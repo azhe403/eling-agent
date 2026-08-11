@@ -16,3 +16,6 @@ build/
 *.db
 *.db-journal
 *.db-wal
+
+# Superpowers scratch directory
+.superpowers/
