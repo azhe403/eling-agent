@@ -1,0 +1,18 @@
+# Build outputs
+bin/
+obj/
+.vs/
+.idea/
+*.user
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+build/
+*.log
+
+# Databases / Caches
+*.db
+*.db-journal
+*.db-wal

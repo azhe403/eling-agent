@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Eling.Core\Eling.Core.csproj" />
+    <ProjectReference Include="..\Eling.Storage\Eling.Storage.csproj" />
+    <ProjectReference Include="..\Eling.Index\Eling.Index.csproj" />
+    <ProjectReference Include="..\Eling.Graph\Eling.Graph.csproj" />
+    <ProjectReference Include="..\Eling.Mcp\Eling.Mcp.csproj" />
+  </ItemGroup>
+
+</Project>

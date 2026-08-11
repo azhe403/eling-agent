@@ -1,0 +1,17 @@
+{
+  "name": "eling-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "prepare": "husky",
+    "lint:frontend": "pnpm --prefix src/frontend/Eling.Dashboard lint",
+    "typecheck:frontend": "pnpm --prefix src/frontend/Eling.Dashboard exec tsc --noEmit",
+    "validate:backend": "dotnet restore Eling.slnx",
+    "build:backend": "dotnet build Eling.slnx",
+    "test:backend": "dotnet test Eling.slnx",
+    "build:frontend": "pnpm --prefix src/frontend/Eling.Dashboard build"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7"
+  }
+}

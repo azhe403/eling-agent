@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/backend/">
+    <Project Path="src/backend/Eling.Core/Eling.Core.csproj" />
+    <Project Path="src/backend/Eling.Graph/Eling.Graph.csproj" />
+    <Project Path="src/backend/Eling.Index/Eling.Index.csproj" />
+    <Project Path="src/backend/Eling.Mcp/Eling.Mcp.csproj" />
+    <Project Path="src/backend/Eling.Server/Eling.Server.csproj" />
+    <Project Path="src/backend/Eling.Storage/Eling.Storage.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Eling.Core.Tests/Eling.Core.Tests.csproj" />
+    <Project Path="tests/Eling.Index.Tests/Eling.Index.Tests.csproj" />
+    <Project Path="tests/Eling.Server.Tests/Eling.Server.Tests.csproj" />
+    <Project Path="tests/Eling.Storage.Tests/Eling.Storage.Tests.csproj" />
+  </Folder>
+</Solution>
