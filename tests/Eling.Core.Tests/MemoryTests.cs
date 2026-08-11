@@ -58,7 +58,7 @@ public class MemoryTests
     }
 
     [Fact]
-    public void Constructor_ThrowsNullReferenceException_WhenContentIsNull()
+    public void Constructor_ThrowsArgumentNullException_WhenContentIsNull()
     {
         Assert.Throws<ArgumentNullException>(() => new Memory(MemoryType.Note, null!));
     }
