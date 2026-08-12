@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Eling.Core\Eling.Core.csproj" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Eling.Core\Eling.Core.csproj" />
+    <ProjectReference Include="..\Eling.Storage\Eling.Storage.csproj" />
+    <ProjectReference Include="..\Eling.Index\Eling.Index.csproj" />
+  </ItemGroup>
+
+</Project>
