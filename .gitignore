@@ -16,6 +16,7 @@ build/
 *.db
 *.db-journal
 *.db-wal
+.eling/
 
 # Superpowers scratch directory
 .superpowers/
