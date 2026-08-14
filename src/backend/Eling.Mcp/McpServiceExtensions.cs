@@ -20,7 +20,7 @@ public static class McpServiceExtensions
     {
         services.AddMcpServer(options =>
         {
-            options.ServerInstructions = "Eling is a durable markdown-backed memory system. On the first interaction or chat in any repository, verify whether '.eling/' is included in '.gitignore'. If '.gitignore' is missing or does not contain '.eling/', proactively suggest to the user to add '.eling/' to '.gitignore' so that local memory files, SQLite indexes, and log files are not tracked in git.";
+            options.ServerInstructions = ServerInstructions.Default;
         })
         .WithStdioServerTransport()
         .WithToolsFromAssembly();

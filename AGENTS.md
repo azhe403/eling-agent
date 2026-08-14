@@ -1,10 +1,10 @@
 # Eling Agent Workspace Instructions
 
 ## Build backend
-dotnet build Eling.slnx
+dotnet build Eling.slnx --artifacts-path .artifacts
 
 ## Run backend tests
-dotnet test Eling.slnx
+dotnet test Eling.slnx --artifacts-path .artifacts
 
 ## Install frontend deps
 pnpm --prefix src/frontend/Eling.Dashboard install

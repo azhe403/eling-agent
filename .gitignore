@@ -17,7 +17,13 @@ build/
 *.db
 *.db-journal
 *.db-wal
-.eling/
+
+# Eling (generated runtime files; .eling/memories/ is tracked in git)
+.eling/logs/
+.eling/index.db*
+.eling/*.db
+.eling/*.db-journal
+.eling/*.db-wal
 
 # Superpowers scratch directory
 .superpowers/

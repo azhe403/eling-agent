@@ -2,6 +2,9 @@ using Eling.Application;
 using Eling.Core;
 using Eling.Index;
 using Eling.Mcp;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using ModelContextProtocol.Server;
 
 namespace Eling.Mcp.Tests;
 
@@ -296,5 +299,19 @@ public class MemoryToolsTests
         await tools.RebuildIndexAsync();
 
         Assert.True(service.RebuildIndexCalled);
+    }
+
+    [Fact]
+    public void AddElingMcpServer_ConfiguresCanonicalSourceInstructions()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        services.AddElingMcpServer();
+        var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ModelContextProtocol.Server.McpServerOptions>>().Value;
+
+        Assert.NotNull(options.ServerInstructions);
+        Assert.Contains(".eling/memories/", options.ServerInstructions);
+        Assert.Contains("canonical", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("add '.eling/' to '.gitignore'", options.ServerInstructions);
     }
 }
