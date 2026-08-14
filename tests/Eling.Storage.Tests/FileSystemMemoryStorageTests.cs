@@ -1,3 +1,4 @@
+using System.Globalization;
 using Eling.Core;
 using Eling.Storage;
 
@@ -98,6 +99,58 @@ public class FileSystemMemoryStorageTests : IDisposable
         Assert.Equal(2, list.Count);
         Assert.Contains(list, m => m.Id == mem1.Id);
         Assert.Contains(list, m => m.Id == mem2.Id);
+    }
+
+    [Fact]
+    public async Task SaveAsync_RoundTripsExactTimestamps()
+    {
+        var createdAt = DateTimeOffset.Parse(
+            "2026-08-13T15:27:02.7938172+07:00",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind);
+        var updatedAt = createdAt.AddHours(2);
+        var memory = new Memory(MemoryType.Fact, "timestamped content", createdAt: createdAt, updatedAt: updatedAt);
+
+        await _storage.SaveAsync(memory);
+
+        var fetched = await _storage.GetByIdAsync(memory.Id);
+        Assert.NotNull(fetched);
+        Assert.Equal(createdAt, fetched.CreatedAt);
+        Assert.Equal(updatedAt, fetched.UpdatedAt);
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_ReadsLegacyDateTimeOffsetDump()
+    {
+        var memory = new Memory(MemoryType.Fact, "legacy file content");
+        var dirPath = Path.Combine(_tempDir, "memories");
+        Directory.CreateDirectory(dirPath);
+        var filePath = Path.Combine(dirPath, $"{memory.Id.Value}.md");
+        var legacyFrontMatter = $"""
+            id: {memory.Id.Value}
+            type: fact
+            status: active
+            tags:
+            - database
+            created_at: &o0
+              utc_date_time: 2026-08-13T15:27:02.7938172Z
+              ticks: 639222316227938172
+              offset: 00:00:00
+              day_of_week: Thursday
+            updated_at: *o0
+            source: system-spec
+            """;
+        await File.WriteAllTextAsync(filePath, $"---\n{legacyFrontMatter}\n---\n{memory.Content}");
+
+        var fetched = await _storage.GetByIdAsync(memory.Id);
+
+        Assert.NotNull(fetched);
+        var expected = DateTimeOffset.Parse(
+            "2026-08-13T15:27:02.7938172Z",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind);
+        Assert.Equal(expected, fetched.CreatedAt);
+        Assert.Equal(expected, fetched.UpdatedAt);
     }
 
     [Fact]

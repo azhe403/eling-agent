@@ -58,6 +58,17 @@ public class MemoryTests
     }
 
     [Fact]
+    public void MemoryId_IsAlwaysLowerCased()
+    {
+        var id = MemoryId.NewId();
+        Assert.Equal(id.Value.ToLowerInvariant(), id.Value);
+
+        var uppercaseUlid = System.Ulid.NewUlid().ToString().ToUpperInvariant();
+        var parsed = new MemoryId(uppercaseUlid);
+        Assert.Equal(uppercaseUlid.ToLowerInvariant(), parsed.Value);
+    }
+
+    [Fact]
     public void Constructor_ThrowsArgumentNullException_WhenContentIsNull()
     {
         Assert.Throws<ArgumentNullException>(() => new Memory(MemoryType.Note, null!));

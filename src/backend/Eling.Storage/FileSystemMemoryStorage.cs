@@ -1,5 +1,6 @@
 using Eling.Core;
 using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.Converters;
 using YamlDotNet.Serialization.NamingConventions;
 
 namespace Eling.Storage;
@@ -17,11 +18,13 @@ public class FileSystemMemoryStorage : IMemoryStorage
 
         _serializer = new SerializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
+            .WithTypeConverter(new LegacyTolerantDateTimeOffsetConverter())
             .Build();
 
         _deserializer = new DeserializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
             .IgnoreUnmatchedProperties()
+            .WithTypeConverter(new LegacyTolerantDateTimeOffsetConverter())
             .Build();
     }
 

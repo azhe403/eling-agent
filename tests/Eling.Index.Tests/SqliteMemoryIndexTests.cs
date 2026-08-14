@@ -192,10 +192,10 @@ public class SqliteMemoryIndexTests : IDisposable
     }
 
     [Fact]
-    public void Index_UsesFts5VirtualTable_NotLikeQueries()
+    public async Task Index_UsesFts5VirtualTable_NotLikeQueries()
     {
         var memory = new Memory(MemoryType.Fact, "FTS5 verification", new[] { "db" }, "docs");
-        _index.IndexAsync(memory).GetAwaiter().GetResult();
+        await _index.IndexAsync(memory);
 
         using var connection = new SqliteConnection($"Data Source={_dbPath};Pooling=False");
         connection.Open();

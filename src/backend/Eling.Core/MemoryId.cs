@@ -13,10 +13,10 @@ public readonly record struct MemoryId
         {
             throw new ArgumentException("Invalid ULID format.", nameof(value));
         }
-        Value = value;
+        Value = value.ToLowerInvariant();
     }
 
-    public static MemoryId NewId() => new(System.Ulid.NewUlid().ToString());
+    public static MemoryId NewId() => new(System.Ulid.NewUlid().ToString().ToLowerInvariant());
 
     public static MemoryId Parse(string value) => new(value);
 

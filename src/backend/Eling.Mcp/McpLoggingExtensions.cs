@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Serilog;
 using Serilog.Events;
 
@@ -11,28 +12,11 @@ public static class McpLoggingExtensions
         Directory.CreateDirectory(logsDirectory);
         var logPath = Path.Combine(logsDirectory, "mcp.log");
 
-        // Archive previous day's log if mcp.log already exists from a prior day
-        if (File.Exists(logPath))
-        {
-            var lastWrite = File.GetLastWriteTime(logPath).Date;
-            if (lastWrite < DateTime.Today)
-            {
-                var archivePath = Path.Combine(logsDirectory, $"mcp-{lastWrite:yyyy-MM-dd}.log");
-                if (!File.Exists(archivePath))
-                {
-                    File.Move(logPath, archivePath);
-                }
-            }
-        }
+        // Initial boot rollover check
+        RotateAndPruneLogs(logsDirectory);
 
-        // Retain up to 7 days of archived logs
-        foreach (var oldLog in Directory.GetFiles(logsDirectory, "mcp-*.log"))
-        {
-            if (File.GetLastWriteTime(oldLog) < DateTime.Now.AddDays(-7))
-            {
-                try { File.Delete(oldLog); } catch { /* best-effort cleanup */ }
-            }
-        }
+        // Continuous midnight rolling for long-running / always-on execution
+        services.AddHostedService(_ => new DailyLogRollerService(logsDirectory));
 
         return services.AddSerilog((_, lc) => lc
             .MinimumLevel.Debug()
@@ -43,5 +27,70 @@ public static class McpLoggingExtensions
                 path: logPath,
                 shared: true,
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}"));
+    }
+
+    internal static void RotateAndPruneLogs(string logsDirectory)
+    {
+        var logPath = Path.Combine(logsDirectory, "mcp.log");
+
+        // Archive previous day's log if mcp.log already exists from a prior day
+        if (File.Exists(logPath))
+        {
+            var lastWrite = File.GetLastWriteTime(logPath).Date;
+            if (lastWrite < DateTime.Today)
+            {
+                var archivePath = Path.Combine(logsDirectory, $"mcp-{lastWrite:yyyy-MM-dd}.log");
+                if (!File.Exists(archivePath))
+                {
+                    try { File.Move(logPath, archivePath); } catch { /* handles shared lock */ }
+                }
+            }
+        }
+
+        // Retain up to 7 days of archived logs
+        if (Directory.Exists(logsDirectory))
+        {
+            foreach (var oldLog in Directory.GetFiles(logsDirectory, "mcp-*.log"))
+            {
+                if (File.GetLastWriteTime(oldLog) < DateTime.Now.AddDays(-7))
+                {
+                    try { File.Delete(oldLog); } catch { /* best-effort cleanup */ }
+                }
+            }
+        }
+    }
+}
+
+public sealed class DailyLogRollerService : BackgroundService
+{
+    private readonly string _logsDirectory;
+
+    public DailyLogRollerService(string logsDirectory)
+    {
+        _logsDirectory = logsDirectory;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var now = DateTime.Now;
+            var nextMidnight = now.Date.AddDays(1).AddSeconds(1);
+            var delay = nextMidnight - now;
+
+            if (delay > TimeSpan.Zero)
+            {
+                try
+                {
+                    await Task.Delay(delay, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+
+            McpLoggingExtensions.RotateAndPruneLogs(_logsDirectory);
+        }
     }
 }
