@@ -6,9 +6,9 @@
     "prepare": "husky",
     "lint:frontend": "pnpm --prefix src/frontend/Eling.Dashboard lint",
     "typecheck:frontend": "pnpm --prefix src/frontend/Eling.Dashboard exec tsc --noEmit",
-    "validate:backend": "dotnet restore Eling.slnx",
-    "build:backend": "dotnet build Eling.slnx",
-    "test:backend": "dotnet test Eling.slnx",
+    "validate:backend": "dotnet restore Eling.slnx --artifacts-path .artifacts",
+    "build:backend": "dotnet build Eling.slnx --artifacts-path .artifacts",
+    "test:backend": "dotnet test Eling.slnx --artifacts-path .artifacts",
     "build:frontend": "pnpm --prefix src/frontend/Eling.Dashboard build"
   },
   "devDependencies": {

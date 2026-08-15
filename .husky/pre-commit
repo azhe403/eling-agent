@@ -1,3 +1,4 @@
 pnpm lint:frontend
 pnpm typecheck:frontend
 pnpm validate:backend
+pnpm test:backend
