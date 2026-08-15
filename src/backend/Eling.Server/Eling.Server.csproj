@@ -11,11 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Eling.Core\Eling.Core.csproj" />
-    <ProjectReference Include="..\Eling.Storage\Eling.Storage.csproj" />
-    <ProjectReference Include="..\Eling.Index\Eling.Index.csproj" />
-    <ProjectReference Include="..\Eling.Graph\Eling.Graph.csproj" />
-    <ProjectReference Include="..\Eling.Mcp\Eling.Mcp.csproj" />
+    <ProjectReference Include="..\Eling.Application\Eling.Application.csproj" />
   </ItemGroup>
 
 </Project>
