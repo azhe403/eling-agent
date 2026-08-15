@@ -181,4 +181,112 @@ public class MemoryServiceTests
         Assert.Contains(index.LastRebuildBatch!, m => m.Content == "rebuild 1");
         Assert.Contains(index.LastRebuildBatch!, m => m.Content == "rebuild 2");
     }
+
+    [Fact]
+    public async Task UpdateAsync_updates_content_and_returns_updated_memory()
+    {
+        var storage = new FakeStorage();
+        var index = new FakeIndex();
+        var service = new MemoryService(storage, index);
+        var memory = NewMemory("original content");
+        await service.SaveAsync(memory);
+
+        var result = await service.UpdateAsync(memory.Id, content: "updated content");
+
+        Assert.NotNull(result);
+        Assert.Equal("updated content", result!.Content);
+        Assert.Equal(memory.Id, result.Id);
+        Assert.Equal(memory.CreatedAt, result.CreatedAt);
+        Assert.True(result.UpdatedAt > memory.CreatedAt);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_updates_type_and_returns_updated_memory()
+    {
+        var storage = new FakeStorage();
+        var index = new FakeIndex();
+        var service = new MemoryService(storage, index);
+        var memory = NewMemory("type test");
+        await service.SaveAsync(memory);
+
+        var result = await service.UpdateAsync(memory.Id, type: MemoryType.Decision);
+
+        Assert.NotNull(result);
+        Assert.Equal(MemoryType.Decision, result!.Type);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_updates_tags_and_returns_updated_memory()
+    {
+        var storage = new FakeStorage();
+        var index = new FakeIndex();
+        var service = new MemoryService(storage, index);
+        var memory = NewMemory("tags test");
+        await service.SaveAsync(memory);
+
+        var result = await service.UpdateAsync(memory.Id, tags: new[] { "new-tag", "another-tag" });
+
+        Assert.NotNull(result);
+        Assert.Equal(2, result!.Tags.Count);
+        Assert.Contains("new-tag", result.Tags);
+        Assert.Contains("another-tag", result.Tags);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_updates_status_and_returns_updated_memory()
+    {
+        var storage = new FakeStorage();
+        var index = new FakeIndex();
+        var service = new MemoryService(storage, index);
+        var memory = NewMemory("status test");
+        await service.SaveAsync(memory);
+
+        var result = await service.UpdateAsync(memory.Id, status: MemoryStatus.Archived);
+
+        Assert.NotNull(result);
+        Assert.Equal(MemoryStatus.Archived, result!.Status);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_returns_null_for_unknown_id()
+    {
+        var service = new MemoryService(new FakeStorage(), new FakeIndex());
+
+        var result = await service.UpdateAsync(MemoryId.NewId(), content: "nope");
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_preserves_unchanged_fields()
+    {
+        var storage = new FakeStorage();
+        var index = new FakeIndex();
+        var service = new MemoryService(storage, index);
+        var memory = new Memory(MemoryType.Fact, "original", new[] { "tag1" }, "source1");
+        await service.SaveAsync(memory);
+
+        var result = await service.UpdateAsync(memory.Id, content: "only content changed");
+
+        Assert.NotNull(result);
+        Assert.Equal("only content changed", result!.Content);
+        Assert.Equal(MemoryType.Fact, result.Type);
+        Assert.Equal(1, result.Tags.Count);
+        Assert.Equal("source1", result.Source);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_indexes_updated_memory()
+    {
+        var storage = new FakeStorage();
+        var index = new FakeIndex();
+        var service = new MemoryService(storage, index);
+        var memory = NewMemory("index test");
+        await service.SaveAsync(memory);
+
+        await service.UpdateAsync(memory.Id, content: "indexed update");
+
+        Assert.Equal(2, index.Indexed.Count);
+        Assert.Equal("indexed update", index.Indexed[1].Content);
+    }
 }

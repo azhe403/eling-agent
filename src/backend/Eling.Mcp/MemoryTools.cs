@@ -49,6 +49,56 @@ public class MemoryTools
         return saved;
     }
 
+    [McpServerTool(Name = "memory_update"), Description("Update an existing memory by ID. Only provided fields are changed; omitted fields remain unchanged.")]
+    public async Task<Memory?> UpdateAsync(
+        [Description("The ULID of the memory to update")] string id,
+        [Description("New content (omitted = unchanged)")] string? content = null,
+        [Description("New type: fact, preference, decision, lesson, note (omitted = unchanged)")] string? type = null,
+        [Description("New tags (omitted = unchanged)")] string[]? tags = null,
+        [Description("New source (omitted = unchanged)")] string? source = null,
+        [Description("New status: active, superseded, archived (omitted = unchanged)")] string? status = null)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            _logger?.LogWarning("memory_update failed: id is empty");
+            throw new ArgumentException("Id cannot be empty.", nameof(id));
+        }
+
+        var memoryId = MemoryId.Parse(id);
+        MemoryType? memoryType = null;
+        MemoryStatus? memoryStatus = null;
+
+        if (!string.IsNullOrWhiteSpace(type))
+        {
+            if (!Enum.TryParse<MemoryType>(type, ignoreCase: true, out var parsedType))
+            {
+                _logger?.LogWarning("memory_update failed: invalid type '{Type}'", type);
+                throw new ArgumentException($"Invalid memory type '{type}'. Valid types: {string.Join(", ", Enum.GetNames<MemoryType>())}", nameof(type));
+            }
+            memoryType = parsedType;
+        }
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            if (!Enum.TryParse<MemoryStatus>(status, ignoreCase: true, out var parsedStatus))
+            {
+                _logger?.LogWarning("memory_update failed: invalid status '{Status}'", status);
+                throw new ArgumentException($"Invalid memory status '{status}'. Valid statuses: {string.Join(", ", Enum.GetNames<MemoryStatus>())}", nameof(status));
+            }
+            memoryStatus = parsedStatus;
+        }
+
+        var updated = await _memory.UpdateAsync(memoryId, content, memoryType, tags, source, memoryStatus);
+        if (updated is null)
+        {
+            _logger?.LogWarning("memory_update failed: memory '{Id}' not found", id);
+            return null;
+        }
+
+        _logger?.LogInformation("Updated memory '{Id}' with type '{Type}' and {TagCount} tags", updated.Id, updated.Type, updated.Tags.Count);
+        return updated;
+    }
+
     [McpServerTool(Name = "memory_get"), Description("Retrieve a memory by its ID.")]
     public async Task<Memory?> GetByIdAsync(
         [Description("The ULID of the memory to retrieve")] string id)

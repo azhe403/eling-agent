@@ -25,6 +25,27 @@ public class MemoryToolsTests
 
         public Task<Memory?> GetByIdAsync(MemoryId id) => Task.FromResult(Items.GetValueOrDefault(id));
 
+        public Task<Memory?> UpdateAsync(MemoryId id, string? content = null, MemoryType? type = null, string[]? tags = null, string? source = null, MemoryStatus? status = null)
+        {
+            if (!Items.TryGetValue(id, out var existing))
+            {
+                return Task.FromResult<Memory?>(null);
+            }
+
+            var updated = new Memory(
+                type ?? existing.Type,
+                content ?? existing.Content,
+                tags ?? existing.Tags.ToArray(),
+                source ?? existing.Source,
+                status ?? existing.Status,
+                existing.Id,
+                existing.CreatedAt,
+                DateTimeOffset.UtcNow);
+
+            Items[id] = updated;
+            return Task.FromResult<Memory?>(updated);
+        }
+
         public Task<bool> DeleteAsync(MemoryId id) => Task.FromResult(Items.Remove(id));
 
         public Task<IReadOnlyCollection<Memory>> ListAllAsync() =>

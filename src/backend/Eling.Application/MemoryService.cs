@@ -24,6 +24,36 @@ public class MemoryService : IMemoryService
 
     public Task<Memory?> GetByIdAsync(MemoryId id) => _storage.GetByIdAsync(id);
 
+    public async Task<Memory?> UpdateAsync(MemoryId id, string? content = null, MemoryType? type = null, string[]? tags = null, string? source = null, MemoryStatus? status = null)
+    {
+        var existing = await _storage.GetByIdAsync(id);
+        if (existing is null)
+        {
+            return null;
+        }
+
+        // Type is immutable, so we need to create a new Memory object
+        var updatedType = type ?? existing.Type;
+        var updatedContent = content ?? existing.Content;
+        var updatedTags = tags ?? existing.Tags.ToArray();
+        var updatedSource = source ?? existing.Source;
+        var updatedStatus = status ?? existing.Status;
+
+        var updated = new Memory(
+            updatedType,
+            updatedContent,
+            updatedTags,
+            updatedSource,
+            updatedStatus,
+            existing.Id,
+            existing.CreatedAt,
+            DateTimeOffset.UtcNow);
+
+        await _storage.SaveAsync(updated);
+        await _index.IndexAsync(updated);
+        return updated;
+    }
+
     public async Task<bool> DeleteAsync(MemoryId id)
     {
         if (!await _storage.DeleteAsync(id))
