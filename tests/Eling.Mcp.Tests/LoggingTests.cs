@@ -94,10 +94,12 @@ public class LoggingTests : IDisposable
     public void Startup_SeparatesExistingMixedLogsIntoArchiveAndActive()
     {
         var activePath = Path.Combine(_tempLogsDir, "mcp.log");
+        var yesterday = DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd");
+        var today = DateTime.Today.ToString("yyyy-MM-dd");
         var existingContent = new StringBuilder()
-            .AppendLine("2026-08-13 22:48:27.628 +07:00 [INF] [Test] Yesterday log line 1")
-            .AppendLine("2026-08-13 22:49:00.000 +07:00 [INF] [Test] Yesterday log line 2")
-            .AppendLine("2026-08-14 06:23:44.145 +07:00 [INF] [Test] Today log line 1")
+            .AppendLine($"{yesterday} 22:48:27.628 +07:00 [INF] [Test] Yesterday log line 1")
+            .AppendLine($"{yesterday} 22:49:00.000 +07:00 [INF] [Test] Yesterday log line 2")
+            .AppendLine($"{today} 06:23:44.145 +07:00 [INF] [Test] Today log line 1")
             .ToString();
 
         File.WriteAllText(activePath, existingContent, Encoding.UTF8);
@@ -105,7 +107,7 @@ public class LoggingTests : IDisposable
         // Creating the sink on 2026-08-14 will trigger startup rollover
         using var sink = new RollingDailyFileSink(_tempLogsDir);
 
-        var archivePath = Path.Combine(_tempLogsDir, "mcp-2026-08-13.log");
+        var archivePath = Path.Combine(_tempLogsDir, $"mcp-{yesterday}.log");
         Assert.True(File.Exists(archivePath));
 
         var archiveLines = ReadFileShared(archivePath);
