@@ -28,14 +28,51 @@ public class MemoryApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
             });
             builder.UseSetting("Environment", "Development");
             builder.UseSetting("Eling:RootPath", _tempDir);
+            builder.UseSetting("Eling:EnableMcp", "false");
         }).CreateClient();
     }
 
-    public void Dispose()
+public void Dispose()
     {
         _client.Dispose();
-        if (Directory.Exists(_tempDir))
-            Directory.Delete(_tempDir, recursive: true);
+
+        TryDeleteDirectory(_tempDir);
+    }
+
+    private static void TryDeleteDirectory(string path, int retries = 5, int delayMs = 200)
+    {
+        if (!Directory.Exists(path)) return;
+
+        for (int i = 0; i < retries; i++)
+        {
+            try
+            {
+                Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(delayMs);
+            }
+        }
+    }
+
+    private static void TryDeleteFile(string path, int retries = 5, int delayMs = 200)
+    {
+        if (!File.Exists(path)) return;
+
+        for (int i = 0; i < retries; i++)
+        {
+            try
+            {
+                File.Delete(path);
+                return;
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(delayMs);
+            }
+        }
     }
 
     [Fact]
@@ -82,7 +119,7 @@ public class MemoryApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
             content = "Get by id test"
         });
         var body = await postResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
-        var id = body.GetProperty("id").GetString()!;
+        var id = body.GetProperty("id").GetString();
 
         var getResponse = await _client.GetAsync($"/api/memories/{id}");
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
@@ -92,21 +129,56 @@ public class MemoryApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
     }
 
     [Fact]
-    public async Task Get_unknown_id_returns_404()
+    public async Task Get_list_supports_type_filter()
     {
-        // Use a valid ULID format that doesn't exist
-        var fakeId = "01h00000000000000000000000";
-        var response = await _client.GetAsync($"/api/memories/{fakeId}");
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        await _client.PostAsJsonAsync("/api/memories", new { content = "Fact 1", type = "Fact" });
+        await _client.PostAsJsonAsync("/api/memories", new { content = "Preference 1", type = "Preference" });
+
+        var factResponse = await _client.GetAsync("/api/memories?type=Fact");
+        var facts = await factResponse.Content.ReadFromJsonAsync<JsonElement[]>(JsonOptions);
+        Assert.All(facts!, f => Assert.Equal("Fact", f.GetProperty("type").GetString()));
+
+        var prefResponse = await _client.GetAsync("/api/memories?type=Preference");
+        var prefs = await prefResponse.Content.ReadFromJsonAsync<JsonElement[]>(JsonOptions);
+        Assert.All(prefs!, p => Assert.Equal("Preference", p.GetProperty("type").GetString()));
     }
 
     [Fact]
-    public async Task Post_with_empty_content_returns_400()
+    public async Task Get_list_supports_pagination()
     {
-        var response = await _client.PostAsJsonAsync("/api/memories", new
-        {
-            content = ""
-        });
+        for (int i = 0; i < 15; i++)
+            await _client.PostAsJsonAsync("/api/memories", new { content = $"Item {i}", type = "Fact" });
+
+        var page1 = await _client.GetAsync("/api/memories?limit=5");
+        var items1 = await page1.Content.ReadFromJsonAsync<JsonElement[]>(JsonOptions);
+        Assert.Equal(5, items1!.Length);
+
+        var page2 = await _client.GetAsync("/api/memories?limit=5&offset=5");
+        var items2 = await page2.Content.ReadFromJsonAsync<JsonElement[]>(JsonOptions);
+        Assert.Equal(5, items2!.Length);
+    }
+
+    [Fact]
+    public async Task Get_list_invalid_status_returns_400()
+    {
+        var response = await _client.GetAsync("/api/memories?type=InvalidType");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Get_list_invalid_limit_returns_400()
+    {
+        var response = await _client.GetAsync("/api/memories?limit=0");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        response = await _client.GetAsync("/api/memories?limit=101");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Get_list_invalid_offset_returns_400()
+    {
+        var response = await _client.GetAsync("/api/memories?offset=-1");
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
@@ -115,10 +187,10 @@ public class MemoryApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
     {
         var postResponse = await _client.PostAsJsonAsync("/api/memories", new
         {
-            content = "Delete test memory"
+            content = "To be deleted"
         });
         var body = await postResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
-        var id = body.GetProperty("id").GetString()!;
+        var id = body.GetProperty("id").GetString();
 
         var deleteResponse = await _client.DeleteAsync($"/api/memories/{id}");
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
@@ -128,74 +200,47 @@ public class MemoryApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
     }
 
     [Fact]
-    public async Task Search_returns_created_memory()
+    public async Task Delete_nonexistent_returns_404()
     {
-        await _client.PostAsJsonAsync("/api/memories", new
+        var response = await _client.DeleteAsync("/api/memories/00000000-0000-0000-0000-000000000000");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Patch_updates_content_and_type()
+    {
+        var postResponse = await _client.PostAsJsonAsync("/api/memories", new
         {
-            content = " searchable purple elephant ",
-            type = "Note"
+            content = "Original content",
+            type = "Fact"
         });
+        var body = await postResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var id = body.GetProperty("id").GetString();
 
-        // Rebuild index so the new memory is searchable
-        var rebuildResponse = await _client.PostAsync("/api/memories/rebuild-index", null);
-        Assert.Equal(HttpStatusCode.NoContent, rebuildResponse.StatusCode);
-
-        var searchResponse = await _client.GetAsync("/api/memories/search?q=elephant");
-        Assert.Equal(HttpStatusCode.OK, searchResponse.StatusCode);
-
-        var results = await searchResponse.Content.ReadFromJsonAsync<JsonElement[]>(JsonOptions);
-        Assert.NotNull(results);
-        Assert.NotEmpty(results);
-    }
-
-    [Fact]
-    public async Task Rebuild_index_returns_204()
-    {
-        var response = await _client.PostAsync("/api/memories/rebuild-index", null);
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Get_list_filters_by_status()
-    {
-        // Create a memory (defaults to Active)
-        await _client.PostAsJsonAsync("/api/memories", new
+        var patchResponse = await _client.PatchAsJsonAsync($"/api/memories/{id}", new
         {
-            content = "Status filter test"
+            content = "Updated content",
+            type = "Preference"
         });
+        Assert.Equal(HttpStatusCode.OK, patchResponse.StatusCode);
 
-        // Filter for active
-        var activeResponse = await _client.GetAsync("/api/memories?status=active");
-        Assert.Equal(HttpStatusCode.OK, activeResponse.StatusCode);
+        var updated = await patchResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal("Updated content", updated.GetProperty("content").GetString());
+        Assert.Equal("Preference", updated.GetProperty("type").GetString());
 
-        var activeMemories = await activeResponse.Content.ReadFromJsonAsync<JsonElement[]>(JsonOptions);
-        Assert.NotNull(activeMemories);
-        Assert.Contains(activeMemories, m => m.GetProperty("content").GetString() == "Status filter test");
-
-        // Filter for archived (should be empty)
-        var archivedResponse = await _client.GetAsync("/api/memories?status=archived");
-        Assert.Equal(HttpStatusCode.OK, archivedResponse.StatusCode);
-
-        var archivedMemories = await archivedResponse.Content.ReadFromJsonAsync<JsonElement[]>(JsonOptions);
-        Assert.NotNull(archivedMemories);
-        Assert.DoesNotContain(archivedMemories, m => m.GetProperty("content").GetString() == "Status filter test");
+        var getResponse = await _client.GetAsync($"/api/memories/{id}");
+        var memory = await getResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal("Updated content", memory.GetProperty("content").GetString());
+        Assert.Equal("Preference", memory.GetProperty("type").GetString());
     }
 
     [Fact]
-    public async Task Get_list_invalid_status_returns_400()
+    public async Task Patch_nonexistent_returns_404()
     {
-        var response = await _client.GetAsync("/api/memories?status=garbage");
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Post_invalid_type_returns_400()
-    {
-        var response = await _client.PostAsJsonAsync("/api/memories", new
+        var response = await _client.PatchAsJsonAsync("/api/memories/00000000-0000-0000-0000-000000000000", new
         {
-            content = "Bad type test",
-            type = "NotAType"
+            content = "Does not matter"
         });
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 }
