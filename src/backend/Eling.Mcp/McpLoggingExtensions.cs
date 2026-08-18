@@ -13,12 +13,11 @@ namespace Eling.Mcp;
 
 public static class McpLoggingExtensions
 {
-    private const string DefaultLogsDirectory = ".eling/logs";
-    private const string DefaultActiveFileName = "mcp.log";
-    private const string ActiveLogPath = DefaultLogsDirectory + "/" + DefaultActiveFileName;
+    private const string DefaultRootPath = ".eling";
 
-    public static IServiceCollection AddElingLogging(this IServiceCollection services, string logsDirectory = DefaultLogsDirectory)
+    public static IServiceCollection AddElingLogging(this IServiceCollection services, string rootPath = DefaultRootPath)
     {
+        var logsDirectory = Path.Combine(rootPath, "logs");
         Directory.CreateDirectory(logsDirectory);
 
         var sink = new RollingDailyFileSink(logsDirectory);

@@ -326,7 +326,7 @@ public class MemoryToolsTests
     public void AddElingMcpServer_ConfiguresCanonicalSourceInstructions()
     {
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        services.AddElingMcpServer();
+        services.AddElingMcpServerStdio();
         var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ModelContextProtocol.Server.McpServerOptions>>().Value;
 

@@ -16,13 +16,25 @@ public static class McpServiceExtensions
         return services;
     }
 
-    public static IServiceCollection AddElingMcpServer(this IServiceCollection services)
+    public static IServiceCollection AddElingMcpServerStdio(this IServiceCollection services)
     {
         services.AddMcpServer(options =>
         {
             options.ServerInstructions = ServerInstructions.Default;
         })
         .WithStdioServerTransport()
+        .WithToolsFromAssembly();
+
+        return services;
+    }
+
+    public static IServiceCollection AddElingMcpServerHttp(this IServiceCollection services)
+    {
+        services.AddMcpServer(options =>
+        {
+            options.ServerInstructions = ServerInstructions.Default;
+        })
+        .WithHttpTransport()
         .WithToolsFromAssembly();
 
         return services;

@@ -20,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\backend\Eling.Server\Eling.Server.csproj" />
+    <ProjectReference Include="..\..\src\backend\Eling.Host\Eling.Host.csproj" />
   </ItemGroup>
 
 </Project>
