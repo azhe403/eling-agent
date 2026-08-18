@@ -46,13 +46,11 @@ Available tools:
 - `eling-live_memory_get` — retrieve by ID
 - `eling-live_memory_list` — list all
 - `eling-live_memory_search` — search by query
-- `eling-live_memory_update` — partial update (preferred over delete+insert)
 - `eling-live_memory_delete` — remove by ID
 - `eling-live_memory_rebuild_index` — rebuild search index
 
 Rules:
 * Always sync memories to BOTH Vestige AND Eling MCP when saving.
 * Memory content must be project-specific (e.g., "For Eling project"), never generic.
-* Use `memory_update` for partial changes instead of delete+insert.
 * When MCP needs restart (code changes to MCP server), ask user to restart — never edit memory files directly.
 * Memory files live in `.eling/memories/` and are tracked in Git.
