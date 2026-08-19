@@ -20,5 +20,17 @@ public readonly record struct MemoryId
 
     public static MemoryId Parse(string value) => new(value);
 
+    public static bool TryParse(string? value, out MemoryId result)
+    {
+        if (string.IsNullOrWhiteSpace(value) || !System.Ulid.TryParse(value, out _))
+        {
+            result = default;
+            return false;
+        }
+
+        result = new MemoryId(value);
+        return true;
+    }
+
     public override string ToString() => Value;
 }
