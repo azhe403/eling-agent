@@ -48,6 +48,8 @@ public static class MemoryEndpoints
     )
     {
         var all = await service.ListAllAsync();
+        // Newest first so limit/offset paging surfaces recent memories
+        all = all.OrderByDescending(m => m.CreatedAt).ToList();
 
         if (!string.IsNullOrEmpty(status))
         {

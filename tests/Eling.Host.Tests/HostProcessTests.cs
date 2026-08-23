@@ -44,8 +44,9 @@ public sealed class HostProcessTests : IAsyncLifetime
         }
     }
 
-    private async Task StartHostAsync(int port, string rootPath)
+    private async Task StartHostAsync(string rootPath)
     {
+        const int port = 4317;
         var projectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "src", "backend", "Eling.Host"));
 
         _process = new Process
@@ -53,7 +54,7 @@ public sealed class HostProcessTests : IAsyncLifetime
             StartInfo = new ProcessStartInfo
             {
                 FileName = "dotnet",
-                Arguments = $"run --port {port} --root-path {rootPath}",
+                Arguments = $"run --no-dashboard",
                 WorkingDirectory = projectDir,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
@@ -103,8 +104,7 @@ public sealed class HostProcessTests : IAsyncLifetime
     [Fact]
     public async Task Health_endpoint_returns_200()
     {
-        var port = GetAvailablePort();
-        await StartHostAsync(port, _tempDir);
+        await StartHostAsync(_tempDir);
 
         var response = await _client!.GetAsync("/health");
 
@@ -117,8 +117,7 @@ public sealed class HostProcessTests : IAsyncLifetime
     [Fact]
     public async Task Host_starts_with_default_port_and_shuts_down_cleanly()
     {
-        var port = GetAvailablePort();
-        await StartHostAsync(port, _tempDir);
+        await StartHostAsync(_tempDir);
 
         Assert.False(_process!.HasExited, "Process should still be running");
 
@@ -129,12 +128,4 @@ public sealed class HostProcessTests : IAsyncLifetime
         Assert.True(_process.ExitCode != -1 || _process.HasExited);
     }
 
-    private static int GetAvailablePort()
-    {
-        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-                var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
 }

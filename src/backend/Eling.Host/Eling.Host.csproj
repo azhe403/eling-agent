@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <OutputType>Exe</OutputType>
     <AssemblyName>eling</AssemblyName>
+    <StartBeforeBuildEnabled>true</StartBeforeBuildEnabled>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,5 +24,15 @@
     <ProjectReference Include="..\Eling.Mcp\Eling.Mcp.csproj" />
     <ProjectReference Include="..\Eling.Server\Eling.Server.csproj" />
   </ItemGroup>
+
+  <!-- Build the Next.js dashboard before the main build (Debug and Release) -->
+  <Target Name="BuildDashboard" BeforeTargets="Build" Condition="'$(Configuration)' == 'Release' Or '$(Configuration)' == 'Debug'">
+    <Exec Command="pnpm --prefix $(MSBuildProjectDirectory)/../../frontend/Eling.Dashboard install" />
+    <Exec Command="pnpm --prefix $(MSBuildProjectDirectory)/../../frontend/Eling.Dashboard build" />
+    <ItemGroup>
+      <DashboardFiles Include="$(MSBuildProjectDirectory)/../../frontend/Eling.Dashboard/out/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(DashboardFiles)" DestinationFiles="@(DashboardFiles->'$(OutputPath)wwwroot/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

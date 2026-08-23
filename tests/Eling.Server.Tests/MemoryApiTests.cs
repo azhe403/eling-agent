@@ -20,6 +20,10 @@ public class MemoryApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         _tempDir = Path.Combine(Path.GetTempPath(), "eling-tests-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_tempDir);
 
+        // WebApplicationFactory invokes Program.Main with empty args, which would
+        // default to stdio MCP mode. Force web host mode for the test server.
+        Environment.SetEnvironmentVariable("ELING_NO_DASHBOARD", "1");
+
         _client = factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
@@ -27,8 +31,6 @@ public class MemoryApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
                 config.Sources.Clear();
             });
             builder.UseSetting("Environment", "Development");
-            builder.UseSetting("Eling:RootPath", _tempDir);
-            builder.UseSetting("Eling:EnableMcp", "false");
         }).CreateClient();
     }
 

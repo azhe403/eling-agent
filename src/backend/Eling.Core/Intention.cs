@@ -37,10 +37,3 @@ public class Intention
         Tags = tags?.ToList().AsReadOnly() ?? (IReadOnlyCollection<string>)Array.Empty<string>();
     }
 }
-
-public enum TriggerType
-{
-    Topic,
-    FilePattern,
-    TimeBased
-}
