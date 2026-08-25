@@ -14,11 +14,18 @@ public sealed class ProjectScope
         DataDirectory = Path.Combine(Root, DataDirectoryName);
     }
 
-    public static ProjectScope Discover(string? startDirectory = null)
+    /// <param name="stopAtDirectory">
+    /// Optional ceiling for the upward walk (test seam): the walk inspects this
+    /// directory last and never goes above it. Production callers omit it.
+    /// </param>
+    public static ProjectScope Discover(string? startDirectory = null, string? stopAtDirectory = null)
     {
         var start = string.IsNullOrWhiteSpace(startDirectory)
             ? Directory.GetCurrentDirectory()
             : Path.GetFullPath(startDirectory);
+        var stopAt = string.IsNullOrWhiteSpace(stopAtDirectory)
+            ? null
+            : Path.GetFullPath(stopAtDirectory);
 
         var current = new DirectoryInfo(start);
         while (current is not null)
@@ -27,6 +34,15 @@ public sealed class ProjectScope
             if (Directory.Exists(candidate))
             {
                 return new ProjectScope(current.FullName);
+            }
+
+            if (stopAt is not null &&
+                string.Equals(
+                    current.FullName.TrimEnd(Path.DirectorySeparatorChar),
+                    stopAt.TrimEnd(Path.DirectorySeparatorChar),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                break;
             }
 
             current = current.Parent;

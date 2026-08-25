@@ -1,4 +1,4 @@
-namespace Eling.Server.Dtos;
+namespace Eling.Dashboard.Dtos;
 
 public record UpdateMemoryRequest(
     string? Content,

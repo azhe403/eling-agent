@@ -3,9 +3,9 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 
-namespace Eling.Server.Tests;
+namespace Eling.Dashboard.Tests;
 
-public class MemoryApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public class MemoryApiTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable, IAsyncLifetime
 {
     private readonly HttpClient _client;
     private readonly string _tempDir;
@@ -20,10 +20,6 @@ public class MemoryApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         _tempDir = Path.Combine(Path.GetTempPath(), "eling-tests-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_tempDir);
 
-        // WebApplicationFactory invokes Program.Main with empty args, which would
-        // default to stdio MCP mode. Force web host mode for the test server.
-        Environment.SetEnvironmentVariable("ELING_NO_DASHBOARD", "1");
-
         _client = factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
@@ -33,6 +29,25 @@ public class MemoryApiTests : IClassFixture<WebApplicationFactory<Program>>, IDi
             builder.UseSetting("Environment", "Development");
         }).CreateClient();
     }
+
+    public async Task InitializeAsync()
+    {
+        // The dashboard never owns a project .eling; its memory API borrows the
+        // data directory of a registered runtime. Register one for this test run.
+        var registration = new
+        {
+            processId = Environment.ProcessId,
+            projectRoot = _tempDir,
+            dataDirectory = Path.Combine(_tempDir, ".eling"),
+            startTime = DateTimeOffset.UtcNow,
+            mcpEnabled = false,
+            mcpTransport = "none"
+        };
+        var registerResponse = await _client.PostAsJsonAsync("/api/coordinator/register", registration);
+        registerResponse.EnsureSuccessStatusCode();
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
 public void Dispose()
     {

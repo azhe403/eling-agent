@@ -1,9 +1,8 @@
 using Eling.Application;
 using Eling.Core;
-using Eling.Index;
 using Microsoft.AspNetCore.Http.HttpResults;
 
-namespace Eling.Server.Endpoints;
+namespace Eling.Dashboard.Endpoints;
 
 public static class MemoryEndpoints
 {

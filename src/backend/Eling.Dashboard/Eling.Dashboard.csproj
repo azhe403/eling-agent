@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>eling-dashboard</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Eling.Application\Eling.Application.csproj" />
+  </ItemGroup>
+
+  <!-- Build the Next.js dashboard, copy it next to build output, and include it
+       in publish output. Explicit Copy (not Content items): dynamically-added
+       Content does not reliably flow into the SDK copy pipeline.
+       Inputs/Outputs make it incremental: restarts skip pnpm entirely when the
+       frontend is unchanged. -->
+  <Target Name="BuildDashboard"
+          BeforeTargets="Build"
+          Condition="'$(ElingSkipDashboard)' != 'true'"
+          Inputs="$(MSBuildProjectDirectory)/../../frontend/Eling.Dashboard/package.json;
+                  $(MSBuildProjectDirectory)/../../frontend/Eling.Dashboard/next.config.ts;
+                  $(MSBuildProjectDirectory)/../../frontend/Eling.Dashboard/src/**/*"
+          Outputs="$(MSBuildProjectDirectory)/../../frontend/Eling.Dashboard/out/.eling-stamp">
+    <Exec Command="pnpm --prefix $(MSBuildProjectDirectory)/../../frontend/Eling.Dashboard install" />
+    <Exec Command="pnpm --prefix $(MSBuildProjectDirectory)/../../frontend/Eling.Dashboard build" />
+    <WriteLinesToFile File="$(MSBuildProjectDirectory)/../../frontend/Eling.Dashboard/out/.eling-stamp" Lines="$([System.DateTime]::UtcNow.ToString('o'))" Overwrite="true" />
+    <ItemGroup>
+      <DashboardFiles Include="$(MSBuildProjectDirectory)/../../frontend/Eling.Dashboard/out/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(DashboardFiles)"
+          DestinationFiles="@(DashboardFiles->'$(OutputPath)eling-dashboard-ui/%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="IncludeDashboardInPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <DashboardFiles Include="$(OutputPath)eling-dashboard-ui/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(DashboardFiles)"
+          DestinationFiles="@(DashboardFiles->'$(PublishDir)eling-dashboard-ui/%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

@@ -29,5 +29,7 @@ build/
 .superpowers/
 
 # Dashboard build output (served by Eling.Host at runtime)
-src/backend/Eling.Host/wwwroot/*
-!src/backend/Eling.Host/wwwroot/.gitkeep
+src/backend/Eling.Host/eling-dashboard/
+
+# Test run outputs
+TestResults/

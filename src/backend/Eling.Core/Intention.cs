@@ -24,7 +24,6 @@ public class Intention
         DateTimeOffset? expiresAt = null)
     {
         ArgumentNullException.ThrowIfNull(description);
-        ArgumentNullException.ThrowIfNull(triggerType);
 
         Id = MemoryId.NewId();
         Description = description;

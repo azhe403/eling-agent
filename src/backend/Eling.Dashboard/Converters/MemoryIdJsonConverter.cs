@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Eling.Core;
 
-namespace Eling.Server.Converters;
+namespace Eling.Dashboard.Converters;
 
 public sealed class MemoryIdJsonConverter : JsonConverter<MemoryId>
 {
