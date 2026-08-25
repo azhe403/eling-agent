@@ -1,6 +1,6 @@
 using YamlDotNet.Serialization;
 
-namespace Eling.Storage;
+namespace Eling.Application;
 
 internal class MemoryFrontMatter
 {

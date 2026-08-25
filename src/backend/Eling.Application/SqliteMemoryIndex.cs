@@ -2,7 +2,7 @@ using Eling.Core;
 using Microsoft.Data.Sqlite;
 using System.Data.Common;
 
-namespace Eling.Index;
+namespace Eling.Application;
 
 public sealed class SqliteMemoryIndex : IMemoryIndex
 {

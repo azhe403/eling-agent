@@ -1,7 +1,5 @@
 using Eling.Application;
 using Eling.Core;
-using Eling.Index;
-using Eling.Storage;
 
 namespace Eling.Application.Tests;
 

@@ -1,6 +1,4 @@
 using Eling.Application;
-using Eling.Index;
-using Eling.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 
@@ -23,18 +21,6 @@ public static class McpServiceExtensions
             options.ServerInstructions = ServerInstructions.Default;
         })
         .WithStdioServerTransport()
-        .WithToolsFromAssembly();
-
-        return services;
-    }
-
-    public static IServiceCollection AddElingMcpServerHttp(this IServiceCollection services)
-    {
-        services.AddMcpServer(options =>
-        {
-            options.ServerInstructions = ServerInstructions.Default;
-        })
-        .WithHttpTransport()
         .WithToolsFromAssembly();
 
         return services;

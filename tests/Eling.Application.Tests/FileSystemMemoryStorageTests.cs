@@ -1,8 +1,8 @@
 using System.Globalization;
 using Eling.Core;
-using Eling.Storage;
+using Eling.Application;
 
-namespace Eling.Storage.Tests;
+namespace Eling.Application.Tests;
 
 public class FileSystemMemoryStorageTests : IDisposable
 {

@@ -1,6 +1,5 @@
 using Eling.Application;
 using Eling.Core;
-using Eling.Index;
 using Eling.Mcp;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;

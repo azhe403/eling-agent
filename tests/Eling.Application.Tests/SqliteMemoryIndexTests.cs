@@ -1,8 +1,8 @@
 using Eling.Core;
-using Eling.Index;
 using Microsoft.Data.Sqlite;
+using Eling.Application;
 
-namespace Eling.Index.Tests;
+namespace Eling.Application.Tests;
 
 public class SqliteMemoryIndexTests : IDisposable
 {

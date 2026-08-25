@@ -4,7 +4,7 @@ using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.Converters;
 
-namespace Eling.Storage;
+namespace Eling.Application;
 
 /// <summary>
 /// Serializes <see cref="DateTimeOffset"/> as an ISO-8601 scalar (base behavior),

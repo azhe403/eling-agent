@@ -1,6 +1,6 @@
 using Eling.Core;
 
-namespace Eling.Storage;
+namespace Eling.Application;
 
 public interface IIntentionStorage
 {

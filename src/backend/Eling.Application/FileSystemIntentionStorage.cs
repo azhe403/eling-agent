@@ -3,7 +3,7 @@ using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.Converters;
 using YamlDotNet.Serialization.NamingConventions;
 
-namespace Eling.Storage;
+namespace Eling.Application;
 
 public class FileSystemIntentionStorage : IIntentionStorage
 {
