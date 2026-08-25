@@ -1,0 +1,84 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, rid: win-x64 }
+          - { os: ubuntu-latest, rid: linux-x64 }
+          - { os: ubuntu-latest, rid: linux-arm64 }
+          - { os: macos-latest, rid: osx-x64 }
+          - { os: macos-latest, rid: osx-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # BuildDashboard target runs pnpm install + build automatically.
+      # Both executables publish into the same folder: installed eling
+      # locates its paired eling-dashboard next to itself.
+      - name: Publish
+        run: >
+          dotnet publish src/backend/Eling.Host
+          -c Release -r ${{ matrix.rid }}
+          --self-contained true
+          -p:PublishSingleFile=true
+          -o publish
+
+      - name: Publish dashboard
+        run: >
+          dotnet publish src/backend/Eling.Dashboard
+          -c Release -r ${{ matrix.rid }}
+          --self-contained true
+          -p:PublishSingleFile=true
+          -o publish
+
+      - name: Package
+        shell: bash
+        run: |
+          find publish -name "*.pdb" -delete
+          cd publish
+          if [ "${{ matrix.rid }}" = "win-x64" ]; then
+            7z a "../eling-${{ matrix.rid }}.zip" .
+          else
+            tar czf "../eling-${{ matrix.rid }}.tar.gz" .
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eling-${{ matrix.rid }}
+          path: eling-${{ matrix.rid }}.*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*
