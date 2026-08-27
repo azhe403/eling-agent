@@ -2,6 +2,7 @@
 bin/
 obj/
 .artifacts/
+.bin/
 .vs/
 .idea/
 *.user

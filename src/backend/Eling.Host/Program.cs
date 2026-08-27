@@ -124,9 +124,11 @@ void SpawnDashboard()
     var pairedExe = ownDirectory is null ? null : Path.Combine(ownDirectory, exeName);
     var siblingDll = Path.Combine(AppContext.BaseDirectory, "eling-dashboard.dll");
 
-    // Dev layout: centralized .artifacts tree (ArtifactsPath is set repo-wide
-    // in Directory.Build.props, so `dotnet run` lands here too). Walk up from
-    // the binary location until the repo's .artifacts folder is found.
+    // Dev layout: the paired eling + eling-dashboard binaries are built together
+    // beside each other in .bin/ (for `dotnet run`/`watch`), while test/CI builds
+    // use .artifacts/bin/ (via --artifacts-path). Prefer the sibling next to the
+    // host; fall back to walking up to a .artifacts tree when running from a
+    // standalone/published binary.
     string? repoArtifactsDll = null;
     var walker = new DirectoryInfo(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory));
     for (var depth = 0; depth < 10 && walker is not null; depth++)

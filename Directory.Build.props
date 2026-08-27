@@ -3,10 +3,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- One centralized output for every invocation (build/test/run/publish),
-         so the paired eling/eling-dashboard binaries always coexist in
-         .artifacts/bin/<Project>/<config>. -->
-    <ArtifactsPath>$(MSBuildThisFileDirectory).artifacts</ArtifactsPath>
+    <!-- Dev runtime output: one shared folder so host & dashboard sit side-by-side
+         (like staging/publish), while obj stays per-project.
+         When test/CI passes artifacts-path explicitly, ArtifactsPath is set and
+         overrides this to keep test builds in .artifacts. -->
+    <OutputPath Condition="'$(ArtifactsPath)' == ''">$(MSBuildThisFileDirectory).bin\$(Configuration)\</OutputPath>
     <!-- eling-live MCP launches via `dotnet run`: any MSBuild output would pollute
          the stdout JSON-RPC stream. Keep restore/build output silent repo-wide. -->
     <NuGetAudit>false</NuGetAudit>
