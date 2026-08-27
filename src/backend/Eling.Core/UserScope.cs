@@ -6,6 +6,12 @@ public sealed class UserScope
     public string ConfigDirectory { get; }
     public string RuntimeDirectory { get; }
 
+    /// <summary>
+    /// Global memory storage root — physically separated from any project .eling.
+    /// Points to <user-data>/eling/ itself; FileSystemMemoryStorage appends /memories.
+    /// </summary>
+    public string GlobalDataDirectory => Root;
+
     public UserScope(string root)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
