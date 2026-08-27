@@ -22,18 +22,125 @@ public sealed class RuntimeRegistry : IDisposable
     private Timer? _shutdownTimer;
     private bool _everRegistered;
     private bool disposedValue;
+    private readonly UserScope _userScope;
+    private IMemoryService? _globalService;
+    private readonly IMemoryMerger _merger = new MemoryMerger();
 
     public Action? ShutdownCallback { get; set; }
 
-    public RuntimeRegistry(ILogger<RuntimeRegistry> logger)
+    private readonly string _runtimeDir;
+
+    public RuntimeRegistry(ILogger<RuntimeRegistry> logger, UserScope? userScope = null)
     {
         _logger = logger;
+        _userScope = userScope ?? UserScope.Resolve(Environment.GetEnvironmentVariable("ELING_USER_SCOPE"));
+        _runtimeDir = _userScope.RuntimeDirectory;
+        Directory.CreateDirectory(_runtimeDir);
+
         // Intervals are env-tunable so lifecycle tests don't wait real minutes.
         _staleAfter = FromEnvironment("ELING_TEST_STALE_MS", TimeSpan.FromSeconds(30));
         _removeGrace = FromEnvironment("ELING_TEST_GRACE_MS", TimeSpan.FromSeconds(60));
         _emptyShutdownDebounce = FromEnvironment("ELING_TEST_SHUTDOWN_DEBOUNCE_MS", TimeSpan.FromSeconds(5));
         var sweepPeriod = FromEnvironment("ELING_TEST_SWEEP_MS", TimeSpan.FromSeconds(10));
         _sweeper = new Timer(_ => Sweep(), null, sweepPeriod, sweepPeriod);
+
+        // Load existing runtime files on start to sync across dashboard processes
+        SyncFromDisk();
+    }
+
+    private void SyncFromDisk()
+    {
+        lock (_lock)
+        {
+            if (!Directory.Exists(_runtimeDir)) return;
+            var now = DateTimeOffset.UtcNow;
+            
+            // Read active files from disk
+            var files = Directory.GetFiles(_runtimeDir, "*.json");
+            var diskPids = new HashSet<int>();
+            
+            foreach (var file in files)
+            {
+                try
+                {
+                    var fileName = Path.GetFileNameWithoutExtension(file);
+                    if (!int.TryParse(fileName, out var pid)) continue;
+
+                    var lastWrite = File.GetLastWriteTimeUtc(file);
+                    if (now - lastWrite > _staleAfter)
+                    {
+                        File.Delete(file);
+                        continue;
+                    }
+
+                    diskPids.Add(pid);
+                    var content = File.ReadAllText(file);
+                    var reg = System.Text.Json.JsonSerializer.Deserialize(content, CoordinatorJsonContext.Default.RuntimeRegistration);
+                    if (reg is null) continue;
+
+                    _everRegistered = true;
+                    var existing = _runtimes.FirstOrDefault(r => r.ProcessId == reg.ProcessId);
+                    if (existing is not null)
+                    {
+                        existing.ProjectRoot = reg.ProjectRoot;
+                        existing.DataDirectory = reg.DataDirectory;
+                        existing.StartTime = reg.StartTime;
+                        existing.McpEnabled = reg.McpEnabled;
+                        existing.McpTransport = reg.McpTransport;
+                        existing.LastHeartbeat = lastWrite;
+                        existing.IsAlive = true;
+                    }
+                    else
+                    {
+                        _runtimes.Add(new RuntimeInfo
+                        {
+                            ProcessId = reg.ProcessId,
+                            ProjectRoot = reg.ProjectRoot,
+                            DataDirectory = reg.DataDirectory,
+                            StartTime = reg.StartTime,
+                            McpEnabled = reg.McpEnabled,
+                            McpTransport = reg.McpTransport,
+                            LastHeartbeat = lastWrite,
+                            IsAlive = true
+                        });
+                    }
+                }
+                catch
+                {
+                    // Ignore corrupted files
+                }
+            }
+
+            // Clean up runtimes in memory that are no longer present on disk
+            _runtimes.RemoveAll(r => !diskPids.Contains(r.ProcessId));
+        }
+    }
+
+    private void WriteToDisk(RuntimeRegistration reg)
+    {
+        try
+        {
+            var path = Path.Combine(_runtimeDir, $"{reg.ProcessId}.json");
+            var content = System.Text.Json.JsonSerializer.Serialize(reg, CoordinatorJsonContext.Default.RuntimeRegistration);
+            File.WriteAllText(path, content);
+        }
+        catch
+        {
+            // Ignore file lock issues during concurrent writes
+        }
+    }
+
+    private void RemoveFromDisk(int processId)
+    {
+        try
+        {
+            var path = Path.Combine(_runtimeDir, $"{processId}.json");
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch
+        {
+            // Ignore
+        }
     }
 
     public void Register(RuntimeRegistration registration)
@@ -42,6 +149,7 @@ public sealed class RuntimeRegistry : IDisposable
         {
             _everRegistered = true;
             ResetShutdownTimer();
+            WriteToDisk(registration);
 
             var existing = _runtimes.FirstOrDefault(r => r.ProcessId == registration.ProcessId);
             if (existing is not null)
@@ -83,6 +191,31 @@ public sealed class RuntimeRegistry : IDisposable
 
             runtime.LastHeartbeat = DateTimeOffset.UtcNow;
             runtime.IsAlive = true;
+
+            // Touch the file to update its LastWriteTime for other dashboards
+            try
+            {
+                var path = Path.Combine(_runtimeDir, $"{processId}.json");
+                if (File.Exists(path))
+                {
+                    File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
+                }
+                else
+                {
+                    var reg = new RuntimeRegistration
+                    {
+                        ProcessId = runtime.ProcessId,
+                        ProjectRoot = runtime.ProjectRoot,
+                        DataDirectory = runtime.DataDirectory,
+                        StartTime = runtime.StartTime,
+                        McpEnabled = runtime.McpEnabled,
+                        McpTransport = runtime.McpTransport
+                    };
+                    WriteToDisk(reg);
+                }
+            }
+            catch {}
+
             return true;
         }
     }
@@ -91,6 +224,7 @@ public sealed class RuntimeRegistry : IDisposable
     {
         lock (_lock)
         {
+            RemoveFromDisk(processId);
             var removed = _runtimes.RemoveAll(r => r.ProcessId == processId) > 0;
             if (removed)
             {
@@ -103,6 +237,7 @@ public sealed class RuntimeRegistry : IDisposable
 
     public IReadOnlyList<RuntimeInfo> Alive()
     {
+        SyncFromDisk();
         lock (_lock)
         {
             return _runtimes.Where(r => r.IsAlive).ToList();
@@ -137,16 +272,174 @@ public sealed class RuntimeRegistry : IDisposable
         }
     }
 
+    public IMemoryService GetGlobalMemoryService()
+    {
+        lock (_lock)
+        {
+            if (_globalService is not null) return _globalService;
+            _globalService = new MemoryService(
+                new FileSystemMemoryStorage(_userScope.GlobalDataDirectory),
+                new SqliteMemoryIndex(Path.Combine(_userScope.GlobalDataDirectory, "index.db")));
+            return _globalService;
+        }
+    }
+
+    public IMemoryService? TryResolveMemoryServiceByProjectRoot(string projectRoot)
+    {
+        lock (_lock)
+        {
+            var runtime = _runtimes.FirstOrDefault(r =>
+                r.IsAlive && string.Equals(Path.GetFullPath(r.ProjectRoot), Path.GetFullPath(projectRoot), StringComparison.OrdinalIgnoreCase));
+            if (runtime is null) return null;
+            if (!_memoryByDataDirectory.TryGetValue(runtime.DataDirectory, out var service))
+            {
+                service = new MemoryService(
+                    new FileSystemMemoryStorage(runtime.DataDirectory),
+                    new SqliteMemoryIndex(Path.Combine(runtime.DataDirectory, "index.db")));
+                _memoryByDataDirectory[runtime.DataDirectory] = service;
+            }
+            return service;
+        }
+    }
+
+    public IMemoryService? TryResolveMemoryServiceByDataDirectory(string dataDirectory)
+    {
+        lock (_lock)
+        {
+            var runtime = _runtimes.FirstOrDefault(r =>
+                r.IsAlive && string.Equals(Path.GetFullPath(r.DataDirectory), Path.GetFullPath(dataDirectory), StringComparison.OrdinalIgnoreCase));
+            if (runtime is null) return null;
+            if (!_memoryByDataDirectory.TryGetValue(runtime.DataDirectory, out var service))
+            {
+                service = new MemoryService(
+                    new FileSystemMemoryStorage(runtime.DataDirectory),
+                    new SqliteMemoryIndex(Path.Combine(runtime.DataDirectory, "index.db")));
+                _memoryByDataDirectory[runtime.DataDirectory] = service;
+            }
+            return service;
+        }
+    }
+
+    public IReadOnlyList<(RuntimeInfo Runtime, IMemoryService Service)> GetAliveProjectServices()
+    {
+        lock (_lock)
+        {
+            var result = new List<(RuntimeInfo, IMemoryService)>();
+            foreach (var runtime in _runtimes.Where(r => r.IsAlive))
+            {
+                if (!_memoryByDataDirectory.TryGetValue(runtime.DataDirectory, out var service))
+                {
+                    service = new MemoryService(
+                        new FileSystemMemoryStorage(runtime.DataDirectory),
+                        new SqliteMemoryIndex(Path.Combine(runtime.DataDirectory, "index.db")));
+                    _memoryByDataDirectory[runtime.DataDirectory] = service;
+                }
+                result.Add((runtime, service));
+            }
+            return result.AsReadOnly();
+        }
+    }
+
+    public async Task<IReadOnlyCollection<ScopedMemory>> ListAggregatedAsync(MemoryStatus? status = null)
+    {
+        var globalService = GetGlobalMemoryService();
+        var globalMemories = await globalService.ListAllAsync();
+        if (status.HasValue) globalMemories = globalMemories.Where(m => m.Status == status.Value).ToList();
+
+        var allProjectMemories = new List<ScopedMemory>();
+        foreach (var (runtime, service) in GetAliveProjectServices())
+        {
+            var list = await service.ListAllAsync();
+            if (status.HasValue) list = list.Where(m => m.Status == status.Value).ToList();
+            foreach (var m in list)
+            {
+                allProjectMemories.Add(new ScopedMemory(m, MemoryScopeKind.Project, runtime.ProjectRoot));
+            }
+        }
+
+        var globalScoped = globalMemories.Select(m => new ScopedMemory(m, MemoryScopeKind.Global, null)).ToList();
+        var merged = _merger.MergeLists(
+            allProjectMemories.Select(s => s.Memory).ToList(),
+            globalMemories,
+            null);
+        // Build correctly with per-project roots: merger above loses per-project roots, so reconstruct
+        var result = new List<ScopedMemory>();
+        result.AddRange(globalScoped);
+        result.AddRange(allProjectMemories);
+        return result.AsReadOnly();
+    }
+
+    public async Task<IReadOnlyCollection<ScopedSearchResult>> SearchAggregatedAsync(string query, int? limit = null)
+    {
+        var globalService = GetGlobalMemoryService();
+        var globalResults = await globalService.SearchAsync(query);
+        var all = new List<ScopedSearchResult>();
+        foreach (var r in globalResults)
+        {
+            all.Add(new ScopedSearchResult(r.Id, r.Rank, MemoryScopeKind.Global, null));
+        }
+
+        foreach (var (runtime, service) in GetAliveProjectServices())
+        {
+            var projectResults = await service.SearchAsync(query);
+            foreach (var r in projectResults)
+            {
+                // Project priority boost
+                var boosted = r.Rank - 1000.0;
+                all.Add(new ScopedSearchResult(r.Id, boosted, MemoryScopeKind.Project, runtime.ProjectRoot));
+            }
+        }
+
+        var ordered = all.OrderBy(x => x.Rank).ToList();
+        if (limit.HasValue && limit.Value > 0 && ordered.Count > limit.Value)
+        {
+            ordered = ordered.Take(limit.Value).ToList();
+        }
+
+        // Dedup by scoped identity
+        var seen = new HashSet<string>();
+        var deduped = new List<ScopedSearchResult>();
+        foreach (var item in ordered)
+        {
+            var key = $"{item.Scope}:{item.Id.Value}:{item.ProjectRoot}";
+            if (seen.Add(key)) deduped.Add(item);
+        }
+        return deduped.AsReadOnly();
+    }
+
+    public IMemoryMerger Merger => _merger;
+    public UserScope UserScope => _userScope;
+
     private void Sweep()
     {
         bool anyAlive;
         lock (_lock)
         {
             var now = DateTimeOffset.UtcNow;
+            
+            // Clean up disk files first
+            if (Directory.Exists(_runtimeDir))
+            {
+                var files = Directory.GetFiles(_runtimeDir, "*.json");
+                foreach (var file in files)
+                {
+                    try
+                    {
+                        var lastWrite = File.GetLastWriteTimeUtc(file);
+                        if (now - lastWrite > _staleAfter)
+                        {
+                            File.Delete(file);
+                        }
+                    }
+                    catch {}
+                }
+            }
+
             foreach (var runtime in _runtimes.Where(r => r.IsAlive && now - r.LastHeartbeat > _staleAfter))
             {
                 runtime.IsAlive = false;
                 _logger.LogWarning("Runtime stale: pid={Pid} root={Root}", runtime.ProcessId, runtime.ProjectRoot);
+                RemoveFromDisk(runtime.ProcessId);
             }
 
             _runtimes.RemoveAll(r => !r.IsAlive && now - r.LastHeartbeat > _removeGrace);

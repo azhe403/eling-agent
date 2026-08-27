@@ -35,6 +35,8 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
 
 builder.Services.AddSingleton<RuntimeRegistry>();
+builder.Services.AddSingleton<IMemoryScopePolicy, MemoryScopePolicy>();
+builder.Services.AddSingleton<IMemoryMerger, MemoryMerger>();
 builder.Services.AddScoped<IMemoryService>(sp =>
     sp.GetRequiredService<RuntimeRegistry>().ResolveMemoryService());
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -55,6 +57,7 @@ app.UseRouting();
 app.MapGet("/health", () => Results.Ok(new { status = "Healthy", pid = Environment.ProcessId }));
 app.MapCoordinatorEndpoints();
 app.MapMemoryRoutes();
+app.MapScopedMemoryRoutes();
 app.MapFallbackToFile("index.html");
 
 var registry = app.Services.GetRequiredService<RuntimeRegistry>();

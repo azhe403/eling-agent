@@ -18,7 +18,11 @@ type Memory = {
   createdAt: string
   updatedAt: string
   source?: string | null
+  scope?: string
+  project?: { id: string; root: string } | null
 }
+
+type Runtime = { projectRoot: string; dataDirectory: string }
 
 const TYPES = ["All", "Fact", "Preference", "Decision", "Lesson", "Note"]
 const EDIT_TYPES = TYPES.slice(1)
@@ -46,18 +50,55 @@ export default function MemoriesPage() {
   const [type, setType] = useState("All")
   const [query, setQuery] = useState("")
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [scope, setScope] = useState<string>("all")
+  const [runtimes, setRuntimes] = useState<Runtime[]>([])
+
+  const loadRuntimes = useCallback(async () => {
+    try {
+      const res = await fetch("/api/coordinator/runtimes")
+      if (res.ok) setRuntimes(await res.json())
+    } catch { /* ignore */ }
+  }, [])
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/memories?limit=100")
+      let url = "/api/aggregated/memories?limit=100"
+      if (scope === "global") url = "/api/global/memories?limit=100"
+      else if (scope !== "all") url = `/api/project/memories?projectRoot=${encodeURIComponent(scope)}&limit=100`
+      const res = await fetch(url)
       if (!res.ok) throw new Error(`API returned ${res.status}`)
-      setMemories(await res.json())
+      const data = await res.json()
+      // Dashboard scoped endpoints return {id, type, status, content, tags, createdAt, updatedAt, scope, project}
+      // Legacy /api/memories returns flat Memory; normalize to include scope
+      const normalized: Memory[] = Array.isArray(data)
+        ? data.map((m: Memory) => ({
+            ...m,
+            scope: (m.scope as string) ?? (scope === "global" ? "global" : scope === "all" ? m.scope ?? "project" : "project"),
+            project: m.project ?? (scope !== "all" && scope !== "global" ? { id: scope.split("\\").pop() ?? scope, root: scope } : null),
+          }))
+        : []
+      setMemories(normalized)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load memories")
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [scope])
+
+  useEffect(() => {
+    // Mount fetch is intentional; all setStates inside loadRuntimes() run
+    // after await, but the rule cannot see through the function boundary.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadRuntimes()
+    const onFocus = () => loadRuntimes()
+    window.addEventListener("focus", onFocus)
+    window.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") loadRuntimes()
+    })
+    return () => {
+      window.removeEventListener("focus", onFocus)
+    }
+  }, [loadRuntimes])
 
   useEffect(() => {
     // Mount fetch is intentional; all setStates inside load() run after await,
@@ -66,10 +107,35 @@ export default function MemoriesPage() {
     load()
   }, [load])
 
-  async function remove(id: string) {
-    const res = await fetch(`/api/memories/${id}`, { method: "DELETE" })
+  // Auto-refresh scope list + memories when a new project registers (poll diff)
+  useEffect(() => {
+    let prev = runtimes.map((r) => r.projectRoot).join("|")
+    const check = async () => {
+      try {
+        const res = await fetch("/api/coordinator/runtimes")
+        if (!res.ok) return
+        const next: Runtime[] = await res.json()
+        const nextKey = next.map((r) => r.projectRoot).join("|")
+        if (nextKey !== prev) {
+          prev = nextKey
+          setRuntimes(next)
+          // if currently on "All" or a project that just appeared, reload memories to reflect new scope
+          load()
+        }
+      } catch { /* ignore */ }
+    }
+    const id = setInterval(check, 5000)
+    return () => clearInterval(id)
+  }, [runtimes, load])
+
+  async function remove(m: Memory) {
+    let url = `/api/memories/${m.id}`
+    if (m.scope === "global") url = `/api/global/memories/${m.id}`
+    else if (m.scope === "project" && m.project?.root) url = `/api/project/memories/${m.id}?projectRoot=${encodeURIComponent(m.project.root)}`
+    else if (scope !== "all" && scope !== "global") url = `/api/project/memories/${m.id}?projectRoot=${encodeURIComponent(scope)}`
+    const res = await fetch(url, { method: "DELETE" })
     if (res.ok || res.status === 404) {
-      setMemories((m) => m.filter((x) => x.id !== id))
+      setMemories((x) => x.filter((y) => y.id !== m.id))
     }
   }
 
@@ -77,15 +143,51 @@ export default function MemoriesPage() {
     id: string,
     body: { content: string; type: string; status: string }
   ) {
-    const res = await fetch(`/api/memories/${id}`, {
+    const target = memories.find((x) => x.id === id)
+    let url = `/api/memories/${id}`
+    if (target?.scope === "global") url = `/api/global/memories/${id}`
+    else if (target?.scope === "project" && target.project?.root) url = `/api/project/memories/${id}?projectRoot=${encodeURIComponent(target.project.root)}`
+    const res = await fetch(url, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     })
     if (res.ok) {
       const updated = (await res.json()) as Memory
-      setMemories((m) => m.map((x) => (x.id === id ? updated : x)))
+      setMemories((x) => x.map((y) => (y.id === id ? { ...updated, scope: target?.scope, project: target?.project } : y)))
       setEditingId(null)
+    }
+  }
+
+  async function promote(m: Memory) {
+    if (m.scope !== "project" || !m.project?.root) return
+    const res = await fetch("/api/scoped/promote-to-global", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: m.id, sourceProjectRoot: m.project.root }),
+    })
+    if (res.ok) {
+      // keep original, just toast via reload
+      await load()
+    } else {
+      setError(`Promote failed: ${res.status}`)
+    }
+  }
+
+  async function copyToProject(m: Memory, targetRoot: string) {
+    const isGlobal = m.scope === "global"
+    const body = isGlobal
+      ? { id: m.id, sourceScope: "global", targetProjectRoot: targetRoot }
+      : { id: m.id, sourceScope: "project", sourceProjectRoot: m.project?.root, targetProjectRoot: targetRoot }
+    const res = await fetch("/api/scoped/copy-to-project", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    if (res.ok) {
+      await load()
+    } else {
+      setError(`Copy failed: ${res.status}`)
     }
   }
 
@@ -129,13 +231,39 @@ export default function MemoriesPage() {
       </header>
 
       <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
-        <div className="sticky top-16 z-10 flex flex-wrap items-center gap-2 bg-background pb-2">
-          <Input
-            placeholder="Search content..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="max-w-xs"
-          />
+        <div className="sticky top-16 z-10 flex flex-col gap-2 bg-background pb-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground">Scope:</span>
+            <button
+              onClick={() => setScope("all")}
+              className={scope === "all" ? "rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground" : "rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"}
+            >
+              All Open Projects
+            </button>
+            <button
+              onClick={() => setScope("global")}
+              className={scope === "global" ? "rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground" : "rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"}
+            >
+              🌐 Global
+            </button>
+            {runtimes.map((r) => (
+              <button
+                key={r.projectRoot}
+                onClick={() => setScope(r.projectRoot)}
+                className={scope === r.projectRoot ? "rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground" : "rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"}
+                title={r.projectRoot}
+              >
+                📁 {r.projectRoot.split("\\").pop() ?? r.projectRoot.split("/").pop()}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              placeholder="Search content..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="max-w-xs"
+            />
           <div className="flex flex-wrap gap-1">
             {TYPES.map((t) => (
               <button
@@ -150,6 +278,7 @@ export default function MemoriesPage() {
                 {t}
               </button>
             ))}
+          </div>
           </div>
         </div>
 
@@ -209,12 +338,50 @@ export default function MemoriesPage() {
                           #{tag}
                         </span>
                       ))}
+                      <span className={m.scope === "global" ? "rounded-md bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-600" : "rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600"}>
+                        {m.scope === "global" ? "🌐 Global" : m.project ? `📁 ${m.project.id}` : "📁 Project"}
+                      </span>
                       <span className="text-xs text-muted-foreground">
                         {new Date(m.updatedAt).toLocaleString()}
                       </span>
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    {m.scope === "project" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground hover:text-foreground text-xs"
+                        onClick={() => promote(m)}
+                        aria-label="Promote to global"
+                        title="Promote to Global (copy, original stays)"
+                      >
+                        ↑ Global
+                      </Button>
+                    )}
+                    {m.scope === "global" && runtimes.length > 0 && (
+                      <select
+                        aria-label="Copy to project"
+                        title="Copy to Project"
+                        className="h-8 rounded-md border bg-background px-2 text-xs"
+                        defaultValue=""
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            copyToProject(m, e.target.value)
+                            e.target.value = ""
+                          }
+                        }}
+                      >
+                        <option value="" disabled>
+                          Copy to…
+                        </option>
+                        {runtimes.map((r) => (
+                          <option key={r.projectRoot} value={r.projectRoot}>
+                            📁 {r.projectRoot.split("\\").pop() ?? r.projectRoot.split("/").pop()}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon"
@@ -228,7 +395,7 @@ export default function MemoriesPage() {
                       variant="ghost"
                       size="icon"
                       className="text-muted-foreground hover:text-destructive"
-                      onClick={() => remove(m.id)}
+                      onClick={() => remove(m)}
                       aria-label="Delete memory"
                     >
                       <Trash2 className="size-4" />
