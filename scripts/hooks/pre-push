@@ -1,0 +1,30 @@
+#!/bin/sh
+# Eling pre-push hook: Publishes Eling globally and runs smoke tests before pushing.
+
+echo "== [pre-push hook] Starting global publish & smoke test =="
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT"
+
+if [ -f "./publish-global.ps1" ] && (command -v pwsh >/dev/null 2>&1 || command -v powershell.exe >/dev/null 2>&1); then
+  if command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "./publish-global.ps1"
+  else
+    powershell.exe -ExecutionPolicy Bypass -File "./publish-global.ps1"
+  fi
+elif [ -f "./publish-global.sh" ]; then
+  chmod +x "./publish-global.sh" 2>/dev/null || true
+  bash "./publish-global.sh"
+else
+  echo "[pre-push hook] Error: No suitable publish-global script or runner found. Aborting push." >&2
+  exit 1
+fi
+
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+  echo "== [pre-push hook] publish-global failed (exit code $EXIT_CODE). Aborting git push! ==" >&2
+  exit 1
+fi
+
+echo "== [pre-push hook] publish-global succeeded. Proceeding with git push. =="
+exit 0

@@ -3,11 +3,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- Dev runtime output: one shared folder so host & dashboard sit side-by-side
-         (like staging/publish), while obj stays per-project.
-         When test/CI passes artifacts-path explicitly (e.g. artifacts-path .bin-test),
-         ArtifactsPath overrides this to keep test builds completely isolated in .bin-test. -->
-    <OutputPath Condition="'$(ArtifactsPath)' == ''">$(MSBuildThisFileDirectory).bin\</OutputPath>
+    <!-- Per-configuration .bin/ output to avoid lock conflicts between dev (Debug)
+         and test/publish (Release) processes that hold the .bin/ DLLs in memory.
+         obj/ stays per-project (default `obj/<Config>/<Framework>/`), which is what
+         the live dev backend at port 4417 already uses. -->
+    <OutputPath Condition="'$(ArtifactsPath)' == ''">$(MSBuildThisFileDirectory).bin\$(Configuration)\</OutputPath>
     <!-- eling-live MCP launches via `dotnet run`: any MSBuild output would pollute
          the stdout JSON-RPC stream. Keep restore/build output silent repo-wide. -->
     <NuGetAudit>false</NuGetAudit>
