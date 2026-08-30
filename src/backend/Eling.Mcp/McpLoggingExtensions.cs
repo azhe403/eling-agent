@@ -17,7 +17,12 @@ public static class McpLoggingExtensions
 
     public static IServiceCollection AddElingLogging(this IServiceCollection services, string rootPath = DefaultRootPath)
     {
-        var logsDirectory = Path.Combine(rootPath, "logs");
+        // Resolve to absolute path so log directory is deterministic regardless of
+        // the host process's current working directory. Without this, a relative
+        // rootPath (e.g. ".eling") would be combined with the host CWD and produce
+        // log files at unpredictable locations like <user-home>/.eling/logs/.
+        var absoluteRootPath = Path.GetFullPath(rootPath);
+        var logsDirectory = Path.Combine(absoluteRootPath, "logs");
         Directory.CreateDirectory(logsDirectory);
 
         var sink = new RollingDailyFileSink(logsDirectory);

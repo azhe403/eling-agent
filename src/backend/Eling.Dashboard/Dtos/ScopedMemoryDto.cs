@@ -44,4 +44,5 @@ public record CopyRequest(
 
 public record PromoteRequest(
     string Id,
-    string SourceProjectRoot);
+    string SourceProjectRoot,
+    bool Move = false);

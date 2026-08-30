@@ -16,10 +16,11 @@ public class MemoryToolsTests
         public string? LastSearchQuery;
         public bool RebuildIndexCalled;
 
-        public Task<Memory> SaveAsync(Memory memory)
+        public Task<SaveResult> SaveAsync(Memory memory)
         {
+            var action = Items.ContainsKey(memory.Id) ? SaveAction.Updated : SaveAction.Created;
             Items[memory.Id] = memory;
-            return Task.FromResult(memory);
+            return Task.FromResult(new SaveResult(memory, action));
         }
 
         public Task<Memory?> GetByIdAsync(MemoryId id) => Task.FromResult(Items.GetValueOrDefault(id));
@@ -332,6 +333,8 @@ public class MemoryToolsTests
         Assert.NotNull(options.ServerInstructions);
         Assert.Contains(".eling/memories/", options.ServerInstructions);
         Assert.Contains("canonical", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".gitignore", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prompt the user for confirmation", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("add '.eling/' to '.gitignore'", options.ServerInstructions);
     }
 }

@@ -26,10 +26,11 @@ import {
 import { PanelLeftIcon } from "lucide-react"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
+const SIDEBAR_STORAGE_KEY = "eling_sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
-const SIDEBAR_WIDTH_ICON = "3rem"
+const SIDEBAR_WIDTH_ICON = "4.25rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
 type SidebarContextProps = {
@@ -53,6 +54,25 @@ function useSidebar() {
   return context
 }
 
+function getInitialSidebarOpen(defaultOpen: boolean): boolean {
+  if (typeof window === "undefined") return defaultOpen
+  try {
+    const saved = localStorage.getItem(SIDEBAR_STORAGE_KEY)
+    if (saved !== null) {
+      return saved === "true"
+    }
+    const match = document.cookie.match(
+      new RegExp(`(?:^|; )${SIDEBAR_COOKIE_NAME}=([^;]*)`)
+    )
+    if (match) {
+      return match[1] === "true"
+    }
+  } catch {
+    // ignore storage access errors
+  }
+  return defaultOpen
+}
+
 function SidebarProvider({
   defaultOpen = true,
   open: openProp,
@@ -69,28 +89,41 @@ function SidebarProvider({
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = React.useState(false)
 
-  // This is the internal state of the sidebar.
-  // We use openProp and setOpenProp for control from outside the component.
-  const [_open, _setOpen] = React.useState(defaultOpen)
+  // Lazy-initialize with the stored preference directly so initial client render matches storage
+  const [_open, _setOpen] = React.useState(() => getInitialSidebarOpen(defaultOpen))
   const open = openProp ?? _open
+
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
-      const openState = typeof value === "function" ? value(open) : value
-      if (setOpenProp) {
-        setOpenProp(openState)
-      } else {
-        _setOpen(openState)
-      }
+      _setOpen((prev) => {
+        const next = typeof value === "function" ? value(prev) : value
+        if (setOpenProp) {
+          setOpenProp(next)
+        }
 
-      // This sets the cookie to keep the sidebar state.
-      document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+        // Persist to localStorage and cookie
+        try {
+          localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next))
+          if (!next) {
+            document.documentElement.setAttribute("data-sidebar-collapsed", "true")
+          } else {
+            document.documentElement.removeAttribute("data-sidebar-collapsed")
+          }
+        } catch {
+          // ignore
+        }
+        document.cookie = `${SIDEBAR_COOKIE_NAME}=${next}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+        return next
+      })
     },
-    [setOpenProp, open]
+    [setOpenProp]
   )
 
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
-    return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
+    return isMobile
+      ? setOpenMobile((prev) => !prev)
+      : setOpen((prev) => !prev)
   }, [isMobile, setOpen, setOpenMobile])
 
   // Adds a keyboard shortcut to toggle the sidebar.

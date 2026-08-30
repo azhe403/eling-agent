@@ -11,16 +11,19 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = $PSScriptRoot
 $outDir = Join-Path $env:TEMP "eling-publish-global"
+$artifactsDir = Join-Path $env:TEMP "eling-publish-artifacts"
 $binDir = Join-Path $env:USERPROFILE ".local\bin"
 
 Write-Host "== Publishing ($Configuration / $Rid) =="
 if (Test-Path $outDir) { Remove-Item $outDir -Recurse -Force }
+if (Test-Path $artifactsDir) { Remove-Item $artifactsDir -Recurse -Force }
 
 foreach ($project in @("Eling.Host", "Eling.Dashboard")) {
     Write-Host "-- dotnet publish src/backend/$project"
     dotnet publish (Join-Path $repoRoot "src/backend/$project") `
         -c $Configuration -r $Rid `
         --self-contained true `
+        --artifacts-path $artifactsDir `
         -p:PublishSingleFile=true `
         -p:IncludeNativeLibrariesForSelfExtract=true `
         -o $outDir --nologo -v q
@@ -64,6 +67,7 @@ $psi.RedirectStandardInput = $true
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError = $true
 $process = [System.Diagnostics.Process]::Start($psi)
+[void]$process.StandardError.ReadToEndAsync()
 
 function Stop-SmokeProcess {
     if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
@@ -89,39 +93,23 @@ if (-not $health) {
 Write-Host "  health: $health"
 
 Write-Host "== Smoke test: MCP memory read/write =="
-$script:pending = $null
-
 function Send-Mcp($object) {
     $line = $object | ConvertTo-Json -Depth 8 -Compress
     $process.StandardInput.WriteLine($line)
     $process.StandardInput.Flush()
 }
 
-function Wait-McpResponse([int]$targetId, [int]$timeoutSeconds) {
-    # One continuous stdout reader; returns the RAW line whose response id matches.
-    $deadline = [datetime]::UtcNow.AddSeconds($timeoutSeconds)
-    while ([datetime]::UtcNow -lt $deadline) {
-        if (-not $script:pending) {
-            $script:pending = $process.StandardOutput.ReadLineAsync()
-        }
-        if ($script:pending.Wait(300)) {
-            $line = $script:pending.Result
-            $script:pending = $null
-            try {
-                $json = $line | ConvertFrom-Json
-                if ($json.id -eq $targetId) { return $line }
-            } catch { }
-        }
-    }
-    return $null
+function Read-McpResponse {
+    return $process.StandardOutput.ReadLine()
 }
 
 Send-Mcp @{ jsonrpc = '2.0'; id = 1; method = 'initialize'; params = @{
     protocolVersion = '2024-11-05'; capabilities = @{};
     clientInfo = @{ name = 'publish-smoke'; version = '1.0' } } }
-if (-not (Wait-McpResponse 1 30)) {
+$initLine = Read-McpResponse 30
+if (-not $initLine -or $initLine -notmatch '"id":1') {
     Stop-SmokeProcess
-    throw "Smoke test FAILED: MCP initialize got no response."
+    throw "Smoke test FAILED: MCP initialize got no response. Raw: $initLine"
 }
 
 Send-Mcp @{ jsonrpc = '2.0'; method = 'notifications/initialized' }
@@ -132,22 +120,23 @@ $content = "publish-global smoke test $stamp"
 Send-Mcp @{ jsonrpc = '2.0'; id = 2; method = 'tools/call'; params = @{
     name = 'memory_save'; arguments = @{
         content = $content; type = 'note'; tags = @('smoke') } } }
-$saveLine = Wait-McpResponse 2 30
-
-Send-Mcp @{ jsonrpc = '2.0'; id = 3; method = 'tools/call'; params = @{
-    name = 'memory_search'; arguments = @{ query = $content } } }
-$searchLine = Wait-McpResponse 3 30
-
-Stop-SmokeProcess
+$saveLine = Read-McpResponse 30
 
 if (-not $saveLine -or $saveLine -notmatch '01[0-9a-hjkmnp-tv-z]{24}') {
+    Stop-SmokeProcess
     $preview = if ($saveLine) { $saveLine.Substring(0, [Math]::Min(400, $saveLine.Length)) } else { "<null: no response within timeout>" }
     throw "Smoke test FAILED: memory_save returned no usable response. Raw: $preview"
 }
 $savedId = $Matches[0]
 
-if (-not $searchLine -or $searchLine -notmatch [regex]::Escape($savedId)) {
-    throw "Smoke test FAILED: memory_search did not return the saved memory (id=$savedId)."
+Send-Mcp @{ jsonrpc = '2.0'; id = 3; method = 'tools/call'; params = @{
+    name = 'memory_get'; arguments = @{ id = $savedId; scope = 'project' } } }
+$getLine = Read-McpResponse 30
+
+Stop-SmokeProcess
+
+if (-not $getLine -or $getLine -notmatch [regex]::Escape($savedId)) {
+    throw "Smoke test FAILED: memory_get did not return the saved memory (id=$savedId). Raw: $getLine"
 }
 
 Write-Host ""

@@ -7,12 +7,14 @@ import { Brain, LayoutDashboard, Database } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 const navItems = [
   { title: "Dashboard", url: "/dashboard/", icon: LayoutDashboard },
@@ -51,6 +53,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter className="p-2 border-t border-sidebar-border">
+        <ThemeToggle />
+      </SidebarFooter>
     </Sidebar>
   )
 }

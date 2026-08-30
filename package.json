@@ -3,15 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "dev": "concurrently -n \"backend,frontend\" -c \"blue,green\" \"cross-env ELING_DASHBOARD_PORT=4417 dotnet run --project src/backend/Eling.Dashboard/Eling.Dashboard.csproj\" \"pnpm --prefix src/frontend/Eling.Dashboard dev\"",
+    "dev:backend": "cross-env ELING_DASHBOARD_PORT=4417 dotnet run --project src/backend/Eling.Dashboard/Eling.Dashboard.csproj",
+    "dev:frontend": "pnpm --prefix src/frontend/Eling.Dashboard dev",
     "prepare": "husky",
     "lint:frontend": "pnpm --prefix src/frontend/Eling.Dashboard lint",
     "typecheck:frontend": "pnpm --prefix src/frontend/Eling.Dashboard exec tsc --noEmit",
-    "validate:backend": "dotnet restore Eling.slnx --artifacts-path .artifacts",
-    "build:backend": "dotnet build Eling.slnx --artifacts-path .artifacts",
-    "test:backend": "dotnet test Eling.slnx --artifacts-path .artifacts",
+    "validate:backend": "dotnet restore Eling.slnx --artifacts-path .bin-test",
+    "build:backend": "dotnet build Eling.slnx",
+    "test:backend": "dotnet test Eling.slnx --artifacts-path .bin-test",
     "build:frontend": "pnpm --prefix src/frontend/Eling.Dashboard build"
   },
   "devDependencies": {
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
     "husky": "^9.1.7"
   }
 }

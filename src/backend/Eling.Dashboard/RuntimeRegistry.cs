@@ -240,7 +240,34 @@ public sealed class RuntimeRegistry : IDisposable
         SyncFromDisk();
         lock (_lock)
         {
-            return _runtimes.Where(r => r.IsAlive).ToList();
+            var userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var seenRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var result = new List<RuntimeInfo>();
+
+            // Prioritize most recent runtime per project root first
+            foreach (var runtime in _runtimes.Where(r => r.IsAlive).OrderByDescending(r => r.LastHeartbeat))
+            {
+                var normalizedRoot = Path.GetFullPath(runtime.ProjectRoot);
+                
+                // Exclude User Profile Home and Global Data Directory from project-level runtime list
+                // (they are represented by the dedicated "🌐 Global" button)
+                var isUserHome = !string.IsNullOrWhiteSpace(userHome) &&
+                    string.Equals(normalizedRoot.TrimEnd(Path.DirectorySeparatorChar), userHome.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+                var isGlobalScope = string.Equals(normalizedRoot.TrimEnd(Path.DirectorySeparatorChar), _userScope.GlobalDataDirectory.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+
+                if (isUserHome || isGlobalScope) continue;
+
+                if (seenRoots.Add(normalizedRoot))
+                {
+                    result.Add(runtime);
+                }
+            }
+
+            // Sort alphabetically by Project Folder Name for stable & clean UI order
+            return result
+                .OrderBy(r => Path.GetFileName(Path.TrimEndingDirectorySeparator(r.ProjectRoot)), StringComparer.OrdinalIgnoreCase)
+                .ToList()
+                .AsReadOnly();
         }
     }
 
@@ -256,10 +283,9 @@ public sealed class RuntimeRegistry : IDisposable
             var latest = _runtimes
                 .Where(r => r.IsAlive)
                 .OrderByDescending(r => r.StartTime)
-                .FirstOrDefault()
-                ?? throw new InvalidOperationException("No active project runtime is registered.");
+                .FirstOrDefault();
 
-            var directory = latest.DataDirectory;
+            var directory = latest?.DataDirectory ?? Path.Combine(Directory.GetCurrentDirectory(), ".eling");
             if (!_memoryByDataDirectory.TryGetValue(directory, out var service))
             {
                 service = new MemoryService(
@@ -325,17 +351,54 @@ public sealed class RuntimeRegistry : IDisposable
         lock (_lock)
         {
             var result = new List<(RuntimeInfo, IMemoryService)>();
+            var seenDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var globalDataDir = Path.GetFullPath(_userScope.GlobalDataDirectory);
+
             foreach (var runtime in _runtimes.Where(r => r.IsAlive))
             {
-                if (!_memoryByDataDirectory.TryGetValue(runtime.DataDirectory, out var service))
+                // Skip runtimes that map to the global data directory — those
+                // are global-only sessions, not project sessions.
+                var runtimeDataDir = Path.GetFullPath(runtime.DataDirectory);
+                if (string.Equals(runtimeDataDir, globalDataDir, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!seenDirectories.Add(runtimeDataDir)) continue;
+
+                if (!_memoryByDataDirectory.TryGetValue(runtimeDataDir, out var service))
                 {
                     service = new MemoryService(
-                        new FileSystemMemoryStorage(runtime.DataDirectory),
-                        new SqliteMemoryIndex(Path.Combine(runtime.DataDirectory, "index.db")));
-                    _memoryByDataDirectory[runtime.DataDirectory] = service;
+                        new FileSystemMemoryStorage(runtimeDataDir),
+                        new SqliteMemoryIndex(Path.Combine(runtimeDataDir, "index.db")));
+                    _memoryByDataDirectory[runtimeDataDir] = service;
                 }
                 result.Add((runtime, service));
             }
+
+            if (result.Count == 0)
+            {
+                var localDataDir = Path.Combine(Directory.GetCurrentDirectory(), ".eling");
+                if (Directory.Exists(localDataDir))
+                {
+                    if (!_memoryByDataDirectory.TryGetValue(localDataDir, out var localService))
+                    {
+                        localService = new MemoryService(
+                            new FileSystemMemoryStorage(localDataDir),
+                            new SqliteMemoryIndex(Path.Combine(localDataDir, "index.db")));
+                        _memoryByDataDirectory[localDataDir] = localService;
+                    }
+                    var syntheticRuntime = new RuntimeInfo
+                    {
+                        ProcessId = Environment.ProcessId,
+                        ProjectRoot = Directory.GetCurrentDirectory(),
+                        DataDirectory = localDataDir,
+                        StartTime = DateTimeOffset.UtcNow,
+                        McpEnabled = true,
+                        McpTransport = "stdio",
+                        LastHeartbeat = DateTimeOffset.UtcNow,
+                        IsAlive = true
+                    };
+                    result.Add((syntheticRuntime, localService));
+                }
+            }
+
             return result.AsReadOnly();
         }
     }
@@ -358,15 +421,29 @@ public sealed class RuntimeRegistry : IDisposable
         }
 
         var globalScoped = globalMemories.Select(m => new ScopedMemory(m, MemoryScopeKind.Global, null)).ToList();
-        var merged = _merger.MergeLists(
-            allProjectMemories.Select(s => s.Memory).ToList(),
-            globalMemories,
-            null);
-        // Build correctly with per-project roots: merger above loses per-project roots, so reconstruct
+
+        // Build distinct list by Id.Value (ULID is globally-unique per design).
+        // Two entries with the same Id are the same memory even if they originate
+        // from different runtime paths (e.g. global + project fallback).
+        var seenKeys = new HashSet<string>();
         var result = new List<ScopedMemory>();
-        result.AddRange(globalScoped);
-        result.AddRange(allProjectMemories);
-        return result.AsReadOnly();
+
+        foreach (var item in globalScoped)
+        {
+            if (seenKeys.Add(item.Id.Value)) result.Add(item);
+        }
+
+        foreach (var item in allProjectMemories)
+        {
+            if (seenKeys.Add(item.Id.Value)) result.Add(item);
+        }
+
+        // Sort descending: newest (by UpdatedAt / CreatedAt) always at the top
+        return result
+            .OrderByDescending(s => s.Memory.UpdatedAt)
+            .ThenByDescending(s => s.Memory.CreatedAt)
+            .ToList()
+            .AsReadOnly();
     }
 
     public async Task<IReadOnlyCollection<ScopedSearchResult>> SearchAggregatedAsync(string query, int? limit = null)

@@ -106,14 +106,23 @@ public sealed class McpProcessTests : IAsyncLifetime
     {
         var process = StartEling();
 
+        var stderrSb = new System.Text.StringBuilder();
+        var stderrTask = Task.Run(async () =>
+        {
+            while (await process.StandardError.ReadLineAsync() is { } line)
+            {
+                stderrSb.AppendLine(line);
+            }
+        });
+
         await SendInitializeAsync(process, id: 1);
 
-        // Let startup diagnostics accumulate, then stop and drain both pipes.
+        // Let startup diagnostics accumulate, then stop.
         await Task.Delay(1500);
         process.Kill(entireProcessTree: true);
-        var restOfStdout = await process.StandardOutput.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(10));
-        var stderr = await process.StandardError.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        await stderrTask.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
+        var stderr = stderrSb.ToString();
         Assert.True(stderr.Contains("eling", StringComparison.OrdinalIgnoreCase),
             $"Expected diagnostics on stderr, got: {stderr}");
     }

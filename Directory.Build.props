@@ -5,9 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Dev runtime output: one shared folder so host & dashboard sit side-by-side
          (like staging/publish), while obj stays per-project.
-         When test/CI passes artifacts-path explicitly, ArtifactsPath is set and
-         overrides this to keep test builds in .artifacts. -->
-    <OutputPath Condition="'$(ArtifactsPath)' == ''">$(MSBuildThisFileDirectory).bin\$(Configuration)\</OutputPath>
+         When test/CI passes artifacts-path explicitly (e.g. artifacts-path .bin-test),
+         ArtifactsPath overrides this to keep test builds completely isolated in .bin-test. -->
+    <OutputPath Condition="'$(ArtifactsPath)' == ''">$(MSBuildThisFileDirectory).bin\</OutputPath>
     <!-- eling-live MCP launches via `dotnet run`: any MSBuild output would pollute
          the stdout JSON-RPC stream. Keep restore/build output silent repo-wide. -->
     <NuGetAudit>false</NuGetAudit>

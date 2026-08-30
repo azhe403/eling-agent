@@ -44,7 +44,7 @@ public static class ScopedMemoryEndpoints
     {
         var service = registry.GetGlobalMemoryService();
         var all = await service.ListAllAsync();
-        all = all.OrderByDescending(m => m.CreatedAt).ToList();
+        all = all.OrderByDescending(m => m.UpdatedAt).ThenByDescending(m => m.CreatedAt).ToList();
         if (!string.IsNullOrEmpty(status))
         {
             if (!Enum.TryParse<MemoryStatus>(status, true, out var parsed)) return TypedResults.BadRequest($"Invalid status '{status}'");
@@ -80,7 +80,7 @@ public static class ScopedMemoryEndpoints
         return memory is null ? TypedResults.NotFound() : TypedResults.Ok(ScopedMemoryDto.From(memory, MemoryScopeKind.Global, null));
     }
 
-    private static async Task<Results<Created<ScopedMemoryDto>, BadRequest<string>>> CreateGlobalAsync(RuntimeRegistry registry, SaveMemoryRequest request)
+    private static async Task<Results<Created<ScopedMemoryDto>, BadRequest<string>>> CreateGlobalAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, SaveMemoryRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Content)) return TypedResults.BadRequest("Content is required.");
         MemoryType type = MemoryType.Note;
@@ -89,18 +89,25 @@ public static class ScopedMemoryEndpoints
         var memory = new Memory(type, request.Content, request.Tags, request.Source);
         var service = registry.GetGlobalMemoryService();
         var saved = await service.SaveAsync(memory);
+        broadcaster.Notify("dashboard");
         var dto = ScopedMemoryDto.From(saved, MemoryScopeKind.Global, null);
         return TypedResults.Created($"/api/global/memories/{saved.Id}", dto);
     }
 
-    private static async Task<Results<NoContent, NotFound>> DeleteGlobalAsync(RuntimeRegistry registry, string id)
+    private static async Task<Results<NoContent, NotFound>> DeleteGlobalAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, string id)
     {
         if (!TryParseMemoryId(id, out var memoryId)) return TypedResults.NotFound();
         var service = registry.GetGlobalMemoryService();
-        return await service.DeleteAsync(memoryId) ? TypedResults.NoContent() : TypedResults.NotFound();
+        var deleted = await service.DeleteAsync(memoryId);
+        if (deleted)
+        {
+            broadcaster.Notify("dashboard");
+            return TypedResults.NoContent();
+        }
+        return TypedResults.NotFound();
     }
 
-    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>>> UpdateGlobalAsync(RuntimeRegistry registry, string id, UpdateMemoryRequest request)
+    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>>> UpdateGlobalAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, string id, UpdateMemoryRequest request)
     {
         if (!TryParseMemoryId(id, out var memoryId)) return TypedResults.NotFound();
         MemoryType? type = null;
@@ -117,7 +124,9 @@ public static class ScopedMemoryEndpoints
         }
         var service = registry.GetGlobalMemoryService();
         var updated = await service.UpdateAsync(memoryId, request.Content, type, request.Tags?.ToArray(), request.Source, status);
-        return updated is null ? TypedResults.NotFound() : TypedResults.Ok(ScopedMemoryDto.From(updated, MemoryScopeKind.Global, null));
+        if (updated is null) return TypedResults.NotFound();
+        broadcaster.Notify("dashboard");
+        return TypedResults.Ok(ScopedMemoryDto.From(updated, MemoryScopeKind.Global, null));
     }
 
     private static async Task<NoContent> RebuildGlobalAsync(RuntimeRegistry registry)
@@ -160,7 +169,7 @@ public static class ScopedMemoryEndpoints
         var service = registry.TryResolveMemoryServiceByProjectRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found or not alive");
         var all = await service.ListAllAsync();
-        all = all.OrderByDescending(m => m.CreatedAt).ToList();
+        all = all.OrderByDescending(m => m.UpdatedAt).ThenByDescending(m => m.CreatedAt).ToList();
         if (!string.IsNullOrEmpty(status))
         {
             if (!Enum.TryParse<MemoryStatus>(status, true, out var parsed)) return TypedResults.BadRequest($"Invalid status '{status}'");
@@ -200,7 +209,7 @@ public static class ScopedMemoryEndpoints
         return memory is null ? TypedResults.NotFound() : TypedResults.Ok(ScopedMemoryDto.From(memory, MemoryScopeKind.Project, projectRoot));
     }
 
-    private static async Task<Results<Created<ScopedMemoryDto>, BadRequest<string>, NotFound<string>>> CreateProjectAsync(RuntimeRegistry registry, string projectRoot, SaveMemoryRequest request)
+    private static async Task<Results<Created<ScopedMemoryDto>, BadRequest<string>, NotFound<string>>> CreateProjectAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, string projectRoot, SaveMemoryRequest request)
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
         if (string.IsNullOrWhiteSpace(request.Content)) return TypedResults.BadRequest("Content is required.");
@@ -211,20 +220,27 @@ public static class ScopedMemoryEndpoints
             return TypedResults.BadRequest($"Invalid type '{request.Type}'");
         var memory = new Memory(type, request.Content, request.Tags, request.Source);
         var saved = await service.SaveAsync(memory);
+        broadcaster.Notify("dashboard");
         var dto = ScopedMemoryDto.From(saved, MemoryScopeKind.Project, projectRoot);
         return TypedResults.Created($"/api/project/memories/{saved.Id}?projectRoot={Uri.EscapeDataString(projectRoot)}", dto);
     }
 
-    private static async Task<Results<NoContent, NotFound, BadRequest<string>, NotFound<string>>> DeleteProjectAsync(RuntimeRegistry registry, string id, string projectRoot)
+    private static async Task<Results<NoContent, NotFound, BadRequest<string>, NotFound<string>>> DeleteProjectAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, string id, string projectRoot)
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
         if (!TryParseMemoryId(id, out var memoryId)) return TypedResults.NotFound();
         var service = registry.TryResolveMemoryServiceByProjectRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found");
-        return await service.DeleteAsync(memoryId) ? TypedResults.NoContent() : TypedResults.NotFound();
+        var deleted = await service.DeleteAsync(memoryId);
+        if (deleted)
+        {
+            broadcaster.Notify("dashboard");
+            return TypedResults.NoContent();
+        }
+        return TypedResults.NotFound();
     }
 
-    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>, NotFound<string>>> UpdateProjectAsync(RuntimeRegistry registry, string id, string projectRoot, UpdateMemoryRequest request)
+    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>, NotFound<string>>> UpdateProjectAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, string id, string projectRoot, UpdateMemoryRequest request)
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
         if (!TryParseMemoryId(id, out var memoryId)) return TypedResults.NotFound();
@@ -243,12 +259,14 @@ public static class ScopedMemoryEndpoints
             status = parsed;
         }
         var updated = await service.UpdateAsync(memoryId, request.Content, type, request.Tags?.ToArray(), request.Source, status);
-        return updated is null ? TypedResults.NotFound() : TypedResults.Ok(ScopedMemoryDto.From(updated, MemoryScopeKind.Project, projectRoot));
+        if (updated is null) return TypedResults.NotFound();
+        broadcaster.Notify("dashboard");
+        return TypedResults.Ok(ScopedMemoryDto.From(updated, MemoryScopeKind.Project, projectRoot));
     }
 
     // ---- Copy / Promote ----
 
-    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>>> CopyToProjectAsync(RuntimeRegistry registry, CopyRequest request)
+    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>>> CopyToProjectAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, CopyRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Id)) return TypedResults.BadRequest("Id is required");
         if (string.IsNullOrWhiteSpace(request.TargetProjectRoot)) return TypedResults.BadRequest("TargetProjectRoot is required");
@@ -273,10 +291,11 @@ public static class ScopedMemoryEndpoints
 
         var copy = new Memory(sourceMemory.Type, sourceMemory.Content, sourceMemory.Tags, sourceMemory.Source, sourceMemory.Status);
         var saved = await targetService.SaveAsync(copy);
+        broadcaster.Notify("dashboard");
         return TypedResults.Ok(ScopedMemoryDto.From(saved, MemoryScopeKind.Project, request.TargetProjectRoot));
     }
 
-    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>>> PromoteToGlobalAsync(RuntimeRegistry registry, PromoteRequest request)
+    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>>> PromoteToGlobalAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, PromoteRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Id)) return TypedResults.BadRequest("Id is required");
         if (string.IsNullOrWhiteSpace(request.SourceProjectRoot)) return TypedResults.BadRequest("SourceProjectRoot is required");
@@ -287,6 +306,12 @@ public static class ScopedMemoryEndpoints
         if (sourceMemory is null) return TypedResults.NotFound();
         var copy = new Memory(sourceMemory.Type, sourceMemory.Content, sourceMemory.Tags, sourceMemory.Source, sourceMemory.Status);
         var saved = await registry.GetGlobalMemoryService().SaveAsync(copy);
+        if (request.Move)
+        {
+            // Move semantics: delete the source after the global copy is confirmed saved.
+            await srcService.DeleteAsync(memoryId);
+        }
+        broadcaster.Notify("dashboard");
         return TypedResults.Ok(ScopedMemoryDto.From(saved, MemoryScopeKind.Global, null));
     }
 

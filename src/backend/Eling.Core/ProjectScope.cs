@@ -27,11 +27,21 @@ public sealed class ProjectScope
             ? null
             : Path.GetFullPath(stopAtDirectory);
 
+        var userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
         var current = new DirectoryInfo(start);
         while (current is not null)
         {
             var candidate = Path.Combine(current.FullName, DataDirectoryName);
-            if (Directory.Exists(candidate))
+            // .eling is only considered a project directory if it's NOT directly in user home root
+            // (user-level data must strictly live under ~/.config/eling/)
+            var isUserHome = !string.IsNullOrWhiteSpace(userHome) &&
+                string.Equals(
+                    current.FullName.TrimEnd(Path.DirectorySeparatorChar),
+                    userHome.TrimEnd(Path.DirectorySeparatorChar),
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (Directory.Exists(candidate) && !isUserHome)
             {
                 return new ProjectScope(current.FullName);
             }

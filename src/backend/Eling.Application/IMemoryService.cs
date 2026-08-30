@@ -5,7 +5,7 @@ namespace Eling.Application;
 
 public interface IMemoryService
 {
-    Task<Memory> SaveAsync(Memory memory);
+    Task<SaveResult> SaveAsync(Memory memory);
     Task<Memory?> GetByIdAsync(MemoryId id);
     Task<Memory?> UpdateAsync(MemoryId id, string? content = null, MemoryType? type = null, string[]? tags = null, string? source = null, MemoryStatus? status = null);
     Task<bool> DeleteAsync(MemoryId id);

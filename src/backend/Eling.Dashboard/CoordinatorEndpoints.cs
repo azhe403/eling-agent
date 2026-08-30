@@ -24,5 +24,11 @@ public static class CoordinatorEndpoints
             registry.Unregister(pid) ? Results.NoContent() : Results.NotFound());
 
         group.MapGet("/runtimes", (RuntimeRegistry registry) => Results.Ok(registry.Alive()));
+
+        group.MapPost("/notify-change", (MemoryChangeBroadcaster broadcaster) =>
+        {
+            broadcaster.Notify("coordinator");
+            return Results.Ok();
+        });
     }
 }

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
     <OutputType>Exe</OutputType>
     <AssemblyName>eling</AssemblyName>
     <StartBeforeBuildEnabled>true</StartBeforeBuildEnabled>
@@ -8,6 +9,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Eling.Mcp\Eling.Mcp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CliWrap" Version="3.10.5" />
   </ItemGroup>
 
 </Project>

@@ -69,7 +69,8 @@ public class MemoryServiceTests
 
         var result = await service.SaveAsync(memory);
 
-        Assert.Same(memory, result);
+        Assert.Equal(memory.Id, result.Id);
+        Assert.Equal(SaveAction.Created, result.Action);
         Assert.Contains(storage.Items, kv => kv.Value.Id == memory.Id);
         Assert.Contains(index.Indexed, m => m.Id == memory.Id);
     }
@@ -286,5 +287,79 @@ public class MemoryServiceTests
 
         Assert.Equal(2, index.Indexed.Count);
         Assert.Equal("indexed update", index.Indexed[1].Content);
+    }
+
+    [Fact]
+    public async Task SaveAsync_updates_in_place_when_content_matches_normalized_existing_active_memory()
+    {
+        var storage = new FakeStorage();
+        var index = new FakeIndex();
+        var service = new MemoryService(storage, index);
+        var original = new Memory(MemoryType.Fact, "Remember the token", new[] { "tag1" }, "source1");
+        var firstResult = await service.SaveAsync(original);
+        Assert.Equal(SaveAction.Created, firstResult.Action);
+
+        // Same content, different casing/whitespace and extra tags.
+        var incoming = new Memory(MemoryType.Fact, "  REMEMBER THE TOKEN  ", new[] { "tag2" }, "source2");
+        var result = await service.SaveAsync(incoming);
+
+        // No duplicate entry: exactly one memory remains.
+        Assert.Single(storage.Items);
+        Assert.Equal(SaveAction.Updated, result.Action);
+        Assert.Equal(original.Id, result.Id);
+        // Preserved original identity/timestamps, refreshed update time.
+        Assert.Equal(original.CreatedAt, result.CreatedAt);
+        Assert.True(result.UpdatedAt >= original.CreatedAt);
+        // Tags merged, source preferred from the incoming save.
+        Assert.Equal(new[] { "tag1", "tag2" }, result.Tags.OrderBy(t => t).ToArray());
+        Assert.Equal("source2", result.Source);
+        Assert.Equal(2, index.Indexed.Count); // original + merge
+    }
+
+    [Fact]
+    public async Task SaveAsync_inserts_new_when_content_differs()
+    {
+        var storage = new FakeStorage();
+        var index = new FakeIndex();
+        var service = new MemoryService(storage, index);
+        var r1 = await service.SaveAsync(NewMemory("hello world"));
+        var r2 = await service.SaveAsync(NewMemory("completely different"));
+
+        Assert.Equal(SaveAction.Created, r1.Action);
+        Assert.Equal(SaveAction.Created, r2.Action);
+        Assert.Equal(2, storage.Items.Count);
+    }
+
+    [Fact]
+    public async Task SaveAsync_inserts_new_when_matching_content_is_archived()
+    {
+        var storage = new FakeStorage();
+        var index = new FakeIndex();
+        var service = new MemoryService(storage, index);
+        var archived = new Memory(MemoryType.Fact, "duplicate content", status: MemoryStatus.Archived);
+        await service.SaveAsync(archived);
+
+        var incoming = new Memory(MemoryType.Fact, "duplicate content");
+        var result = await service.SaveAsync(incoming);
+
+        Assert.Equal(SaveAction.Created, result.Action);
+        Assert.Equal(2, storage.Items.Count);
+        Assert.NotEqual(archived.Id, result.Id);
+    }
+
+    [Fact]
+    public async Task SaveAsync_does_not_match_against_inactive_or_archived_memory()
+    {
+        var storage = new FakeStorage();
+        var index = new FakeIndex();
+        var service = new MemoryService(storage, index);
+        var superseded = new Memory(MemoryType.Fact, "superseded content", status: MemoryStatus.Superseded);
+        await service.SaveAsync(superseded);
+
+        var result = await service.SaveAsync(NewMemory("superseded content"));
+
+        Assert.Equal(SaveAction.Created, result.Action);
+        Assert.Equal(2, storage.Items.Count);
+        Assert.NotEqual(superseded.Id, result.Id);
     }
 }

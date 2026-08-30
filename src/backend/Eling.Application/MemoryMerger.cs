@@ -11,18 +11,29 @@ public sealed class MemoryMerger : IMemoryMerger
         IReadOnlyCollection<Memory> globalMemories,
         string? projectRoot)
     {
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var result = new List<ScopedMemory>();
+
+        // Project memories come first (project priority)
         foreach (var m in projectMemories)
         {
-            result.Add(new ScopedMemory(m, MemoryScopeKind.Project, projectRoot));
-        }
-        foreach (var m in globalMemories)
-        {
-            result.Add(new ScopedMemory(m, MemoryScopeKind.Global, null));
+            var key = $"{MemoryScopeKind.Project}:{m.Id.Value}:{projectRoot}";
+            if (seenKeys.Add(key))
+            {
+                result.Add(new ScopedMemory(m, MemoryScopeKind.Project, projectRoot));
+            }
         }
 
-        // Safe dedup: same scoped identity (scope+id) only
-        // If exact same id appears in both scopes, they are distinct (different scope)
+        // Global memories come second
+        foreach (var m in globalMemories)
+        {
+            var key = $"{MemoryScopeKind.Global}:{m.Id.Value}";
+            if (seenKeys.Add(key))
+            {
+                result.Add(new ScopedMemory(m, MemoryScopeKind.Global, null));
+            }
+        }
+
         return result.AsReadOnly();
     }
 

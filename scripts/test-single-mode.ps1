@@ -2,9 +2,12 @@
 param([string]$Mode = "rest")
 
 $ErrorActionPreference = "Stop"
-$root = Split-Path $MyInvocation.MyCommand.Path
-$artifacts = Join-Path $root ".artifacts"
-$exe = Join-Path $artifacts "bin/Eling.Host/debug/eling.exe"
+$root = Split-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) -Parent
+$binTest = Join-Path $root ".bin-test"
+$exe = Join-Path $binTest "bin/Eling.Host/debug/eling.exe"
+if (-not (Test-Path $exe)) {
+    $exe = Join-Path $root ".bin/Debug/eling.exe"
+}
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "eling-mode-$Mode-$(Get-Random)"
 $proc = $null
 $client = $null

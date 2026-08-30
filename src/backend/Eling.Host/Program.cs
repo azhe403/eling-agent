@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
+using CliWrap;
+using Eling.Application;
 using Eling.Core;
+using Eling.Host;
 using Eling.Mcp;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -24,13 +27,26 @@ static int ResolveDashboardPort() =>
 
 var projectScope = ProjectScope.Discover();
 var userScope = UserScope.Resolve();
-Directory.CreateDirectory(projectScope.DataDirectory);
+
+var userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+var isUserHome = !string.IsNullOrWhiteSpace(userHome) &&
+    string.Equals(
+        projectScope.Root.TrimEnd(Path.DirectorySeparatorChar),
+        userHome.TrimEnd(Path.DirectorySeparatorChar),
+        StringComparison.OrdinalIgnoreCase);
+
+// If host is spawned directly at user home without an active project repository,
+// strictly use ~/.config/eling (global data directory) and never pollute user home with ~/.eling.
+var effectiveDataDir = isUserHome ? userScope.GlobalDataDirectory : projectScope.DataDirectory;
+
+Directory.CreateDirectory(effectiveDataDir);
 Directory.CreateDirectory(userScope.RuntimeDirectory);
 
 var builder = Host.CreateApplicationBuilder();
 builder.Logging.ClearProviders();
-builder.Services.AddElingLogging(projectScope.DataDirectory);
-builder.Services.AddElingCoreServices(projectScope.DataDirectory);
+builder.Services.AddElingLogging(effectiveDataDir);
+builder.Services.AddSingleton<IMemoryChangeNotifier>(new HttpCoordinatorMemoryChangeNotifier(DashboardPort));
+builder.Services.AddElingCoreServices(effectiveDataDir);
 builder.Services.AddElingMcpServerStdio();
 
 var host = builder.Build();
@@ -111,56 +127,51 @@ async Task EnsureDashboardAsync(CancellationToken stopping)
 
 void SpawnDashboard()
 {
-    var psi = new ProcessStartInfo
-    {
-        UseShellExecute = false,
-        CreateNoWindow = true,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true
-    };
-
     var exeName = OperatingSystem.IsWindows() ? "eling-dashboard.exe" : "eling-dashboard";
     var ownDirectory = Path.GetDirectoryName(Environment.ProcessPath);
     var pairedExe = ownDirectory is null ? null : Path.Combine(ownDirectory, exeName);
     var siblingDll = Path.Combine(AppContext.BaseDirectory, "eling-dashboard.dll");
 
-    // Dev layout: the paired eling + eling-dashboard binaries are built together
-    // beside each other in .bin/ (for `dotnet run`/`watch`), while test/CI builds
-    // use .artifacts/bin/ (via --artifacts-path). Prefer the sibling next to the
-    // host; fall back to walking up to a .artifacts tree when running from a
-    // standalone/published binary.
-    string? repoArtifactsDll = null;
+    // In dev mode (e.g. port 4417 or source repository), check if Eling.Dashboard.csproj exists.
+    // If so, launch `dotnet watch --project ...` so backend dashboard also hot-reloads on C# changes!
+    string? dashboardCsproj = null;
+    string? repoDll = null;
+    string? repoRoot = null;
     var walker = new DirectoryInfo(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory));
     for (var depth = 0; depth < 10 && walker is not null; depth++)
     {
-        var candidateRoot = Path.Combine(walker.FullName, ".artifacts", "bin", "Eling.Dashboard");
-        foreach (var configuration in Directory.Exists(candidateRoot)
-                     ? Directory.GetDirectories(candidateRoot)
-                     : [])
+        var candidate = Path.Combine(walker.FullName, "src", "backend", "Eling.Dashboard", "Eling.Dashboard.csproj");
+        if (File.Exists(candidate))
         {
-            var candidate = Path.Combine(configuration, "eling-dashboard.dll");
-            if (File.Exists(candidate)) { repoArtifactsDll = candidate; break; }
+            dashboardCsproj = candidate;
+            repoRoot = walker.FullName;
+            break;
         }
 
-        if (repoArtifactsDll is not null) break;
         walker = walker.Parent;
     }
 
-    if (pairedExe is not null && File.Exists(pairedExe))
+    Command cmd;
+
+    if (dashboardCsproj is not null && repoRoot is not null)
     {
-        psi.FileName = pairedExe;
+        cmd = Cli.Wrap("dotnet")
+            .WithArguments(["run", "--project", dashboardCsproj, "--no-build"])
+            .WithWorkingDirectory(repoRoot);
+    }
+    else if (pairedExe is not null && File.Exists(pairedExe))
+    {
+        cmd = Cli.Wrap(pairedExe);
     }
     else if (File.Exists(siblingDll))
     {
-        psi.FileName = "dotnet";
-        psi.ArgumentList.Add("exec");
-        psi.ArgumentList.Add(siblingDll);
+        cmd = Cli.Wrap("dotnet")
+            .WithArguments(["exec", siblingDll]);
     }
-    else if (repoArtifactsDll is not null)
+    else if (repoDll is not null)
     {
-        psi.FileName = "dotnet";
-        psi.ArgumentList.Add("exec");
-        psi.ArgumentList.Add(repoArtifactsDll);
+        cmd = Cli.Wrap("dotnet")
+            .WithArguments(["exec", repoDll]);
     }
     else
     {
@@ -168,24 +179,32 @@ void SpawnDashboard()
         return;
     }
 
-    var process = Process.Start(psi);
-    if (process is null)
+    // Configure environment and safely redirect all child output to STDERR
+    // to preserve MCP stdout JSON-RPC protocol purity.
+    cmd = cmd
+        .WithEnvironmentVariables(env => env.Set("ELING_DASHBOARD_PORT", DashboardPort.ToString()))
+        .WithStandardOutputPipe(PipeTarget.ToDelegate(line => Console.Error.WriteLine($"[dashboard-watch] {line}")))
+        .WithStandardErrorPipe(PipeTarget.ToDelegate(line => Console.Error.WriteLine($"[eling-dashboard] {line}")));
+
+    cmd = cmd
+        .WithEnvironmentVariables(env => env.Set("ELING_DASHBOARD_PORT", DashboardPort.ToString()))
+        .WithStandardOutputPipe(PipeTarget.ToDelegate(line => Console.Error.WriteLine($"[dashboard-watch] {line}")))
+        .WithStandardErrorPipe(PipeTarget.ToDelegate(line => Console.Error.WriteLine($"[eling-dashboard] {line}")));
+
+    try
     {
-        Console.Error.WriteLine("[eling] failed to spawn eling-dashboard.");
-        return;
+        var task = cmd.ExecuteAsync();
+        _ = task.Task.ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+            {
+                Console.Error.WriteLine($"[eling] dashboard process faulted: {t.Exception?.GetBaseException().Message}");
+            }
+        });
     }
-
-    // Drain pipes so the child never blocks on a full buffer; forward its
-    // stderr for diagnostics, discard stdout.
-    _ = process.StandardOutput.ReadToEndAsync();
-    _ = ForwardStderrAsync(process);
-}
-
-static async Task ForwardStderrAsync(Process process)
-{
-    while (await process.StandardError.ReadLineAsync() is { } line)
+    catch (Exception ex)
     {
-        Console.Error.WriteLine($"[eling-dashboard] {line}");
+        Console.Error.WriteLine($"[eling] failed to spawn eling-dashboard via CliWrap: {ex.Message}");
     }
 }
 
@@ -194,8 +213,11 @@ async Task RegisterAsync(CancellationToken stopping)
     var registration = new RuntimeRegistration
     {
         ProcessId = Environment.ProcessId,
-        ProjectRoot = projectScope.Root,
-        DataDirectory = projectScope.DataDirectory,
+        // Distinguish global-only host runs from real project runs: use a unique
+        // sentinel projectRoot so the runtime registry does not aggregate the same
+        // ~/.config/eling storage twice (once as "project", once as "global").
+        ProjectRoot = isUserHome ? "UserScope" : projectScope.Root,
+        DataDirectory = effectiveDataDir,
         StartTime = GetStartTime(),
         McpEnabled = true,
         McpTransport = "stdio"

@@ -260,4 +260,100 @@ public void Dispose()
         });
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Coordinator_NotifyChange_returns_200()
+    {
+        var response = await _client.PostAsync("/api/coordinator/notify-change", null);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Events_memories_streams_initial_connected_event_and_mutation_events()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events/memories");
+        using var sseResponse = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        Assert.Equal(HttpStatusCode.OK, sseResponse.StatusCode);
+        Assert.Equal("text/event-stream", sseResponse.Content.Headers.ContentType?.MediaType);
+
+        using var stream = await sseResponse.Content.ReadAsStreamAsync(cts.Token);
+        using var reader = new StreamReader(stream);
+
+        // First event is connected handshake
+        var line1 = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("data: connected", line1);
+        var blank1 = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("", blank1);
+
+        // Trigger a notification in background while reading
+        var notifyTask = Task.Run(async () =>
+        {
+            await Task.Delay(100);
+            return await _client.PostAsync("/api/coordinator/notify-change", null, cts.Token);
+        });
+
+        var line2 = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("data: coordinator", line2);
+
+        var notifyResponse = await notifyTask;
+        Assert.Equal(HttpStatusCode.OK, notifyResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Simulation_Realtime_EventStream_Receives_Dashboard_And_MCP_Mutations()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events/memories");
+        using var sseResponse = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        Assert.Equal(HttpStatusCode.OK, sseResponse.StatusCode);
+
+        using var stream = await sseResponse.Content.ReadAsStreamAsync(cts.Token);
+        using var reader = new StreamReader(stream);
+
+        // 1. Connection handshake
+        var initial = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("data: connected", initial);
+        await reader.ReadLineAsync(cts.Token); // blank line
+
+        // 2. Simulate Dashboard Create
+        var createResponse = await _client.PostAsJsonAsync("/api/memories", new
+        {
+            content = "Simulated Realtime Memory",
+            type = "Note"
+        }, cts.Token);
+        createResponse.EnsureSuccessStatusCode();
+        var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var id = created.GetProperty("id").GetString();
+
+        var evt1 = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("data: dashboard", evt1);
+        await reader.ReadLineAsync(cts.Token); // blank line
+
+        // 3. Simulate MCP stdio mutation (via coordinator notify)
+        var mcpNotify = await _client.PostAsync("/api/coordinator/notify-change", null, cts.Token);
+        mcpNotify.EnsureSuccessStatusCode();
+
+        var evt2 = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("data: coordinator", evt2);
+        await reader.ReadLineAsync(cts.Token); // blank line
+
+        // 4. Simulate Dashboard Patch/Edit
+        var patchResponse = await _client.PatchAsJsonAsync($"/api/memories/{id}", new
+        {
+            content = "Simulated Updated Realtime Memory"
+        }, cts.Token);
+        patchResponse.EnsureSuccessStatusCode();
+
+        var evt3 = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("data: dashboard", evt3);
+        await reader.ReadLineAsync(cts.Token); // blank line
+
+        // 5. Simulate Dashboard Delete
+        var deleteResponse = await _client.DeleteAsync($"/api/memories/{id}", cts.Token);
+        deleteResponse.EnsureSuccessStatusCode();
+
+        var evt4 = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("data: dashboard", evt4);
+    }
 }

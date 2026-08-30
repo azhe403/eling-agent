@@ -4,7 +4,7 @@ namespace Eling.Application;
 
 public interface IScopedMemoryService
 {
-    Task<ScopedMemory> SaveAsync(Memory memory, string? scope = null);
+    Task<ScopedSaveResult> SaveAsync(Memory memory, string? scope = null);
     Task<ScopedMemory?> GetByIdAsync(MemoryReference reference);
     Task<ScopedMemory?> GetByIdAsync(MemoryId id, string? scope);
     Task<bool> DeleteAsync(MemoryReference reference);

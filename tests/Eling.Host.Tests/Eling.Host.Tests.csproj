@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\backend\Eling.Host\Eling.Host.csproj" />
+    <ProjectReference Include="..\..\src\backend\Eling.Dashboard\Eling.Dashboard.csproj" />
   </ItemGroup>
 
 </Project>

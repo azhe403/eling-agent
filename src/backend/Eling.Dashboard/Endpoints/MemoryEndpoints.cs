@@ -111,6 +111,7 @@ public static class MemoryEndpoints
 
     private static async Task<Results<Created<Memory>, BadRequest<string>>> CreateMemoryAsync(
         IMemoryService service,
+        MemoryChangeBroadcaster broadcaster,
         Dtos.SaveMemoryRequest request
     )
     {
@@ -126,11 +127,13 @@ public static class MemoryEndpoints
 
         var memory = new Memory(type, request.Content, request.Tags, request.Source);
         var saved = await service.SaveAsync(memory);
-        return TypedResults.Created($"/api/memories/{saved.Id}", saved);
+        broadcaster.Notify("dashboard");
+        return TypedResults.Created($"/api/memories/{saved.Id}", saved.Memory);
     }
 
     private static async Task<Results<NoContent, NotFound>> DeleteMemoryAsync(
         IMemoryService service,
+        MemoryChangeBroadcaster broadcaster,
         string id
     )
     {
@@ -138,11 +141,17 @@ public static class MemoryEndpoints
             return TypedResults.NotFound();
 
         var deleted = await service.DeleteAsync(memoryId);
-        return deleted ? TypedResults.NoContent() : TypedResults.NotFound();
+        if (deleted)
+        {
+            broadcaster.Notify("dashboard");
+            return TypedResults.NoContent();
+        }
+        return TypedResults.NotFound();
     }
 
     private static async Task<Results<Ok<Memory>, NotFound, BadRequest<string>>> UpdateMemoryAsync(
         IMemoryService service,
+        MemoryChangeBroadcaster broadcaster,
         string id,
         Dtos.UpdateMemoryRequest request
     )
@@ -176,7 +185,12 @@ public static class MemoryEndpoints
             source: request.Source,
             status: status);
 
-        return updated is not null ? TypedResults.Ok(updated) : TypedResults.NotFound();
+        if (updated is not null)
+        {
+            broadcaster.Notify("dashboard");
+            return TypedResults.Ok(updated);
+        }
+        return TypedResults.NotFound();
     }
 
     private static async Task<NoContent> RebuildIndexAsync(IMemoryService service)

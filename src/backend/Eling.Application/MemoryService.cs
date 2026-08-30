@@ -14,11 +14,62 @@ public class MemoryService : IMemoryService
         _index = index;
     }
 
-    public async Task<Memory> SaveAsync(Memory memory)
+    public async Task<SaveResult> SaveAsync(Memory memory)
     {
+        // Dedup: if an active memory with identical content (ignoring case and
+        // leading/trailing whitespace) already exists, update it in place instead
+        // of inserting a duplicate. Only active memories are deduplicated so that
+        // archived/superseded entries never swallow a new save.
+        var normalized = NormalizeContent(memory.Content);
+        var existing = await FindActiveByContentAsync(normalized);
+        if (existing is not null)
+        {
+            var merged = await MergeIntoAsync(existing, memory);
+            return new SaveResult(merged, SaveAction.Updated);
+        }
+
         await _storage.SaveAsync(memory);
         await _index.IndexAsync(memory);
-        return memory;
+        return new SaveResult(memory, SaveAction.Created);
+    }
+
+    private static string NormalizeContent(string content) => content.Trim();
+
+    private async Task<Memory?> FindActiveByContentAsync(string normalizedContent)
+    {
+        var all = await _storage.ListAllAsync();
+        foreach (var candidate in all)
+        {
+            if (candidate.Status == MemoryStatus.Active &&
+                string.Equals(NormalizeContent(candidate.Content), normalizedContent, StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private async Task<Memory> MergeIntoAsync(Memory existing, Memory incoming)
+    {
+        var mergedTags = existing.Tags
+            .Concat(incoming.Tags)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList()
+            .AsReadOnly();
+
+        var merged = new Memory(
+            existing.Type,
+            incoming.Content,
+            mergedTags,
+            incoming.Source ?? existing.Source,
+            existing.Status,
+            existing.Id,
+            existing.CreatedAt,
+            DateTimeOffset.UtcNow);
+
+        await _storage.SaveAsync(merged);
+        await _index.IndexAsync(merged);
+        return merged;
     }
 
     public Task<Memory?> GetByIdAsync(MemoryId id) => _storage.GetByIdAsync(id);

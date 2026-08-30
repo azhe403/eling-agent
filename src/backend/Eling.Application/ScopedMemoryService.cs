@@ -31,13 +31,14 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     private IMemoryService ResolveService(MemoryScopeKind kind) =>
         kind == MemoryScopeKind.Project ? _projectService : _globalService;
 
-    public async Task<ScopedMemory> SaveAsync(Memory memory, string? scope = null)
+    public async Task<ScopedSaveResult> SaveAsync(Memory memory, string? scope = null)
     {
         ArgumentNullException.ThrowIfNull(memory);
         var kind = _policy.Resolve(scope);
         var service = ResolveService(kind);
-        var saved = await service.SaveAsync(memory);
-        return new ScopedMemory(saved, kind, kind == MemoryScopeKind.Project ? _projectRoot : null);
+        var saveResult = await service.SaveAsync(memory);
+        var scoped = new ScopedMemory(saveResult.Memory, kind, kind == MemoryScopeKind.Project ? _projectRoot : null);
+        return new ScopedSaveResult(scoped, saveResult.Action);
     }
 
     public async Task<ScopedMemory?> GetByIdAsync(MemoryReference reference)

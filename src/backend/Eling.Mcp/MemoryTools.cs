@@ -11,32 +11,36 @@ public class MemoryTools
 {
     private readonly IMemoryService _memory;
     private readonly IScopedMemoryService? _scoped;
+    private readonly IMemoryChangeNotifier _notifier;
     private readonly ILogger<MemoryTools>? _logger;
 
-    public MemoryTools(IMemoryService memory, ILogger<MemoryTools>? logger = null)
+    public MemoryTools(IMemoryService memory, ILogger<MemoryTools>? logger = null, IMemoryChangeNotifier? notifier = null)
     {
         _memory = memory;
         _logger = logger;
+        _notifier = notifier ?? NullMemoryChangeNotifier.Instance;
     }
 
-    public MemoryTools(IScopedMemoryService scoped, ILogger<MemoryTools>? logger = null)
+    public MemoryTools(IScopedMemoryService scoped, ILogger<MemoryTools>? logger = null, IMemoryChangeNotifier? notifier = null)
     {
         _scoped = scoped;
         _memory = scoped.ProjectService;
         _logger = logger;
+        _notifier = notifier ?? NullMemoryChangeNotifier.Instance;
     }
 
-    public MemoryTools(IMemoryService memory, IScopedMemoryService scoped, ILogger<MemoryTools>? logger = null)
+    public MemoryTools(IMemoryService memory, IScopedMemoryService scoped, ILogger<MemoryTools>? logger = null, IMemoryChangeNotifier? notifier = null)
     {
         _memory = memory;
         _scoped = scoped;
         _logger = logger;
+        _notifier = notifier ?? NullMemoryChangeNotifier.Instance;
     }
 
     private bool HasScoped => _scoped is not null;
 
     [McpServerTool(Name = "memory_save"), Description("Save a memory to the knowledge store. The content is the main text to remember, and optional tags help with categorization.")]
-    public async Task<Memory> SaveAsync(
+    public async Task<SaveMemoryResponse> SaveAsync(
         [Description("The content to remember")] string content,
         [Description("Type of memory: fact, preference, decision, lesson, note. Defaults to 'fact'.")] string type = "fact",
         [Description("Optional tags for categorization")] string[]? tags = null,
@@ -64,13 +68,15 @@ public class MemoryTools
         if (HasScoped && _scoped is not null)
         {
             var scoped = await _scoped.SaveAsync(memory, scope);
-            _logger?.LogInformation("Saved memory '{Id}' with scope '{Scope}' type '{Type}'", scoped.Id, scoped.Scope, scoped.Memory.Type);
-            return scoped.Memory;
+            _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' scope '{Scope}' type '{Type}'", scoped.Id, scoped.Action, scoped.Scope, scoped.Memory.Type);
+            await _notifier.NotifyAsync("mcp");
+            return SaveMemoryResponse.From(scoped);
         }
 
         var saved = await _memory.SaveAsync(memory);
-        _logger?.LogInformation("Saved memory '{Id}' with type '{Type}' and {TagCount} tags", saved.Id, saved.Type, saved.Tags.Count);
-        return saved;
+        _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' type '{Type}' and {TagCount} tags", saved.Id, saved.Action, saved.Type, saved.Tags.Count);
+        await _notifier.NotifyAsync("mcp");
+        return SaveMemoryResponse.From(saved, scope);
     }
 
     [McpServerTool(Name = "memory_update"), Description("Update an existing memory by ID. Only provided fields are changed; omitted fields remain unchanged.")]
@@ -124,6 +130,7 @@ public class MemoryTools
                 return null;
             }
             _logger?.LogInformation("Updated memory '{Id}' in scope '{Scope}'", scopedUpdated.Id, scopedUpdated.Scope);
+            await _notifier.NotifyAsync("mcp");
             return scopedUpdated.Memory;
         }
 
@@ -135,6 +142,7 @@ public class MemoryTools
         }
 
         _logger?.LogInformation("Updated memory '{Id}' with type '{Type}' and {TagCount} tags", updated.Id, updated.Type, updated.Tags.Count);
+        await _notifier.NotifyAsync("mcp");
         return updated;
     }
 
@@ -192,11 +200,13 @@ public class MemoryTools
             var reference = new MemoryReference(memoryId, scopeKind, scopeKind == MemoryScopeKind.Project ? _scoped.ProjectRoot : null);
             var deleted = await _scoped.DeleteAsync(reference);
             _logger?.LogInformation("Deleted memory '{Id}' scope '{Scope}' (result: {Result})", id, scopeKind, deleted);
+            if (deleted) await _notifier.NotifyAsync("mcp");
             return deleted;
         }
 
         var result = await _memory.DeleteAsync(memoryId);
         _logger?.LogInformation("Deleted memory '{Id}' (result: {Result})", id, result);
+        if (result) await _notifier.NotifyAsync("mcp");
         return result;
     }
 
@@ -300,6 +310,7 @@ public class MemoryTools
         var scoped = _scoped ?? throw new InvalidOperationException("Scoped memory service not available");
         var source = new MemoryReference(memoryId, sourceKind, sourceKind == MemoryScopeKind.Project ? scoped.ProjectRoot : null);
         var copied = await scoped.CopyToProjectAsync(source, scoped.ProjectRoot!);
+        if (copied is not null) await _notifier.NotifyAsync("mcp");
         return copied?.Memory;
     }
 
@@ -313,6 +324,7 @@ public class MemoryTools
         var scoped = _scoped ?? throw new InvalidOperationException("Scoped memory service not available");
         var source = new MemoryReference(memoryId, MemoryScopeKind.Project, scoped.ProjectRoot);
         var promoted = await scoped.PromoteToGlobalAsync(source);
+        if (promoted is not null) await _notifier.NotifyAsync("mcp");
         return promoted?.Memory;
     }
 }

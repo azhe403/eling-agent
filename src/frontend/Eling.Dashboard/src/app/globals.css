@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   --radius: 0.625rem;
@@ -117,5 +117,24 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+
+  /* Zero-flicker: Disable transitions during initial page render */
+  html.preload *,
+  html.preload *::before,
+  html.preload *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  /* Anti-flicker instant sidebar collapse on initial paint */
+  html[data-sidebar-collapsed="true"] [data-slot="sidebar-wrapper"] {
+    --sidebar-width: var(--sidebar-width-icon, 4.25rem) !important;
+  }
+  html[data-sidebar-collapsed="true"] [data-slot="sidebar-gap"] {
+    width: calc(var(--sidebar-width-icon, 4.25rem) + 1rem) !important;
+  }
+  html[data-sidebar-collapsed="true"] [data-slot="sidebar-container"] {
+    width: var(--sidebar-width-icon, 4.25rem) !important;
   }
 }

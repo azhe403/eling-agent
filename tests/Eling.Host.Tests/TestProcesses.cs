@@ -15,10 +15,21 @@ public static class TestProcesses
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 
     public static string HostDll { get; } =
-        Path.Combine(RepoRoot, ".artifacts", "bin", "Eling.Host", "debug", "eling.dll");
+        ResolveTestBinary("Eling.Host", "eling.dll");
 
     public static string DashboardDll { get; } =
-        Path.Combine(RepoRoot, ".artifacts", "bin", "Eling.Dashboard", "debug", "eling-dashboard.dll");
+        ResolveTestBinary("Eling.Dashboard", "eling-dashboard.dll");
+
+    private static string ResolveTestBinary(string projectName, string binaryName)
+    {
+        var testArtifact = Path.Combine(RepoRoot, ".bin-test", "bin", projectName, "debug", binaryName);
+        if (File.Exists(testArtifact)) return testArtifact;
+
+        var binShared = Path.Combine(RepoRoot, ".bin", "Debug", binaryName);
+        if (File.Exists(binShared)) return binShared;
+
+        return testArtifact;
+    }
 
     /// <summary>Fast liveness intervals so lifecycle tests finish in seconds.</summary>
     public static IDictionary<string, string> TestTimingEnv => new Dictionary<string, string>
@@ -36,6 +47,23 @@ public static class TestProcesses
     /// All process tests share one sequential collection, so one port is safe.
     /// </summary>
     public static readonly int TestDashboardPort = FindFreePort(45000, 46000);
+
+    /// <summary>
+    /// Isolated user-scope root for the whole process-test run. Real eling
+    /// instances from other sessions write runtime registrations into the
+    /// global ~/.config/eling/runtime, and a dashboard born on any port still
+    /// syncs those files on startup. Pointing every spawned process at a
+    /// throwaway temp user scope keeps the test dashboard fully separate from
+    /// running instances so the two can never interfere with each other.
+    /// </summary>
+    public static readonly string TestUserScope = CreateTestUserScope();
+
+    private static string CreateTestUserScope()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "eling-usertest-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(Path.Combine(root, "runtime"));
+        return root;
+    }
 
     public static string BaseUrl => $"http://127.0.0.1:{TestDashboardPort}";
 
@@ -84,6 +112,9 @@ public static class TestProcesses
 
         // Every spawned runtime + its child dashboard use the isolated port.
         psi.Environment["ELING_DASHBOARD_PORT"] = TestDashboardPort.ToString();
+        // And an isolated user scope so the test dashboard never syncs runtime
+        // registrations from a live Eling instance owned by another session.
+        psi.Environment["ELING_USER_SCOPE"] = TestUserScope;
 
         var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start process.");
         return process;

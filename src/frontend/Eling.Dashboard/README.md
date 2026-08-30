@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Eling Dashboard (frontend)
 
-## Getting Started
+Next.js (App Router) user interface for the Eling memory dashboard. It lives
+inside the Eling monorepo and is **not a standalone/deployable web app** — it is
+built to static files and served from within the `Eling.Dashboard` ASP.NET Core
+host (loopback only).
 
-First, run the development server:
+## What it is
+
+The dashboard UI talks to the dashboard's HTTP API on `127.0.0.1:4317` to let
+users browse and manage Eling memories across scopes:
+
+- `All Open Projects` — aggregated memories from every alive project runtime
+- `Global` — user-wide memories under `~/.config/eling`
+- per-project — memories for one project runtime
+
+Routes:
+
+- `/` → landing/redirect
+- `/dashboard` → dashboard home
+- `/dashboard/memories` → list/search/edit/promote/copy memories
+- `/dashboard/create` → create a new memory
+
+## How it is built & served
+
+Unlike a normal `create-next-app` project, the frontend is **not** deployed
+separately and is not served by `next start`.
+
+1. The backend `Eling.Dashboard` project drives the build and install
+   automatically through an MSBuild target (`BuildDashboard` in
+   `Eling.Dashboard.csproj`). When the backend builds, it runs:
+
+   ```bash
+   pnpm install
+   pnpm build
+   ```
+
+   and copies the resulting static output (`out/`) next to the dashboard binary
+   as `eling-dashboard-ui/`. Set `ElingSkipDashboard=true` to skip this during
+   backend builds.
+
+2. `Eling.Dashboard/Program.cs` serves that folder as its static web root
+   (`WebRootPath = eling-dashboard-ui`) with a SPA fallback to `index.html`.
+
+So to rebuild the frontend you can either build the backend, or run it directly:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Development
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+This dashboard is a **static Next.js export** (`next.config.ts` sets
+`output: "export"`) with no dev-server proxy configured. Pages call the
+dashboard API with same-origin relative paths (e.g. `fetch("/api/...")`), so
+they resolve correctly only when served from the `Eling.Dashboard` host (which
+serves both the API and the static UI on the same origin `127.0.0.1:4317`).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+To preview the real UI, start an `eling` / `eling-dashboard` instance and open
+`http://127.0.0.1:4317`. If you run `pnpm dev` (Next on its own port), the UI
+renders but its same-origin API calls will not reach the dashboard unless you
+wire up a proxy/rewrite yourself.
 
-## Learn More
+## Tech notes
 
-To learn more about Next.js, take a look at the following resources:
+- **Package manager**: pnpm (see `package.json` `packageManager`). Use pnpm,
+  not npm/yarn/bun.
+- **Next.js 16** (App Router, Turbopack). This version has breaking changes
+  versus older Next.js — read `node_modules/next/dist/docs/` before writing
+  frontend code (see `AGENTS.md` in this directory).
+- **shadcn/ui** + **Tailwind CSS v4**.
+- Source lives under `src/app/`; shared UI components under `src/components/`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Integrations / scripts
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Root `AGENTS.md` and root `package.json` wire `build:frontend` /
+  `typecheck:frontend` / `lint:frontend` via
+  `pnpm --prefix src/frontend/Eling.Dashboard ...`.
+- The `Eling.Dashboard` MSBuild target builds the frontend automatically when
+  the backend is built (see the "How it is built & served" section above), so
+  repo-level validation scripts that `dotnet build` the solution pick it up too.

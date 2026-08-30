@@ -1,6 +1,7 @@
 using Eling.Application;
 using Eling.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using ModelContextProtocol.Server;
 
 namespace Eling.Mcp;
@@ -31,6 +32,7 @@ public static class McpServiceExtensions
         // Scope policy & merger — application layer owns scope decisions
         services.AddSingleton<IMemoryScopePolicy, MemoryScopePolicy>();
         services.AddSingleton<IMemoryMerger, MemoryMerger>();
+        services.TryAddSingleton<IMemoryChangeNotifier>(NullMemoryChangeNotifier.Instance);
 
         // Scoped service: Project + Global, with Project priority on merge
         services.AddScoped<IScopedMemoryService>(sp =>
@@ -61,6 +63,7 @@ public static class McpServiceExtensions
 
         services.AddSingleton<IMemoryScopePolicy, MemoryScopePolicy>();
         services.AddSingleton<IMemoryMerger, MemoryMerger>();
+        services.TryAddSingleton<IMemoryChangeNotifier>(NullMemoryChangeNotifier.Instance);
 
         services.AddScoped<IScopedMemoryService>(sp =>
         {
