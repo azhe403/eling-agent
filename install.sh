@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Eling installer (Linux / macOS)
-# Usage:  curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent-memory/main/install.sh | bash
+# Usage:  curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent/main/install.sh | bash
 
 set -euo pipefail
 
-REPO="azhe403/eling-agent-memory"
+REPO="azhe403/eling-agent"
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 case "$OS" in

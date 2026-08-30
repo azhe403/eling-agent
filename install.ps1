@@ -1,8 +1,8 @@
 # Eling installer (Windows)
-# Usage:  irm https://raw.githubusercontent.com/azhe403/eling-agent-memory/main/install.ps1 | iex
+# Usage:  irm https://raw.githubusercontent.com/azhe403/eling-agent/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
-$repo = "azhe403/eling-agent-memory"
+$repo = "azhe403/eling-agent"
 
 $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
 $asset = $release.assets | Where-Object { $_.name -eq "eling-win-x64.zip" } | Select-Object -First 1
