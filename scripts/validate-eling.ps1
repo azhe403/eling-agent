@@ -6,10 +6,9 @@
     Tests: solution build, unit/integration tests, the dashboard HTTP API
     (spawned by the eling host), and the stdio MCP server.
 
-    Matches the current Eling architecture (PE cut 8/9):
-      - Eling.Host      : entry point, runs MCP over stdio, spawns & heartbeats
-                          the shared dashboard.
-      - Eling.Dashboard : user-scoped HTTP API + web UI on 127.0.0.1:<port>.
+    Matches the current Eling architecture (single binary):
+      - Eling.Backend   : unified entry point, runs MCP over stdio + HTTP API
+                          + web UI on 127.0.0.1:<port>. No cross-process spawn.
 
     There is no standalone "HTTP MCP" or "REST server on port 5001" mode
     anymore, so the old --port/--root-path/--enable-mcp/--http-mcp flags are gone.
@@ -28,10 +27,13 @@ $ErrorActionPreference = "Stop"
 # auto-load System.Net.Http, so pull it in explicitly.
 Add-Type -AssemblyName System.Net.Http
 $root = Split-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) -Parent
-$binTest = Join-Path $root ".bin-test"
-$exe = Join-Path $binTest "bin/Eling.Host/debug/eling.exe"
+$elingOutputRoot = if ($env:ELING_OUTPUT_ROOT) { $env:ELING_OUTPUT_ROOT } else { ".bin-test" }
+$exe = Join-Path $root "$elingOutputRoot/Debug/net10.0/eling-backend.exe"
 if (-not (Test-Path $exe)) {
-    $exe = Join-Path $root ".bin/Debug/eling.exe"
+    $exe = Join-Path $root ".bin/Debug/net10.0/eling-backend.exe"
+}
+if (-not (Test-Path $exe)) {
+    $exe = Join-Path $root ".bin/Debug/net10.0/eling.exe"
 }
 $results = @()
 $failed = 0
@@ -148,7 +150,7 @@ function Test-Phase {
 # --- Phase 1: Build (skipped with -RuntimeOnly) ---
 if (-not $RuntimeOnly) {
     Test-Phase "Build backend" {
-        dotnet build Eling.slnx --artifacts-path $binTest 2>&1 | Out-Null
+        dotnet build Eling.slnx 2>&1 | Out-Null
         $LASTEXITCODE -eq 0
     }
 }
@@ -156,7 +158,7 @@ if (-not $RuntimeOnly) {
 # --- Phase 2: Unit/integration tests (skipped with -RuntimeOnly) ---
 if (-not $RuntimeOnly) {
     Test-Phase "Unit & integration tests" {
-        dotnet test Eling.slnx --artifacts-path $binTest 2>&1 | Tee-Object -Variable testOutput
+        dotnet test Eling.slnx 2>&1 | Tee-Object -Variable testOutput
         $LASTEXITCODE -eq 0
     }
 }

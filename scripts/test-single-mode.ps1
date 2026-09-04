@@ -1,12 +1,18 @@
 #!/usr/bin/env pwsh
+# Deprecated shim: Eling now uses single binary eling-backend (unified MCP+REST).
+# Modes "rest" and "http-mcp" are kept as aliases — they all hit the same
+# HTTP API via the unified backend. Use validate-eling.ps1 for full coverage.
 param([string]$Mode = "rest")
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) -Parent
-$binTest = Join-Path $root ".bin-test"
-$exe = Join-Path $binTest "bin/Eling.Host/debug/eling.exe"
+$elingOutputRoot = if ($env:ELING_OUTPUT_ROOT) { $env:ELING_OUTPUT_ROOT } else { ".bin-test" }
+$exe = Join-Path $root "$elingOutputRoot/Debug/net10.0/eling-backend.exe"
 if (-not (Test-Path $exe)) {
-    $exe = Join-Path $root ".bin/Debug/eling.exe"
+    $exe = Join-Path $root ".bin/Debug/net10.0/eling-backend.exe"
+}
+if (-not (Test-Path $exe)) {
+    $exe = Join-Path $root ".bin/Debug/net10.0/eling.exe"
 }
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "eling-mode-$Mode-$(Get-Random)"
 $proc = $null

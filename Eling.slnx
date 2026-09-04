@@ -1,16 +1,10 @@
 <Solution>
   <Folder Name="/src/backend/">
     <Project Path="src/backend/Eling.Core/Eling.Core.csproj" />
-    <Project Path="src/backend/Eling.Application/Eling.Application.csproj" />
-    <Project Path="src/backend/Eling.Mcp/Eling.Mcp.csproj" />
-    <Project Path="src/backend/Eling.Dashboard/Eling.Dashboard.csproj" />
-    <Project Path="src/backend/Eling.Host/Eling.Host.csproj" />
+    <Project Path="src/backend/Eling.Backend/Eling.Backend.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Eling.Core.Tests/Eling.Core.Tests.csproj" />
-    <Project Path="tests/Eling.Application.Tests/Eling.Application.Tests.csproj" />
-    <Project Path="tests/Eling.Mcp.Tests/Eling.Mcp.Tests.csproj" />
-    <Project Path="tests/Eling.Dashboard.Tests/Eling.Dashboard.Tests.csproj" />
-    <Project Path="tests/Eling.Host.Tests/Eling.Host.Tests.csproj" />
+    <Project Path="tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj" />
   </Folder>
 </Solution>

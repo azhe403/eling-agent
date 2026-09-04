@@ -6,11 +6,15 @@
     <!-- Single source of truth for the product version. The pre-release CI
           workflow reads this base version and appends -pre.{run_number}. -->
     <Version>0.1.0</Version>
-    <!-- Per-configuration .bin/ output to avoid lock conflicts between dev (Debug)
-          and test/publish (Release) processes that hold the .bin/ DLLs in memory.
-          obj/ stays per-project (default `obj/<Config>/<Framework>/`), which is what
-          the live dev backend at port 4417 already uses. -->
-    <OutputPath Condition="'$(ArtifactsPath)' == ''">$(MSBuildThisFileDirectory).bin\$(Configuration)\</OutputPath>
+    <!-- Per-configuration output root driven by ELING_OUTPUT_ROOT env var (defaults to .bin).
+         This gives each tool/test/MCP runner its own isolated bin folder while keeping
+         a flat layout inside each folder (all projects' output side-by-side).
+         obj/ stays per-project (default `obj/<Config>/<Framework>/`). -->
+    <ElingOutputRoot Condition="'$(ElingOutputRoot)' == ''">$([System.Environment]::GetEnvironmentVariable('ELING_OUTPUT_ROOT'))</ElingOutputRoot>
+    <ElingOutputRoot Condition="'$(ElingOutputRoot)' == ''">.bin</ElingOutputRoot>
+    <!-- OutputPath relative to solution root (where Directory.Build.props lives).
+         The SDK will append the target framework (and RID) automatically. -->
+    <OutputPath>$(MSBuildThisFileDirectory)$(ElingOutputRoot)\$(Configuration)\</OutputPath>
     <!-- eling-live MCP launches via `dotnet run`: any MSBuild output would pollute
           the stdout JSON-RPC stream. Keep restore/build output silent repo-wide. -->
     <NuGetAudit>false</NuGetAudit>

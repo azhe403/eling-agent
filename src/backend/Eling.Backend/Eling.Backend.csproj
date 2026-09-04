@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>eling-backend</AssemblyName>
+    <RootNamespace>Eling.Backend</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Eling.Core\Eling.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Eling.Backend.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="2.1.0" />
+    <PackageReference Include="Serilog" Version="4.4.0" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+
+  <Target Name="BuildDashboard" BeforeTargets="Build"
+          Condition="'$(ElingSkipDashboard)' != 'true' and '$(Configuration)' != 'Debug'"
+          Inputs="$(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/package.json;
+                   $(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/next.config.ts;
+                   $(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/src/**/*"
+          Outputs="$(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/out/.eling-stamp">
+    <Exec Command="pnpm --prefix $(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard install" />
+    <Exec Command="pnpm --prefix $(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard build" />
+    <WriteLinesToFile File="$(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/out/.eling-stamp" Lines="$([System.DateTime]::UtcNow.ToString('o'))" Overwrite="true" />
+    <ItemGroup>
+      <DashboardFiles Include="$(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/out/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(DashboardFiles)" DestinationFiles="@(DashboardFiles->'$(OutputPath)eling-dashboard-ui/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="IncludeDashboardInPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <DashboardFiles Include="$(OutputPath)eling-dashboard-ui/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(DashboardFiles)" DestinationFiles="@(DashboardFiles->'$(PublishDir)eling-dashboard-ui/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>
