@@ -8,9 +8,10 @@
         "dotnet",
         "watch",
         "--project",
-        "src/backend/Eling.Host/Eling.Host.csproj"
+        "src/backend/Eling.Backend/Eling.Backend.csproj"
       ],
       "environment": {
+        "ELING_OUTPUT_ROOT": ".bin-opencode",
         "ELING_DASHBOARD_PORT": "4417",
         "ELING_WATCH_DASHBOARD": "1"
       }

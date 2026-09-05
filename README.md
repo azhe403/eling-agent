@@ -50,12 +50,14 @@ That is the Eling promise. A memory you can still read with your eyes.
 
 ## Architecture
 
-- `src/backend/Eling.Core`: Pure domain abstractions & interfaces (zero infrastructure dependencies).
-- `src/backend/Eling.Application`: Memory/intention services, Markdown file storage, SQLite/FTS5 index cache.
-- `src/backend/Eling.Mcp`: MCP server protocol adapters (stdio).
-- `src/backend/Eling.Dashboard`: ASP.NET Core HTTP host exposing coordinator & memory APIs.
-- `src/backend/Eling.Host`: `eling` entry point — project-scoped MCP runtime over stdio; ensures & heartbeats the dashboard on port 4317.
-- `src/frontend/Eling.Dashboard`: Next.js frontend UI communicating via HTTP API.
+- `src/backend/Eling.Core`: Domain (Memory, Intention, Scope, Runtime) — `Eling.Core/` → `Memory/`, `Scope/`, `Runtime/`, `MemoryRecall/`; flat `Eling.Core` namespace. No infrastructure beyond `Ulid`, `YamlDotNet`, `Microsoft.Data.Sqlite`.
+- `src/backend/Eling.Backend`: Single binary `eling-backend` — unified MCP (stdio) + HTTP API + UI (`Microsoft.NET.Sdk.Web`, `Assembly: eling-backend`). `Program.cs` only orchestrates; `Bootstrap/` (port probe `DashboardPort`, scope `ProjectContext`, DI `DashboardServices`, routes `DashboardRoutes`, self-register `RuntimeSelfRegistration`); `Mcp/Tools/` (one logical tool per file e.g. `MemoryWriteTool`); `Dtos/` (single `Eling.Backend.Dtos`); `Endpoints/`, `Converters/`. Listens `127.0.0.1:4317` (stg) / `4417` (dev, `ELING_DASHBOARD_PORT`) + `::1`; `0.0.0.0:4427` for frontend dev via `pnpm`.
+- `src/frontend/Eling.Dashboard`: Next.js frontend UI. Dev `next dev -H 0.0.0.0 -p 4427` → `rewrites` `nginx`-style proxy to `http://127.0.0.1:{ELING_BACKEND_PORT}/api/*`. Prod `output: export` served as `eling-dashboard-ui/` static by `Eling.Backend`.
+
+HTTP ports (single-binary ownership: first launcher wins, peers skip Kestrel):
+- `4317` staging (global `~/.local/bin/eling-backend`), `4417` dev (`Eling.Backend.csproj`), `4427` frontend dev.
+
+See [INSTALL.md](INSTALL.md) for binary + MCP setup and [CHANGELOG.md](CHANGELOG.md) for history.
 
 ## Build & Test
 
@@ -63,13 +65,17 @@ That is the Eling promise. A memory you can still read with your eyes.
 ```bash
 # Dev build (outputs to shared .bin/)
 dotnet build Eling.slnx
+dotnet build src/backend/Eling.Backend/Eling.Backend.csproj -p:ElingSkipDashboard=true  # fast, skip pnpm
 
-# Run tests (outputs to isolated .bin-test/)
-dotnet test Eling.slnx --artifacts-path .bin-test
+# Run tests (one project at a time, isolated .bin-test/ per AGENTS.md)
+dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj --artifacts-path .bin-test
+dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --artifacts-path .bin-test
 ```
 
 ### Frontend
 ```bash
 pnpm --prefix src/frontend/Eling.Dashboard install
-pnpm --prefix src/frontend/Eling.Dashboard build
+pnpm --prefix src/frontend/Eling.Dashboard build   # or pnpm dev → 4427 → backend 4417
 ```
+
+`validate-eling.ps1` runs the full flow (build → tests → dashboard HTTP API → stdio MCP); scripts now target `eling-backend.exe`.
