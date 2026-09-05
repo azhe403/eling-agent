@@ -1,103 +1,127 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import { useAutoHeight } from "@/hooks/use-auto-height"
 
-const TYPES = ["Fact", "Preference", "Decision", "Lesson", "Note"]
+const TYPES = ["Fact", "Preference", "Decision", "Lesson", "Note"] as const
+type MemoryType = (typeof TYPES)[number]
 
 type Runtime = { projectRoot: string; dataDirectory: string }
+
+// Discriminated union: scope is either the current project (no projectRoot in URL),
+// an explicit project (projectRoot required), or the global scope.
+type Scope =
+  | { kind: "project" }
+  | { kind: "scoped"; projectRoot: string }
+  | { kind: "global" }
+
+const SCOPE_PROJECT: Scope = { kind: "project" }
+const SCOPE_GLOBAL: Scope = { kind: "global" }
+
+function scopeToUrl(scope: Scope): string {
+  switch (scope.kind) {
+    case "project":
+      return "/api/memories"
+    case "global":
+      return "/api/global/memories"
+    case "scoped":
+      return `/api/project/memories?projectRoot=${encodeURIComponent(scope.projectRoot)}`
+  }
+}
+
+function scopeLabel(s: Scope): string {
+  if (s.kind === "project") return "📁 Current Project"
+  if (s.kind === "global") return "🌐 Global Scope"
+  return `📁 ${s.projectRoot.split("\\").pop() ?? s.projectRoot.split("/").pop() ?? s.projectRoot} (Project)`
+}
+
+function scopeValue(s: Scope): string {
+  if (s.kind === "project") return "project"
+  if (s.kind === "global") return "global"
+  return s.projectRoot
+}
+
+function parseScopeValue(value: string): Scope {
+  if (value === "project") return SCOPE_PROJECT
+  if (value === "global") return SCOPE_GLOBAL
+  return { kind: "scoped", projectRoot: value }
+}
 
 export default function CreateMemoryPage() {
   const router = useRouter()
   const [content, setContent] = useState("")
-  const [type, setType] = useState("Note")
+  const [type, setType] = useState<MemoryType>("Note")
   const [tags, setTags] = useState("")
-  const [scope, setScope] = useState("project")
+  const [scope, setScope] = useState<Scope>(SCOPE_PROJECT)
   const [runtimes, setRuntimes] = useState<Runtime[]>([])
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [isPending, startTransition] = useTransition()
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const adjustHeight = useCallback(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto"
-      // N+1 line buffer (24px) for elegant breathing room below the last line
-      const nextHeight = Math.max(80, textareaRef.current.scrollHeight + 24)
-      textareaRef.current.style.height = `${nextHeight}px`
-    }
-  }, [])
-
-  useEffect(() => {
-    adjustHeight()
-  }, [adjustHeight])
+  useAutoHeight(textareaRef, [content])
 
   useEffect(() => {
     async function loadRuntimes() {
       try {
-        const res = await fetch(`/api/coordinator/runtimes?_t=${Date.now()}`, {
-          cache: "no-store",
-          headers: { "Cache-Control": "no-cache" },
-        })
+        const res = await fetch("/api/coordinator/runtimes", { cache: "no-store" })
         if (res.ok) {
           const data: Runtime[] = await res.json()
           setRuntimes(data)
-          // Read initial scope via ref-like read to avoid effect dependency loop
+          // Default to the first available project runtime if no explicit choice yet.
           if (data.length > 0) {
-            setScope(prev =>
-              prev === "project" ? data[0].projectRoot : prev
+            setScope((prev) =>
+              prev.kind === "project" ? { kind: "scoped", projectRoot: data[0].projectRoot } : prev,
             )
           }
         }
       } catch {
-        // ignore
+        // ignore — leave the default scope
       }
     }
     loadRuntimes()
   }, [])
 
-  async function submit(e: React.FormEvent) {
+  function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!content.trim()) {
       setError("Content is required.")
       return
     }
 
-    setSaving(true)
     setError(null)
-    try {
-      const payload = {
-        content: content.trim(),
-        type,
-        tags: tags
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean),
-      }
-
-      let url = "/api/memories"
-      if (scope === "global") {
-        url = "/api/global/memories"
-      } else if (scope !== "project") {
-        url = `/api/project/memories?projectRoot=${encodeURIComponent(scope)}`
-      }
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) throw new Error(`API returned ${res.status}`)
-      router.push("/dashboard/memories/")
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save memory")
-      setSaving(false)
+    const payload = {
+      content: content.trim(),
+      type,
+      tags: tags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean),
     }
+    const url = scopeToUrl(scope)
+
+    startTransition(async () => {
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) throw new Error(`API returned ${res.status}`)
+        router.push("/dashboard/memories/")
+        // Note: no setState after router.push — the component unmounts on navigation.
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to save memory")
+      }
+    })
   }
+
+  const isSubmitting = isPending || !content.trim()
 
   return (
     <>
@@ -120,10 +144,7 @@ export default function CreateMemoryPage() {
               ref={textareaRef}
               id="content"
               value={content}
-              onChange={(e) => {
-                setContent(e.target.value)
-                adjustHeight()
-              }}
+              onChange={(e) => setContent(e.target.value)}
               placeholder="What should Eling remember?"
               className="rounded-lg border border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-y min-h-[80px] leading-relaxed overflow-hidden"
             />
@@ -136,19 +157,17 @@ export default function CreateMemoryPage() {
               </label>
               <select
                 id="scope"
-                value={scope}
-                onChange={(e) => setScope(e.target.value)}
+                value={scopeValue(scope)}
+                onChange={(e) => setScope(parseScopeValue(e.target.value))}
                 className="h-9 rounded-md border border-input bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {runtimes.map((r) => (
                   <option key={r.projectRoot} value={r.projectRoot}>
-                    📁 {r.projectRoot.split("\\").pop() ?? r.projectRoot.split("/").pop()} (Project)
+                    {scopeLabel({ kind: "scoped", projectRoot: r.projectRoot })}
                   </option>
                 ))}
-                {runtimes.length === 0 && (
-                  <option value="project">📁 Current Project</option>
-                )}
-                <option value="global">🌐 Global Scope</option>
+                {runtimes.length === 0 && <option value="project">{scopeLabel(SCOPE_PROJECT)}</option>}
+                <option value="global">{scopeLabel(SCOPE_GLOBAL)}</option>
               </select>
             </div>
 
@@ -159,7 +178,7 @@ export default function CreateMemoryPage() {
               <select
                 id="type"
                 value={type}
-                onChange={(e) => setType(e.target.value)}
+                onChange={(e) => setType(e.target.value as MemoryType)}
                 className="h-9 rounded-md border border-input bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {TYPES.map((t) => (
@@ -193,8 +212,8 @@ export default function CreateMemoryPage() {
           )}
 
           <div className="flex items-center gap-2 pt-2">
-            <Button type="submit" disabled={saving || !content.trim()}>
-              {saving && <Loader2 className="size-4 animate-spin" />}
+            <Button type="submit" disabled={Boolean(isSubmitting)}>
+              {isPending && <Loader2 className="size-4 animate-spin" />}
               Save Memory
             </Button>
             <Button

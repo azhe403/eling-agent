@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { InlineScript } from "@/components/inline-script";
 import { ThemeProvider } from "@/components/theme-provider";
+import { getSidebarInlineScript } from "@/lib/sidebar-state";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,14 +28,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
     >
       <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{document.documentElement.classList.add('preload');var t=localStorage.getItem('eling-theme')||'system';var d=t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.classList.add('dark');else document.documentElement.classList.remove('dark');var s=localStorage.getItem('eling_sidebar_state');if(s==='false')document.documentElement.setAttribute('data-sidebar-collapsed','true');else document.documentElement.removeAttribute('data-sidebar-collapsed');window.addEventListener('DOMContentLoaded',function(){requestAnimationFrame(function(){requestAnimationFrame(function(){document.documentElement.classList.remove('preload');});});});}catch(_){}})();`,
-          }}
-        />
+        <InlineScript html={getSidebarInlineScript()} />
       </head>
       <body className="min-h-full flex flex-col">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          storageKey="eling-theme"
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );

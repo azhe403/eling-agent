@@ -26,6 +26,7 @@ import {
 import { PanelLeftIcon } from "lucide-react"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
+export { SIDEBAR_COOKIE_NAME }
 const SIDEBAR_STORAGE_KEY = "eling_sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
@@ -54,25 +55,6 @@ function useSidebar() {
   return context
 }
 
-function getInitialSidebarOpen(defaultOpen: boolean): boolean {
-  if (typeof window === "undefined") return defaultOpen
-  try {
-    const saved = localStorage.getItem(SIDEBAR_STORAGE_KEY)
-    if (saved !== null) {
-      return saved === "true"
-    }
-    const match = document.cookie.match(
-      new RegExp(`(?:^|; )${SIDEBAR_COOKIE_NAME}=([^;]*)`)
-    )
-    if (match) {
-      return match[1] === "true"
-    }
-  } catch {
-    // ignore storage access errors
-  }
-  return defaultOpen
-}
-
 function SidebarProvider({
   defaultOpen = true,
   open: openProp,
@@ -89,8 +71,11 @@ function SidebarProvider({
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = React.useState(false)
 
-  // Lazy-initialize with the stored preference directly so initial client render matches storage
-  const [_open, _setOpen] = React.useState(() => getInitialSidebarOpen(defaultOpen))
+  // Initial open state comes from the server layout via the sidebar_state
+  // cookie (see dashboard/layout.tsx), so the server render and the client's
+  // first (hydration) render agree. setOpen below keeps cookie and
+  // localStorage in sync after hydration.
+  const [_open, _setOpen] = React.useState(defaultOpen)
   const open = openProp ?? _open
 
   const setOpen = React.useCallback(
