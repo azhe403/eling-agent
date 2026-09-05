@@ -28,10 +28,15 @@ public sealed class RuntimeRegistry : IDisposable
     public Action? ShutdownCallback { get; set; }
 
     private readonly string _runtimeDir;
+    private readonly MemoryChangeBroadcaster? _broadcaster;
 
-    public RuntimeRegistry(ILogger<RuntimeRegistry> logger, UserScope? userScope = null)
+    public RuntimeRegistry(
+        ILogger<RuntimeRegistry> logger,
+        UserScope? userScope = null,
+        MemoryChangeBroadcaster? broadcaster = null)
     {
         _logger = logger;
+        _broadcaster = broadcaster;
         _userScope = userScope ?? UserScope.Resolve(Environment.GetEnvironmentVariable("ELING_USER_SCOPE"));
         _runtimeDir = _userScope.RuntimeDirectory;
         Directory.CreateDirectory(_runtimeDir);
@@ -583,6 +588,7 @@ public sealed class RuntimeRegistry : IDisposable
                 }
             }
 
+            var prunedAny = false;
             foreach (var runtime in _runtimes.Where(r => r.IsAlive && now - r.LastHeartbeat > _staleAfter))
             {
                 if (IsProcessAlive(runtime.ProcessId))
@@ -596,7 +602,13 @@ public sealed class RuntimeRegistry : IDisposable
                     runtime.IsAlive = false;
                     _logger.LogWarning("Runtime stale: pid={Pid} root={Root}", runtime.ProcessId, runtime.ProjectRoot);
                     RemoveFromDisk(runtime.ProcessId);
+                    prunedAny = true;
                 }
+            }
+
+            if (prunedAny)
+            {
+                _broadcaster?.Notify("runtimes");
             }
 
             _runtimes.RemoveAll(r => !r.IsAlive && now - r.LastHeartbeat > _removeGrace);

@@ -23,12 +23,7 @@
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
 
-  <Target Name="BuildDashboard" BeforeTargets="Build"
-          Condition="'$(ElingSkipDashboard)' != 'true' and '$(Configuration)' != 'Debug'"
-          Inputs="$(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/package.json;
-                   $(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/next.config.ts;
-                   $(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/src/**/*"
-          Outputs="$(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/out/.eling-stamp">
+  <Target Name="BuildDashboard" BeforeTargets="Build" Condition="'$(ElingSkipDashboard)' != 'true' and '$(Configuration)' != 'Debug'" Inputs="$(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/package.json;&#xD;&#xA;                   $(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/next.config.ts;&#xD;&#xA;                   $(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/src/**/*" Outputs="$(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/out/.eling-stamp">
     <Exec Command="pnpm --prefix $(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard install" />
     <Exec Command="pnpm --prefix $(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard build" />
     <WriteLinesToFile File="$(MSBuildThisFileDirectory)../../frontend/Eling.Dashboard/out/.eling-stamp" Lines="$([System.DateTime]::UtcNow.ToString('o'))" Overwrite="true" />

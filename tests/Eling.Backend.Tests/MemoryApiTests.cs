@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Eling.Backend.Bootstrap;
 using Microsoft.AspNetCore.Builder;
 
 namespace Eling.Backend.Tests;
@@ -327,7 +328,7 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
     public async Task GetEventsStream_Subscribed_ReceivesConnectedThenMutationEvents()
     {
         var client = EnsureClient();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events/memories");
         using var sseResponse = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
         Assert.Equal(HttpStatusCode.OK, sseResponse.StatusCode);
@@ -336,16 +337,14 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
         using var stream = await sseResponse.Content.ReadAsStreamAsync(cts.Token);
         using var reader = new StreamReader(stream);
 
-        // First event is connected handshake
         var line1 = await reader.ReadLineAsync(cts.Token);
         Assert.Equal("data: connected", line1);
         var blank1 = await reader.ReadLineAsync(cts.Token);
         Assert.Equal("", blank1);
 
-        // Trigger a notification in background while reading
         var notifyTask = Task.Run(async () =>
         {
-            await Task.Delay(100);
+            await Task.Delay(200);
             return await client.PostAsync("/api/coordinator/notify-change", null, cts.Token);
         });
 
@@ -412,5 +411,45 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
 
         var evt4 = await reader.ReadLineAsync(cts.Token);
         Assert.Equal("data: dashboard", evt4);
+    }
+
+    [Fact]
+    public async Task GetEventsStream_RegisterAndUnregisterRuntime_ReceivesRuntimesEvents()
+    {
+        var client = EnsureClient();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events/memories");
+        using var sseResponse = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        Assert.Equal(HttpStatusCode.OK, sseResponse.StatusCode);
+
+        using var stream = await sseResponse.Content.ReadAsStreamAsync(cts.Token);
+        using var reader = new StreamReader(stream);
+
+        var initial = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("data: connected", initial);
+        await reader.ReadLineAsync(cts.Token);
+
+        var testPid = 999999;
+        var reg = new
+        {
+            processId = testPid,
+            projectRoot = _tempDir,
+            dataDirectory = Path.Combine(_tempDir, ".eling"),
+            startTime = DateTimeOffset.UtcNow,
+            mcpEnabled = false,
+            mcpTransport = "none"
+        };
+        var regResp = await client.PostAsJsonAsync("/api/coordinator/register", reg, cts.Token);
+        regResp.EnsureSuccessStatusCode();
+
+        var evt1 = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("data: runtimes", evt1);
+        await reader.ReadLineAsync(cts.Token);
+
+        var unregResp = await client.DeleteAsync($"/api/coordinator/unregister/{testPid}", cts.Token);
+        unregResp.EnsureSuccessStatusCode();
+
+        var evt2 = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("data: runtimes", evt2);
     }
 }

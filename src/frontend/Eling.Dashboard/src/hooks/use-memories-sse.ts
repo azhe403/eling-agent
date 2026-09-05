@@ -5,21 +5,30 @@ import { useEffect, useRef, useState } from "react"
 export type SseStatus = "connected" | "connecting" | "error"
 
 /**
- * Subscribe to the backend's memory change SSE stream (`/api/events/memories`).
+ * Subscribe to the backend's memory and coordinator change SSE stream (`/api/events/memories`).
  * Native `EventSource` handles reconnection — we surface `connecting` when the
  * browser is retrying and `error` when the stream is closed. Diagnostic
  * `console.log` calls mirror the originals so dev tools still show the
  * familiar 🔄🟢⚡🟡⚪ stream colors during debugging.
  */
-export function useMemoriesSse(onMutation: () => void): { status: SseStatus } {
+export function useMemoriesSse(
+  onMutation: () => void,
+  onRuntimesChange?: () => void
+): { status: SseStatus } {
   const [status, setStatus] = useState<SseStatus>("connecting")
 
-  // Stash the latest callback in a ref so the long-lived EventSource handler
-  // can call it without forcing the effect to re-subscribe on every render.
+  // Stash callbacks in refs so the long-lived EventSource handler
+  // can call them without forcing the effect to re-subscribe on every render.
   const onMutationRef = useRef(onMutation)
+  const onRuntimesChangeRef = useRef(onRuntimesChange)
+
   useEffect(() => {
     onMutationRef.current = onMutation
   }, [onMutation])
+
+  useEffect(() => {
+    onRuntimesChangeRef.current = onRuntimesChange
+  }, [onRuntimesChange])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -44,8 +53,21 @@ export function useMemoriesSse(onMutation: () => void): { status: SseStatus } {
           `%c[SSE EVENT RECEIVED] ⚡ Data payload: "${event.data}" at ${new Date().toLocaleTimeString()}`,
           "color: #2563eb; font-weight: bold; background: #dbeafe; padding: 2px 6px; border-radius: 4px;"
         )
-        // Refresh memories whenever a mutation event is received.
-        if (event.data && event.data !== "connected") {
+
+        if (!event.data || event.data === "connected") return
+
+        if (event.data === "runtimes") {
+          console.log(
+            "%c[AUTO REFRESH] 🌐 Triggering onRuntimesChange('sse_runtimes')...",
+            "color: #0284c7; font-weight: bold;"
+          )
+          if (onRuntimesChangeRef.current) {
+            onRuntimesChangeRef.current()
+          } else {
+            onMutationRef.current()
+          }
+        } else {
+          // Refresh memories whenever a mutation event is received.
           console.log(
             "%c[AUTO REFRESH] 🚀 Triggering load('sse_mutation')...",
             "color: #9333ea; font-weight: bold;"

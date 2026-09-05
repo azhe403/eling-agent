@@ -23,17 +23,17 @@
 - Test: `tests/Eling.Dashboard.Tests/MemoryApiTests.cs`
 
 **Steps:**
-- [ ] **Step 1: Broadcast `"runtimes"` on Register and Unregister**
+- [x] **Step 1: Broadcast `"runtimes"` on Register and Unregister**
   In `CoordinatorEndpoints.cs`:
   - On `POST /api/coordinator/register` -> call `broadcaster.Notify("runtimes")`.
   - On `DELETE /api/coordinator/unregister/{pid}` -> call `broadcaster.Notify("runtimes")`.
 
-- [ ] **Step 2: Broadcast `"runtimes"` on Sweeper Pruning**
+- [x] **Step 2: Broadcast `"runtimes"` on Sweeper Pruning**
   In `RuntimeRegistry.cs`:
   - Pass/inject `MemoryChangeBroadcaster?` or callback when runtimes are pruned in `Sweep()`.
   - Trigger `broadcaster.Notify("runtimes")` whenever stale runtimes are removed.
 
-- [ ] **Step 3: Add integration tests**
+- [x] **Step 3: Add integration tests**
   In `MemoryApiTests.cs`:
   - Test that registering and unregistering runtimes emits the `"runtimes"` SSE event.
 
@@ -45,22 +45,22 @@
 - Modify: `src/frontend/Eling.Dashboard/src/app/dashboard/memories/page.tsx`
 
 **Steps:**
-- [ ] **Step 1: Wire `"runtimes"` event in `EventSource.onmessage`**
+- [x] **Step 1: Wire `"runtimes"` event in `EventSource.onmessage`**
   In `memories/page.tsx`:
   - When `event.data === "runtimes"` (or mutation events), call `loadRuntimes()` and `load()`.
 
-- [ ] **Step 2: Remove window event listeners (focus/visibilitychange)**
+- [x] **Step 2: Remove window event listeners (focus/visibilitychange)**
   In `memories/page.tsx`:
   - Remove `window.addEventListener("focus", onFocus)` and `visibilitychange` handler.
   - Keep initial `loadRuntimes()` on mount only.
 
-- [ ] **Step 3: Verify TypeScript and Frontend Build**
+- [x] **Step 3: Verify TypeScript and Frontend Build**
   - Run `pnpm --prefix src/frontend/Eling.Dashboard build` to verify clean compilation.
 
 ---
 
 ### Task 3: Full Verification
 
-- [ ] **Step 1: Run complete test suite**
+- [x] **Step 1: Run complete test suite**
   - Run `dotnet test Eling.slnx --artifacts-path .bin-test`
   - Expected: 100% tests passing.

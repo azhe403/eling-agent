@@ -27,7 +27,7 @@ public sealed class ProjectScopeTests : IDisposable
     }
 
     [Fact]
-    public void Ancestor_eling_directory_is_discovered()
+    public void Discover_AncestorHasElingDirectory_FindsIt()
     {
         var project = CreateDir("project");
         Directory.CreateDirectory(Path.Combine(project, ".eling"));
@@ -40,7 +40,7 @@ public sealed class ProjectScopeTests : IDisposable
     }
 
     [Fact]
-    public void Nearest_eling_wins_over_higher_ancestor()
+    public void Discover_MultipleElingDirectories_NearestWins()
     {
         var outer = CreateDir("outer");
         Directory.CreateDirectory(Path.Combine(outer, ".eling"));
@@ -56,7 +56,7 @@ public sealed class ProjectScopeTests : IDisposable
     [Theory]
     [InlineData("solution.slnx")]
     [InlineData("solution.sln")]
-    public void Solution_files_are_not_scope_authority(string solutionFile)
+    public void Discover_SolutionFileWithoutEling_IsNotScopeAuthority(string solutionFile)
     {
         // A solution file without any .eling anywhere must NOT become a scope root.
         var dir = CreateDir("sln-dir");
@@ -70,7 +70,7 @@ public sealed class ProjectScopeTests : IDisposable
     }
 
     [Fact]
-    public void Missing_eling_falls_back_to_start_directory()
+    public void Discover_NoElingDirectory_FallsBackToStartDirectory()
     {
         var dir = CreateDir("fresh");
 
@@ -81,7 +81,7 @@ public sealed class ProjectScopeTests : IDisposable
     }
 
     [Fact]
-    public void Discover_defaults_to_current_working_directory()
+    public void Discover_NoOverride_DefaultsToCurrentWorkingDirectory()
     {
         var original = Directory.GetCurrentDirectory();
         try
@@ -102,7 +102,7 @@ public sealed class ProjectScopeTests : IDisposable
 public sealed class UserScopeTests
 {
     [Fact]
-    public void Resolve_defaults_to_per_user_config_directory()
+    public void Resolve_NoOverride_DefaultsToPerUserConfigDirectory()
     {
         var scope = UserScope.Resolve();
 
@@ -115,7 +115,7 @@ public sealed class UserScopeTests
     }
 
     [Fact]
-    public void Override_path_wins()
+    public void Resolve_OverridePathProvided_WinsOverDefault()
     {
         var overrideRoot = Path.Combine(Path.GetTempPath(), "eling-user-override-" + Guid.NewGuid().ToString("N")[..8]);
 
@@ -125,7 +125,7 @@ public sealed class UserScopeTests
     }
 
     [Fact]
-    public void User_scope_is_independent_of_project_scope()
+    public void Resolve_UserScopeConfigured_IndependentOfProjectScope()
     {
         var projectRoot = Path.Combine(Path.GetTempPath(), "eling-independence-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(projectRoot);

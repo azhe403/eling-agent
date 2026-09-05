@@ -20,8 +20,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Separator } from "@/components/ui/separator"
+import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import { formatDate } from "@/lib/date-utils"
@@ -160,49 +170,21 @@ export function MemoriesList() {
 
     void fetchAll()
 
-    const onFocus = () => void loadRuntimes()
-    window.addEventListener("focus", onFocus)
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") void loadRuntimes()
-    }
-    window.addEventListener("visibilitychange", onVisibility)
-
     return () => {
       isMounted = false
-      window.removeEventListener("focus", onFocus)
-      window.removeEventListener("visibilitychange", onVisibility)
     }
   }, [load, loadRuntimes])
 
-  // Real-time memory refresh via Server-Sent Events (extracted to the shared hook).
+  // Real-time memory and runtimes refresh via Server-Sent Events (SSE).
   const { status: sseStatus } = useMemoriesSse(
     useCallback(() => {
       void load("sse_mutation")
-    }, [load])
+    }, [load]),
+    useCallback(() => {
+      void loadRuntimes()
+      void load("sse_runtimes")
+    }, [load, loadRuntimes])
   )
-
-  // Auto-refresh scope list + memories when a new project registers (poll diff)
-  useEffect(() => {
-    let prev = runtimes.map((r) => r.projectRoot).join("|")
-    const check = async () => {
-      try {
-        const res = await fetch("/api/coordinator/runtimes")
-        if (!res.ok) return
-        const next: Runtime[] = await res.json()
-        const nextKey = next.map((r) => r.projectRoot).join("|")
-        if (nextKey !== prev) {
-          prev = nextKey
-          setRuntimes(next)
-          // if currently on "All" or a project that just appeared, reload memories
-          void load()
-        }
-      } catch {
-        // ignore
-      }
-    }
-    const id = setInterval(check, 5000)
-    return () => clearInterval(id)
-  }, [runtimes, load])
 
   async function remove(m: Memory) {
     let url = `/api/memories/${m.id}`
@@ -305,66 +287,85 @@ export function MemoriesList() {
 
   return (
     <>
-      {/* Status + refresh bar — relocated here because the top header is now the
-          RSC shell's Breadcrumb shell. Identical layout/behavior as the original
-          right-side of the header, wraps under the breadcrumb on narrow screens. */}
-      <div className="flex flex-wrap items-center gap-2 px-4 pt-2 pb-0">
-        <div
-          className="flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium border border-border/50 bg-muted/30"
-          title={
-            sseStatus === "connected"
-              ? "SSE Connected: Live stream active"
-              : "SSE: Connecting..."
-          }
-        >
-          <span
-            className={`inline-block size-2 rounded-full ${
-              sseStatus === "connected"
-                ? "bg-green-500 animate-pulse"
-                : sseStatus === "connecting"
-                  ? "bg-amber-500"
-                  : "bg-destructive"
-            }`}
+      <header className="flex h-16 shrink-0 items-center justify-between gap-2 px-4 border-b border-border/40">
+        <div className="flex items-center gap-2">
+          <SidebarTrigger className="-ml-1" />
+          <Separator
+            orientation="vertical"
+            className="mr-2 data-vertical:h-4 data-vertical:self-auto"
           />
-          <span className="text-muted-foreground">
-            {sseStatus === "connected"
-              ? "Live"
-              : sseStatus === "connecting"
-                ? "Connecting"
-                : "Offline"}
-          </span>
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem className="hidden md:block">
+                <BreadcrumbLink href="#">Eling</BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator className="hidden md:block" />
+              <BreadcrumbItem>
+                <BreadcrumbPage>Memories</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
         </div>
 
-        <span className="text-xs text-muted-foreground">
-          {filtered.length} of {memories.length}
-        </span>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={async () => {
-            setLoading(true)
-            setError(null)
-            await load("manual_click")
-          }}
-          disabled={mounted ? loading : false}
-        >
-          <RefreshCw
-            className={mounted && loading ? "size-4 animate-spin" : "size-4"}
-          />
-          Refresh
-        </Button>
-        <Button
-          size="sm"
-          className="ml-auto"
-          onClick={() => router.push("/dashboard/create/")}
-        >
-          <Plus className="size-4" />
-          New Memory
-        </Button>
-      </div>
+        <div className="flex items-center gap-2">
+          <div
+            className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium border border-border/50 bg-muted/30"
+            title={
+              sseStatus === "connected"
+                ? "SSE Connected: Live stream active"
+                : "SSE: Connecting..."
+            }
+          >
+            <span
+              className={`inline-block size-2 rounded-full ${
+                sseStatus === "connected"
+                  ? "bg-green-500 animate-pulse"
+                  : sseStatus === "connecting"
+                    ? "bg-amber-500"
+                    : "bg-destructive"
+              }`}
+            />
+            <span className="text-muted-foreground">
+              {sseStatus === "connected"
+                ? "Live"
+                : sseStatus === "connecting"
+                  ? "Connecting"
+                  : "Offline"}
+            </span>
+          </div>
 
-      <div className="flex flex-1 flex-col gap-4 p-4 pt-2">
-        <div className="sticky top-16 z-10 flex flex-col gap-2 bg-background pb-2">
+          <span className="hidden sm:inline-block text-xs text-muted-foreground font-medium">
+            {filtered.length} of {memories.length}
+          </span>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              setLoading(true)
+              setError(null)
+              await load("manual_click")
+            }}
+            disabled={mounted ? loading : false}
+          >
+            <RefreshCw
+              className={mounted && loading ? "size-4 animate-spin" : "size-4"}
+            />
+            <span className="hidden sm:inline-block">Refresh</span>
+          </Button>
+
+          <Button
+            size="sm"
+            onClick={() => router.push("/dashboard/create/")}
+          >
+            <Plus className="size-4" />
+            <span>New Memory</span>
+          </Button>
+        </div>
+      </header>
+
+      <div className="flex flex-1 flex-col gap-4 p-4 pt-4">
+        <div className="sticky top-0 z-10 flex flex-col gap-2 bg-background pb-2 pt-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-medium text-muted-foreground">
               Scope:

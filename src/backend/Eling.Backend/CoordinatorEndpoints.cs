@@ -11,17 +11,25 @@ public static class CoordinatorEndpoints
         // Loopback-only binding is the access control; no host filter needed
         // (the old RequireHost("localhost") rejected 127.0.0.1 callers).
 
-        group.MapPost("/register", (RuntimeRegistration registration, RuntimeRegistry registry) =>
+        group.MapPost("/register", (RuntimeRegistration registration, RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster) =>
         {
             registry.Register(registration);
+            broadcaster.Notify("runtimes");
             return Results.Ok();
         });
 
         group.MapPost("/heartbeat/{pid:int}", (int pid, RuntimeRegistry registry) =>
             registry.Heartbeat(pid) ? Results.Ok() : Results.NotFound());
 
-        group.MapDelete("/unregister/{pid:int}", (int pid, RuntimeRegistry registry) =>
-            registry.Unregister(pid) ? Results.NoContent() : Results.NotFound());
+        group.MapDelete("/unregister/{pid:int}", (int pid, RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster) =>
+        {
+            if (registry.Unregister(pid))
+            {
+                broadcaster.Notify("runtimes");
+                return Results.NoContent();
+            }
+            return Results.NotFound();
+        });
 
         group.MapGet("/runtimes", (RuntimeRegistry registry) => Results.Ok(registry.Alive()));
 
