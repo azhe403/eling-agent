@@ -3,9 +3,11 @@ bin/
 obj/
 .artifacts/
 .bin/
-.bin-test/
+.bin-*/
+.mybin/
 .vs/
 .idea/
+.tmp
 *.user
 
 # Node / Next.js
@@ -26,12 +28,29 @@ build/
 .eling/*.db
 .eling/*.db-journal
 .eling/*.db-wal
+.eling/runtime/
 
 # Superpowers scratch directory
 .superpowers/
 
-# Dashboard build output (served by Eling.Host at runtime)
-src/backend/Eling.Host/eling-dashboard/
-
 # Test run outputs
 TestResults/
+
+.vercel
+.env*
+
+# Turborepo
+.turbo
+
+# Agents
+.omo
+
+# Agent scratch (opencode, openchamber, plan files)
+.opencode/scratch/
+.openchamber/
+*.backup
+opencode.json.openchamber.backup
+
+# Lint / typecheck output artifacts (not source)
+*.err.txt
+*.out.txt
