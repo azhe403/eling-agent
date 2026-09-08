@@ -87,7 +87,7 @@ public class SqliteMemoryIndexTests : IDisposable
         Assert.Equal(2, results.Count);
         Assert.Equal(moreRelevant.Id, results[0].Id);
         Assert.Equal(lessRelevant.Id, results[1].Id);
-        Assert.True(results.All(r => r.Rank <= 0), "BM25 rank must be a real (non-positive) score.");
+        Assert.True(results.All(r => r.Rank > 0), "Rank must be a positive weighted score (porter 1.0 + trigram 0.4).");
         Assert.All(results, r => Assert.False(double.IsNaN(r.Rank)));
     }
 
@@ -199,12 +199,22 @@ public class SqliteMemoryIndexTests : IDisposable
         using var connection = new SqliteConnection($"Data Source={_dbPath};Pooling=False");
         connection.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT type, sql FROM sqlite_master WHERE name = 'memory_fts';";
+        // The 3-layer architecture splits search into memory_fts_porter and
+        // memory_fts_trigram. Either presence is a valid FTS5 virtual table.
+        command.CommandText = """
+            SELECT name, sql FROM sqlite_master
+            WHERE type = 'table' AND name IN ('memory_fts_porter', 'memory_fts_trigram')
+            ORDER BY name;
+            """;
         using var reader = command.ExecuteReader();
-        Assert.True(reader.Read(), "memory_fts table must exist.");
-        Assert.Equal("table", reader.GetString(0));
-        Assert.Contains("fts5", reader.GetString(1), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("LIKE", reader.GetString(1), StringComparison.OrdinalIgnoreCase);
+        var tablesFound = 0;
+        while (reader.Read())
+        {
+            tablesFound++;
+            Assert.Contains("fts5", reader.GetString(1), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("LIKE", reader.GetString(1), StringComparison.OrdinalIgnoreCase);
+        }
+        Assert.Equal(2, tablesFound);
     }
 
     [Fact]
