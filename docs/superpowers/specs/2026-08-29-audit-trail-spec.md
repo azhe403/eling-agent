@@ -5,34 +5,35 @@
 
 ## 1. Purpose
 
-Mendefinisikan kontrak canonical untuk **Audit Trail** di Eling: mekanisme pencatatan
-immutable untuk setiap aksi mutasi memori, lifecycle dashboard, dan runtime sweep
-sehingga governance, compliance, dan forensik dapat dilakukan dengan mudah.
+Defines the canonical contract for the **Audit Trail** in Eling: an immutable
+recording mechanism for every memory mutation action, dashboard lifecycle event,
+and runtime sweep, so that governance, compliance, and forensics can be performed
+with ease.
 
 ## 2. Scope
 
-### 2.1 In-Scope (WAJIB diaudit)
+### 2.1 In-Scope (MUST be audited)
 
 - **Memory mutations**: Save, Update, Delete, Promote-to-global, Copy-to-project.
 - **Dashboard lifecycle**: Start, Stop, Restart, Auto-shutdown.
 - **Runtime registration**: Register, Unregister, Heartbeat-fail, Stale-sweep.
-- **Cross-cutting**: Coordinator `notify-change` (broadcast event dari MCP ke dashboard).
+- **Cross-cutting**: Coordinator `notify-change` (broadcast event from MCP to dashboard).
 
 ### 2.2 Out-of-Scope
 
-- Real-time streaming audit ke external SIEM (cukup batch mirror ke Vestige).
-- Cryptographic chain-of-custody (Fase 3+).
-- User authentication / RBAC (perlu diskusi lanjut).
+- Real-time streaming of audit events to an external SIEM (batch mirror to Vestige is sufficient).
+- Cryptographic chain-of-custody (Phase 3+).
+- User authentication / RBAC (needs further discussion).
 
 ## 3. Audit Entry Schema
 
-Setiap audit entry adalah **satu baris JSON** (JSONL) dengan field berikut:
+Each audit entry is a **single JSON line** (JSONL) with the following fields:
 
 ```json
 {
   "timestamp": "2026-08-29T15:30:00+00:00",
   "actor": "mcp:eling_dev" | "mcp:eling" | "dashboard" | "system",
-  "action": "memory_save" | "memory_update" | "memory_delete" | "promote" | "copy" | "start" | "stop" | "sweep" | "notify",
+  "action": "memory_save" | "memory_delete" | "promote" | "copy" | "start" | "stop" | "sweep" | "notify",
   "scope": "project" | "global" | "all",
   "memoryId": "01m..." | null,
   "previousContent": "..." | null,
@@ -42,40 +43,40 @@ Setiap audit entry adalah **satu baris JSON** (JSONL) dengan field berikut:
 }
 ```
 
-### Field Constraint
+### Field Constraints
 
-| Field | Tipe | Keterangan |
+| Field | Type | Description |
 |---|---|---|
-| `timestamp` | ISO-8601 string (UTC) | Wajib. Otomatis diisi saat entry dicatat. |
-| `actor` | enum string | Wajib. Identitas pelaku aksi. |
-| `action` | enum string | Wajib. Jenis aksi. |
-| `scope` | enum string | Wajib. Scope memory yang terkait. |
-| `memoryId` | ULID string \| null | Opsional. `null` untuk aksi yang tidak terkait memory. |
-| `previousContent` | string \| null | Wajib untuk `update` / `delete`. `null` untuk `save`. |
-| `newContent` | string \| null | Wajib untuk `save` / `update`. `null` untuk `delete`. |
-| `tags` | string array | Wajib. Tag yang terkait aksi. |
-| `source` | string | Wajib. Source context (user_chat_session, mcp_stdio, dashboard_web, dll). |
+| `timestamp` | ISO-8601 string (UTC) | Required. Auto-filled when the entry is recorded. |
+| `actor` | enum string | Required. Identity of the action's performer. |
+| `action` | enum string | Required. Type of action. |
+| `scope` | enum string | Required. Related memory scope. |
+| `memoryId` | ULID string \| null | Optional. `null` for actions not related to a memory. |
+| `previousContent` | string \| null | Required for `delete`. `null` for `save`. |
+| `newContent` | string \| null | Required for `save`. `null` for `delete`. |
+| `tags` | string array | Required. Tags related to the action. |
+| `source` | string | Required. Source context (user_chat_session, mcp_stdio, dashboard_web, etc.). |
 
 ## 4. Storage Architecture
 
 ### 4.1 Primary Storage (Internal)
 
 - **Path**: `<dataDir>/audit/audit.log.jsonl`
-- **Format**: JSONL (satu entry per baris).
-- **Access mode**: Append-only. File tidak boleh di-overwrite, truncate, atau dihapus saat runtime.
-- **Rotation**: Monthly rotation → `audit-2027-01.log.jsonl`, dst.
-- **Locking**: Append operation atomic via file lock OS untuk mencegah corruption.
+- **Format**: JSONL (one entry per line).
+- **Access mode**: Append-only. The file must not be overwritten, truncated, or deleted at runtime.
+- **Rotation**: Monthly rotation → `audit-2027-01.log.jsonl`, etc.
+- **Locking**: Append operation is atomic via OS file lock to prevent corruption.
 
 ### 4.2 Secondary Storage (Vestige Mirror)
 
-- **Backend**: Vestige MCP `smart_ingest` dengan `node_type: "audit_log"`.
-- **Cadence**: Best-effort, async fire-and-forget (tidak boleh memblokir primary operation).
-- **Retention**: Immutable. Tidak ada auto-delete di Vestige.
+- **Backend**: Vestige MCP `smart_ingest` with `node_type: "audit_log"`.
+- **Cadence**: Best-effort, async fire-and-forget (must not block the primary operation).
+- **Retention**: Immutable. No auto-delete in Vestige.
 
-### 4.3 Memory Snapshot (Opsional)
+### 4.3 Memory Snapshot (Optional)
 
-- Untuk `Delete` memory, simpan versi sebelumnya sebagai memory baru berstatus `Archived`.
-- Ini di luar JSONL log; berupa entry di `.eling/memories/`.
+- For `Delete` actions, store the previous version as a new memory with `Archived` status.
+- This lives outside the JSONL log; it is an entry in `.eling/memories/`.
 
 ## 5. API Contract
 
@@ -88,7 +89,7 @@ public interface IAuditLogger
 }
 ```
 
-Implementasi:
+Implementations:
 - `JsonlAuditLogger`: Primary file-backed.
 - `VestigeAuditMirror`: Secondary best-effort async.
 
@@ -96,34 +97,34 @@ Implementasi:
 
 - `GET /api/audit/events?actor=...&action=...&scope=...&from=...&to=...&limit=...`
 - Response: `{ "events": [...], "total": N, "nextCursor": "..." }`
-- Read-only; no write endpoint from dashboard (write only via internal hooks).
+- Read-only; no write endpoint from the dashboard (write only via internal hooks).
 
 ## 6. UI Requirements
 
-### 6.1 Activity Log Tab di Dashboard
+### 6.1 Activity Log Tab in Dashboard
 
 - **Path**: `/dashboard/activity-log/`
 - **Table columns**: Timestamp, Actor, Action, Scope, MemoryId (short), Tags.
 - **Filter bar**: Actor, Action, Scope, Time range.
-- **Per-entry detail**: Klik untuk modal dengan diff before-after (untuk update/delete).
-- **Performance**: Pagination + virtual list untuk dataset besar.
+- **Per-entry detail**: Click to open a modal with a before-after diff (for update/delete).
+- **Performance**: Pagination + virtual list for large datasets.
 
 ## 7. Retention & Compliance
 
-- **TTL per file**: Monthly rotation, file lama diarsipkan (tidak dihapus).
-- **Audit log tampering detection**: Hash chain opsional (Fase 3+).
-- **Compliance scope**: Internal governance; belum ada external compliance standard yang harus dipenuhi.
+- **TTL per file**: Monthly rotation; old files are archived (not deleted).
+- **Audit log tampering detection**: Optional hash chain (Phase 3+).
+- **Compliance scope**: Internal governance; no external compliance standard must be met yet.
 
 ## 8. Acceptance Criteria
 
-Spesifikasi dianggap terpenuhi ketika:
+The specification is considered fulfilled when:
 
-1. Semua mutation memory hooks menulis entry audit ke JSONL.
-2. Dashboard dapat membaca dan menampilkan audit log.
-3. Vestige mirror best-effort aktif.
-4. Monthly rotation berjalan otomatis.
-5. Test unit + integration mencakup minimal 90% path audit.
+1. All memory mutation hooks write an audit entry to JSONL.
+2. The dashboard can read and display the audit log.
+3. The best-effort Vestige mirror is active.
+4. Monthly rotation runs automatically.
+5. Unit + integration tests cover at least 90% of the audit paths.
 
 ## 9. Status
 
-LOCKED (2026-08-29). Tidak boleh diedit sembarangan; gunakan plan untuk update progress.
+LOCKED (2026-08-29). Must not be edited casually; use the plan to track progress updates.

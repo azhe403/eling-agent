@@ -11,7 +11,10 @@
     "typecheck:frontend": "pnpm --prefix src/frontend/Eling.Dashboard exec tsc --noEmit",
     "validate:backend": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet restore Eling.slnx",
     "build:backend": "dotnet build Eling.slnx",
-    "test:backend": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test Eling.slnx",
+    "test:backend": "dotnet test Eling.slnx --filter FullyQualifiedName!~DashboardLifecycleTests",
+    "test:backend:full": "dotnet test Eling.slnx",
+    "test:backend:core": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj",
+    "test:backend:api": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj",
     "build:frontend": "pnpm --prefix src/frontend/Eling.Dashboard build"
   },
   "devDependencies": {

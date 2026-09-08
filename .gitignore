@@ -23,7 +23,6 @@ build/
 *.db-wal
 
 # Eling (generated runtime files; .eling/memories/ is tracked in git)
-.eling/logs/
 .eling/index.db*
 .eling/*.db
 .eling/*.db-journal

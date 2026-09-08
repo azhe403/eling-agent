@@ -17,5 +17,13 @@ Commits = user-controlled checkpoints: implement → test → report → stop. N
 ## Eling Memory
 All operations via **MCP tools** — NEVER touch `.eling/memories/` files directly. Prefer `mcp_eling_dev_*`, fallback `mcp_eling_*`. `memory_recall` is the on-demand context-hydration tool — invoke when you need to refresh the slice of memory relevant to the current task, then save with `memory_save`.
 
-### Mandatory Session-Start Recall ("Eling session recall" — HARD RULE)
-First turn of every new chat, BEFORE writing any response or running any other tool, you MUST invoke **Eling session recall** = `memory_recall` (via `mcp_eling_dev_*`, e.g. `eling_dev_memory_recall` — fallback `mcp_eling_*`) with a topics array derived from the user's opening message. Do not skip this step. Do not announce it in the response. Use the recalled context internally, then answer the user naturally.
+### Mandatory Recall ("Eling recall" — HARD RULE)
+Invoke `memory_recall` in these situations:
+
+1. **Session start** — First turn of every new chat, BEFORE writing any response or running any other tool, with topics derived from the user's opening message.
+
+2. **Before git commit** — Before any commit preparation, recall git/workflow/conventions memories to ensure no hygiene violations.
+
+3. **Before significant task** — When starting a non-trivial task, check if relevant memories exist and are stale.
+
+Use `mcp_eling_dev_*` tools (e.g. `eling_dev_memory_recall`) — fallback to `mcp_eling_*`. Do not skip. Do not announce it in the response. Use recalled context internally, then execute.

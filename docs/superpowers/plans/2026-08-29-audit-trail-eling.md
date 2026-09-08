@@ -1,28 +1,28 @@
-# Audit Trail untuk Eling (Plan)
+# Audit Trail for Eling (Plan)
 
 > Tracker index: `01m1729ysxn8gn0jjtk9pp79zx` (Eling project scope).
 > Locked spec: `docs/superpowers/specs/2026-08-29-audit-trail-spec.md`.
 
-## Visi
+## Vision
 
-Setiap aksi penting di Eling (memory mutations, dashboard lifecycle, runtime sweep) dicatat
-secara immutable ke audit log yang dapat di-query dan diaudit manual. Tujuannya adalah
-governance, compliance, dan kemampuan forensik saat dibutuhkan.
+Every significant action in Eling (memory mutations, dashboard lifecycle, runtime sweep) is recorded
+immutably to an audit log that can be queried and manually audited. The goal is
+governance, compliance, and forensic capability when needed.
 
-## Scope Audit (apa saja yang di-track)
+## Audit Scope (what is tracked)
 
-- **Memory mutations**: Save, Update, Delete, Promote-to-global, Copy-to-project.
+- **Memory mutations**: Save, Delete, Promote-to-global, Copy-to-project.
 - **Dashboard lifecycle**: Start, Stop, Restart, Auto-shutdown.
 - **Runtime registration**: Register, Unregister, Heartbeat-fail, Stale-sweep.
-- **Cross-cutting**: Coordinator notify-change (broadcast event dari MCP ke dashboard).
+- **Cross-cutting**: Coordinator notify-change (broadcast event from MCP to dashboard).
 
-## Field Audit Entry (JSON Lines)
+## Audit Entry Fields (JSON Lines)
 
 ```json
 {
   "timestamp": "2026-08-29T15:30:00+00:00",
   "actor": "mcp:eling_dev" | "mcp:eling" | "dashboard" | "system",
-  "action": "memory_save" | "memory_update" | "memory_delete" | "promote" | "copy" | "start" | "stop" | "sweep" | "notify",
+  "action": "memory_save" | "memory_delete" | "promote" | "copy" | "start" | "stop" | "sweep" | "notify",
   "scope": "project" | "global",
   "memoryId": "01m..." | null,
   "previousContent": "..." | null,
@@ -35,43 +35,43 @@ governance, compliance, dan kemampuan forensik saat dibutuhkan.
 ## Storage Strategy
 
 1. **Internal Append-Only Log**: `.eling/audit/audit.log.jsonl` (JSONL, human-readable).
-2. **File Rotation**: Monthly rotation agar ukuran file tetap manageable.
-3. **Vestige Mirror**: Auto-duplicate setiap entry ke Vestige untuk long-term durable audit.
-4. **Memory Snapshot** (opsional): On Delete, simpan versi sebelumnya sebagai `Archived` memory.
+2. **File Rotation**: Monthly rotation to keep file size manageable.
+3. **Vestige Mirror**: Auto-duplicate every entry to Vestige for long-term durable audit.
+4. **Memory Snapshot** (optional): On Delete, store the previous version as an `Archived` memory.
 
 ## UI
 
-Dashboard menampilkan tab baru **"Activity Log"** dengan:
+The dashboard shows a new **"Activity Log"** tab with:
 - Filter by actor, action, scope, time range.
-- Per-entry detail: klik untuk melihat diff before-after.
-- Pagination infinite scroll + virtual list untuk performa.
+- Per-entry detail: click to see a before-after diff.
+- Infinite scroll pagination + virtual list for performance.
 
 ## Compliance & Retention
 
-- **Append-only**: file log tidak pernah di-overwrite, hanya appended.
-- **TTL**: file di-rotate per bulan (Januari 2027 → `audit-2027-01.log.jsonl`).
-- **Off-system Backup**: Mirror ke Vestige sebagai immutable durable storage.
+- **Append-only**: log files are never overwritten, only appended.
+- **TTL**: files are rotated monthly (January 2027 → `audit-2027-01.log.jsonl`).
+- **Off-system Backup**: Mirror to Vestige as immutable durable storage.
 
-## Tasks (akan dipecah saat eksekusi)
+## Tasks (to be split during execution)
 
-- [ ] T1. Backend: Definisikan `AuditEvent` DTO dan `IAuditLogger` interface.
+- [ ] T1. Backend: Define the `AuditEvent` DTO and `IAuditLogger` interface.
 - [ ] T2. Backend: Implement `JsonlAuditLogger` (file-backed append-only).
-- [ ] T3. Backend: Hook `IAuditLogger` ke `MemoryService.SaveAsync` / `UpdateAsync` / `DeleteAsync`.
-- [ ] T4. Backend: Hook ke `RuntimeRegistry.Register` / `Unregister` / `Sweep` / `Shutdown`.
+- [ ] T3. Backend: Hook `IAuditLogger` into `MemoryService.SaveAsync` / `UpdateAsync` / `DeleteAsync`.
+- [ ] T4. Backend: Hook into `RuntimeRegistry.Register` / `Unregister` / `Sweep` / `Shutdown`.
 - [ ] T5. Backend: Vestige mirror (best-effort, async fire-and-forget).
 - [ ] T6. Backend: Monthly rotation helper.
-- [ ] T7. Frontend: `ActivityLog` page dengan table + filter.
-- [ ] T8. Frontend: Per-entry detail modal dengan diff.
-- [ ] T9. Tests: Backend unit + integration test untuk `IAuditLogger`.
-- [ ] T10. Tests: Frontend E2E untuk tab Activity Log.
-- [ ] T11. Docs: Update `AGENTS.md` dengan aturan audit trail.
+- [ ] T7. Frontend: `ActivityLog` page with table + filter.
+- [ ] T8. Frontend: Per-entry detail modal with diff.
+- [ ] T9. Tests: Backend unit + integration tests for `IAuditLogger`.
+- [ ] T10. Tests: Frontend E2E for the Activity Log tab.
+- [ ] T11. Docs: Update `AGENTS.md` with audit trail rules.
 
-## Non-Goals (di luar scope)
+## Non-Goals (out of scope)
 
-- Real-time streaming audit ke external SIEM (cukup batch mirror ke Vestige).
-- Cryptographic chain-of-custody (opsional Fase 3+).
-- User authentication / RBAC (perlu diskusi lebih lanjut).
+- Real-time streaming of audit events to an external SIEM (batch mirror to Vestige is sufficient).
+- Cryptographic chain-of-custody (optional Phase 3+).
+- User authentication / RBAC (needs further discussion).
 
 ## Status
 
-Draft (2026-08-29). Spec locked. Plan tasks belum dieksekusi.
+Draft (2026-08-29). Spec locked. Plan tasks not yet executed.

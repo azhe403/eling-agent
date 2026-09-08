@@ -87,7 +87,7 @@ eling_install:
   runtime_probe: "GET http://127.0.0.1:$PORT/health"
   mcp_transport: stdio
   session_start_tool: memory_recall   # on-demand context hydration (renamed from session_start; call any time during a conversation)
-  memory_tools: [memory_save, memory_get, memory_search, memory_list, memory_update, memory_delete]
+  memory_tools: [memory_save, memory_get, memory_search, memory_list, memory_delete]
 ```
 
 ## Troubleshooting
