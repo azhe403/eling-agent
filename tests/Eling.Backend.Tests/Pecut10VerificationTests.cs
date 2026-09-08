@@ -161,6 +161,57 @@ public class Pecut10VerificationTests
         finally { TryDelete(userDir); TryDelete(projA); TryDelete(projB); }
     }
 
+    [Fact]
+    public async Task CopyToGlobal_SourceRemains()
+    {
+        var (serviceA, _, _, userDir, projA, projB) = CreateServices();
+        try
+        {
+            var projMem = new Memory(MemoryType.Lesson, "Project lesson to copy");
+            var savedProj = await serviceA.SaveAsync(projMem, "project");
+            var copied = await serviceA.CopyToGlobalAsync(new MemoryReference(savedProj.Id, MemoryScopeKind.Project, projA));
+            Assert.NotNull(copied);
+            Assert.Equal(MemoryScopeKind.Global, copied.Scope);
+            var stillInProject = await serviceA.GetByIdAsync(new MemoryReference(savedProj.Id, MemoryScopeKind.Project, projA));
+            Assert.NotNull(stillInProject);
+        }
+        finally { TryDelete(userDir); TryDelete(projA); TryDelete(projB); }
+    }
+
+    [Fact]
+    public async Task MoveToGlobal_SourceDeleted()
+    {
+        var (serviceA, _, _, userDir, projA, projB) = CreateServices();
+        try
+        {
+            var projMem = new Memory(MemoryType.Decision, "Project decision to move");
+            var savedProj = await serviceA.SaveAsync(projMem, "project");
+            var moved = await serviceA.MoveToGlobalAsync(new MemoryReference(savedProj.Id, MemoryScopeKind.Project, projA));
+            Assert.NotNull(moved);
+            Assert.Equal(MemoryScopeKind.Global, moved.Scope);
+            var goneFromProject = await serviceA.GetByIdAsync(new MemoryReference(savedProj.Id, MemoryScopeKind.Project, projA));
+            Assert.Null(goneFromProject);
+        }
+        finally { TryDelete(userDir); TryDelete(projA); TryDelete(projB); }
+    }
+
+    [Fact]
+    public async Task MoveToProject_SourceDeleted()
+    {
+        var (serviceA, _, _, userDir, projA, projB) = CreateServices();
+        try
+        {
+            var globalMem = new Memory(MemoryType.Preference, "Global preference to move");
+            var savedGlobal = await serviceA.SaveAsync(globalMem, "global");
+            var moved = await serviceA.MoveToProjectAsync(MemoryReference.ForGlobal(savedGlobal.Id), projA);
+            Assert.NotNull(moved);
+            Assert.Equal(MemoryScopeKind.Project, moved.Scope);
+            var goneFromGlobal = await serviceA.GetByIdAsync(MemoryReference.ForGlobal(savedGlobal.Id));
+            Assert.Null(goneFromGlobal);
+        }
+        finally { TryDelete(userDir); TryDelete(projA); TryDelete(projB); }
+    }
+
     private static void TryDelete(string path)
     {
         try { if (Directory.Exists(path)) Directory.Delete(path, true); } catch { }

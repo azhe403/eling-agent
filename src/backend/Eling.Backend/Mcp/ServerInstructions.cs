@@ -10,19 +10,19 @@ public static class ServerInstructions
     /// </summary>
     public static readonly string[] Sections =
     [
-        "Eling is a durable markdown-backed memory system. In Eling, memory Markdown files under '.eling/memories/' are the canonical source of truth and MUST be tracked in Git.",
+        "Eling is a durable markdown-backed memory system. Memory Markdown files under '.eling/memories/' are the canonical source of truth and MUST be tracked in Git.",
 
-        "Generated runtime files (such as '.eling/logs/', '.eling/index.db*', '.eling/*.db', '.eling/*.db-journal', '.eling/*.db-wal', '.eling/runtime/') MUST be added to '.gitignore'.",
+        "Generated runtime files (logs, '.eling/index.db*', '.eling/*.db', '.eling/*.db-journal', '.eling/*.db-wal', '.eling/runtime/') MUST be added to '.gitignore'. When running in a project workspace, always check that '.gitignore' ignores these runtime files while keeping '.eling/memories/' tracked; prompt the user for confirmation to fix '.gitignore' if needed.",
 
-        "When running in a project workspace, always check if the project's '.gitignore' properly ignores these Eling runtime files while keeping '.eling/memories/' tracked.",
+        "'Eling <something>' (Javanese for 'remember <something>') is a recall instruction: retrieve the memory previously stored in Eling (e.g. 'eling build steps' recalls the build steps saved in memories).",
 
-        "If '.gitignore' is missing or does not include these runtime ignore patterns, prompt the user for confirmation to update '.gitignore' with standard Eling ignore patterns.",
+        "All memory operations MUST use Eling MCP tools — never read, search, or write '.eling/memories/' files directly.",
 
-        "Memory Recall Strategy: Hydrate context at session start, upon major topic shifts, or before non-trivial planning. Avoid redundant recall on every micro-turn to preserve latency and context window. On explicit user recall requests ('eling <something>'), retrieve the relevant memories immediately.",
+        "Memory Save Rule: ALWAYS use scope=project by default so the memory is written to '.eling/memories/' and survives session changes; use scope=global only for cross-project rules.",
 
-        "Usage: 'Eling <something>' (Javanese for 'remember <something>') is a recall instruction — " +
-        "it means retrieving a memory previously stored in Eling's memory management " +
-        "(e.g. 'eling cara build' = recall the build steps saved in Eling memories)."
+        "Consistency Rules: Use clean lowercase memory tags (no underscores, no mixed language). Keep memories portable — avoid machine-specific absolute paths and personal usernames; use relative paths or generic placeholders so memories stay consistent across machines and platforms.",
+
+        "Memory Recall Strategy: Hydrate context at session start, before significant actions, and after major milestones; avoid redundant recall on every micro-turn to preserve latency and context window."
     ];
 
     /// <summary>

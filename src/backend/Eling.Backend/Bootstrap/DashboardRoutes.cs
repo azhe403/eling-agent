@@ -24,6 +24,7 @@ public static class DashboardRoutes
         app.MapCoordinatorEndpoints();
         app.MapMemoryRoutes();
         app.MapScopedMemoryRoutes();
+        app.MapMemoryMaintenanceEndpoints();
         app.MapFallbackToFile("index.html");
     }
 

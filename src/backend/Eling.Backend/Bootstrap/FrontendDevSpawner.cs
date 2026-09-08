@@ -5,72 +5,63 @@ namespace Eling.Backend.Bootstrap;
 
 internal static class FrontendDevSpawner
 {
-    public static void TrySpawn(ProjectContext context, int backendPort, ILogger logger)
+    public static void TrySpawn(ProjectContext context, int backendPort, ILogger logger, CancellationToken cancellationToken = default)
     {
-        var repoRoot = FindRepoRootWithPnpm();
+        var repoRoot = DevModeDetector.FindRepoRootWithPnpm();
         if (repoRoot is null) return;
-
-        if (IsPortListening(4427))
-        {
-            KillProcessTreeOnPort(4427, logger);
-        }
 
         Task.Run(async () =>
         {
-            try
+            var restartDelay = TimeSpan.FromSeconds(2);
+            while (!cancellationToken.IsCancellationRequested)
             {
-                var isWindows = OperatingSystem.IsWindows();
-                var targetExe = isWindows ? "cmd.exe" : "pnpm";
-                var targetArgs = isWindows ? new[] { "/c", "pnpm", "dev:frontend" } : new[] { "dev:frontend" };
+                try
+                {
+                    if (await DevModeDetector.IsPortListeningAsync(4427, cancellationToken: cancellationToken))
+                    {
+                        KillProcessTreeOnPort(4427, logger);
+                    }
 
-                logger.LogInformation(
-                    "spawning pnpm dev:frontend via CliWrap at {RepoRoot} -> port 4427 (backend {BackendPort})",
-                    repoRoot, backendPort);
+                    logger.LogInformation(
+                        "spawning pnpm dev:frontend via CliWrap at {RepoRoot} -> port 4427 (backend {BackendPort})",
+                        repoRoot, backendPort);
 
-                await CliWrap.Cli.Wrap(targetExe)
-                    .WithArguments(targetArgs)
-                    .WithWorkingDirectory(repoRoot)
-                    .WithEnvironmentVariables(env => env.Set("ELING_BACKEND_PORT", backendPort.ToString()))
-                    .WithStandardOutputPipe(CliWrap.PipeTarget.ToDelegate(line => logger.LogInformation("[pnpm-dev] {Line}", line)))
-                    .WithStandardErrorPipe(CliWrap.PipeTarget.ToDelegate(line => logger.LogWarning("[pnpm-dev:err] {Line}", line)))
-                    .ExecuteAsync();
+                    await CliWrap.Cli.Wrap("pnpm")
+                        .WithArguments("dev:frontend")
+                        .WithWorkingDirectory(repoRoot)
+                        .WithEnvironmentVariables(env => env.Set("ELING_BACKEND_PORT", backendPort.ToString()))
+                        .WithStandardOutputPipe(CliWrap.PipeTarget.ToDelegate(line => logger.LogInformation("[pnpm-dev] {Line}", line)))
+                        .WithStandardErrorPipe(CliWrap.PipeTarget.ToDelegate(line => logger.LogWarning("[pnpm-dev:err] {Line}", line)))
+                        .ExecuteAsync(cancellationToken);
+
+                    if (!cancellationToken.IsCancellationRequested)
+                    {
+                        logger.LogWarning("pnpm dev:frontend exited unexpectedly; restarting watchdog in {DelaySec}s...", restartDelay.TotalSeconds);
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    logger.LogInformation("Frontend dev watchdog stopped cleanly via cancellation");
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Frontend dev watchdog encountered error; restarting in {DelaySec}s...", restartDelay.TotalSeconds);
+                }
+
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await Task.Delay(restartDelay, cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
             }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "failed to spawn pnpm dev:frontend via CliWrap");
-            }
-        });
-    }
-
-    private static bool IsPortListening(int port)
-    {
-        try
-        {
-            using var client = new System.Net.Sockets.TcpClient();
-            var task = client.ConnectAsync("127.0.0.1", port);
-            return task.Wait(TimeSpan.FromMilliseconds(200)) && client.Connected;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static string? FindRepoRootWithPnpm()
-    {
-        var walker = new DirectoryInfo(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory));
-        for (var depth = 0; depth < 10 && walker is not null; depth++)
-        {
-            if (File.Exists(Path.Combine(walker.FullName, "package.json"))
-                && File.Exists(Path.Combine(walker.FullName, "pnpm-lock.yaml")))
-            {
-                return walker.FullName;
-            }
-
-            walker = walker.Parent;
-        }
-
-        return null;
+        }, cancellationToken);
     }
 
     private static void KillProcessTreeOnPort(int port, ILogger logger)

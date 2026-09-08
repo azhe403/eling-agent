@@ -49,12 +49,18 @@ public static class HttpLoop
                 if (isDevMode)
                 {
                     var feLogger = loggerFactory.CreateLogger("Eling.Backend.FrontendDev");
-                    TrySpawnPnpmFrontend(context, dashboardPort, feLogger);
+                    TrySpawnPnpmFrontend(context, dashboardPort, feLogger, cancellationToken);
                 }
 
                 await app.RunAsync(cancellationToken);
                 logger.LogInformation("HTTP host shut down cleanly on attempt #{Attempt}", attempt);
-                return 0;
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return 0;
+                }
+
+                logger.LogWarning("HTTP host stopped unexpectedly without cancellation; attempting restart...");
+                await DelayWithJitterAsync(cancellationToken);
             }
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
             {
@@ -76,8 +82,8 @@ public static class HttpLoop
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "HTTP host crashed on attempt #{Attempt}", attempt);
-                return 1;
+                logger.LogError(ex, "HTTP host crashed on attempt #{Attempt}; retrying after jitter", attempt);
+                await DelayWithJitterAsync(cancellationToken);
             }
             finally
             {
@@ -158,7 +164,8 @@ public static class HttpLoop
     internal static void TrySpawnPnpmFrontend(
         ProjectContext context,
         int backendPort,
-        ILogger logger
+        ILogger logger,
+        CancellationToken cancellationToken = default
     )
-        => FrontendDevSpawner.TrySpawn(context, backendPort, logger);
+        => FrontendDevSpawner.TrySpawn(context, backendPort, logger, cancellationToken);
 }

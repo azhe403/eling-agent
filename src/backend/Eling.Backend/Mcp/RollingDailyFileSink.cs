@@ -13,7 +13,7 @@ public sealed class RollingDailyFileSink : ILogEventSink, IDisposable
     private const string ActiveFileName = "mcp.log";
     private const int DefaultRetainedDays = 7;
     private const string LogFilePattern = "mcp-*.log";
-    private const string OutputTemplate = "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [pid:{ProcessId}] [{SourceContext}] {Message:lj}{NewLine}{Exception}";
+    private const string OutputTemplate = "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [pid:{ProcessId}] [project:{ProjectId}] [{SourceContext}] {Message:lj}{NewLine}{Exception}";
 
     private readonly string _logsDirectory;
     private readonly string _activeFileName;

@@ -30,6 +30,13 @@ import {
 } from "@/components/ui/breadcrumb"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -66,6 +73,9 @@ export function MemoriesList() {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [promoteTarget, setPromoteTarget] = useState<Memory | null>(null)
   const [promoteAsMove, setPromoteAsMove] = useState(false)
+  const [copyTarget, setCopyTarget] = useState<Memory | null>(null)
+  const [copyAsMove, setCopyAsMove] = useState(false)
+  const [copyProjectRoot, setCopyProjectRoot] = useState<string>("")
   const [deleteTarget, setDeleteTarget] = useState<Memory | null>(null)
   const [scope, setScope] = useState<string>("all")
   const [runtimes, setRuntimes] = useState<Runtime[]>([])
@@ -244,15 +254,16 @@ export function MemoriesList() {
     }
   }
 
-  async function copyToProject(m: Memory, targetRoot: string) {
+  async function copyToProject(m: Memory, targetRoot: string, move = false) {
     const isGlobal = m.scope === "global"
     const body = isGlobal
-      ? { id: m.id, sourceScope: "global", targetProjectRoot: targetRoot }
+      ? { id: m.id, sourceScope: "global", targetProjectRoot: targetRoot, move }
       : {
           id: m.id,
           sourceScope: "project",
           sourceProjectRoot: m.project?.root,
           targetProjectRoot: targetRoot,
+          move,
         }
     const res = await fetch("/api/scoped/copy-to-project", {
       method: "POST",
@@ -466,7 +477,11 @@ export function MemoriesList() {
                   onEdit={(id) => setEditingId(id)}
                   onDelete={(target) => setDeleteTarget(target)}
                   onPromote={(target) => setPromoteTarget(target)}
-                  onCopyToProject={copyToProject}
+                  onCopyToProject={(m, root) => {
+                    setCopyTarget(m)
+                    setCopyProjectRoot(root)
+                    setCopyAsMove(false)
+                  }}
                 />
               )
             )}
@@ -570,6 +585,125 @@ export function MemoriesList() {
               }}
             >
               {promoteAsMove ? "Move to Global" : "Copy to Global"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={copyTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCopyTarget(null)
+            setCopyAsMove(false)
+            setCopyProjectRoot("")
+          }
+        }}
+      >
+        <AlertDialogContent
+          className="w-[94vw] sm:max-w-4xl"
+          onOverlayClick={() => {
+            setCopyTarget(null)
+            setCopyAsMove(false)
+            setCopyProjectRoot("")
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>Copy to Project</AlertDialogTitle>
+            <AlertDialogDescription>
+              Choose how to copy this memory to the target project:
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-foreground">Target Project</label>
+            <Select value={copyProjectRoot} onValueChange={(v) => setCopyProjectRoot(v ?? "")}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select a project..." />
+              </SelectTrigger>
+              <SelectContent>
+                {runtimes.map((r) => (
+                  <SelectItem key={r.projectRoot} value={r.projectRoot}>
+                    📁 {r.projectRoot.split("\\").pop() ?? r.projectRoot.split("/").pop()}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {copyTarget && (
+            <div className="rounded-lg border bg-muted/40 p-4 text-xs text-muted-foreground space-y-2">
+              <div className="flex items-center justify-between font-medium text-foreground border-b border-border/40 pb-2">
+                <span>
+                  {copyTarget.type} · ID: {copyTarget.id}
+                </span>
+                <span className="text-[11px] font-normal text-muted-foreground">
+                  {formatDate(copyTarget.createdAt)}
+                </span>
+              </div>
+              <div className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-foreground font-sans pr-1 leading-relaxed">
+                {copyTarget.content}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 py-1 text-xs">
+            <label className="flex items-start gap-2.5 rounded-lg border p-3.5 cursor-pointer hover:bg-accent transition-colors">
+              <input
+                type="radio"
+                name="copy-mode"
+                checked={!copyAsMove}
+                onChange={() => setCopyAsMove(false)}
+                className="mt-0.5"
+              />
+              <div className="flex-1">
+                <div className="font-medium text-foreground">
+                  Copy to Project (Recommended)
+                </div>
+                <div className="text-muted-foreground mt-1">
+                  Original memory stays in {copyTarget?.scope === "global" ? "Global" : "this project"}; a new copy is created in the target project.
+                </div>
+              </div>
+            </label>
+
+            <label className="flex items-start gap-2.5 rounded-lg border p-3.5 cursor-pointer hover:bg-accent transition-colors">
+              <input
+                type="radio"
+                name="copy-mode"
+                checked={copyAsMove}
+                onChange={() => setCopyAsMove(true)}
+                className="mt-0.5"
+              />
+              <div className="flex-1">
+                <div className="font-medium text-foreground text-amber-600 dark:text-amber-400">
+                  Move to Project
+                </div>
+                <div className="text-muted-foreground mt-1">
+                  Original memory will be deleted from {copyTarget?.scope === "global" ? "Global" : "this project"} and moved permanently to the target project.
+                </div>
+              </div>
+            </label>
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className={
+                copyAsMove ? "bg-amber-600 hover:bg-amber-700 text-white" : ""
+              }
+              onClick={() => {
+                if (copyTarget && copyProjectRoot) {
+                  const target = copyTarget
+                  const root = copyProjectRoot
+                  const asMove = copyAsMove
+                  setCopyTarget(null)
+                  setCopyAsMove(false)
+                  setCopyProjectRoot("")
+                  void copyToProject(target, root, asMove)
+                }
+              }}
+            >
+              {copyAsMove ? "Move to Project" : "Copy to Project"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

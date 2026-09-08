@@ -4,21 +4,23 @@ public class MemoryService : IMemoryService
 {
     private readonly IMemoryStorage _storage;
     private readonly IMemoryIndex _index;
+    private readonly SmartSaveOptions _smartSave;
 
     public MemoryService(IMemoryStorage storage, IMemoryIndex index)
+        : this(storage, index, new SmartSaveOptions())
+    {
+    }
+
+    public MemoryService(IMemoryStorage storage, IMemoryIndex index, SmartSaveOptions smartSave)
     {
         _storage = storage;
         _index = index;
+        _smartSave = smartSave;
     }
 
     public async Task<SaveResult> SaveAsync(Memory memory)
     {
-        // Dedup: if an active memory with identical content (ignoring case and
-        // leading/trailing whitespace) already exists, update it in place instead
-        // of inserting a duplicate. Only active memories are deduplicated so that
-        // archived/superseded entries never swallow a new save.
-        var normalized = NormalizeContent(memory.Content);
-        var existing = await FindActiveByContentAsync(normalized);
+        var existing = await FindActiveSimilarAsync(memory);
         if (existing is not null)
         {
             var merged = await MergeIntoAsync(existing, memory);
@@ -32,27 +34,41 @@ public class MemoryService : IMemoryService
 
     private static string NormalizeContent(string content) => content.Trim();
 
-    private async Task<Memory?> FindActiveByContentAsync(string normalizedContent)
+    private async Task<Memory?> FindActiveSimilarAsync(Memory incoming)
     {
+        var normalized = NormalizeContent(incoming.Content);
         var all = await _storage.ListAllAsync();
+        Memory? bestMatch = null;
+        double bestScore = 0.0;
+
         foreach (var candidate in all)
         {
-            if (candidate.Status == MemoryStatus.Active &&
-                string.Equals(NormalizeContent(candidate.Content), normalizedContent, StringComparison.OrdinalIgnoreCase))
-            {
+            if (candidate.Status != MemoryStatus.Active)
+                continue;
+            if (candidate.Type != incoming.Type)
+                continue;
+
+            if (string.Equals(NormalizeContent(candidate.Content), normalized, StringComparison.OrdinalIgnoreCase))
                 return candidate;
+
+            if (!_smartSave.EnableFuzzyMatch)
+                continue;
+
+            var score = MemorySimilarity.CalculateJaccard(candidate.Content, incoming.Content);
+            if (score >= _smartSave.DuplicateThreshold && score > bestScore)
+            {
+                bestMatch = candidate;
+                bestScore = score;
             }
         }
-        return null;
+
+        return bestMatch;
     }
 
     private async Task<Memory> MergeIntoAsync(Memory existing, Memory incoming)
     {
-        var mergedTags = existing.Tags
-            .Concat(incoming.Tags)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList()
-            .AsReadOnly();
+        var mergedTags = Memory.NormalizeTags(
+            existing.Tags.Concat(incoming.Tags));
 
         var merged = new Memory(
             existing.Type,

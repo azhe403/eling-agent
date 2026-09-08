@@ -40,6 +40,18 @@ public sealed class MemoryRecallMemory
     [JsonPropertyName("scope")]
     public string Scope { get; set; } = "project";
 
+    [JsonPropertyName("matchedVia")]
+    public IReadOnlyCollection<string>? MatchedVia { get; set; }
+
+    [JsonPropertyName("porterScore")]
+    public double PorterScore { get; set; }
+
+    [JsonPropertyName("trigramScore")]
+    public double TrigramScore { get; set; }
+
+    [JsonPropertyName("queryMode")]
+    public string? QueryMode { get; set; }
+
     public static MemoryRecallMemory From(Memory memory) => new()
     {
         Id = memory.Id,
@@ -52,6 +64,16 @@ public sealed class MemoryRecallMemory
         Source = memory.Source,
         Scope = "project"
     };
+
+    public static MemoryRecallMemory From(MemoryRecallHit hit)
+    {
+        var dto = From(hit.Memory);
+        dto.MatchedVia = hit.MatchedVia;
+        dto.PorterScore = hit.PorterScore;
+        dto.TrigramScore = hit.TrigramScore;
+        dto.QueryMode = hit.QueryMode;
+        return dto;
+    }
 
     public static MemoryRecallMemory From(ScopedMemory scoped) => new()
     {

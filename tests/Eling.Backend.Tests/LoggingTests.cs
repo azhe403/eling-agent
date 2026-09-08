@@ -81,6 +81,24 @@ public class LoggingTests : IDisposable
     }
 
     [Fact]
+    public void Sink_RendersProjectIdInLogLines()
+    {
+        using var sink = new RollingDailyFileSink(_tempLogsDir);
+        using var logger = new LoggerConfiguration()
+            .Enrich.WithProperty("ProcessId", Environment.ProcessId)
+            .Enrich.WithProperty("ProjectId", "Eling")
+            .WriteTo.Sink(sink)
+            .CreateLogger();
+
+        logger.Information("Project tagged message");
+
+        var activePath = Path.Combine(_tempLogsDir, "mcp.log");
+        var content = ReadFileShared(activePath);
+        Assert.Contains("[project:Eling]", content);
+        Assert.Contains("Project tagged message", content);
+    }
+
+    [Fact]
     public void Rollover_ArchivesPreviousDayToDateNamedFile_AndKeepsMcpLog()
     {
         var day1 = new DateTimeOffset(2026, 8, 13, 10, 0, 0, TimeSpan.FromHours(7));

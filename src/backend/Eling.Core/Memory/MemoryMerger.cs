@@ -49,12 +49,12 @@ public sealed class MemoryMerger : IMemoryMerger
             // Project gets priority boost so it ranks above comparable global results
             // Lower rank = more relevant in FTS5 bm25 (negative). We boost by subtracting.
             var boostedRank = r.Rank - ProjectPriorityBoost;
-            merged.Add(new ScopedSearchResult(r.Id, boostedRank, MemoryScopeKind.Project, projectRoot));
+            merged.Add(new ScopedSearchResult(r.Id, boostedRank, MemoryScopeKind.Project, projectRoot, r.MatchedVia, r.PorterScore, r.TrigramScore, r.QueryMode));
         }
 
         foreach (var r in globalResults)
         {
-            merged.Add(new ScopedSearchResult(r.Id, r.Rank, MemoryScopeKind.Global, null));
+            merged.Add(new ScopedSearchResult(r.Id, r.Rank, MemoryScopeKind.Global, null, r.MatchedVia, r.PorterScore, r.TrigramScore, r.QueryMode));
         }
 
         // Deduplicate: only if same scoped identity appears twice (should not happen)

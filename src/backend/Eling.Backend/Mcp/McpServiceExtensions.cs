@@ -51,6 +51,11 @@ public static class McpServiceExtensions
                 sp.GetRequiredService<IScopedMemoryService>(),
                 sp.GetRequiredService<IIntentionStorage>()));
 
+        services.AddScoped<IMemoryMaintenanceService>(sp =>
+            new MemoryMaintenanceService(
+                sp.GetRequiredService<IMemoryService>(),
+                sp.GetRequiredService<IMemoryIndex>()));
+
         return services;
     }
 
@@ -86,6 +91,11 @@ public static class McpServiceExtensions
             new MemoryRecallService(
                 sp.GetRequiredService<IScopedMemoryService>(),
                 sp.GetRequiredService<IIntentionStorage>()));
+
+        services.AddScoped<IMemoryMaintenanceService>(sp =>
+            new MemoryMaintenanceService(
+                sp.GetRequiredService<IMemoryService>(),
+                sp.GetRequiredService<IMemoryIndex>()));
 
         return services;
     }

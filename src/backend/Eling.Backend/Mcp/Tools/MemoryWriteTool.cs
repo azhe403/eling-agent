@@ -7,7 +7,7 @@ using ModelContextProtocol.Server;
 namespace Eling.Backend.Mcp.Tools;
 
 /// <summary>
-/// MCP tools for the write-side of the memory store: create, update, delete.
+/// MCP tools for the write-side of the memory store: create, delete.
 /// </summary>
 [McpServerToolType]
 public sealed class MemoryWriteTool
@@ -73,80 +73,15 @@ public sealed class MemoryWriteTool
             var scoped = await _scoped.SaveAsync(memory, scope);
             _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' scope '{Scope}' type '{Type}'", scoped.Id, scoped.Action, scoped.Memory.Type, scoped.Scope);
             await _notifier.NotifyAsync("mcp");
+            await _scoped.RebuildIndexAsync(scope);
             return SaveMemoryResponse.From(scoped);
         }
 
         var saved = await _memory.SaveAsync(memory);
         _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' type '{Type}' and {TagCount} tags", saved.Id, saved.Action, saved.Type, saved.Tags.Count);
         await _notifier.NotifyAsync("mcp");
+        await _memory.RebuildIndexAsync();
         return SaveMemoryResponse.From(saved, scope);
-    }
-
-    [McpServerTool(Name = "memory_update"), Description("Update an existing memory by ID. Only provided fields are changed; omitted fields remain unchanged.")]
-    public async Task<Memory?> UpdateAsync(
-        [Description("The ULID of the memory to update")] string id,
-        [Description("New content (omitted = unchanged)")] string? content = null,
-        [Description("New type: fact, preference, decision, lesson, note (omitted = unchanged)")] string? type = null,
-        [Description("New tags (omitted = unchanged)")] string[]? tags = null,
-        [Description("New source (omitted = unchanged)")] string? source = null,
-        [Description("New status: active, superseded, archived (omitted = unchanged)")] string? status = null,
-        [Description("Scope: project or global. Defaults to 'project'.")] string scope = "project")
-    {
-        if (string.IsNullOrWhiteSpace(id))
-        {
-            _logger?.LogWarning("memory_update failed: id is empty");
-            throw new ArgumentException("Id cannot be empty.", nameof(id));
-        }
-
-        var memoryId = MemoryId.Parse(id);
-        MemoryType? memoryType = null;
-        MemoryStatus? memoryStatus = null;
-
-        if (!string.IsNullOrWhiteSpace(type))
-        {
-            if (!Enum.TryParse<MemoryType>(type, ignoreCase: true, out var parsedType))
-            {
-                _logger?.LogWarning("memory_update failed: invalid type '{Type}'", type);
-                throw new ArgumentException($"Invalid memory type '{type}'. Valid types: {string.Join(", ", Enum.GetNames<MemoryType>())}", nameof(type));
-            }
-            memoryType = parsedType;
-        }
-
-        if (!string.IsNullOrWhiteSpace(status))
-        {
-            if (!Enum.TryParse<MemoryStatus>(status, ignoreCase: true, out var parsedStatus))
-            {
-                _logger?.LogWarning("memory_update failed: invalid status '{Status}'", status);
-                throw new ArgumentException($"Invalid memory status '{status}'. Valid statuses: {string.Join(", ", Enum.GetNames<MemoryStatus>())}", nameof(status));
-            }
-            memoryStatus = parsedStatus;
-        }
-
-        if (HasScoped && _scoped is not null)
-        {
-            var scopeKind = scope.Trim().ToLowerInvariant() == "global" ? MemoryScopeKind.Global : MemoryScopeKind.Project;
-            var reference = new MemoryReference(memoryId, scopeKind, _scoped.ProjectRoot);
-            var scopedUpdated = await _scoped.UpdateAsync(reference, content, memoryType, tags, source, memoryStatus);
-            if (scopedUpdated is null)
-            {
-                _logger?.LogWarning("memory_update failed: memory '{Id}' not found in scope '{Scope}'", id, scopeKind);
-                return null;
-            }
-            _logger?.LogInformation("Updated memory '{Id}' in scope '{Scope}'", scopedUpdated.Id, scopedUpdated.Scope);
-            await _notifier.NotifyAsync("mcp");
-            return scopedUpdated.Memory;
-        }
-
-        var updated = await _memory.UpdateAsync(memoryId, content, memoryType, tags, source, memoryStatus);
-        if (updated is null)
-        {
-            _logger?.LogWarning("memory_update failed: memory '{Id}' not found", id);
-            return null;
-        }
-
-        _logger?.LogInformation("Updated memory '{Id}' with type '{Type}' and {TagCount} tags", updated.Id, updated.Type, updated.Tags.Count);
-        await _notifier.NotifyAsync("mcp");
-        return updated;
     }
 
     [McpServerTool(Name = "memory_delete"), Description("Delete a memory by its ID. Returns true if the memory was deleted, false if it was not found.")]
@@ -167,13 +102,21 @@ public sealed class MemoryWriteTool
             var reference = new MemoryReference(memoryId, scopeKind, scopeKind == MemoryScopeKind.Project ? _scoped.ProjectRoot : null);
             var deleted = await _scoped.DeleteAsync(reference);
             _logger?.LogInformation("Deleted memory '{Id}' scope '{Scope}' (result: {Result})", id, scopeKind, deleted);
-            if (deleted) await _notifier.NotifyAsync("mcp");
+            if (deleted)
+            {
+                await _notifier.NotifyAsync("mcp");
+                await _scoped.RebuildIndexAsync(scope);
+            }
             return deleted;
         }
 
         var result = await _memory.DeleteAsync(memoryId);
         _logger?.LogInformation("Deleted memory '{Id}' (result: {Result})", id, result);
-        if (result) await _notifier.NotifyAsync("mcp");
+        if (result)
+        {
+            await _notifier.NotifyAsync("mcp");
+            await _memory.RebuildIndexAsync();
+        }
         return result;
     }
 }

@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace Eling.Core;
 
 /// <summary>
@@ -13,11 +15,16 @@ public sealed class MemoryRecallService : IMemoryRecallService
 {
     private readonly IScopedMemoryService _scoped;
     private readonly IIntentionStorage _intentions;
+    private readonly ILogger<MemoryRecallService>? _logger;
 
-    public MemoryRecallService(IScopedMemoryService scoped, IIntentionStorage intentions)
+    public MemoryRecallService(
+        IScopedMemoryService scoped,
+        IIntentionStorage intentions,
+        ILogger<MemoryRecallService>? logger = null)
     {
         _scoped = scoped;
         _intentions = intentions;
+        _logger = logger;
     }
 
     public async Task<MemoryRecallResult> RecallAsync(
@@ -37,27 +44,33 @@ public sealed class MemoryRecallService : IMemoryRecallService
         // behaviour: intention matching is the only thing that actually worked
         // there, and it remains useful for the on-demand recall use case.
         var allIntentions = await _intentions.ListAllAsync();
-        var intentionResults = new List<MemoryRecallIntentionResult>(allIntentions.Count);
+        var intentionResults = allIntentions.Count == 0
+            ? (IReadOnlyList<MemoryRecallIntentionResult>)[]
+            : new List<MemoryRecallIntentionResult>(allIntentions.Count);
         var triggered = 0;
         var expired = 0;
-        foreach (var intention in allIntentions)
+        if (allIntentions.Count > 0)
         {
-            if (!IntentionTriggerMatcher.IsOutstanding(intention, now))
+            var intentionList = (List<MemoryRecallIntentionResult>)intentionResults;
+            foreach (var intention in allIntentions)
             {
-                if (IntentionTriggerMatcher.IsExpired(intention, now)) expired++;
-                continue;
+                if (!IntentionTriggerMatcher.IsOutstanding(intention, now))
+                {
+                    if (IntentionTriggerMatcher.IsExpired(intention, now)) expired++;
+                    continue;
+                }
+                var (matched, isExpired) = IntentionTriggerMatcher.Match(intention, context, now);
+                if (isExpired) expired++;
+                if (matched) triggered++;
+                intentionList.Add(new MemoryRecallIntentionResult(intention, matched, isExpired));
             }
-            var (matched, isExpired) = IntentionTriggerMatcher.Match(intention, context, now);
-            if (isExpired) expired++;
-            if (matched) triggered++;
-            intentionResults.Add(new MemoryRecallIntentionResult(intention, matched, isExpired));
         }
 
         // Topic-based recall: join non-empty topics into a single FTS query
         // and resolve the ranked IDs back to full Memory payloads. We rely
         // on SearchAsync's ranking (SQLite FTS5 BM25) to order results, so
         // no client-side re-ranking is needed.
-        var recall = new List<Memory>(recallLimit);
+        var recall = new List<MemoryRecallHit>(recallLimit);
         var topics = context?.Topics ?? [];
         if (topics.Count > 0 && recallLimit > 0)
         {
@@ -75,7 +88,21 @@ public sealed class MemoryRecallService : IMemoryRecallService
                         ? MemoryReference.ForGlobal(hit.Id)
                         : MemoryReference.ForProject(hit.Id, hit.ProjectRoot ?? _scoped.ProjectRoot ?? ".");
                     var scoped = await _scoped.GetByIdAsync(reference);
-                    if (scoped is not null) recall.Add(scoped.Memory);
+                    if (hit.QueryMode == "or-fallback")
+                    {
+                        _logger?.LogDebug(
+                            "memory_recall fell back to OR queries: tokens={TokenCount}, scope={Scope}",
+                            topics.Count, scope);
+                    }
+                    if (scoped is not null)
+                    {
+                        recall.Add(new MemoryRecallHit(
+                            scoped.Memory,
+                            hit.MatchedVia,
+                            hit.PorterScore,
+                            hit.TrigramScore,
+                            hit.QueryMode));
+                    }
                     if (recall.Count >= recallLimit) break;
                 }
             }

@@ -38,7 +38,7 @@ public static class DashboardServices
         bool isOwnerMode = true)
     {
         // Serilog to file + stderr, so stdout stays clean for MCP stdio JSON-RPC.
-        services.AddElingLogging(context.EffectiveDataDir);
+            services.AddElingLogging(projectId: ProjectId.FromScope(context.ProjectScope, context.IsUserHome));
         services.AddElingCoreServices(context.ProjectScope, context.UserScope);
         // NOTE: do NOT call AddElingMcpServerStdio() here. The MCP stdio transport
         // is owned exclusively by the GenericHost in Program.cs so that peer-mode

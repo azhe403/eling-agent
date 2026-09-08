@@ -18,9 +18,6 @@ export type MemoryCardProps = {
   onCopyToProject: (m: Memory, projectRoot: string) => void
 }
 
-// Renders one memory card. Extracted from the original god component so the
-// parent can stay focused on list state, fetching and dialogs. Visual structure
-// is preserved verbatim from lines 482-599 of the previous file.
 export function MemoryCard({
   memory: m,
   copiedId,
@@ -113,27 +110,16 @@ export function MemoryCard({
           </Button>
         )}
         {m.scope === "global" && runtimes.length > 0 && (
-          <select
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground hover:text-foreground text-xs"
+            onClick={() => onCopyToProject(m, "")}
             aria-label="Copy to project"
             title="Copy to Project"
-            className="h-8 rounded-md border bg-background px-2 text-xs"
-            defaultValue=""
-            onChange={(e) => {
-              if (e.target.value) {
-                onCopyToProject(m, e.target.value)
-                e.target.value = ""
-              }
-            }}
           >
-            <option value="" disabled>
-              Copy to…
-            </option>
-            {runtimes.map((r) => (
-              <option key={r.projectRoot} value={r.projectRoot}>
-                📁 {r.projectRoot.split("\\").pop() ?? r.projectRoot.split("/").pop()}
-              </option>
-            ))}
-          </select>
+            ↓ Project
+          </Button>
         )}
         <Button
           variant="ghost"

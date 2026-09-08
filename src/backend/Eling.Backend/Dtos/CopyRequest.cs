@@ -4,4 +4,5 @@ public record CopyRequest(
     string Id,
     string SourceScope,
     string? SourceProjectRoot,
-    string TargetProjectRoot);
+    string TargetProjectRoot,
+    bool Move = false);
