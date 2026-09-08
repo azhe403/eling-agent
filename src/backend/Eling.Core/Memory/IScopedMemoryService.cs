@@ -15,6 +15,9 @@ public interface IScopedMemoryService
 
     // Copy / Promote between scopes
     Task<ScopedMemory?> CopyToProjectAsync(MemoryReference source, string targetProjectRoot);
+    Task<ScopedMemory?> CopyToGlobalAsync(MemoryReference source);
+    Task<ScopedMemory?> MoveToProjectAsync(MemoryReference source, string targetProjectRoot);
+    Task<ScopedMemory?> MoveToGlobalAsync(MemoryReference source);
     Task<ScopedMemory?> PromoteToGlobalAsync(MemoryReference source);
 
     // Raw services for isolation checks

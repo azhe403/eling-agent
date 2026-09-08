@@ -31,7 +31,9 @@ public static class ScopedMemoryEndpoints
 
         var copy = app.MapGroup("/api/scoped");
         copy.MapPost("/copy-to-project", CopyToProjectAsync);
+        copy.MapPost("/move-to-project", MoveToProjectAsync);
         copy.MapPost("/promote-to-global", PromoteToGlobalAsync);
+        copy.MapPost("/move-to-global", MoveToGlobalAsync);
 
         return app;
     }
@@ -290,8 +292,26 @@ public static class ScopedMemoryEndpoints
 
         var copy = new Memory(sourceMemory.Type, sourceMemory.Content, sourceMemory.Tags, sourceMemory.Source, sourceMemory.Status);
         var saved = await targetService.SaveAsync(copy);
+        if (request.Move)
+        {
+            if (request.SourceScope == "global")
+            {
+                await registry.GetGlobalMemoryService().DeleteAsync(memoryId);
+            }
+            else if (!string.IsNullOrWhiteSpace(request.SourceProjectRoot))
+            {
+                var srcService = registry.TryResolveMemoryServiceByProjectRoot(request.SourceProjectRoot);
+                if (srcService is not null) await srcService.DeleteAsync(memoryId);
+            }
+        }
         broadcaster.Notify("dashboard");
         return TypedResults.Ok(ScopedMemoryDto.From(saved, MemoryScopeKind.Project, request.TargetProjectRoot));
+    }
+
+    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>>> MoveToProjectAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, CopyRequest request)
+    {
+        var moveRequest = request with { Move = true };
+        return await CopyToProjectAsync(registry, broadcaster, moveRequest);
     }
 
     private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>>> PromoteToGlobalAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, PromoteRequest request)
@@ -312,6 +332,12 @@ public static class ScopedMemoryEndpoints
         }
         broadcaster.Notify("dashboard");
         return TypedResults.Ok(ScopedMemoryDto.From(saved, MemoryScopeKind.Global, null));
+    }
+
+    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>>> MoveToGlobalAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, PromoteRequest request)
+    {
+        var moveRequest = request with { Move = true };
+        return await PromoteToGlobalAsync(registry, broadcaster, moveRequest);
     }
 
     private static bool TryParseMemoryId(string id, out MemoryId memoryId)

@@ -126,11 +126,11 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         IReadOnlyCollection<ScopedSearchResult> merged;
         if (normalizedScope == "project")
         {
-            merged = projectResults.Select(r => new ScopedSearchResult(r.Id, r.Rank, MemoryScopeKind.Project, _projectRoot)).ToList().AsReadOnly();
+            merged = projectResults.Select(r => new ScopedSearchResult(r.Id, r.Rank, MemoryScopeKind.Project, _projectRoot, r.MatchedVia, r.PorterScore, r.TrigramScore, r.QueryMode)).ToList().AsReadOnly();
         }
         else if (normalizedScope == "global")
         {
-            merged = globalResults.Select(r => new ScopedSearchResult(r.Id, r.Rank, MemoryScopeKind.Global, null)).ToList().AsReadOnly();
+            merged = globalResults.Select(r => new ScopedSearchResult(r.Id, r.Rank, MemoryScopeKind.Global, null, r.MatchedVia, r.PorterScore, r.TrigramScore, r.QueryMode)).ToList().AsReadOnly();
         }
         else
         {
@@ -220,6 +220,77 @@ public sealed class ScopedMemoryService : IScopedMemoryService
 
         var copy = new Memory(memory.Type, memory.Content, memory.Tags, memory.Source, memory.Status);
         var saved = await _globalService.SaveAsync(copy);
+        return new ScopedMemory(saved, MemoryScopeKind.Global, null);
+    }
+
+    public async Task<ScopedMemory?> CopyToGlobalAsync(MemoryReference source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (source.Scope == MemoryScopeKind.Global)
+        {
+            throw new InvalidOperationException("Source is already Global");
+        }
+
+        var sourceService = ResolveService(source.Scope);
+        var memory = await sourceService.GetByIdAsync(source.Id);
+        if (memory is null) return null;
+
+        var copy = new Memory(memory.Type, memory.Content, memory.Tags, memory.Source, memory.Status);
+        var saved = await _globalService.SaveAsync(copy);
+        return new ScopedMemory(saved, MemoryScopeKind.Global, null);
+    }
+
+    public async Task<ScopedMemory?> MoveToProjectAsync(MemoryReference source, string targetProjectRoot)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetProjectRoot);
+        if (source.Scope == MemoryScopeKind.Project && string.Equals(Path.GetFullPath(source.ProjectRoot ?? ""), Path.GetFullPath(targetProjectRoot), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Source and target project are the same");
+        }
+
+        var sourceService = ResolveService(source.Scope);
+        var memory = await sourceService.GetByIdAsync(source.Id);
+        if (memory is null) return null;
+
+        var copy = new Memory(memory.Type, memory.Content, memory.Tags, memory.Source, memory.Status);
+        IMemoryService targetService;
+        if (_projectRoot != null && string.Equals(Path.GetFullPath(targetProjectRoot), Path.GetFullPath(_projectRoot), StringComparison.OrdinalIgnoreCase))
+        {
+            targetService = _projectService;
+        }
+        else
+        {
+            var dataDir = Path.GetFullPath(targetProjectRoot).EndsWith(".eling", StringComparison.OrdinalIgnoreCase)
+                ? Path.GetFullPath(targetProjectRoot)
+                : Path.Combine(Path.GetFullPath(targetProjectRoot), ".eling");
+            targetService = new MemoryService(
+                new FileSystemMemoryStorage(dataDir),
+                new SqliteMemoryIndex(Path.Combine(dataDir, "index.db")));
+        }
+
+        var saved = await targetService.SaveAsync(copy);
+        await sourceService.DeleteAsync(source.Id);
+
+        return new ScopedMemory(saved, MemoryScopeKind.Project, targetProjectRoot);
+    }
+
+    public async Task<ScopedMemory?> MoveToGlobalAsync(MemoryReference source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (source.Scope == MemoryScopeKind.Global)
+        {
+            throw new InvalidOperationException("Source is already Global");
+        }
+
+        var sourceService = ResolveService(source.Scope);
+        var memory = await sourceService.GetByIdAsync(source.Id);
+        if (memory is null) return null;
+
+        var copy = new Memory(memory.Type, memory.Content, memory.Tags, memory.Source, memory.Status);
+        var saved = await _globalService.SaveAsync(copy);
+        await sourceService.DeleteAsync(source.Id);
+
         return new ScopedMemory(saved, MemoryScopeKind.Global, null);
     }
 }

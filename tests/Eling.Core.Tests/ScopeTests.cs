@@ -141,3 +141,144 @@ public sealed class UserScopeTests
         try { Directory.Delete(projectRoot, recursive: true); } catch { }
     }
 }
+
+public sealed class CentralLogDirectoryTests
+{
+    [Fact]
+    public void Default_Linux_macos_path_returns_local_share()
+    {
+        // Arrange
+        var expectedHome = "/home/user";
+        var expected = Path.Combine(expectedHome, ".local", "share", "eling", "logs");
+
+        // Act
+        var actual = CentralLogDirectory.Resolve(userHome: expectedHome);
+
+        // Assert
+        Assert.Equal(expected, actual);
+        Assert.True(Directory.Exists(actual));
+    }
+
+    [Fact]
+    public void Default_Windows_path_returns_local_share()
+    {
+        // Arrange
+        var expectedHome = @"C:\Users\some-user";
+        var expected = Path.Combine(expectedHome, ".local", "share", "eling", "logs");
+
+        // Act
+        var actual = CentralLogDirectory.Resolve(userHome: expectedHome);
+
+        // Assert
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void XDG_override_is_honoured_on_all_platforms()
+    {
+        // Arrange
+        var xdgDataHome = "/custom/data";
+        var userHome = "/home/user";
+        var expected = Path.Combine(xdgDataHome, "eling", "logs");
+
+        // Act
+        var actual = CentralLogDirectory.Resolve(xdgDataHome: xdgDataHome, userHome: userHome);
+
+        // Assert
+        Assert.Equal(expected, actual);
+        Assert.True(Directory.Exists(actual));
+    }
+
+    [Fact]
+    public void Directory_is_created_on_resolve()
+    {
+        // Arrange
+        var tempDir = Path.Combine(Path.GetTempPath(), $"test-{Guid.NewGuid()}");
+        var expectedHome = tempDir;
+        var expected = Path.Combine(tempDir, ".local", "share", "eling", "logs");
+
+        // Act
+        var actual = CentralLogDirectory.Resolve(userHome: expectedHome);
+
+        // Assert
+        Assert.Equal(expected, actual);
+        Assert.True(Directory.Exists(actual));
+    }
+
+    [Fact]
+    public void Null_or_whitespace_userHome_falls_back_to_SpecialFolder_UserProfile()
+    {
+        // Arrange
+        var expectedHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var expected = Path.Combine(expectedHome, ".local", "share", "eling", "logs");
+
+        // Act & Assert for null
+        var actualNull = CentralLogDirectory.Resolve(userHome: null);
+        Assert.Equal(expected, actualNull);
+
+        // Act & Assert for whitespace
+        var actualWhitespace = CentralLogDirectory.Resolve(userHome: "   ");
+        Assert.Equal(expected, actualWhitespace);
+    }
+
+    [Fact]
+    public void Empty_xdgDataHome_is_ignored()
+    {
+        // Arrange
+        var expectedHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var expected = Path.Combine(expectedHome, ".local", "share", "eling", "logs");
+
+        // Act
+        var actual = CentralLogDirectory.Resolve(xdgDataHome: "", userHome: expectedHome);
+
+        // Assert
+        Assert.Equal(expected, actual);
+    }
+}
+
+public sealed class ProjectIdTests
+{
+    [Fact]
+    public void Returns_UserScope_when_isUserHome_is_true()
+    {
+        // Arrange
+        ProjectScope? scope = null; // doesn't matter when isUserHome true
+        bool isUserHome = true;
+
+        // Act
+        var actual = ProjectId.FromScope(scope, isUserHome);
+
+        // Assert
+        Assert.Equal("UserScope", actual);
+    }
+
+    [Fact]
+    public void Returns_DirectoryName_for_normal_project_scope()
+    {
+        // Arrange
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"project-{Guid.NewGuid()}");
+        Directory.CreateDirectory(tempRoot);
+        var scope = new ProjectScope(tempRoot);
+        bool isUserHome = false; // not running at user home
+
+        // Act
+        var actual = ProjectId.FromScope(scope, isUserHome);
+
+        // Assert
+        Assert.Equal(Path.GetFileName(tempRoot), actual);
+    }
+
+    [Fact]
+    public void Returns_unknown_when_scope_is_null()
+    {
+        // Arrange
+        ProjectScope? scope = null;
+        bool isUserHome = false;
+
+        // Act
+        var actual = ProjectId.FromScope(scope, isUserHome);
+
+        // Assert
+        Assert.Equal("unknown", actual);
+    }
+}
