@@ -1,0 +1,125 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Global Styles -->
+    <Style Selector="TextBlock">
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Foreground" Value="#f3f4f6"/>
+    </Style>
+
+    <Style Selector="TextBox">
+        <Setter Property="Background" Value="#1f1f1f"/>
+        <Setter Property="Foreground" Value="#f3f4f6"/>
+        <Setter Property="BorderBrush" Value="#333333"/>
+        <Setter Property="CornerRadius" Value="6"/>
+        <Setter Property="Padding" Value="8,6"/>
+    </Style>
+
+    <Style Selector="ComboBox">
+        <Setter Property="Background" Value="#1f1f1f"/>
+        <Setter Property="Foreground" Value="#f3f4f6"/>
+        <Setter Property="BorderBrush" Value="#333333"/>
+        <Setter Property="CornerRadius" Value="6"/>
+    </Style>
+
+    <Style Selector="Button">
+        <Setter Property="Background" Value="#262626"/>
+        <Setter Property="Foreground" Value="#d1d5db"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="BorderBrush" Value="#333333"/>
+        <Setter Property="CornerRadius" Value="6"/>
+        <Setter Property="Padding" Value="10,5"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style Selector="Button.primary">
+        <Setter Property="Background" Value="#2563eb"/>
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+
+    <Style Selector="Button.danger">
+        <Setter Property="Background" Value="#dc2626"/>
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+
+    <Style Selector="Button.subtle">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+
+    <!-- ListBoxItem: Static, hover follows cursor, not selection -->
+    <Style Selector="ListBoxItem">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Margin" Value="0"/>
+    </Style>
+    <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="#1f1f1f"/>
+        <Setter Property="Padding" Value="0"/>
+    </Style>
+    <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent"/>
+    </Style>
+
+    <Style Selector="ListBox">
+        <Setter Property="Background" Value="#121212"/>
+    </Style>
+
+    <!-- Memory Card Styles -->
+    <Style Selector="Border.memory-card">
+        <Setter Property="Background" Value="#1c1c1c"/>
+        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="Padding" Value="16,12"/>
+        <Setter Property="Margin" Value="3"/>
+        <Setter Property="BorderBrush" Value="#2c2c2c"/>
+        <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+
+    <Style Selector="Border.badge">
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="Padding" Value="8,3"/>
+    </Style>
+
+    <Style Selector="Border.tag">
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="Padding" Value="6,2"/>
+        <Setter Property="Margin" Value="0,0,4,4"/>
+        <Setter Property="Background" Value="#262626"/>
+        <Setter Property="BorderBrush" Value="#383838"/>
+        <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+
+    <Style Selector="Border.scope-badge">
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="Padding" Value="6,2"/>
+        <Setter Property="Background" Value="#262626"/>
+        <Setter Property="BorderBrush" Value="#383838"/>
+        <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+
+    <!-- Modal Overlay Styles -->
+    <Style Selector="Border.modal-overlay">
+        <Setter Property="Background" Value="#cc000000"/>
+        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        <Setter Property="VerticalAlignment" Value="Stretch"/>
+    </Style>
+
+    <Style Selector="Border.modal">
+        <Setter Property="Background" Value="#1c1c1c"/>
+        <Setter Property="BorderBrush" Value="#333333"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Padding" Value="20"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <Style Selector="Border.modal.danger">
+        <Setter Property="BorderBrush" Value="#7f1d1d"/>
+    </Style>
+
+</Styles>

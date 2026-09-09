@@ -1,0 +1,355 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Eling.Desktop.ViewModels"
+        xmlns:m="using:Eling.Desktop.Models"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="using:Eling.Desktop"
+        mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+        x:Class="Eling.Desktop.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="Eling"
+        Width="1050" Height="720">
+
+    <Grid>
+        <!-- Main Application Layout -->
+        <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+            <!-- Top Bar -->
+            <Border Grid.Row="0" Background="#1a1a1a" Padding="16,12" BorderBrush="#2a2a2a" BorderThickness="0,0,0,1">
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12">
+                        <TextBlock Text="🧠 Eling" FontSize="20" FontWeight="Bold"
+                                   VerticalAlignment="Center"/>
+                        <Border Background="#242424" BorderBrush="#333333" BorderThickness="1"
+                                CornerRadius="12" Padding="10,4" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Ellipse Width="8" Height="8" VerticalAlignment="Center">
+                                    <Ellipse.Fill>
+                                        <SolidColorBrush Color="{Binding SseStatus, Converter={x:Static local:SseStatusColorConverter.Instance}}"/>
+                                    </Ellipse.Fill>
+                                </Ellipse>
+                                <TextBlock Text="{Binding SseStatus}" FontSize="11" Foreground="#9ca3af"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                        <Button Command="{Binding CreateMemoryCommand}" Content="+ New Memory"
+                                Classes="primary" Padding="12,6"/>
+                        <Button Command="{Binding RefreshCommand}" Content="↻ Refresh"
+                                IsEnabled="{Binding !IsLoading}"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Filter Bar -->
+            <Border Grid.Row="1" Background="#161616" Padding="16,10" BorderBrush="#2a2a2a" BorderThickness="0,0,0,1">
+                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                    <!-- Scope Tabs -->
+                    <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
+                        <TextBlock Text="Scope:" FontSize="12" Foreground="#6b7280" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                        <Button Content="All Open Projects" Padding="12,5" FontSize="11"
+                                Command="{Binding SelectScopeCommand}" CommandParameter="all"
+                                Background="{Binding SelectedScope, Converter={x:Static local:ScopeButtonConverter.Instance}, ConverterParameter=all}"
+                                Foreground="White" BorderThickness="0"/>
+                        <Button Content="🌐 Global" Padding="12,5" FontSize="11"
+                                Command="{Binding SelectScopeCommand}" CommandParameter="global"
+                                Background="{Binding SelectedScope, Converter={x:Static local:ScopeButtonConverter.Instance}, ConverterParameter=global}"
+                                Foreground="White" BorderThickness="0"/>
+                        <ItemsControl ItemsSource="{Binding Runtimes}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="6"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="m:RuntimeDto">
+                                    <Button Content="{Binding Name, StringFormat='📁 {0}'}"
+                                            Padding="12,5" FontSize="11"
+                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectScopeCommand}"
+                                            CommandParameter="{Binding ProjectRoot}"
+                                            Background="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedScope, Converter={x:Static local:ScopeButtonConverter.Instance}, ConverterParameter={Binding ProjectRoot}}"
+                                            Foreground="#d1d5db" BorderThickness="0"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!-- Type Filter Chips -->
+                    <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <TextBlock Text="Type:" FontSize="12" Foreground="#6b7280" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                        <ItemsControl ItemsSource="{Binding TypeFilters}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="4"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Content="{Binding}" Padding="10,5" FontSize="11"
+                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectTypeCommand}"
+                                            CommandParameter="{Binding}"
+                                            Background="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedType, Converter={x:Static local:ScopeButtonConverter.Instance}, ConverterParameter={Binding}}"
+                                            Foreground="#d1d5db" BorderThickness="0"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!-- Search Box with Clear Button -->
+                    <Border Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" VerticalAlignment="Center" Margin="16,0,0,0">
+                        <Grid ColumnDefinitions="*,Auto" Width="280">
+                            <TextBox Text="{Binding SearchQuery}" PlaceholderText="Search content or ID..."
+                                     Padding="10,6,28,6"/>
+                            <Button Grid.Column="1" Content="✕"
+                                    Command="{Binding ClearSearchCommand}"
+                                    Classes="subtle"
+                                    IsVisible="{Binding SearchQuery, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                    FontSize="11" Margin="0,0,4,0"
+                                    VerticalAlignment="Center" HorizontalAlignment="Right"/>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- Memory List -->
+            <ListBox Grid.Row="2"
+                     ItemsSource="{Binding FilteredMemories}"
+                     Padding="6"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="m:MemoryDto">
+                        <Border Classes="memory-card">
+                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+
+                                <!-- Badges -->
+                                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                                    <Border Classes="badge"
+                                            Background="{Binding Type, Converter={x:Static local:MemoryTypeColorConverter.Instance}}">
+                                        <TextBlock Text="{Binding Type}" FontSize="11" FontWeight="SemiBold" Foreground="White"/>
+                                    </Border>
+                                    <Border Classes="scope-badge">
+                                        <TextBlock Text="{Binding ScopeDisplay}" FontSize="10" Foreground="#9ca3af"/>
+                                    </Border>
+                                </StackPanel>
+
+                                <!-- Action Buttons -->
+                                <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                                    <Button Content="↑ Promote" FontSize="11" Padding="8,4" CornerRadius="4"
+                                            Background="#142e1f" Foreground="#4ade80" BorderBrush="#1f4a30" BorderThickness="1"
+                                            IsVisible="{Binding IsProjectScope}"
+                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).PromptPromoteCommand}"
+                                            CommandParameter="{Binding}"
+                                            ToolTip.Tip="Promote memory to Global scope"/>
+                                    <Button Content="↓ Project" FontSize="11" Padding="8,4" CornerRadius="4"
+                                            Background="#14263b" Foreground="#60a5fa" BorderBrush="#1e3a5f" BorderThickness="1"
+                                            IsVisible="{Binding IsGlobalScope}"
+                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).PromptCopyCommand}"
+                                            CommandParameter="{Binding}"
+                                            ToolTip.Tip="Copy or move memory to a Project"/>
+                                    <Button Content="✏ Edit" FontSize="11" Padding="8,4" CornerRadius="4"
+                                            Background="#262626" Foreground="#9ca3af" BorderThickness="0"
+                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).StartEditCommand}"
+                                            CommandParameter="{Binding}"/>
+                                    <Button Content="🗑 Delete" FontSize="11" Padding="8,4" CornerRadius="4"
+                                            Background="#331818" Foreground="#ef4444" BorderThickness="0"
+                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).PromptDeleteCommand}"
+                                            CommandParameter="{Binding}"/>
+                                </StackPanel>
+
+                                <!-- Content -->
+                                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                           Text="{Binding Content}" FontSize="13" Foreground="#e5e7eb"
+                                           TextWrapping="Wrap" MaxLines="4" Margin="0,4,0,0"/>
+
+                                <!-- Tags -->
+                                <ItemsControl Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                                              ItemsSource="{Binding Tags}" Margin="0,3,0,0">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Classes="tag">
+                                                <TextBlock Text="{Binding StringFormat='#{0}'}" FontSize="10" Foreground="#d1d5db"/>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <!-- ID + Timestamps -->
+                                <StackPanel Grid.Row="3" Grid.Column="0" Orientation="Horizontal" Spacing="8" Margin="0,2,0,0">
+                                    <TextBlock Text="{Binding Id, StringFormat='ID: {0}'}" FontSize="10"
+                                               Foreground="#6b7280" FontFamily="Cascadia Code,Consolas,Menlo"/>
+                                    <TextBlock Text="{Binding CreatedAt, StringFormat='Created: {0:yyyy-MM-dd HH:mm}'}"
+                                               FontSize="10" Foreground="#6b7280"/>
+                                </StackPanel>
+                                <TextBlock Grid.Row="3" Grid.Column="1" Margin="0,2,0,0"
+                                           Text="{Binding UpdatedAt, StringFormat='Updated: {0:yyyy-MM-dd HH:mm}'}"
+                                           FontSize="10" Foreground="#6b7280"/>
+
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- Bottom Status Bar -->
+            <Border Grid.Row="3" Background="#161616" Padding="16,8" BorderBrush="#2a2a2a" BorderThickness="0,1,0,0">
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                        <Ellipse Width="8" Height="8" VerticalAlignment="Center">
+                            <Ellipse.Fill>
+                                <SolidColorBrush Color="{Binding SseStatus, Converter={x:Static local:SseStatusColorConverter.Instance}}"/>
+                            </Ellipse.Fill>
+                        </Ellipse>
+                        <TextBlock Text="{Binding ConnectionDetails}" FontSize="11" Foreground="#9ca3af" VerticalAlignment="Center"/>
+                        <TextBlock Text="|" FontSize="11" Foreground="#4b5563" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#6b7280" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
+                        <TextBlock Text="{Binding MemoryCountStatus}" FontSize="11" Foreground="#9ca3af" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+        </Grid>
+
+        <!-- Create Memory Modal -->
+        <Border Classes="modal-overlay" IsVisible="{Binding ShowCreateDialog}">
+            <Border Classes="modal" Width="550">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Create New Memory" FontSize="16" FontWeight="Bold"/>
+                    <TextBlock Text="Content" FontSize="12" Foreground="#9ca3af"/>
+                    <TextBox Text="{Binding CreateContent}" AcceptsReturn="True" Height="100" TextWrapping="Wrap"/>
+                    <Grid ColumnDefinitions="*,*">
+                        <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,6,0">
+                            <TextBlock Text="Type" FontSize="12" Foreground="#9ca3af"/>
+                            <ComboBox ItemsSource="{Binding TypeOptions}" SelectedItem="{Binding CreateType}"
+                                      HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="4" Margin="6,0,0,0">
+                            <TextBlock Text="Scope" FontSize="12" Foreground="#9ca3af"/>
+                            <ComboBox SelectedIndex="0" HorizontalAlignment="Stretch">
+                                <ComboBoxItem Content="Current Project" Tag="all"/>
+                                <ComboBoxItem Content="Global Scope" Tag="global"/>
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Text="Tags (comma-separated)" FontSize="12" Foreground="#9ca3af"/>
+                    <TextBox Text="{Binding CreateTags}" PlaceholderText="e.g. backend, auth, convention"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+                        <Button Content="Cancel" Command="{Binding CancelCreateCommand}" Classes="subtle" Foreground="#9ca3af"/>
+                        <Button Content="Save Memory" Command="{Binding SaveCreateCommand}"
+                                Classes="primary" Padding="14,6"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <!-- Edit Memory Modal -->
+        <Border Classes="modal-overlay" IsVisible="{Binding EditingMemory, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <Border Classes="modal" Width="550">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Edit Memory" FontSize="16" FontWeight="Bold"/>
+                    <TextBlock Text="Content" FontSize="12" Foreground="#9ca3af"/>
+                    <TextBox Text="{Binding EditContent}" AcceptsReturn="True" Height="100" TextWrapping="Wrap"/>
+                    <Grid ColumnDefinitions="*,*">
+                        <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,6,0">
+                            <TextBlock Text="Type" FontSize="12" Foreground="#9ca3af"/>
+                            <ComboBox ItemsSource="{Binding TypeOptions}" SelectedItem="{Binding EditType}"
+                                      HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="4" Margin="6,0,0,0">
+                            <TextBlock Text="Status" FontSize="12" Foreground="#9ca3af"/>
+                            <ComboBox ItemsSource="{Binding StatusOptions}" SelectedItem="{Binding EditStatus}"
+                                      HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+                        <Button Content="Cancel" Command="{Binding CancelEditCommand}" Classes="subtle" Foreground="#9ca3af"/>
+                        <Button Content="Save Changes" Command="{Binding SaveEditCommand}"
+                                Classes="primary" Padding="14,6"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <!-- Delete Confirmation Modal -->
+        <Border Classes="modal-overlay" IsVisible="{Binding DeleteTarget, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <Border Classes="modal danger" Width="480">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Delete Memory?" FontSize="16" FontWeight="Bold" Foreground="#ef4444"/>
+                    <TextBlock Text="This action will permanently delete this memory from storage disk. This cannot be undone."
+                               FontSize="12" Foreground="#9ca3af" TextWrapping="Wrap"/>
+                    <Border Background="#141414" BorderBrush="#2e2e2e" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,4,0,0">
+                        <TextBlock Text="{Binding DeleteTarget.Content}" FontSize="12" MaxLines="3" TextWrapping="Wrap"/>
+                    </Border>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+                        <Button Content="Cancel" Command="{Binding CancelDeleteCommand}" Classes="subtle" Foreground="#9ca3af"/>
+                        <Button Content="Delete Permanently" Command="{Binding ConfirmDeleteCommand}"
+                                Classes="danger" Padding="14,6"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <!-- Promote to Global Modal -->
+        <Border Classes="modal-overlay" IsVisible="{Binding PromoteTarget, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <Border Classes="modal" Width="520">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Promote to Global Scope" FontSize="16" FontWeight="Bold"/>
+                    <TextBlock Text="Choose promotion mode for this memory:" FontSize="12" Foreground="#9ca3af"/>
+                    <Border Background="#141414" BorderBrush="#2e2e2e" BorderThickness="1" CornerRadius="6" Padding="10">
+                        <TextBlock Text="{Binding PromoteTarget.Content}" FontSize="12" MaxLines="3" TextWrapping="Wrap"/>
+                    </Border>
+                    <RadioButton Content="Copy to Global (keep original in project)" IsChecked="{Binding !PromoteAsMove}"
+                                 Foreground="#f3f4f6" FontSize="12"/>
+                    <RadioButton Content="Move to Global (delete original from project)" IsChecked="{Binding PromoteAsMove}"
+                                 Foreground="#f59e0b" FontSize="12"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+                        <Button Content="Cancel" Command="{Binding CancelPromoteCommand}" Classes="subtle" Foreground="#9ca3af"/>
+                        <Button Content="Promote" Command="{Binding ConfirmPromoteCommand}"
+                                Classes="primary" Padding="14,6"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <!-- Copy/Demote to Project Modal -->
+        <Border Classes="modal-overlay" IsVisible="{Binding CopyTarget, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <Border Classes="modal" Width="520">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Copy/Move to Project" FontSize="16" FontWeight="Bold"/>
+                    <TextBlock Text="Target Project" FontSize="12" Foreground="#9ca3af"/>
+                    <ComboBox ItemsSource="{Binding Runtimes}" SelectedItem="{Binding CopyProjectRoot}"
+                              HorizontalAlignment="Stretch">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate DataType="m:RuntimeDto">
+                                <TextBlock Text="{Binding Name, StringFormat='📁 {0}'}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <Border Background="#141414" BorderBrush="#2e2e2e" BorderThickness="1" CornerRadius="6" Padding="10">
+                        <TextBlock Text="{Binding CopyTarget.Content}" FontSize="12" MaxLines="3" TextWrapping="Wrap"/>
+                    </Border>
+                    <RadioButton Content="Copy to Project (keep in global)" IsChecked="{Binding !CopyAsMove}"
+                                 Foreground="#f3f4f6" FontSize="12"/>
+                    <RadioButton Content="Move to Project (delete from global)" IsChecked="{Binding CopyAsMove}"
+                                 Foreground="#f59e0b" FontSize="12"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+                        <Button Content="Cancel" Command="{Binding CancelCopyCommand}" Classes="subtle" Foreground="#9ca3af"/>
+                        <Button Content="Confirm" Command="{Binding ConfirmCopyCommand}"
+                                Classes="primary" Padding="14,6"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Border>
+
+    </Grid>
+
+</Window>

@@ -3,6 +3,9 @@
     <Project Path="src/backend/Eling.Core/Eling.Core.csproj" />
     <Project Path="src/backend/Eling.Backend/Eling.Backend.csproj" />
   </Folder>
+  <Folder Name="/src/desktop/">
+    <Project Path="src/desktop/Eling.Desktop/Eling.Desktop.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Eling.Core.Tests/Eling.Core.Tests.csproj" />
     <Project Path="tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj" />
