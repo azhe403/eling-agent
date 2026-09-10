@@ -5,6 +5,7 @@ using Eling.Backend.Mcp;
 using Eling.Core;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Backend.Bootstrap;
 
@@ -39,7 +40,7 @@ public static class DashboardServices
     {
         // Serilog to file + stderr, so stdout stays clean for MCP stdio JSON-RPC.
             services.AddElingLogging(projectId: ProjectId.FromScope(context.ProjectScope, context.IsUserHome));
-        services.AddElingCoreServices(context.ProjectScope, context.UserScope);
+        services.AddElingCoreServices(context.Chain, context.UserScope);
         // NOTE: do NOT call AddElingMcpServerStdio() here. The MCP stdio transport
         // is owned exclusively by the GenericHost in Program.cs so that peer-mode
         // processes (which never build a WebApplication) still have an active
@@ -67,6 +68,18 @@ public static class DashboardServices
         services.AddSingleton<IMemoryMerger, MemoryMerger>();
         services.AddScoped<IMemoryService>(sp =>
             sp.GetRequiredService<RuntimeRegistry>().ResolveMemoryService());
+
+        // Only the dashboard owner maps the SSE endpoint, so only it needs the
+        // runtime-directory watcher. The watcher turns cross-process runtime
+        // membership changes (files appearing/disappearing in the shared
+        // runtime dir) into SSE "runtimes" broadcasts for every subscriber.
+        if (isOwnerMode)
+        {
+            services.AddSingleton<RuntimeDirWatcher>(sp => new RuntimeDirWatcher(
+                sp.GetRequiredService<RuntimeRegistry>().UserScope.RuntimeDirectory,
+                sp.GetRequiredService<MemoryChangeBroadcaster>(),
+                sp.GetRequiredService<ILogger<RuntimeDirWatcher>>()));
+        }
         services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;

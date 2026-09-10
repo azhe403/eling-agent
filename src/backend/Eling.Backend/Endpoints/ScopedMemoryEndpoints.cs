@@ -68,7 +68,7 @@ public static class ScopedMemoryEndpoints
         if (string.IsNullOrWhiteSpace(q)) return TypedResults.BadRequest("Query parameter 'q' is required.");
         var service = registry.GetGlobalMemoryService();
         var results = await service.SearchAsync(q);
-        var list = results.Select(r => new ScopedSearchResultDto(r.Id.Value, r.Rank, "global", null)).ToList();
+        var list = results.Select(ScopedSearchResultDto.Global).ToList();
         if (limit is not null) list = list.Take(limit.Value).ToList();
         return TypedResults.Ok((IReadOnlyCollection<ScopedSearchResultDto>)list.AsReadOnly());
     }
@@ -157,7 +157,7 @@ public static class ScopedMemoryEndpoints
     {
         if (string.IsNullOrWhiteSpace(q)) return TypedResults.Ok((IReadOnlyCollection<ScopedSearchResultDto>)Array.Empty<ScopedSearchResultDto>());
         var results = await registry.SearchAggregatedAsync(q, limit);
-        var dtos = results.Select(r => new ScopedSearchResultDto(r.Id.Value, r.Rank, r.Scope == MemoryScopeKind.Global ? "global" : "project", r.ProjectRoot)).ToList().AsReadOnly();
+        var dtos = results.Select(ScopedSearchResultDto.From).ToList().AsReadOnly();
         return TypedResults.Ok((IReadOnlyCollection<ScopedSearchResultDto>)dtos);
     }
 
@@ -195,7 +195,7 @@ public static class ScopedMemoryEndpoints
         var service = registry.TryResolveMemoryServiceByProjectRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found or not alive");
         var results = await service.SearchAsync(q);
-        var list = results.Select(r => new ScopedSearchResultDto(r.Id.Value, r.Rank, "project", projectRoot)).ToList();
+        var list = results.Select(r => ScopedSearchResultDto.Project(r, projectRoot)).ToList();
         if (limit is not null) list = list.Take(limit.Value).ToList();
         return TypedResults.Ok((IReadOnlyCollection<ScopedSearchResultDto>)list.AsReadOnly());
     }

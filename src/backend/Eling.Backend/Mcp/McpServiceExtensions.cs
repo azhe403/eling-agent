@@ -60,31 +60,56 @@ public static class McpServiceExtensions
     }
 
     public static IServiceCollection AddElingCoreServices(this IServiceCollection services, ProjectScope projectScope, UserScope userScope)
+        => services.AddElingCoreServices(new ScopeChain(projectScope.Root, [projectScope]), userScope);
+
+    /// <summary>
+    /// Registers the memory graph from an ordered scope chain: one storage pair
+    /// per chain level plus the global store. The head level is the write
+    /// target; an uninitialized (empty) chain registers no project levels, so
+    /// project writes fail with <see cref="ProjectScopeNotInitializedException"/>
+    /// until the user approves <c>memory_init_project</c>. Storage instances are
+    /// lazy — nothing touches disk until an actual read/write.
+    /// </summary>
+    public static IServiceCollection AddElingCoreServices(this IServiceCollection services, ScopeChain chain, UserScope userScope)
     {
-        ArgumentNullException.ThrowIfNull(projectScope);
+        ArgumentNullException.ThrowIfNull(chain);
         ArgumentNullException.ThrowIfNull(userScope);
 
-        services.AddSingleton<IMemoryStorage>(new FileSystemMemoryStorage(projectScope.DataDirectory));
-        services.AddSingleton<IMemoryIndex>(new SqliteMemoryIndex(Path.Combine(projectScope.DataDirectory, "index.db")));
-        services.AddSingleton<IIntentionStorage>(new FileSystemIntentionStorage(projectScope.DataDirectory));
-        services.AddScoped<IMemoryService, MemoryService>();
-
+        // Global storage under UserScope (real global scope, no project runtime required)
         services.AddKeyedSingleton<IMemoryStorage>("global", (sp, key) => new FileSystemMemoryStorage(userScope.GlobalDataDirectory));
         services.AddKeyedSingleton<IMemoryIndex>("global", (sp, key) => new SqliteMemoryIndex(Path.Combine(userScope.GlobalDataDirectory, "index.db")));
 
+        // Scope policy & merger — application layer owns scope decisions
         services.AddSingleton<IMemoryScopePolicy, MemoryScopePolicy>();
         services.AddSingleton<IMemoryMerger, MemoryMerger>();
         services.TryAddSingleton<IMemoryChangeNotifier>(NullMemoryChangeNotifier.Instance);
 
+        // Back-compat non-scoped surface: head level storage when initialized,
+        // otherwise an uninitialized path value (never created on disk).
+        var headDataDirectory = chain.Head?.DataDirectory
+            ?? Path.Combine(chain.Cwd, ProjectScope.DataDirectoryName);
+        services.AddSingleton<IMemoryStorage>(new FileSystemMemoryStorage(headDataDirectory));
+        services.AddSingleton<IMemoryIndex>(new SqliteMemoryIndex(Path.Combine(headDataDirectory, "index.db")));
+        services.AddSingleton<IIntentionStorage>(new FileSystemIntentionStorage(headDataDirectory));
+        services.AddScoped<IMemoryService, MemoryService>();
+
+        // Scoped service: chain levels + Global, with level-grouped merge
         services.AddScoped<IScopedMemoryService>(sp =>
         {
             var policy = sp.GetRequiredService<IMemoryScopePolicy>();
             var merger = sp.GetRequiredService<IMemoryMerger>();
-            var projectService = sp.GetRequiredService<IMemoryService>();
             var globalStorage = sp.GetRequiredKeyedService<IMemoryStorage>("global");
             var globalIndex = sp.GetRequiredKeyedService<IMemoryIndex>("global");
             var globalService = new MemoryService(globalStorage, globalIndex);
-            return new ScopedMemoryService(projectService, globalService, policy, merger, projectScope.Root);
+            var levels = new List<ProjectLevel>();
+            foreach (var level in chain.Levels)
+            {
+                var service = new MemoryService(
+                    new FileSystemMemoryStorage(level.DataDirectory),
+                    new SqliteMemoryIndex(Path.Combine(level.DataDirectory, "index.db")));
+                levels.Add(new ProjectLevel(level, service));
+            }
+            return new ScopedMemoryService(levels, globalService, policy, merger, chain.Cwd);
         });
 
         services.AddScoped<IMemoryRecallService>(sp =>

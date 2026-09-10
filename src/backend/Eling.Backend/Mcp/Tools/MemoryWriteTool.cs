@@ -70,11 +70,19 @@ public sealed class MemoryWriteTool
         var memory = new Memory(memoryType, content, tags, source);
         if (HasScoped && _scoped is not null)
         {
-            var scoped = await _scoped.SaveAsync(memory, scope);
-            _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' scope '{Scope}' type '{Type}'", scoped.Id, scoped.Action, scoped.Memory.Type, scoped.Scope);
-            await _notifier.NotifyAsync("mcp");
-            await _scoped.RebuildIndexAsync(scope);
-            return SaveMemoryResponse.From(scoped);
+            try
+            {
+                var scoped = await _scoped.SaveAsync(memory, scope);
+                _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' scope '{Scope}' type '{Type}'", scoped.Id, scoped.Action, scoped.Memory.Type, scoped.Scope);
+                await _notifier.NotifyAsync("mcp");
+                await _scoped.RebuildIndexAsync(scope);
+                return SaveMemoryResponse.From(scoped);
+            }
+            catch (ProjectScopeNotInitializedException ex)
+            {
+                _logger?.LogWarning("memory_save blocked: {Message}", ex.Message);
+                return SaveMemoryResponse.FromInitRequired(ex.Cwd);
+            }
         }
 
         var saved = await _memory.SaveAsync(memory);

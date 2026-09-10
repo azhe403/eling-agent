@@ -101,7 +101,9 @@ public sealed class MemoryRecallService : IMemoryRecallService
                             hit.MatchedVia,
                             hit.PorterScore,
                             hit.TrigramScore,
-                            hit.QueryMode));
+                            hit.QueryMode,
+                            scoped.Scope,
+                            scoped.ProjectRoot));
                     }
                     if (recall.Count >= recallLimit) break;
                 }
@@ -109,16 +111,16 @@ public sealed class MemoryRecallService : IMemoryRecallService
         }
 
         // Recent: most recently updated active memories in the requested
-        // scope. The previous session_start hard-coded Take(5) and ignored
-        // its recentLimit parameter; we honour it here.
-        var recent = new List<Memory>(recentLimit);
+        // scope, keeping their scope provenance. The previous session_start
+        // hard-coded Take(5) and ignored its recentLimit parameter; we honour
+        // it here.
+        var recent = new List<ScopedMemory>(recentLimit);
         if (recentLimit > 0)
         {
             var active = await _scoped.ListAsync(scope, MemoryStatus.Active);
             recent.AddRange(active
                 .OrderByDescending(s => s.Memory.UpdatedAt)
-                .Take(recentLimit)
-                .Select(s => s.Memory));
+                .Take(recentLimit));
         }
 
         // Stats: total + active counts derive from ListAsync rather than two

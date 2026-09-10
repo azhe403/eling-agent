@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Eling.Core;
 
 namespace Eling.Backend.Dtos;
@@ -12,7 +13,7 @@ public record ScopedMemoryDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     string Scope,
-    ProjectInfoDto? Project)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ProjectInfoDto? Project)
 {
     public static ScopedMemoryDto From(Memory memory, MemoryScopeKind scope, string? projectRoot)
     {

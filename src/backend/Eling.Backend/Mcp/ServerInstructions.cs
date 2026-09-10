@@ -22,7 +22,9 @@ public static class ServerInstructions
 
         "Consistency Rules: Use clean lowercase memory tags (no underscores, no mixed language). Keep memories portable — avoid machine-specific absolute paths and personal usernames; use relative paths or generic placeholders so memories stay consistent across machines and platforms.",
 
-        "Memory Recall Strategy: Hydrate context at session start, before significant actions, and after major milestones; avoid redundant recall on every micro-turn to preserve latency and context window."
+        "Memory Recall Strategy: Hydrate context at session start, before significant actions, and after major milestones; avoid redundant recall on every micro-turn to preserve latency and context window.",
+        "Project scope initialization requires user consent: when `memory_project_status` reports `adoptable`, or a default `memory_save` returns `init-required`, ask the user; on approval call `memory_init_project`. The backend never creates `.eling` on its own.",
+        "Tool responses carry provenance: `projectName`/`projectRoot` identify the scope level a memory lives in (own, an ancestor, or null for global); `memory_get`/`list`/`search` return scoped payloads."
     ];
 
     /// <summary>

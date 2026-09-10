@@ -21,7 +21,7 @@ public static class McpHostBuilder
         builder.ConfigureServices(services =>
         {
             services.AddElingLogging(projectId: ProjectId.FromScope(effectiveContext.ProjectScope, effectiveContext.IsUserHome));
-            services.AddElingCoreServices(effectiveContext.ProjectScope, effectiveContext.UserScope);
+            services.AddElingCoreServices(effectiveContext.Chain, effectiveContext.UserScope);
             services.AddElingMcpServerStdio();
 
             services.AddSingleton(shared.Registry);

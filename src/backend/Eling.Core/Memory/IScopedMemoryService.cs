@@ -24,5 +24,10 @@ public interface IScopedMemoryService
     IMemoryService ProjectService { get; }
     IMemoryService GlobalService { get; }
     string? ProjectRoot { get; }
+
+    // Scope-chain surface
+    IReadOnlyList<string> ChainRoots { get; }
+    bool IsInitialized { get; }
+    string Cwd { get; }
 }
 

@@ -9,6 +9,6 @@ namespace Eling.Core;
 /// </summary>
 public sealed record MemoryRecallResult(
     IReadOnlyList<MemoryRecallHit> RecallMemories,
-    IReadOnlyList<Memory> RecentMemories,
+    IReadOnlyList<ScopedMemory> RecentMemories,
     IReadOnlyList<MemoryRecallIntentionResult> Intentions,
     MemoryRecallStats Stats);

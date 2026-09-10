@@ -4,31 +4,42 @@ namespace Eling.Core;
 
 public sealed class MemoryMerger : IMemoryMerger
 {
-    private const double ProjectPriorityBoost = 1000.0;
-
     public IReadOnlyCollection<ScopedMemory> MergeLists(
         IReadOnlyCollection<Memory> projectMemories,
         IReadOnlyCollection<Memory> globalMemories,
         string? projectRoot)
-    {
-        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var result = new List<ScopedMemory>();
+        => MergeLists(
+            [new MemoryLevel(projectRoot ?? "", projectMemories)],
+            globalMemories);
 
-        // Project memories come first (project priority)
-        foreach (var m in projectMemories)
+    public IReadOnlyCollection<ScopedSearchResult> MergeSearchResults(
+        IReadOnlyCollection<MemorySearchResult> projectResults,
+        IReadOnlyCollection<MemorySearchResult> globalResults,
+        string? projectRoot)
+        => MergeSearchResults(
+            [new SearchResultLevel(projectRoot ?? "", projectResults)],
+            globalResults);
+
+    public IReadOnlyCollection<ScopedMemory> MergeLists(
+        IReadOnlyList<MemoryLevel> levels,
+        IReadOnlyCollection<Memory> globalMemories)
+    {
+        var result = new List<ScopedMemory>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var level in levels)
         {
-            var key = $"{MemoryScopeKind.Project}:{m.Id.Value}:{projectRoot}";
-            if (seenKeys.Add(key))
+            foreach (var m in level.Memories)
             {
-                result.Add(new ScopedMemory(m, MemoryScopeKind.Project, projectRoot));
+                if (seen.Add(m.Id.Value))
+                {
+                    result.Add(new ScopedMemory(m, MemoryScopeKind.Project, level.ProjectRoot));
+                }
             }
         }
 
-        // Global memories come second
         foreach (var m in globalMemories)
         {
-            var key = $"{MemoryScopeKind.Global}:{m.Id.Value}";
-            if (seenKeys.Add(key))
+            if (seen.Add(m.Id.Value))
             {
                 result.Add(new ScopedMemory(m, MemoryScopeKind.Global, null));
             }
@@ -38,38 +49,38 @@ public sealed class MemoryMerger : IMemoryMerger
     }
 
     public IReadOnlyCollection<ScopedSearchResult> MergeSearchResults(
-        IReadOnlyCollection<MemorySearchResult> projectResults,
-        IReadOnlyCollection<MemorySearchResult> globalResults,
-        string? projectRoot)
+        IReadOnlyList<SearchResultLevel> levels,
+        IReadOnlyCollection<MemorySearchResult> globalResults)
     {
-        var merged = new List<ScopedSearchResult>();
-
-        foreach (var r in projectResults)
+        // Level-grouped contract: each scope-chain block precedes the next
+        // (nearest first) and global is always last. No cross-level re-sort —
+        // results arrive rank-ascending from FTS5 within a level. Nearest-wins
+        // dedup by ULID keeps the higher-priority (nearer) copy.
+        var result = new List<ScopedSearchResult>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var level in levels)
         {
-            // Project gets priority boost so it ranks above comparable global results
-            // Lower rank = more relevant in FTS5 bm25 (negative). We boost by subtracting.
-            var boostedRank = r.Rank - ProjectPriorityBoost;
-            merged.Add(new ScopedSearchResult(r.Id, boostedRank, MemoryScopeKind.Project, projectRoot, r.MatchedVia, r.PorterScore, r.TrigramScore, r.QueryMode));
+            foreach (var r in level.Results)
+            {
+                if (seen.Add(r.Id.Value))
+                {
+                    result.Add(ToScoped(r, MemoryScopeKind.Project, level.ProjectRoot));
+                }
+            }
         }
 
         foreach (var r in globalResults)
         {
-            merged.Add(new ScopedSearchResult(r.Id, r.Rank, MemoryScopeKind.Global, null, r.MatchedVia, r.PorterScore, r.TrigramScore, r.QueryMode));
-        }
-
-        // Deduplicate: only if same scoped identity appears twice (should not happen)
-        var seen = new HashSet<string>();
-        var deduped = new List<ScopedSearchResult>();
-        foreach (var item in merged.OrderBy(x => x.Rank))
-        {
-            var key = $"{item.Scope}:{item.Id.Value}";
-            if (seen.Add(key))
+            if (seen.Add(r.Id.Value))
             {
-                deduped.Add(item);
+                result.Add(ToScoped(r, MemoryScopeKind.Global, null));
             }
         }
 
-        return deduped.AsReadOnly();
+        return result.AsReadOnly();
     }
+
+    private static ScopedSearchResult ToScoped(MemorySearchResult r, MemoryScopeKind scope, string? projectRoot)
+        => new(r.Id, r.Rank, scope, projectRoot, r.MatchedVia, r.PorterScore, r.TrigramScore, r.QueryMode);
 }
 

@@ -40,6 +40,14 @@ public sealed class MemoryRecallMemory
     [JsonPropertyName("scope")]
     public string Scope { get; set; } = "project";
 
+    [JsonPropertyName("projectName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProjectName { get; set; }
+
+    [JsonPropertyName("projectRoot")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProjectRoot { get; set; }
+
     [JsonPropertyName("matchedVia")]
     public IReadOnlyCollection<string>? MatchedVia { get; set; }
 
@@ -51,6 +59,9 @@ public sealed class MemoryRecallMemory
 
     [JsonPropertyName("queryMode")]
     public string? QueryMode { get; set; }
+
+    private static string? NameOf(string? root)
+        => root is null ? null : Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar));
 
     public static MemoryRecallMemory From(Memory memory) => new()
     {
@@ -68,6 +79,9 @@ public sealed class MemoryRecallMemory
     public static MemoryRecallMemory From(MemoryRecallHit hit)
     {
         var dto = From(hit.Memory);
+        dto.Scope = hit.Scope == MemoryScopeKind.Global ? "global" : "project";
+        dto.ProjectName = NameOf(hit.ProjectRoot);
+        dto.ProjectRoot = hit.ProjectRoot;
         dto.MatchedVia = hit.MatchedVia;
         dto.PorterScore = hit.PorterScore;
         dto.TrigramScore = hit.TrigramScore;
@@ -85,7 +99,9 @@ public sealed class MemoryRecallMemory
         CreatedAt = scoped.Memory.CreatedAt,
         UpdatedAt = scoped.Memory.UpdatedAt,
         Source = scoped.Memory.Source,
-        Scope = scoped.Scope == MemoryScopeKind.Global ? "global" : "project"
+        Scope = scoped.Scope == MemoryScopeKind.Global ? "global" : "project",
+        ProjectName = NameOf(scoped.ProjectRoot),
+        ProjectRoot = scoped.ProjectRoot
     };
 
     private static string Truncate(string content, int maxLength)

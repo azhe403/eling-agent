@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Eling.Backend.Dtos;
 using Eling.Core;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
@@ -7,6 +8,8 @@ namespace Eling.Backend.Mcp.Tools;
 
 /// <summary>
 /// MCP tools for the read-side of the memory store: get by id, list, search.
+/// All scoped reads return provenance-bearing DTOs so clients can tell which
+/// scope level (own project, an ancestor, or global) each memory lives in.
 /// </summary>
 [McpServerToolType]
 public sealed class MemoryReadTool
@@ -38,7 +41,7 @@ public sealed class MemoryReadTool
     }
 
     [McpServerTool(Name = "memory_get"), Description("Retrieve a memory by its ID.")]
-    public async Task<Memory?> GetByIdAsync(
+    public async Task<ScopedMemoryDto?> GetByIdAsync(
         [Description("The ULID of the memory to retrieve")] string id,
         [Description("Scope: project, global, or merged. Defaults to 'project'.")] string scope = "project")
     {
@@ -47,34 +50,45 @@ public sealed class MemoryReadTool
             _logger?.LogWarning("memory_get failed: id is empty");
             throw new ArgumentException("Id cannot be empty.", nameof(id));
         }
+        scope = (scope ?? "project").Trim();
 
         var memoryId = MemoryId.Parse(id);
-        if (HasScoped && scope.Trim().ToLowerInvariant() == "merged")
+        if (HasScoped && scope.ToLowerInvariant() == "merged")
         {
-            var projectRef = new MemoryReference(memoryId, MemoryScopeKind.Project, _scoped!.ProjectRoot);
-            var found = await _scoped.GetByIdAsync(projectRef);
-            if (found is not null) return found.Memory;
-            var globalRef = MemoryReference.ForGlobal(memoryId);
-            var global = await _scoped.GetByIdAsync(globalRef);
+            try
+            {
+                var projectRef = new MemoryReference(memoryId, MemoryScopeKind.Project, _scoped!.ProjectRoot);
+                var found = await _scoped.GetByIdAsync(projectRef);
+                if (found is not null)
+                {
+                    _logger?.LogInformation("Retrieved memory '{Id}' merged (found in project)", id);
+                    return ScopedMemoryDto.From(found.Memory, found.Scope, found.ProjectRoot);
+                }
+            }
+            catch (ProjectScopeNotInitializedException)
+            {
+                // Uninitialized project scope: fall through to global lookup.
+            }
+            var global = await _scoped!.GetByIdAsync(MemoryReference.ForGlobal(memoryId));
             _logger?.LogInformation("Retrieved memory '{Id}' merged (found: {Found})", id, global is not null);
-            return global?.Memory;
+            return global is null ? null : ScopedMemoryDto.From(global.Memory, global.Scope, global.ProjectRoot);
         }
         if (HasScoped && _scoped is not null)
         {
-            var scopeKind = scope.Trim().ToLowerInvariant() == "global" ? MemoryScopeKind.Global : MemoryScopeKind.Project;
+            var scopeKind = scope.ToLowerInvariant() == "global" ? MemoryScopeKind.Global : MemoryScopeKind.Project;
             var reference = new MemoryReference(memoryId, scopeKind, scopeKind == MemoryScopeKind.Project ? _scoped.ProjectRoot : null);
             var scopedResult = await _scoped.GetByIdAsync(reference);
             _logger?.LogInformation("Retrieved memory '{Id}' scope '{Scope}' (found: {Found})", id, scopeKind, scopedResult is not null);
-            return scopedResult?.Memory;
+            return scopedResult is null ? null : ScopedMemoryDto.From(scopedResult.Memory, scopedResult.Scope, scopedResult.ProjectRoot);
         }
 
         var result = await _memory.GetByIdAsync(memoryId);
         _logger?.LogInformation("Retrieved memory '{Id}' (found: {Found})", id, result is not null);
-        return result;
+        return result is null ? null : ScopedMemoryDto.From(result, MemoryScopeKind.Project, null);
     }
 
     [McpServerTool(Name = "memory_list"), Description("List memories, optionally filtered by status.")]
-    public async Task<IReadOnlyCollection<Memory>> ListAsync(
+    public async Task<IReadOnlyCollection<ScopedMemoryDto>> ListAsync(
         [Description("Filter by status: active, superseded, archived, or 'all'. Defaults to 'active'.")] string status = "active",
         [Description("Scope: project, global, or merged. Defaults to 'merged'.")] string scope = "merged")
     {
@@ -93,16 +107,16 @@ public sealed class MemoryReadTool
             }
 
             var scoped = await _scoped!.ListAsync(scope, filter);
-            var memories = scoped.Select(s => s.Memory).ToList().AsReadOnly();
-            _logger?.LogInformation("Listed {Count} memories scope '{Scope}' status '{Status}'", memories.Count, scope, status);
-            return memories;
+            var dtos = scoped.Select(s => ScopedMemoryDto.From(s.Memory, s.Scope, s.ProjectRoot)).ToList().AsReadOnly();
+            _logger?.LogInformation("Listed {Count} memories scope '{Scope}' status '{Status}'", dtos.Count, scope, status);
+            return dtos;
         }
 
         var all = await _memory.ListAllAsync();
         if (string.IsNullOrWhiteSpace(status) || status.Equals("all", StringComparison.OrdinalIgnoreCase))
         {
             _logger?.LogInformation("Listed all {Count} memories", all.Count);
-            return all;
+            return all.Select(m => ScopedMemoryDto.From(m, MemoryScopeKind.Project, null)).ToList().AsReadOnly();
         }
 
         if (!Enum.TryParse<MemoryStatus>(status, ignoreCase: true, out var memoryStatus))
@@ -113,11 +127,11 @@ public sealed class MemoryReadTool
 
         var filtered = all.Where(m => m.Status == memoryStatus).ToList().AsReadOnly();
         _logger?.LogInformation("Listed {Count} memories filtered by status '{Status}'", filtered.Count, memoryStatus);
-        return filtered;
+        return filtered.Select(m => ScopedMemoryDto.From(m, MemoryScopeKind.Project, null)).ToList().AsReadOnly();
     }
 
     [McpServerTool(Name = "memory_search"), Description("Search memories by keyword query.")]
-    public async Task<IReadOnlyCollection<MemorySearchResult>> SearchAsync(
+    public async Task<IReadOnlyCollection<ScopedSearchResultDto>> SearchAsync(
         [Description("The search query")] string query,
         [Description("Maximum number of results to return. Defaults to 10.")] int limit = 10,
         [Description("Scope: project, global, or merged. Defaults to 'merged' (project + global with project priority).")] string scope = "merged")
@@ -131,7 +145,7 @@ public sealed class MemoryReadTool
         if (HasScoped)
         {
             var scopedResults = await _scoped!.SearchAsync(query, scope, limit);
-            var results = scopedResults.Select(r => new MemorySearchResult(r.Id, r.Rank)).ToList().AsReadOnly();
+            var results = scopedResults.Select(ScopedSearchResultDto.From).ToList().AsReadOnly();
             _logger?.LogInformation("Search for '{Query}' scope '{Scope}' returned {Count} results", query, scope, results.Count);
             return results;
         }
@@ -143,6 +157,6 @@ public sealed class MemoryReadTool
         }
 
         _logger?.LogInformation("Search for '{Query}' returned {Count} results", query, fallback.Count);
-        return fallback;
+        return fallback.Select(r => new ScopedSearchResultDto(r.Id.Value, r.Rank, "project", null, null)).ToList().AsReadOnly();
     }
 }

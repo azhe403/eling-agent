@@ -13,5 +13,13 @@ public interface IMemoryMerger
         IReadOnlyCollection<MemorySearchResult> projectResults,
         IReadOnlyCollection<MemorySearchResult> globalResults,
         string? projectRoot);
+
+    IReadOnlyCollection<ScopedMemory> MergeLists(
+        IReadOnlyList<MemoryLevel> levels,
+        IReadOnlyCollection<Memory> globalMemories);
+
+    IReadOnlyCollection<ScopedSearchResult> MergeSearchResults(
+        IReadOnlyList<SearchResultLevel> levels,
+        IReadOnlyCollection<MemorySearchResult> globalResults);
 }
 

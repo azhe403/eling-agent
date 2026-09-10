@@ -22,13 +22,12 @@ public static class TestAppBuilder
         Directory.CreateDirectory(tempDir);
         Directory.CreateDirectory(Path.Combine(tempDir, ".eling"));
 
-        var projectRoot = tempDir;
-        var projectScope = new ProjectScope(projectRoot);
+        var chain = ScopeChain.Discover(tempDir);
         var userScope = UserScope.Resolve(Environment.GetEnvironmentVariable("ELING_USER_SCOPE"));
         var context = new ProjectContext(
-            projectScope,
+            chain,
             userScope,
-            Path.Combine(projectRoot, ".eling"),
+            Path.Combine(tempDir, ".eling"),
             IsUserHome: false);
 
         var shared = AppServices.Create(context);

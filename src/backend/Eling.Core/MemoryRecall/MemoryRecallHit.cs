@@ -6,11 +6,14 @@ namespace Eling.Core;
 /// per-layer BM25-derived scores, and the query mode ("and" or
 /// "or-fallback") that produced the hit. Populated by the recall
 /// service so the MCP response can show why a memory surfaced for the
-/// given topics and which query strategy was used.
+/// given topics and which query strategy was used. Carries scope
+/// provenance: which chain level (or global) the hit came from.
 /// </summary>
 public sealed record MemoryRecallHit(
     Memory Memory,
     IReadOnlyCollection<string>? MatchedVia = null,
     double PorterScore = 0.0,
     double TrigramScore = 0.0,
-    string? QueryMode = null);
+    string? QueryMode = null,
+    MemoryScopeKind Scope = MemoryScopeKind.Project,
+    string? ProjectRoot = null);
