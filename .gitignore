@@ -53,3 +53,5 @@ opencode.json.openchamber.backup
 # Lint / typecheck output artifacts (not source)
 *.err.txt
 *.out.txt
+
+*.zip

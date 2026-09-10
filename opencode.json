@@ -1,6 +1,13 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
+    "eling": {
+      "type": "local",
+      "command": [
+        "eling-backend"
+      ],
+      "enabled": false
+    },
     "eling_dev": {
       "enabled": true,
       "type": "local",
@@ -10,6 +17,7 @@
         "--project",
         "src/backend/Eling.Backend/Eling.Backend.csproj"
       ],
+      "cwd": ".",
       "environment": {
         "ELING_OUTPUT_ROOT": ".bin-opencode",
         "ELING_DASHBOARD_PORT": "4417",
