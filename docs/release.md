@@ -7,7 +7,7 @@ How GitHub releases are built, what each asset contains, and which one to downlo
 | Channel | Trigger | Tag | Assets |
 |---|---|---|---|
 | Stable | Push tag `v*` | `v0.2.0`, ... | mix + backend-only + dashboard UI |
-| Pre-release | Push to `main` | `v0.1.0-pre.{run_number}` (unique per build, easy rollback) | backend-only |
+| Pre-release | Push to `main` | `v0.1.0-pre.{run_number}` (unique per build, easy rollback) | same three assets as stable |
 
 Pull requests only run the build matrix as validation (no release published).
 `[skip-ci]` in the commit message skips CI entirely.
@@ -24,7 +24,7 @@ Built for 5 RIDs: `win-x64`, `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64` 
 | `eling-backend-<rid>.zip` | Backend + dashboard UI | Agents / backend-only installs (what the install scripts fetch) |
 | `eling-dashboard-ui.zip` / `.tar.gz` | Dashboard UI only, no RID (static files, one asset for all OS, built once on `linux-x64`) | Repairing a corrupt local UI without touching the binary |
 
-Pre-releases attach only the backend-only asset.
+Pre-releases attach the same three asset types as stable releases.
 
 ## How it is built (`release.yml`)
 
