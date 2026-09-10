@@ -20,8 +20,14 @@ curl http://127.0.0.1:4317/health
 
 ## Option A — Prebuilt binary (recommended for users & agents)
 
-1. Download `eling-<rid>.zip/.tar.gz` from the latest Release (or pre-release `v0.1.0-pre.*`).
-2. Unzip. You get `eling-backend` (or `.exe` on Windows) + `eling-dashboard-ui/` next to it. Keep them together.
+Pick the asset for your need (full matrix: `docs/release.md`):
+
+- `eling-backend-<rid>.zip/.tar.gz` — **default install**: backend + dashboard UI (agents, headless). This is what the install scripts fetch.
+- `eling-<rid>.zip/.tar.gz` — Desktop + backend + dashboard UI. Manual download, for desktop users only.
+- `eling-dashboard-ui.zip` — dashboard UI only (for repair via the installer, not manual download).
+
+1. Download the asset from the latest Release (or pre-release `v0.1.0-pre.*`).
+2. Unzip. You get `eling-backend` (or `.exe` on Windows) + `eling-dashboard-ui/` next to it (plus `eling-desktop` in the mix asset). Keep them together.
 3. Move to a PATH dir:
    ```bash
    # Windows
@@ -30,11 +36,42 @@ curl http://127.0.0.1:4317/health
    mv eling-backend ~/.local/bin/eling-backend && chmod +x ~/.local/bin/eling-backend
    ```
 4. Register with your agent host:
+
+   **OpenCode**:
    ```json
    // ~/.config/opencode/opencode.json  (global) — staging 4317
    { "mcp": { "eling": { "command": ["~/.local/bin/eling-backend.exe"], "enabled": true } } }
    // <project>/opencode.json (dev) — 4417
    { "mcp": { "eling_dev": { "command": ["dotnet","watch","--project","src/backend/Eling.Backend/Eling.Backend.csproj"], "environment": { "ELING_DASHBOARD_PORT":"4417" } } } }
+   ```
+
+   **Claude Code** (stdio, from any shell):
+   ```bash
+   # personal, this project only (default scope)
+   claude mcp add eling -- ~/.local/bin/eling-backend
+   # shared with the team (writes project-root .mcp.json — commit it)
+   claude mcp add --scope project eling -- ~/.local/bin/eling-backend
+   claude mcp list   # verify
+   ```
+   Or edit `.mcp.json` at the project root directly:
+   ```json
+   { "mcpServers": { "eling": { "command": "~/.local/bin/eling-backend" } } }
+   ```
+
+   **Claude Desktop** — add to `claude_desktop_config.json`
+   (`~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows),
+   then restart Claude Desktop:
+   ```json
+   { "mcpServers": { "eling": { "command": "~/.local/bin/eling-backend" } } }
+   ```
+
+   **Antigravity** — add to `mcp_config.json`, either globally
+   (`~/.gemini/config/mcp_config.json`) or per workspace
+   (`.agents/mcp_config.json` in the project root). In the IDE:
+   agent panel `…` → MCP Servers → Manage MCP Servers → View raw config,
+   or edit the file directly:
+   ```json
+   { "mcpServers": { "eling": { "command": "~/.local/bin/eling-backend" } } }
    ```
 
 ## Option B — Build from source (for contributors & agents that live in the repo)
@@ -102,6 +139,10 @@ Installed & verified:
 ## Verify
 
 ```bash
+# Dashboard (same port serves UI + API) — open in a browser
+http://localhost:4317          # staging
+http://localhost:4417          # dev (ELING_DASHBOARD_PORT=4417)
+
 # Health
 curl http://127.0.0.1:4317/health          # staging
 curl http://127.0.0.1:4417/health          # dev (ELING_DASHBOARD_PORT=4417)
