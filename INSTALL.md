@@ -59,6 +59,46 @@ Build outputs:
 - `dotnet run` → `.bin/Debug/net10.0/eling-backend.dll` (shared `.bin`, flat layout)
 - `dotnet test --artifacts-path .bin-test` → isolated `.bin-test/`
 
+## Option C — Publish to staging from source (local install)
+
+Ships the current working tree (uncommitted changes included) as the staging binary. Use it to validate working-tree changes against the real installed binary instead of the dev `dotnet watch` process. No commits, pushes, or tags — the install is independent of git history.
+
+```powershell
+# Windows (PowerShell, from repo root)
+.\scripts\publish-global.ps1
+# POSIX
+./scripts/publish-global.sh
+```
+
+What it does:
+- `dotnet publish` Release / self-contained / single-file (`win-x64` on Windows, auto-detected RID on POSIX; dashboard UI included via the `BuildDashboard` target)
+- Installs to user-local bin (`%USERPROFILE%\.local\bin` / `~/.local/bin`): `eling-backend(.exe)` + `eling-dashboard-ui/`
+- Stops the running staging process (port 4317) so files are not locked; the dev process (port 4417) is untouched
+- Smoke test: `GET /health` on 4317, then an MCP `memory_save` → `memory_get` round-trip in a throwaway temp dir
+
+```powershell
+# Faster iteration when you already trust the smoke test
+.\scripts\publish-global.ps1 -SkipSmokeTest
+```
+
+If the dashboard UI breaks locally (blank page, stale assets), redownload just the UI without touching the binary:
+
+```powershell
+# Windows
+.\scripts\install.ps1 -DashboardOnly
+# POSIX
+./scripts/install.sh --dashboard-only
+```
+
+Expected output (ids/pids vary per run):
+
+```
+Installed & verified:
+  health:           {"status":"Healthy","pid":34468}
+  memory read/write: OK (saved & searched back id=01m250g7sj6qx4bqgy1p2h88ce)
+  binary:            ~/.local/bin/eling-backend.exe
+```
+
 ## Verify
 
 ```bash
@@ -81,6 +121,7 @@ pwsh scripts/validate-eling.ps1 -RuntimeOnly
 ```yaml
 eling_install:
   binary: ~/.local/bin/eling-backend   # single binary, not eling.exe
+  publish_staging: scripts/publish-global.ps1  # Release self-contained single-file → user-local bin + smoke test
   ports: { staging: 4317, dev: 4417, frontend: 4427 }
   storage_canonical: .eling/memories/*.md   # tracked in Git
   storage_cache: .eling/index.db*           # gitignored, rebuildable

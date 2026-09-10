@@ -34,16 +34,51 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      # BuildDashboard target runs pnpm install + build automatically.
-      # Single binary eling-backend serves MCP + REST + UI.
-      - name: Publish
+      # 1. Publish Desktop (self-contained — brings the .NET runtime)
+      - name: Publish Desktop
+        run: >
+          dotnet publish src/desktop/Eling.Desktop
+          -c Release -r ${{ matrix.rid }}
+          --self-contained true
+          -o publish
+
+      # 2. Publish Backend (self-contained — DLLs + dashboard UI merge into Desktop folder)
+      - name: Publish Backend
         run: >
           dotnet publish src/backend/Eling.Backend
           -c Release -r ${{ matrix.rid }}
           --self-contained true
-          -p:PublishSingleFile=true
-          -p:IncludeNativeLibrariesForSelfExtract=true
-          -o publish
+          -o publish-backend
+
+      - name: Package backend-only
+        shell: bash
+        run: |
+          find publish-backend -name "*.pdb" -delete
+          cd publish-backend
+          if [ "${{ matrix.rid }}" = "win-x64" ]; then
+            7z a "../eling-backend-${{ matrix.rid }}.zip" .
+          else
+            tar czf "../eling-backend-${{ matrix.rid }}.tar.gz" .
+          fi
+
+      - name: Merge into shared folder
+        shell: bash
+        run: |
+          cp publish-backend/eling-backend.* publish/
+          for f in publish-backend/*.dll; do
+            [ -e "$f" ] || continue
+            dest="publish/$(basename "$f")"
+            if [ -f "$dest" ]; then
+              if ! cmp -s "$f" "$dest"; then echo "ERROR: conflicting $f differs from $dest"; exit 1; fi
+            else
+              cp "$f" publish/
+            fi
+          done
+          if [ -d publish-backend/eling-dashboard-ui ]; then
+            rm -rf publish/eling-dashboard-ui
+            cp -r publish-backend/eling-dashboard-ui publish/
+          fi
+          rm -rf publish-backend
 
       - name: Package
         shell: bash
@@ -56,10 +91,21 @@ jobs:
             tar czf "../eling-${{ matrix.rid }}.tar.gz" .
           fi
 
+      - name: Package dashboard UI (single cross-platform asset)
+        if: matrix.rid == 'linux-x64'
+        shell: bash
+        run: |
+          if [ ! -d publish/eling-dashboard-ui ]; then echo "ERROR: dashboard UI missing in publish output"; exit 1; fi
+          cd publish/eling-dashboard-ui
+          tar czf "../../eling-dashboard-ui.tar.gz" .
+          zip -qr "../../eling-dashboard-ui.zip" .
+
       - uses: actions/upload-artifact@v4
         with:
           name: eling-${{ matrix.rid }}
-          path: eling-${{ matrix.rid }}.*
+          path: |
+            eling-*.zip
+            eling-*.tar.gz
 
   release:
     needs: build

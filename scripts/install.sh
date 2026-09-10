@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 # Eling installer (Linux / macOS)
 # Usage:  curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent/main/install.sh | bash
+# Repair dashboard UI only:  ./install.sh --dashboard-only
 
 set -euo pipefail
+
+DASHBOARD_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --dashboard-only) DASHBOARD_ONLY=1 ;;
+    -h|--help) echo "Usage: $0 [--dashboard-only]"; exit 0 ;;
+    *) echo "Unknown argument: $arg" >&2; exit 1 ;;
+  esac
+done
 
 REPO="azhe403/eling-agent"
 
@@ -21,12 +31,36 @@ case "$ARCH" in
 esac
 
 RID="${OS}-${ARCH}"
-ASSET="eling-${RID}.tar.gz"
+ASSET="eling-backend-${RID}.tar.gz"
 URL="https://github.com/$REPO/releases/latest/download/$ASSET"
 
 BIN_DIR="$HOME/.local/bin"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
+
+if [ "$DASHBOARD_ONLY" = "1" ]; then
+  UI_DIR="$BIN_DIR/eling-dashboard-ui"
+  UI_ASSET="eling-dashboard-ui.tar.gz"
+  UI_URL="https://github.com/$REPO/releases/latest/download/$UI_ASSET"
+  if [ -f "$UI_DIR/index.html" ]; then
+    echo "Dashboard UI looks healthy - re-downloading anyway."
+  else
+    echo "Dashboard UI missing or corrupt - re-downloading."
+  fi
+  pkill -x eling-backend 2>/dev/null || true
+  sleep 1
+  rm -rf "$UI_DIR"
+  mkdir -p "$UI_DIR"
+  curl -fsSL "$UI_URL" | tar xz -C "$UI_DIR"
+  if [ ! -f "$UI_DIR/index.html" ]; then
+    echo "Repair FAILED: index.html still missing after reinstall." >&2
+    exit 1
+  fi
+  echo ""
+  echo "Dashboard UI repaired"
+  echo "  dir: $UI_DIR"
+  exit 0
+fi
 
 # .local/bin may hold other tools — remove only eling's own files
 mkdir -p "$BIN_DIR"

@@ -59,15 +59,15 @@ jobs:
           find publish -name "*.pdb" -delete
           cd publish
           if [ "${{ matrix.rid }}" = "win-x64" ]; then
-            7z a "../eling-${{ matrix.rid }}.zip" .
+            7z a "../eling-backend-${{ matrix.rid }}.zip" .
           else
-            tar czf "../eling-${{ matrix.rid }}.tar.gz" .
+            tar czf "../eling-backend-${{ matrix.rid }}.tar.gz" .
           fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: eling-${{ matrix.rid }}
-          path: eling-${{ matrix.rid }}.*
+          name: eling-backend-${{ matrix.rid }}
+          path: eling-backend-${{ matrix.rid }}.*
 
   # Publish a pre-release only on push to main (unique version per build for
   # easy rollback). Pull requests only run the build matrix as validation.

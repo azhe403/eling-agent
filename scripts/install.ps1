@@ -1,16 +1,44 @@
 # Eling installer (Windows)
 # Usage:  irm https://raw.githubusercontent.com/azhe403/eling-agent/main/install.ps1 | iex
+# Repair dashboard UI only:  .\install.ps1 -DashboardOnly
+
+param(
+    [switch]$DashboardOnly
+)
 
 $ErrorActionPreference = "Stop"
 $repo = "azhe403/eling-agent"
 
-$release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
-$asset = $release.assets | Where-Object { $_.name -eq "eling-win-x64.zip" } | Select-Object -First 1
-if (-not $asset) { throw "eling-win-x64.zip not found in latest release" }
-
 $binDir = "$env:USERPROFILE\.local\bin"
 $tmp = "$env:TEMP\eling-install"
 $tmpZip = "$env:TEMP\eling-install.zip"
+
+$release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
+
+if ($DashboardOnly) {
+    $uiDir = "$binDir\eling-dashboard-ui"
+    if (Test-Path "$uiDir\index.html") {
+        Write-Host "Dashboard UI looks healthy - re-downloading anyway."
+    } else {
+        Write-Host "Dashboard UI missing or corrupt - re-downloading."
+    }
+    $uiAsset = $release.assets | Where-Object { $_.name -eq "eling-dashboard-ui.zip" } | Select-Object -First 1
+    if (-not $uiAsset) { throw "eling-dashboard-ui.zip not found in latest release" }
+    Invoke-WebRequest $uiAsset.browser_download_url -OutFile $tmpZip -UseBasicParsing
+    Get-Process -Name eling-backend, eling -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+    Remove-Item $uiDir -Recurse -Force -ErrorAction SilentlyContinue
+    Expand-Archive $tmpZip -DestinationPath $uiDir -Force
+    if (-not (Test-Path "$uiDir\index.html")) { throw "Repair FAILED: index.html still missing after reinstall." }
+    Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue
+    Write-Host ""
+    Write-Host "Dashboard UI repaired"
+    Write-Host "  dir: $uiDir"
+    exit 0
+}
+$asset = $release.assets | Where-Object { $_.name -eq "eling-backend-win-x64.zip" } | Select-Object -First 1
+if (-not $asset) { throw "eling-backend-win-x64.zip not found in latest release" }
 
 Write-Host "Downloading eling $($release.tag_name)..."
 Invoke-WebRequest $asset.browser_download_url -OutFile $tmpZip -UseBasicParsing
