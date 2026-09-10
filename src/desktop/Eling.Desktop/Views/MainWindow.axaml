@@ -221,11 +221,11 @@
 
         <!-- Create Memory Modal -->
         <Border Classes="modal-overlay" IsVisible="{Binding ShowCreateDialog}">
-            <Border Classes="modal" Width="550">
+            <Border Classes="modal">
                 <StackPanel Spacing="12">
                     <TextBlock Text="Create New Memory" FontSize="16" FontWeight="Bold"/>
                     <TextBlock Text="Content" FontSize="12" Foreground="#9ca3af"/>
-                    <TextBox Text="{Binding CreateContent}" AcceptsReturn="True" Height="100" TextWrapping="Wrap"/>
+                    <TextBox Text="{Binding CreateContent}" AcceptsReturn="True" Height="220" MinHeight="220" TextWrapping="Wrap"/>
                     <Grid ColumnDefinitions="*,*">
                         <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,6,0">
                             <TextBlock Text="Type" FontSize="12" Foreground="#9ca3af"/>
@@ -253,11 +253,11 @@
 
         <!-- Edit Memory Modal -->
         <Border Classes="modal-overlay" IsVisible="{Binding EditingMemory, Converter={x:Static ObjectConverters.IsNotNull}}">
-            <Border Classes="modal" Width="550">
+            <Border Classes="modal">
                 <StackPanel Spacing="12">
                     <TextBlock Text="Edit Memory" FontSize="16" FontWeight="Bold"/>
                     <TextBlock Text="Content" FontSize="12" Foreground="#9ca3af"/>
-                    <TextBox Text="{Binding EditContent}" AcceptsReturn="True" Height="100" TextWrapping="Wrap"/>
+                    <TextBox Text="{Binding EditContent}" AcceptsReturn="True" Height="220" MinHeight="220" TextWrapping="Wrap"/>
                     <Grid ColumnDefinitions="*,*">
                         <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,6,0">
                             <TextBlock Text="Type" FontSize="12" Foreground="#9ca3af"/>
