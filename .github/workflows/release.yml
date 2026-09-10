@@ -34,20 +34,24 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      # 1. Publish Desktop (self-contained — brings the .NET runtime)
+      # 1. Publish Desktop (self-contained single-file — brings the .NET runtime)
       - name: Publish Desktop
         run: >
           dotnet publish src/desktop/Eling.Desktop
           -c Release -r ${{ matrix.rid }}
           --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
           -o publish
 
-      # 2. Publish Backend (self-contained — DLLs + dashboard UI merge into Desktop folder)
+      # 2. Publish Backend (self-contained single-file — dashboard UI included, merged into Desktop folder)
       - name: Publish Backend
         run: >
           dotnet publish src/backend/Eling.Backend
           -c Release -r ${{ matrix.rid }}
           --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
           -o publish-backend
 
       - name: Package backend-only
