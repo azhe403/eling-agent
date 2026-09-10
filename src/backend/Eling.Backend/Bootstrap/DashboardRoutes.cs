@@ -19,6 +19,11 @@ public static class DashboardRoutes
         app.UseStaticFiles();
         app.UseRouting();
 
+        // Registered only in owner mode (see DashboardServices); start watching
+        // the shared runtime dir so cross-process membership changes push SSE
+        // "runtimes" events to connected subscribers.
+        app.Services.GetService<RuntimeDirWatcher>()?.Start();
+
         app.MapGet("/health", () => Results.Ok(new { status = "Healthy", pid = Environment.ProcessId }));
         app.MapSseEvents();
         app.MapCoordinatorEndpoints();

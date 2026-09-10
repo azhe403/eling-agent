@@ -10,10 +10,8 @@ public class MemoryServiceSmartSaveTests
     {
         var storage = new InMemoryMemoryStorage();
         var index = new InMemoryMemoryIndex();
-        var service = new MemoryService(
-            storage,
-            index,
-            new SmartSaveOptions { DuplicateThreshold = 0.5 });
+        // Default SmartSaveOptions (DuplicateThreshold = 0.7) must catch this paraphrase.
+        var service = new MemoryService(storage, index);
 
         var initial = new Memory(
             MemoryType.Preference,
@@ -62,5 +60,52 @@ public class MemoryServiceSmartSaveTests
         var result = await service.SaveAsync(new Memory(MemoryType.Preference, "Python fastapi rest endpoint configuration", new[] { "py" }));
 
         Assert.Equal(SaveAction.Created, result.Action);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ExtendedContent_MergesAndUpdatesExisting()
+    {
+        var storage = new InMemoryMemoryStorage();
+        var index = new InMemoryMemoryIndex();
+        var service = new MemoryService(storage, index);
+
+        var initial = new Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" });
+        var firstResult = await service.SaveAsync(initial);
+        Assert.Equal(SaveAction.Created, firstResult.Action);
+
+        var incoming = new Memory(
+            MemoryType.Preference,
+            "Always check git status and diff before commit",
+            new[] { "git", "workflow" });
+        var secondResult = await service.SaveAsync(incoming);
+
+        Assert.Equal(SaveAction.Updated, secondResult.Action);
+        Assert.Equal(firstResult.Memory.Id, secondResult.Memory.Id);
+        Assert.Contains("git", secondResult.Memory.Tags);
+        Assert.Contains("workflow", secondResult.Memory.Tags);
+        Assert.Equal("Always check git status and diff before commit", secondResult.Memory.Content);
+    }
+
+    [Fact]
+    public async Task SaveAsync_UpdatedResult_CarriesPreviousContentAndTags()
+    {
+        var storage = new InMemoryMemoryStorage();
+        var index = new InMemoryMemoryIndex();
+        var service = new MemoryService(storage, index);
+
+        var firstResult = await service.SaveAsync(new Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" }));
+        Assert.Equal(SaveAction.Created, firstResult.Action);
+        Assert.Null(firstResult.Previous);
+
+        var secondResult = await service.SaveAsync(new Memory(
+            MemoryType.Preference,
+            "Always check git status and diff before commit",
+            new[] { "git", "workflow" }));
+
+        Assert.Equal(SaveAction.Updated, secondResult.Action);
+        Assert.NotNull(secondResult.Previous);
+        Assert.Equal("Always check git status before commit", secondResult.Previous!.Content);
+        Assert.Single(secondResult.Previous!.Tags);
+        Assert.Contains("git", secondResult.Previous!.Tags);
     }
 }

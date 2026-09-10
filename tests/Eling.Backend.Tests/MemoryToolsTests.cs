@@ -140,7 +140,7 @@ public class MemoryToolsTests
         var result = await tool.GetByIdAsync(memory.Id.ToString());
 
         Assert.NotNull(result);
-        Assert.Equal(memory.Id, result!.Id);
+        Assert.Equal(memory.Id.ToString(), result!.Id);
         Assert.Equal("Hello world", result.Content);
     }
 
@@ -241,7 +241,7 @@ public class MemoryToolsTests
         var list = await tool.ListAsync(status: "active");
 
         Assert.Single(list);
-        Assert.Equal(active.Id, list.First().Id);
+        Assert.Equal(active.Id.ToString(), list.First().Id);
     }
 
     [Fact]
@@ -272,7 +272,7 @@ public class MemoryToolsTests
         var list = await tool.ListAsync(status: "archived");
 
         Assert.Single(list);
-        Assert.Equal(archived.Id, list.First().Id);
+        Assert.Equal(archived.Id.ToString(), list.First().Id);
     }
 
     [Fact]

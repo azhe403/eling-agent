@@ -1,5 +1,6 @@
 ﻿using System;
 using Avalonia;
+using Eling.Core;
 using Eling.Desktop.Services;
 using Eling.Desktop.ViewModels;
 using Eling.Desktop.Views;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ReactiveUI.Avalonia;
 using Serilog;
+using Serilog.Debugging;
 
 namespace Eling.Desktop;
 
@@ -15,6 +17,8 @@ sealed class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        SelfLog.Enable(Console.Error);
+
         var services = new ServiceCollection();
         ConfigureServices(services);
         var provider = services.BuildServiceProvider();
@@ -29,12 +33,12 @@ sealed class Program
 
     private static void ConfigureServices(IServiceCollection services)
     {
+        var logsDir = CentralLogDirectory.Resolve();
+        var sink = new RollingDailyFileSink(logsDir, "desktop.log", "desktop");
+
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
-            .WriteTo.File(
-                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "eling-desktop.log"),
-                rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: 3)
+            .WriteTo.Sink(sink)
             .CreateLogger();
 
         var loggerFactory = LoggerFactory.Create(builder =>

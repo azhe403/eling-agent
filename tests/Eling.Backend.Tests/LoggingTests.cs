@@ -1,5 +1,5 @@
 using System.Text;
-using Eling.Backend.Mcp;
+using Eling.Core;
 using Eling.Backend.Dtos;
 using Serilog;
 using Serilog.Events;
@@ -52,7 +52,7 @@ public class LoggingTests : IDisposable
     [Fact]
     public void Sink_WritesCurrentLogsTo_McpLog()
     {
-        using var sink = new RollingDailyFileSink(_tempLogsDir);
+        using var sink = new RollingDailyFileSink(_tempLogsDir, "mcp.log", "mcp");
         var evt = CreateLogEvent(DateTimeOffset.Now, "Test active log message");
 
         sink.Emit(evt);
@@ -64,38 +64,18 @@ public class LoggingTests : IDisposable
     }
 
     [Fact]
-    public void Sink_RendersProcessIdInLogLines()
+    public void Sink_UsesGenericTemplate_BackendAndDesktopDifferOnlyByFileName()
     {
-        using var sink = new RollingDailyFileSink(_tempLogsDir);
-        using var logger = new LoggerConfiguration()
-            .Enrich.WithProperty("ProcessId", Environment.ProcessId)
-            .WriteTo.Sink(sink)
-            .CreateLogger();
+        using var sink = new RollingDailyFileSink(_tempLogsDir, "mcp.log", "mcp");
+        var evt = CreateLogEvent(DateTimeOffset.Now, "Uniform template message");
 
-        logger.Information("PID tagged message");
+        sink.Emit(evt);
 
         var activePath = Path.Combine(_tempLogsDir, "mcp.log");
         var content = ReadFileShared(activePath);
-        Assert.Contains($"[pid:{Environment.ProcessId}]", content);
-        Assert.Contains("PID tagged message", content);
-    }
-
-    [Fact]
-    public void Sink_RendersProjectIdInLogLines()
-    {
-        using var sink = new RollingDailyFileSink(_tempLogsDir);
-        using var logger = new LoggerConfiguration()
-            .Enrich.WithProperty("ProcessId", Environment.ProcessId)
-            .Enrich.WithProperty("ProjectId", "Eling")
-            .WriteTo.Sink(sink)
-            .CreateLogger();
-
-        logger.Information("Project tagged message");
-
-        var activePath = Path.Combine(_tempLogsDir, "mcp.log");
-        var content = ReadFileShared(activePath);
-        Assert.Contains("[project:Eling]", content);
-        Assert.Contains("Project tagged message", content);
+        Assert.Contains("Uniform template message", content);
+        Assert.DoesNotContain("[pid:", content);
+        Assert.DoesNotContain("[project:", content);
     }
 
     [Fact]
@@ -104,7 +84,7 @@ public class LoggingTests : IDisposable
         var day1 = new DateTimeOffset(2026, 8, 13, 10, 0, 0, TimeSpan.FromHours(7));
         var day2 = new DateTimeOffset(2026, 8, 14, 10, 0, 0, TimeSpan.FromHours(7));
 
-        using var sink = new RollingDailyFileSink(_tempLogsDir);
+        using var sink = new RollingDailyFileSink(_tempLogsDir, "mcp.log", "mcp");
 
         // Emit day 1 event
         sink.Emit(CreateLogEvent(day1, "Message on Day 1"));
@@ -142,7 +122,7 @@ public class LoggingTests : IDisposable
         File.WriteAllText(activePath, existingContent, Encoding.UTF8);
 
         // Creating the sink on 2026-08-14 will trigger startup rollover
-        using var sink = new RollingDailyFileSink(_tempLogsDir);
+        using var sink = new RollingDailyFileSink(_tempLogsDir, "mcp.log", "mcp");
 
         var archivePath = Path.Combine(_tempLogsDir, $"mcp-{yesterday}.log");
         Assert.True(File.Exists(archivePath));
@@ -169,7 +149,7 @@ public class LoggingTests : IDisposable
         File.WriteAllText(oldFile, "old log");
         File.WriteAllText(recentFile, "recent log");
 
-        using var sink = new RollingDailyFileSink(_tempLogsDir, retainedDays: 7);
+        using var sink = new RollingDailyFileSink(_tempLogsDir, "mcp.log", "mcp", retainedDays: 7);
 
         Assert.False(File.Exists(oldFile), "Old log file beyond 7 days should be pruned");
         Assert.True(File.Exists(recentFile), "Recent log file within 7 days should be kept");

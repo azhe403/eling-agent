@@ -411,8 +411,8 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
-        try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
-        try { _cts?.Dispose(); } catch (ObjectDisposedException) { }
+        try { _cts?.Cancel(); } catch (ObjectDisposedException ex) { _logger.LogDebug(ex, "Cancellation source already disposed during shutdown"); }
+        try { _cts?.Dispose(); } catch (ObjectDisposedException ex) { _logger.LogDebug(ex, "Cancellation source already disposed during shutdown"); }
         _sseClient?.Dispose();
         _backendSupervisor.Dispose();
     }

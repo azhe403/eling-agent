@@ -24,7 +24,7 @@ public class MemoryService : IMemoryService
         if (existing is not null)
         {
             var merged = await MergeIntoAsync(existing, memory);
-            return new SaveResult(merged, SaveAction.Updated);
+            return new SaveResult(merged, SaveAction.Updated, existing);
         }
 
         await _storage.SaveAsync(memory);
@@ -54,7 +54,7 @@ public class MemoryService : IMemoryService
             if (!_smartSave.EnableFuzzyMatch)
                 continue;
 
-            var score = MemorySimilarity.CalculateJaccard(candidate.Content, incoming.Content);
+            var score = MemorySimilarity.CalculateSimilarity(candidate.Content, incoming.Content);
             if (score >= _smartSave.DuplicateThreshold && score > bestScore)
             {
                 bestMatch = candidate;

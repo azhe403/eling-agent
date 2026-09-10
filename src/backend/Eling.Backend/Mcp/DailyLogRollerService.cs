@@ -1,3 +1,4 @@
+using Eling.Core;
 using Microsoft.Extensions.Hosting;
 
 namespace Eling.Backend.Mcp;

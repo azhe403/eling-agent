@@ -20,7 +20,7 @@ public static class McpLoggingExtensions
 
         Directory.CreateDirectory(logsDirectory);
 
-        var sink = new RollingDailyFileSink(logsDirectory);
+        var sink = new RollingDailyFileSink(logsDirectory, "mcp.log", "mcp");
         services.AddSingleton(sink);
         services.AddHostedService(sp => new DailyLogRollerService(logsDirectory, sp.GetService<RollingDailyFileSink>()));
 

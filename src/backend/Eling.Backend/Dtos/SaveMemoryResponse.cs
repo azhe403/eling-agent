@@ -31,9 +31,27 @@ public sealed class SaveMemoryResponse
 
     [JsonPropertyName("source")]
     public string? Source { get; set; }
-
     [JsonPropertyName("scope")]
     public string? Scope { get; set; }
+    [JsonPropertyName("previousContent")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PreviousContent { get; set; }
+    [JsonPropertyName("previousTags")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyCollection<string>? PreviousTags { get; set; }
+    [JsonPropertyName("initRequired")]
+    public bool InitRequired { get; set; }
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
+
+    public static SaveMemoryResponse FromInitRequired(string cwd) => new()
+    {
+        Action = "init-required",
+        Scope = "project",
+        InitRequired = true,
+        Message = $"No project scope initialized at '{cwd}'. Ask the user for approval, then call memory_init_project."
+    };
+
 
     public static SaveMemoryResponse From(SaveResult result, string? scope = null) => new()
     {
@@ -46,7 +64,9 @@ public sealed class SaveMemoryResponse
         CreatedAt = result.Memory.CreatedAt,
         UpdatedAt = result.Memory.UpdatedAt,
         Source = result.Memory.Source,
-        Scope = scope
+        Scope = scope,
+        PreviousContent = result.Previous?.Content,
+        PreviousTags = result.Previous?.Tags.ToList()
     };
 
     public static SaveMemoryResponse From(ScopedSaveResult result) => new()
@@ -60,7 +80,9 @@ public sealed class SaveMemoryResponse
         CreatedAt = result.Memory.CreatedAt,
         UpdatedAt = result.Memory.UpdatedAt,
         Source = result.Memory.Source,
-        Scope = result.Scope == MemoryScopeKind.Global ? "global" : "project"
+        Scope = result.Scope == MemoryScopeKind.Global ? "global" : "project",
+        PreviousContent = result.Previous?.Memory.Content,
+        PreviousTags = result.Previous?.Memory.Tags.ToList()
     };
 }
 

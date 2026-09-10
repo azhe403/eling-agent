@@ -37,5 +37,5 @@ export function getSidebarAttribute(stored: string | null): { name: string; valu
  * out of layout.tsx.
  */
 export function getSidebarInlineScript(): string {
-  return `(function(){try{document.documentElement.classList.add('preload');var s=localStorage.getItem('${SIDEBAR_STORAGE_KEY}');if(${isSidebarCollapsed.toString()}(s)){document.documentElement.setAttribute('data-sidebar-collapsed','true')}else{document.documentElement.removeAttribute('data-sidebar-collapsed')}window.addEventListener('DOMContentLoaded',function(){requestAnimationFrame(function(){requestAnimationFrame(function(){document.documentElement.classList.remove('preload')})})})}catch(_){}})()`
+  return `(function(){try{document.documentElement.classList.add('preload');var s=localStorage.getItem('${SIDEBAR_STORAGE_KEY}');if(${isSidebarCollapsed.toString()}(s)){document.documentElement.setAttribute('data-sidebar-collapsed','true')}else{document.documentElement.removeAttribute('data-sidebar-collapsed')}window.addEventListener('DOMContentLoaded',function(){requestAnimationFrame(function(){requestAnimationFrame(function(){document.documentElement.classList.remove('preload')})})})}catch(e){console.warn('eling sidebar preload failed',e)}})()`
 }
