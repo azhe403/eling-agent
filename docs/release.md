@@ -7,12 +7,30 @@ How GitHub releases are built, what each asset contains, and which one to downlo
 | Channel | Trigger | Tag | Assets |
 |---|---|---|---|
 | Stable | Push tag `v*` | `v0.2.0`, ... | mix + backend-only + dashboard UI |
-| Pre-release | Push to `main` | `v0.1.0-pre.{run_number}` (unique per build, easy rollback) | same three assets as stable |
+| Pre-release | Push to `main` touching a build-relevant path | `v0.1.0-pre.{run_number}` (unique per build, easy rollback) | same three assets as stable |
+
+The pre-release workflow runs only when the changed files are build-relevant (see below), so a push or pull request that touches only memory, docs, scripts, tests, or root metadata builds nothing and publishes nothing. Stable releases are tag-triggered and not path-filtered.
 
 Pull requests only run the build matrix as validation (no release published).
 `[skip-ci]` in the commit message skips CI entirely.
 
 Base product version lives in `VERSION` (`pre-release.yml`), kept in sync with `<Version>` in `Directory.Build.props`.
+
+## When CI runs (path filter)
+
+`pre-release.yml` runs only when at least one changed file matches one of these paths:
+
+| Path | Why it is build-relevant |
+|---|---|
+| `src/**` | Desktop, backend, and dashboard UI source |
+| `Directory.Build.props` | Shared MSBuild version/properties |
+| `package.json` | Frontend dependency manifest (the dashboard UI is bundled into the backend) |
+| `pnpm-lock.yaml` | Frontend dependency lockfile |
+| `.github/workflows/**` | CI definitions — a workflow change rebuilds so the new workflow is validated |
+
+Every other tracked path is deliberately excluded because it never changes the published binary — most importantly `.eling/**` (memory) and `docs/**` / `**/*.md`, but also `scripts/**` (installers and dev tooling), `.husky/**`, `tests/**`, and root metadata such as `mise.toml`, `opencode.json`, `Eling.slnx`, and `.gitignore`.
+
+This is an include list (default-deny), not an ignore list: an unlisted path can never accidentally trigger a release, which is what keeps memory and documentation commits from cutting a heavy 5-OS build. The trade-off is that a new code folder or build input added outside this list will silently stop producing releases until it is listed here.
 
 ## Assets (per stable release)
 

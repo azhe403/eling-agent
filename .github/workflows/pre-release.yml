@@ -3,8 +3,15 @@ name: pre-release
 on:
   push:
     branches: ["main"]
+    paths: &build-paths
+      - 'src/**'
+      - 'Directory.Build.props'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/**'
   pull_request:
     branches: ["main"]
+    paths: *build-paths
 
 # Base product version; kept in sync with <Version> in Directory.Build.props.
 # Each push to main produces a unique pre-release: v0.1.0-pre.{run_number}.
