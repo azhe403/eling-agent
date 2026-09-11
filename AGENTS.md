@@ -13,6 +13,7 @@ Backend dev (`eling_dev`) → **4417**; Frontend → **4427** (proxy `/api/*` �
 
 ## Install from URL
 - When the user prompts `install <github-url>` (e.g. install https://github.com/azhe403/eling-agent), do NOT clone the repo for exploration. Run the one-line installer for the current OS from README/INSTALL.md (stable first, pre-release fallback). Clone only when the user explicitly asks to build from source or contribute.
+- After install, do NOT stop at the binary. Follow `docs/agent-setup.md`: detect the host, register the MCP server (`eling`) globally (merge config, never clobber, no secrets), verify the stdio handshake, then ask consent before `memory_init_project`.
 
 ## Git Workflow
 Commits = user-controlled checkpoints: implement → test → report → stop. NEVER commit/push/amend/reset/rebase/force-push unless asked. Leave work in the working tree; report `git status --short` before stopping.

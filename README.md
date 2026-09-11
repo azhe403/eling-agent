@@ -19,7 +19,7 @@ powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/azh
 curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.sh | bash
 ```
 
-See [INSTALL.md](INSTALL.md) for details. Installs latest stable, fallback to latest pre-release.
+See [INSTALL.md](INSTALL.md) for details and [docs/agent-setup.md](docs/agent-setup.md) for host MCP registration. Installs latest stable, fallback to latest pre-release.
 
 ## The Eling Philosophy
 

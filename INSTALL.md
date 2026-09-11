@@ -26,6 +26,9 @@ eling-backend --help   # starts MCP on stdio, port 4317 if free
 curl http://127.0.0.1:4317/health
 ```
 
+> **Agents:** installing the binary is only step one. Follow **[docs/agent-setup.md](docs/agent-setup.md)** to
+> detect the host, register the MCP server (`eling`), verify the handshake, and (with consent) initialize project memory.
+
 ## Option A — Prebuilt binary (recommended for users & agents)
 
 No prerequisites. No DB setup. Storage is `.eling/memories/*.md` + `index.db` (auto-created).
@@ -45,14 +48,15 @@ Pick the asset for your need (full matrix: `docs/release.md`):
    # Linux/macOS
    mv eling-backend ~/.local/bin/eling-backend && chmod +x ~/.local/bin/eling-backend
    ```
-4. Register with your agent host:
+4. Register with your agent host (per-host detail: **[docs/agent-setup.md](docs/agent-setup.md)**):
 
-   **OpenCode**:
+   **OpenCode** — `~/.config/opencode/opencode.json` (global, staging 4317):
    ```json
-   // ~/.config/opencode/opencode.json  (global) — staging 4317
-   { "mcp": { "eling": { "command": ["~/.local/bin/eling-backend.exe"], "enabled": true } } }
-   // <project>/opencode.json (dev) — 4417
-   { "mcp": { "eling_dev": { "command": ["dotnet","watch","--project","src/backend/Eling.Backend/Eling.Backend.csproj"], "environment": { "ELING_DASHBOARD_PORT":"4417" } } } }
+   { "mcp": { "eling": { "type": "local", "command": ["eling-backend"], "enabled": true } } }
+   ```
+   Dev stanza in `<project>/opencode.json` (port 4417) runs from source via `dotnet watch`:
+   ```json
+   { "mcp": { "eling_dev": { "type": "local", "command": ["dotnet","watch","--project","src/backend/Eling.Backend/Eling.Backend.csproj"], "environment": { "ELING_DASHBOARD_PORT":"4417" } } } }
    ```
 
    **Claude Code** (stdio, from any shell):
@@ -187,6 +191,10 @@ eling_install:
   mcp_transport: stdio
   session_start_tool: memory_recall   # on-demand context hydration (renamed from session_start; call any time during a conversation)
   memory_tools: [memory_save, memory_get, memory_search, memory_list, memory_delete]
+  post_install_playbook: docs/agent-setup.md   # install → detect host → MCP config → verify → consent project init
+  default_scope: global               # project scope only when the user asks
+  hosts: [opencode, claude-code, claude-desktop, antigravity, cursor, codex]
+  project_init_tool: memory_init_project   # requires explicit user consent
 ```
 
 ## Troubleshooting
