@@ -40,23 +40,23 @@ Pre-releases attach the same three asset types as stable releases.
 
 ```powershell
 # Windows PowerShell — backend-only asset from latest stable, fallback to latest pre-release
-irm https://raw.githubusercontent.com/azhe403/eling-agent/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.ps1 | iex
 # Repair dashboard UI only
-.\install.ps1 -DashboardOnly
+.\scripts\install.ps1 -DashboardOnly
 ```
 
 ```cmd
 REM Windows cmd.exe — same installer via PowerShell wrapper
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/azhe403/eling-agent/main/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.ps1 | iex"
 REM Repair dashboard UI only (from repo root)
 scripts\install.bat -DashboardOnly
 ```
 
 ```bash
 # Linux / macOS — RID auto-detected
-curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.sh | bash
 # Repair dashboard UI only
-./install.sh --dashboard-only
+./scripts/install.sh --dashboard-only
 ```
 
 Install target is always user-local (`%USERPROFILE%\.local\bin` / `~/.local/bin`) — never system locations. Repair mode stops the staging backend, replaces only `eling-dashboard-ui/`, and fails loudly if `index.html` is still missing afterwards.

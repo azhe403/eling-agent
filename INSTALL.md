@@ -6,17 +6,17 @@
 
 ```powershell
 # Windows PowerShell
-irm https://raw.githubusercontent.com/azhe403/eling-agent/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.ps1 | iex
 ```
 
 ```cmd
 REM Windows cmd.exe
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/azhe403/eling-agent/main/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.ps1 | iex"
 ```
 
 ```bash
 # Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.sh | bash
 ```
 
 Installs latest stable, fallback to latest pre-release. Then verify:

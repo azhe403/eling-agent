@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Eling installer (Linux / macOS)
-# Usage:  curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent/main/install.sh | bash
-# Repair dashboard UI only:  ./install.sh --dashboard-only
+# Usage:  curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.sh | bash
+# Repair dashboard UI only:  ./scripts/install.sh --dashboard-only
 
 set -euo pipefail
 

@@ -1,6 +1,6 @@
 # Eling installer (Windows)
-# Usage:  irm https://raw.githubusercontent.com/azhe403/eling-agent/main/install.ps1 | iex
-# Repair dashboard UI only:  .\install.ps1 -DashboardOnly
+# Usage:  irm https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.ps1 | iex
+# Repair dashboard UI only:  .\scripts\install.ps1 -DashboardOnly
 
 param(
     [switch]$DashboardOnly
