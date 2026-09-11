@@ -99,6 +99,29 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
             "Test host failed to initialize before the test method ran.");
     }
 
+    /// <summary>
+    /// Reads SSE lines until the expected <c>data: ...</c> event arrives, skipping
+    /// blank separators and unrelated <c>data: runtimes</c> noise emitted by the
+    /// runtime directory watcher. Any other unexpected event fails the test so real
+    /// ordering bugs are not masked. The supplied token bounds the wait.
+    /// </summary>
+    private static async Task<string> ReadEventDataAsync(
+        StreamReader reader, string expected, CancellationToken ct)
+    {
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(ct)
+                ?? throw new InvalidOperationException(
+                    "SSE stream ended before the expected event arrived.");
+
+            if (line == expected) return line;
+            if (line.Length == 0 || line == "data: runtimes") continue;
+
+            throw new InvalidOperationException(
+                $"Unexpected SSE event '{line}' while waiting for '{expected}'.");
+        }
+    }
+
     private static void TryDeleteDirectory(string path, int retries = 5, int delayMs = 200)
     {
         if (!Directory.Exists(path)) return;
@@ -348,7 +371,7 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
             return await client.PostAsync("/api/coordinator/notify-change", null, cts.Token);
         });
 
-        var line2 = await reader.ReadLineAsync(cts.Token);
+        var line2 = await ReadEventDataAsync(reader, "data: coordinator", cts.Token);
         Assert.Equal("data: coordinator", line2);
 
         var notifyResponse = await notifyTask;
@@ -382,7 +405,7 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
         var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
         var id = created.GetProperty("id").GetString();
 
-        var evt1 = await reader.ReadLineAsync(cts.Token);
+        var evt1 = await ReadEventDataAsync(reader, "data: dashboard", cts.Token);
         Assert.Equal("data: dashboard", evt1);
         await reader.ReadLineAsync(cts.Token); // blank line
 
@@ -390,7 +413,7 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
         var mcpNotify = await client.PostAsync("/api/coordinator/notify-change", null, cts.Token);
         mcpNotify.EnsureSuccessStatusCode();
 
-        var evt2 = await reader.ReadLineAsync(cts.Token);
+        var evt2 = await ReadEventDataAsync(reader, "data: coordinator", cts.Token);
         Assert.Equal("data: coordinator", evt2);
         await reader.ReadLineAsync(cts.Token); // blank line
 
@@ -401,7 +424,7 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
         }, cts.Token);
         patchResponse.EnsureSuccessStatusCode();
 
-        var evt3 = await reader.ReadLineAsync(cts.Token);
+        var evt3 = await ReadEventDataAsync(reader, "data: dashboard", cts.Token);
         Assert.Equal("data: dashboard", evt3);
         await reader.ReadLineAsync(cts.Token); // blank line
 
@@ -409,7 +432,7 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
         var deleteResponse = await client.DeleteAsync($"/api/memories/{id}", cts.Token);
         deleteResponse.EnsureSuccessStatusCode();
 
-        var evt4 = await reader.ReadLineAsync(cts.Token);
+        var evt4 = await ReadEventDataAsync(reader, "data: dashboard", cts.Token);
         Assert.Equal("data: dashboard", evt4);
     }
 
