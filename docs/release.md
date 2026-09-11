@@ -39,10 +39,17 @@ Pre-releases attach the same three asset types as stable releases.
 ## Installers
 
 ```powershell
-# Windows — backend-only asset from latest stable release
+# Windows PowerShell — backend-only asset from latest stable, fallback to latest pre-release
 irm https://raw.githubusercontent.com/azhe403/eling-agent/main/install.ps1 | iex
 # Repair dashboard UI only
 .\install.ps1 -DashboardOnly
+```
+
+```cmd
+REM Windows cmd.exe — same installer via PowerShell wrapper
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/azhe403/eling-agent/main/install.ps1 | iex"
+REM Repair dashboard UI only (from repo root)
+scripts\install.bat -DashboardOnly
 ```
 
 ```bash

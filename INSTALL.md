@@ -2,23 +2,33 @@
 
 > Readable by humans and agents. Every step is copy-pasteable.
 
-## TL;DR
+## TL;DR — copy-paste install (one line)
+
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/azhe403/eling-agent/main/install.ps1 | iex
+```
+
+```cmd
+REM Windows cmd.exe
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/azhe403/eling-agent/main/install.ps1 | iex"
+```
 
 ```bash
-# 1. Grab the binary for your OS from Releases (win-x64 / linux-x64 / osx-arm64)
-# 2. Put it on PATH as eling-backend
-# 3. Verify
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent/main/install.sh | bash
+```
+
+Installs latest stable, fallback to latest pre-release. Then verify:
+
+```bash
 eling-backend --help   # starts MCP on stdio, port 4317 if free
 curl http://127.0.0.1:4317/health
 ```
 
-## Prerequisites
-
-- .NET 10 SDK (`dotnet --version` → 10.0.x) — only for building from source.
-- Node 20 + pnpm 9 — only for building the dashboard UI.
-- No DB setup. Storage is `.eling/memories/*.md` + `index.db` (auto-created).
-
 ## Option A — Prebuilt binary (recommended for users & agents)
+
+No prerequisites. No DB setup. Storage is `.eling/memories/*.md` + `index.db` (auto-created).
 
 Pick the asset for your need (full matrix: `docs/release.md`):
 
@@ -74,6 +84,11 @@ Pick the asset for your need (full matrix: `docs/release.md`):
    { "mcpServers": { "eling": { "command": "~/.local/bin/eling-backend" } } }
    ```
 
+## Prerequisites for building from source (Options B/C only)
+
+- .NET 10 SDK (`dotnet --version` → 10.0.x).
+- Node 20 + pnpm 9 — only for building the dashboard UI.
+
 ## Option B — Build from source (for contributors & agents that live in the repo)
 
 ```bash
@@ -121,8 +136,10 @@ What it does:
 If the dashboard UI breaks locally (blank page, stale assets), redownload just the UI without touching the binary:
 
 ```powershell
-# Windows
+# Windows (PowerShell)
 .\scripts\install.ps1 -DashboardOnly
+# Windows (cmd.exe)
+scripts\install.bat -DashboardOnly
 # POSIX
 ./scripts/install.sh --dashboard-only
 ```

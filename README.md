@@ -2,6 +2,25 @@
 
 Git-native persistent memory engine for AI coding agents.
 
+## Install (one line)
+
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/azhe403/eling-agent/main/install.ps1 | iex
+```
+
+```cmd
+REM Windows cmd.exe
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/azhe403/eling-agent/main/install.ps1 | iex"
+```
+
+```bash
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent/main/install.sh | bash
+```
+
+See [INSTALL.md](INSTALL.md) for details. Installs latest stable, fallback to latest pre-release.
+
 ## The Eling Philosophy
 
 > *"Memories are not stored — they are remembered."*

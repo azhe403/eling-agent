@@ -13,7 +13,11 @@ $binDir = "$env:USERPROFILE\.local\bin"
 $tmp = "$env:TEMP\eling-install"
 $tmpZip = "$env:TEMP\eling-install.zip"
 
-$release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
+$release = $null
+$releases = Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=20"
+$release = $releases | Where-Object { -not $_.draft -and -not $_.prerelease } | Select-Object -First 1
+if (-not $release) { $release = $releases | Where-Object { -not $_.draft } | Select-Object -First 1 }
+if (-not $release) { throw "No releases (stable or pre-release) found for $repo" }
 
 if ($DashboardOnly) {
     $uiDir = "$binDir\eling-dashboard-ui"
@@ -23,7 +27,7 @@ if ($DashboardOnly) {
         Write-Host "Dashboard UI missing or corrupt - re-downloading."
     }
     $uiAsset = $release.assets | Where-Object { $_.name -eq "eling-dashboard-ui.zip" } | Select-Object -First 1
-    if (-not $uiAsset) { throw "eling-dashboard-ui.zip not found in latest release" }
+    if (-not $uiAsset) { throw "eling-dashboard-ui.zip not found in selected release (stable or pre-release)" }
     Invoke-WebRequest $uiAsset.browser_download_url -OutFile $tmpZip -UseBasicParsing
     Get-Process -Name eling-backend, eling -ErrorAction SilentlyContinue |
         Stop-Process -Force -ErrorAction SilentlyContinue
@@ -38,7 +42,7 @@ if ($DashboardOnly) {
     exit 0
 }
 $asset = $release.assets | Where-Object { $_.name -eq "eling-backend-win-x64.zip" } | Select-Object -First 1
-if (-not $asset) { throw "eling-backend-win-x64.zip not found in latest release" }
+if (-not $asset) { throw "eling-backend-win-x64.zip not found in selected release (stable or pre-release)" }
 
 Write-Host "Downloading eling $($release.tag_name)..."
 Invoke-WebRequest $asset.browser_download_url -OutFile $tmpZip -UseBasicParsing
