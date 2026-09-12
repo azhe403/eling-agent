@@ -66,12 +66,16 @@ public class MemoryMaintenanceApiTests : IAsyncLifetime, IDisposable
         });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var report = await response.Content.ReadFromJsonAsync<MaintenanceReport>(new JsonSerializerOptions
+
+        // Read as JsonElement (matching MemoryApiTests): the report carries enum
+        // fields and the endpoint borrows whichever runtime is currently alive,
+        // so typed deserialization would both require the server's
+        // JsonStringEnumConverter and couple this test to unrelated data.
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
-        Assert.NotNull(report);
-        Assert.True(report.DryRun);
+        Assert.True(body.GetProperty("dryRun").GetBoolean());
     }
 
     [Fact]
