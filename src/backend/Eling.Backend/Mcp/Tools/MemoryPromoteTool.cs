@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Eling.Core;
+using Eling.Core.Memory;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
@@ -25,11 +26,12 @@ public sealed class MemoryPromoteTool
         _notifier = notifier ?? NullMemoryChangeNotifier.Instance;
     }
 
-    [McpServerTool(Name = "memory_copy_to_project"), Description("Copy a memory to the current project. Use operation='copy' to keep source, 'move' to delete source.")]
+    [McpServerTool(Name = "memory_copy_to_project"), Description("Copy a memory to the current project. Use operation='copy' to keep source, 'move' to delete source. Provide 'project' to target an existing ancestor scope; this requires the current workspace to already have its own .eling scope.")]
     public async Task<Memory?> CopyToProjectAsync(
         [Description("The ULID of the memory to copy")] string id,
         [Description("Source scope: global or project. Defaults to 'global'.")] string sourceScope = "global",
-        [Description("Operation: 'copy' (default, keeps source) or 'move' (deletes source).")] string operation = "copy")
+        [Description("Operation: 'copy' (default, keeps source) or 'move' (deletes source).")] string operation = "copy",
+        [Description("Optional logical name of an ancestor project to target (e.g. the parent .eling). Requires this workspace to have its own .eling scope; never creates a scope.")] string? project = null)
     {
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be empty.", nameof(id));
         var op = operation.Trim().ToLowerInvariant();
@@ -42,17 +44,28 @@ public sealed class MemoryPromoteTool
         var sourceKind = sourceScope.Trim().ToLowerInvariant() == "project" ? MemoryScopeKind.Project : MemoryScopeKind.Global;
         var source = new MemoryReference(memoryId, sourceKind, sourceKind == MemoryScopeKind.Project ? _scoped.ProjectRoot : null);
 
+        var targetRoot = _scoped.ProjectRoot;
+        var hasProjectTarget = !string.IsNullOrWhiteSpace(project);
+        if (!string.IsNullOrWhiteSpace(project))
+        {
+            targetRoot = _scoped.ResolveAncestorProjectRoot(project);
+        }
+        if (string.IsNullOrWhiteSpace(targetRoot))
+        {
+            throw new InvalidOperationException("No project scope is available to copy into.");
+        }
+
         _logger?.LogInformation(
-            "Memory '{Id}' {Operation} to project (sourceScope={SourceScope})",
-            id, op, sourceScope);
+            "Memory '{Id}' {Operation} to project '{Target}' (sourceScope={SourceScope})",
+            id, op, project ?? "(own)", sourceScope);
         ScopedMemory? result;
         if (op == "move")
         {
-            result = await _scoped.MoveToProjectAsync(source, _scoped.ProjectRoot!);
+            result = await _scoped.MoveToProjectAsync(source, targetRoot);
         }
         else
         {
-            result = await _scoped.CopyToProjectAsync(source, _scoped.ProjectRoot!);
+            result = await _scoped.CopyToProjectAsync(source, targetRoot);
         }
 
         _logger?.LogInformation(
@@ -61,7 +74,14 @@ public sealed class MemoryPromoteTool
         if (result is not null)
         {
             await _notifier.NotifyAsync("mcp");
-            await _scoped.RebuildIndexAsync("project");
+            if (hasProjectTarget)
+            {
+                await _scoped.RebuildProjectIndexAsync(targetRoot);
+            }
+            else
+            {
+                await _scoped.RebuildIndexAsync("project");
+            }
         }
         return result?.Memory;
     }

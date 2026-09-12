@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace Eling.Core;
+namespace Eling.Core.Memory;
 
 public class Memory
 {

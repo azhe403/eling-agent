@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Eling.Backend.Bootstrap;
 using Eling.Core;
+using Eling.Core.Memory;
 using Xunit;
 
 namespace Eling.Backend.Tests;

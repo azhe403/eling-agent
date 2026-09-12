@@ -1,6 +1,8 @@
+using Eling.Core.Memory;
+using Eling.Core.Memory.Serialization;
 using Microsoft.Extensions.Logging;
 
-namespace Eling.Core;
+namespace Eling.Core.MemoryRecall;
 
 /// <summary>
 /// Application-layer service that bundles topic-based recall, recently

@@ -1,11 +1,9 @@
-using Eling.Core;
-
-namespace Eling.Core;
+namespace Eling.Core.Memory.Serialization;
 
 public interface IIntentionStorage
 {
-    Task SaveAsync(Intention intention);
-    Task<Intention?> GetByIdAsync(MemoryId id);
+    Task SaveAsync(Intention.Intention intention);
+    Task<Intention.Intention?> GetByIdAsync(MemoryId id);
     Task<bool> DeleteAsync(MemoryId id);
-    Task<IReadOnlyCollection<Intention>> ListAllAsync();
+    Task<IReadOnlyCollection<Intention.Intention>> ListAllAsync();
 }

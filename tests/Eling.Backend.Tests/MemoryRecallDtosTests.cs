@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Eling.Backend.Dtos;
 using Eling.Core;
+using Eling.Core.Memory;
+using Eling.Core.MemoryRecall;
 
 namespace Eling.Backend.Tests;
 

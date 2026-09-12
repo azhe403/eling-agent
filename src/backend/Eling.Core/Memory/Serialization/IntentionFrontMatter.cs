@@ -1,6 +1,6 @@
 using YamlDotNet.Serialization;
 
-namespace Eling.Core;
+namespace Eling.Core.Memory.Serialization;
 
 internal class IntentionFrontMatter
 {

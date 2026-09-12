@@ -1,4 +1,5 @@
 using Eling.Core;
+using Eling.Core.Memory;
 using Xunit;
 
 namespace Eling.Core.Tests;
@@ -9,8 +10,8 @@ public class MemoryMaintenanceServiceTests
     public async Task RunAsync_DryRun_DetectsFuzzyDuplicatesWithoutMutating()
     {
         var (service, storage, _) = NewServiceBypassSmartSave();
-        await storage.SaveAsync(new Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" }));
-        await storage.SaveAsync(new Memory(MemoryType.Preference, "Always check git status and diff before commit", new[] { "git" }));
+        await storage.SaveAsync(new Memory.Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" }));
+        await storage.SaveAsync(new Memory.Memory(MemoryType.Preference, "Always check git status and diff before commit", new[] { "git" }));
 
         var maintenance = new MemoryMaintenanceService(service, new InMemoryMemoryIndex());
         var report = await maintenance.RunAsync(new MaintenanceRequest
@@ -28,8 +29,8 @@ public class MemoryMaintenanceServiceTests
     public async Task RunAsync_ApplyMerge_MarksAbsorbedSuperseded()
     {
         var (service, storage, _) = NewServiceBypassSmartSave();
-        var first = new Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" });
-        var second = new Memory(MemoryType.Preference, "Always check git status and diff before commit", new[] { "git" });
+        var first = new Memory.Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" });
+        var second = new Memory.Memory(MemoryType.Preference, "Always check git status and diff before commit", new[] { "git" });
         await storage.SaveAsync(first);
         await storage.SaveAsync(second);
 
@@ -73,8 +74,8 @@ public class MemoryMaintenanceServiceTests
     public async Task RunAsync_DetectCleanup_EmptyAndStale()
     {
         var (service, storage, _) = NewServiceBypassSmartSave();
-        await storage.SaveAsync(new Memory(MemoryType.Note, "   ", Array.Empty<string>()));
-        var stale = new Memory(MemoryType.Note, "old", new[] { "x" }, status: MemoryStatus.Archived, createdAt: DateTimeOffset.UtcNow.AddDays(-100), updatedAt: DateTimeOffset.UtcNow.AddDays(-100));
+        await storage.SaveAsync(new Memory.Memory(MemoryType.Note, "   ", Array.Empty<string>()));
+        var stale = new Memory.Memory(MemoryType.Note, "old", new[] { "x" }, status: MemoryStatus.Archived, createdAt: DateTimeOffset.UtcNow.AddDays(-100), updatedAt: DateTimeOffset.UtcNow.AddDays(-100));
         await storage.SaveAsync(stale);
 
         var maintenance = new MemoryMaintenanceService(service, new InMemoryMemoryIndex());
@@ -93,9 +94,9 @@ public class MemoryMaintenanceServiceTests
     public async Task RunAsync_DedupExactGroup_Detected()
     {
         var (service, storage, _) = NewServiceBypassSmartSave();
-        await storage.SaveAsync(new Memory(MemoryType.Preference, "Use question tool before any task", new[] { "rule" }));
-        await storage.SaveAsync(new Memory(MemoryType.Preference, "  Use question tool before any task  ", new[] { "rule" }));
-        await storage.SaveAsync(new Memory(MemoryType.Preference, "Different content here", new[] { "rule" }));
+        await storage.SaveAsync(new Memory.Memory(MemoryType.Preference, "Use question tool before any task", new[] { "rule" }));
+        await storage.SaveAsync(new Memory.Memory(MemoryType.Preference, "  Use question tool before any task  ", new[] { "rule" }));
+        await storage.SaveAsync(new Memory.Memory(MemoryType.Preference, "Different content here", new[] { "rule" }));
 
         var maintenance = new MemoryMaintenanceService(service, new InMemoryMemoryIndex());
         var report = await maintenance.RunAsync(new MaintenanceRequest

@@ -1,4 +1,6 @@
 using Eling.Core;
+using Eling.Core.Memory;
+using Eling.Core.Memory.Storage;
 
 namespace Eling.Core.Tests;
 
@@ -9,10 +11,10 @@ namespace Eling.Core.Tests;
 /// </summary>
 public sealed class InMemoryMemoryStorage : IMemoryStorage
 {
-    private readonly Dictionary<MemoryId, Memory> _items = new();
+    private readonly Dictionary<MemoryId, Memory.Memory> _items = new();
     private readonly object _lock = new();
 
-    public Task SaveAsync(Memory memory)
+    public Task SaveAsync(Memory.Memory memory)
     {
         lock (_lock)
         {
@@ -21,20 +23,20 @@ public sealed class InMemoryMemoryStorage : IMemoryStorage
         return Task.CompletedTask;
     }
 
-    public Task<Memory?> GetByIdAsync(MemoryId id)
+    public Task<Memory.Memory?> GetByIdAsync(MemoryId id)
     {
         lock (_lock)
         {
             _items.TryGetValue(id, out var memory);
-            return Task.FromResult<Memory?>(memory);
+            return Task.FromResult<Memory.Memory?>(memory);
         }
     }
 
-    public Task<IReadOnlyCollection<Memory>> ListAllAsync()
+    public Task<IReadOnlyCollection<Memory.Memory>> ListAllAsync()
     {
         lock (_lock)
         {
-            IReadOnlyCollection<Memory> snapshot = _items.Values.ToList();
+            IReadOnlyCollection<Memory.Memory> snapshot = _items.Values.ToList();
             return Task.FromResult(snapshot);
         }
     }

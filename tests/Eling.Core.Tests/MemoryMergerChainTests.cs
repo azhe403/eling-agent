@@ -1,3 +1,5 @@
+using Eling.Core.Memory;
+
 namespace Eling.Core.Tests;
 
 /// <summary>
@@ -10,7 +12,7 @@ public sealed class MemoryMergerChainTests
     private const string ChildRoot = @"C:\work\acme\integrations\payments";
     private const string ParentRoot = @"C:\work\acme\integrations";
 
-    private static Memory NewMemory(string content, MemoryId? id = null)
+    private static Memory.Memory NewMemory(string content, MemoryId? id = null)
         => new(MemoryType.Fact, content, id: id);
 
     private static MemorySearchResult NewResult(MemoryId id, double rank)

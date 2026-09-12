@@ -2,6 +2,11 @@ using Eling.Backend.Dtos;
 using Eling.Backend.Mcp;
 using Eling.Backend.Mcp.Tools;
 using Eling.Core;
+using Eling.Core.Intention;
+using Eling.Core.Memory;
+using Eling.Core.Memory.Serialization;
+using Eling.Core.MemoryRecall;
+using Eling.Core.Scope;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Eling.Backend.Tests;

@@ -125,3 +125,26 @@ Every recall hit surfaces transparent metadata explaining *why* it matched:
 * `porterScore`: BM25 score contribution from whole-word and stemmed token matching.
 * `trigramScore`: BM25 score contribution from 3-gram character substring matching.
 * `queryMode`: Indicates whether the memory was retrieved under strict precision (`"and"`) or via adaptive fallback (`"or-fallback"`).
+
+---
+
+## 5. Project-Scope Posture (`projectScope`)
+
+`memory_recall` also returns a `projectScope` block describing whether onboarding applies, so the agent does not have to prompt repeatedly:
+
+```json
+"projectScope": {
+  "posture": "uninitialized",
+  "policy": "ask",
+  "adoptable": true,
+  "initialized": false,
+  "headRoot": null
+}
+```
+
+* `posture`: `own-scope` | `ancestor-scope` | `uninitialized` | `user-home`.
+* `policy`: resolved machine-local policy — `ask` (offer consent-gated onboarding when adoptable) or `disabled` (project scope off; use `scope=global`).
+* `adoptable`: true only when the workspace is not the user home, has no own scope, and policy is `ask`.
+* `initialized` / `headRoot`: scope-chain facts.
+
+The policy lives at `~/.config/eling/config/project-policy.json` and is managed with the `memory_project_scope_policy` MCP tool. Timestamps are intentionally not part of this block; they are returned by `memory_project_status` and the policy tool. See `docs/superpowers/specs/2026-09-11-project-scope-policy-design.md`.

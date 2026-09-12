@@ -1,4 +1,5 @@
 using Eling.Core;
+using Eling.Core.Memory;
 using Xunit;
 
 namespace Eling.Core.Tests;

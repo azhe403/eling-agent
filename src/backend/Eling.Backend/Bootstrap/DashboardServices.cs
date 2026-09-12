@@ -3,6 +3,8 @@ using System.Text.Json.Serialization;
 using Eling.Backend.Converters;
 using Eling.Backend.Mcp;
 using Eling.Core;
+using Eling.Core.Memory;
+using Eling.Core.Scope;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;

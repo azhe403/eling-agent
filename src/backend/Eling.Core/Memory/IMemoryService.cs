@@ -1,7 +1,4 @@
-using Eling.Core;
-using Eling.Core;
-
-namespace Eling.Core;
+namespace Eling.Core.Memory;
 
 public interface IMemoryService
 {

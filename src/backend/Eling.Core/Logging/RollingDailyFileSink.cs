@@ -7,7 +7,7 @@ using Serilog.Events;
 using Serilog.Formatting;
 using Serilog.Formatting.Display;
 
-namespace Eling.Core;
+namespace Eling.Core.Logging;
 
 public sealed class RollingDailyFileSink : ILogEventSink, IDisposable
 {

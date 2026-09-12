@@ -1,4 +1,4 @@
-namespace Eling.Core;
+namespace Eling.Core.MemoryRecall;
 
 /// <summary>
 /// Input context for <see cref="IMemoryRecallService.RecallAsync"/>. Mirrors

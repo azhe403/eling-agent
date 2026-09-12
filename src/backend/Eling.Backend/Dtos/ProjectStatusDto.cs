@@ -8,4 +8,10 @@ public sealed record ProjectStatusDto(
     string? HeadRoot,
     bool Adoptable,
     IReadOnlyCollection<string> AncestorScopes,
-    string Posture);
+    string Posture,
+    string Policy,
+    string PolicyLevel,
+    DateTimeOffset? PolicyEntryCreatedAt,
+    DateTimeOffset? PolicyEntryUpdatedAt,
+    DateTimeOffset? PolicyDocumentCreatedAt,
+    DateTimeOffset? PolicyDocumentUpdatedAt);

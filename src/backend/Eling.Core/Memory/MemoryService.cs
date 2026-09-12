@@ -1,4 +1,6 @@
-namespace Eling.Core;
+using Eling.Core.Memory.Storage;
+
+namespace Eling.Core.Memory;
 
 public class MemoryService : IMemoryService
 {

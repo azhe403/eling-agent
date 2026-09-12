@@ -1,6 +1,4 @@
-using System;
-
-namespace Eling.Core;
+namespace Eling.Core.Memory;
 
 public readonly record struct MemoryId
 {

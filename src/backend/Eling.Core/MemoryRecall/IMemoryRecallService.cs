@@ -1,4 +1,4 @@
-namespace Eling.Core;
+namespace Eling.Core.MemoryRecall;
 
 /// <summary>
 /// Builds a recall payload that bundles topic-based recall, recently updated

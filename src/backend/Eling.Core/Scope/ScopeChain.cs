@@ -1,4 +1,4 @@
-namespace Eling.Core;
+namespace Eling.Core.Scope;
 
 /// <summary>
 /// Ordered chain of project scopes discovered from a working directory up to

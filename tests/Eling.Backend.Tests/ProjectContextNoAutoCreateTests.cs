@@ -1,5 +1,6 @@
 using Eling.Backend.Bootstrap;
 using Eling.Core;
+using Eling.Core.Scope;
 
 namespace Eling.Backend.Tests;
 

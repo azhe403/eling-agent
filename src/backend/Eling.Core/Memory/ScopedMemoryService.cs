@@ -1,7 +1,8 @@
-namespace Eling.Core;
+using Eling.Core.Exceptions;
+using Eling.Core.Memory.Storage;
+using Eling.Core.Scope;
 
-/// <summary>One scope-chain level: the scope and its dedicated memory service.</summary>
-public sealed record ProjectLevel(ProjectScope Scope, IMemoryService Service);
+namespace Eling.Core.Memory;
 
 public sealed class ScopedMemoryService : IScopedMemoryService
 {
@@ -15,6 +16,13 @@ public sealed class ScopedMemoryService : IScopedMemoryService
 
     public bool IsInitialized => _levels.Count > 0;
 
+    public bool HasOwnScope =>
+        _levels.Count > 0 &&
+        string.Equals(
+            _levels[0].Scope.Root.TrimEnd(Path.DirectorySeparatorChar),
+            _cwd.TrimEnd(Path.DirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
+
     public string Cwd => _cwd;
 
     public IMemoryService GlobalService => _globalService;
@@ -25,6 +33,95 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         _levels.Count > 0
             ? _levels[0].Service
             : throw new ProjectScopeNotInitializedException(_cwd);
+
+    /// <summary>
+    /// Resolves the logical name (last path segment) of an ancestor scope to its
+    /// root. Opt-in: requires this workspace to have its own <c>.eling</c> scope,
+    /// never creates a scope, and throws <see cref="InvalidProjectTargetException"/>
+    /// when the name is unknown or no own scope exists.
+    /// </summary>
+    public string ResolveAncestorProjectRoot(string projectName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectName);
+
+        var ancestorLevels = _levels.Skip(HasOwnScope ? 1 : 0).ToList();
+        var available = ancestorLevels.Select(l => ProjectNameOf(l.Scope.Root)).ToList().AsReadOnly();
+
+        if (!HasOwnScope)
+        {
+            throw new InvalidProjectTargetException(
+                projectName,
+                "this workspace has no own .eling scope; initialize one before targeting an ancestor",
+                available);
+        }
+
+        var trimmed = projectName.Trim();
+        var match = ancestorLevels.FirstOrDefault(l =>
+            string.Equals(ProjectNameOf(l.Scope.Root), trimmed, StringComparison.OrdinalIgnoreCase));
+
+        if (match is null)
+        {
+            throw new InvalidProjectTargetException(
+                projectName,
+                "not a known ancestor scope of this workspace",
+                available);
+        }
+
+        return match.Scope.Root;
+    }
+
+    /// <summary>
+    /// Saves into a specific existing project level of the chain (used for
+    /// explicit ancestor writes). The level must already be part of the chain, so
+    /// no scope is ever created here.
+    /// </summary>
+    public async Task<ScopedSaveResult> SaveToProjectAsync(Memory memory, string targetProjectRoot)
+    {
+        ArgumentNullException.ThrowIfNull(memory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetProjectRoot);
+
+        if (_levels.Count == 0)
+        {
+            throw new ProjectScopeNotInitializedException(_cwd);
+        }
+
+        var level = ResolveLevelByRoot(targetProjectRoot)
+            ?? throw new InvalidProjectTargetException(
+                ProjectNameOf(targetProjectRoot),
+                "not a known project scope level of this workspace",
+                _levels.Select(l => ProjectNameOf(l.Scope.Root)).ToList().AsReadOnly());
+
+        var saveResult = await level.Service.SaveAsync(memory);
+        var scoped = new ScopedMemory(saveResult.Memory, MemoryScopeKind.Project, level.Scope.Root);
+        ScopedMemory? previous = saveResult.Previous is null
+            ? null
+            : new ScopedMemory(saveResult.Previous, MemoryScopeKind.Project, level.Scope.Root);
+        return new ScopedSaveResult(scoped, saveResult.Action, previous);
+    }
+
+    /// <summary>Rebuilds the search index of a single project level of the chain.</summary>
+    public async Task RebuildProjectIndexAsync(string projectRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+        var level = ResolveLevelByRoot(projectRoot);
+        if (level is not null)
+        {
+            await level.Service.RebuildIndexAsync();
+        }
+    }
+
+    private ProjectLevel? ResolveLevelByRoot(string projectRoot)
+    {
+        var target = projectRoot.TrimEnd(Path.DirectorySeparatorChar);
+        return _levels.FirstOrDefault(l =>
+            string.Equals(
+                l.Scope.Root.TrimEnd(Path.DirectorySeparatorChar),
+                target,
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ProjectNameOf(string root) =>
+        Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar));
 
     /// <summary>Old single-project ctor, kept as an N=1 chain wrapper.</summary>
     public ScopedMemoryService(

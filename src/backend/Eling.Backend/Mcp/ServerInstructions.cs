@@ -23,7 +23,7 @@ public static class ServerInstructions
         "Consistency Rules: Use clean lowercase memory tags (no underscores, no mixed language). Keep memories portable — avoid machine-specific absolute paths and personal usernames; use relative paths or generic placeholders so memories stay consistent across machines and platforms.",
 
         "Memory Recall Strategy: Hydrate context at session start, before significant actions, and after major milestones; avoid redundant recall on every micro-turn to preserve latency and context window.",
-        "Project scope initialization requires user consent: when `memory_project_status` reports `adoptable`, or a default `memory_save` returns `init-required`, ask the user; on approval call `memory_init_project`. The backend never creates `.eling` on its own.",
+        "Project scope initialization requires user consent. Offer it at most once per session, and only when `memory_recall` reports `projectScope.adoptable: true` (or `memory_project_status` reports `adoptable`). If a default `memory_save` returns `init-required`, relay it once. When `projectScope.policy` is `disabled`, do not offer initialization — use `scope=global`. If the user asks to enable project memory again for a disabled workspace, set the policy back to `ask` (or clear the entry) via `memory_project_scope_policy`, then offer consent-gated initialization. The backend never creates `.eling` on its own.",
         "Tool responses carry provenance: `projectName`/`projectRoot` identify the scope level a memory lives in (own, an ancestor, or null for global); `memory_get`/`list`/`search` return scoped payloads."
     ];
 

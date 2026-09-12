@@ -1,4 +1,5 @@
 using Eling.Core;
+using Eling.Core.Memory;
 using Xunit;
 
 namespace Eling.Core.Tests;
@@ -13,14 +14,14 @@ public class MemoryServiceSmartSaveTests
         // Default SmartSaveOptions (DuplicateThreshold = 0.7) must catch this paraphrase.
         var service = new MemoryService(storage, index);
 
-        var initial = new Memory(
+        var initial = new Memory.Memory(
             MemoryType.Preference,
             "Selalu pakai question tool untuk minta approval sebelum eksekusi",
             new[] { "workflow" });
         var firstResult = await service.SaveAsync(initial);
         Assert.Equal(SaveAction.Created, firstResult.Action);
 
-        var incoming = new Memory(
+        var incoming = new Memory.Memory(
             MemoryType.Preference,
             "Selalu gunakan question tool untuk meminta approval sebelum eksekusi bash/write",
             new[] { "preference", "approval" });
@@ -40,10 +41,10 @@ public class MemoryServiceSmartSaveTests
         var index = new InMemoryMemoryIndex();
         var service = new MemoryService(storage, index);
 
-        var initial = new Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" });
+        var initial = new Memory.Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" });
         await service.SaveAsync(initial);
 
-        var incoming = new Memory(MemoryType.Lesson, "Always check git status before commit", new[] { "lesson" });
+        var incoming = new Memory.Memory(MemoryType.Lesson, "Always check git status before commit", new[] { "lesson" });
         var result = await service.SaveAsync(incoming);
 
         Assert.Equal(SaveAction.Created, result.Action);
@@ -56,8 +57,8 @@ public class MemoryServiceSmartSaveTests
         var index = new InMemoryMemoryIndex();
         var service = new MemoryService(storage, index);
 
-        await service.SaveAsync(new Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" }));
-        var result = await service.SaveAsync(new Memory(MemoryType.Preference, "Python fastapi rest endpoint configuration", new[] { "py" }));
+        await service.SaveAsync(new Memory.Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" }));
+        var result = await service.SaveAsync(new Memory.Memory(MemoryType.Preference, "Python fastapi rest endpoint configuration", new[] { "py" }));
 
         Assert.Equal(SaveAction.Created, result.Action);
     }
@@ -69,11 +70,11 @@ public class MemoryServiceSmartSaveTests
         var index = new InMemoryMemoryIndex();
         var service = new MemoryService(storage, index);
 
-        var initial = new Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" });
+        var initial = new Memory.Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" });
         var firstResult = await service.SaveAsync(initial);
         Assert.Equal(SaveAction.Created, firstResult.Action);
 
-        var incoming = new Memory(
+        var incoming = new Memory.Memory(
             MemoryType.Preference,
             "Always check git status and diff before commit",
             new[] { "git", "workflow" });
@@ -93,11 +94,11 @@ public class MemoryServiceSmartSaveTests
         var index = new InMemoryMemoryIndex();
         var service = new MemoryService(storage, index);
 
-        var firstResult = await service.SaveAsync(new Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" }));
+        var firstResult = await service.SaveAsync(new Memory.Memory(MemoryType.Preference, "Always check git status before commit", new[] { "git" }));
         Assert.Equal(SaveAction.Created, firstResult.Action);
         Assert.Null(firstResult.Previous);
 
-        var secondResult = await service.SaveAsync(new Memory(
+        var secondResult = await service.SaveAsync(new Memory.Memory(
             MemoryType.Preference,
             "Always check git status and diff before commit",
             new[] { "git", "workflow" }));

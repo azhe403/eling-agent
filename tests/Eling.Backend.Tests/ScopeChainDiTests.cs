@@ -1,6 +1,9 @@
 using Eling.Backend.Bootstrap;
 using Eling.Backend.Mcp;
 using Eling.Core;
+using Eling.Core.Exceptions;
+using Eling.Core.Memory;
+using Eling.Core.Scope;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Eling.Backend.Tests;

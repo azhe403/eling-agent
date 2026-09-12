@@ -1,4 +1,6 @@
-namespace Eling.Core;
+using Eling.Core.Memory;
+
+namespace Eling.Core.MemoryRecall;
 
 /// <summary>
 /// A recalled memory with the search-layer metadata that produced it:
@@ -10,7 +12,7 @@ namespace Eling.Core;
 /// provenance: which chain level (or global) the hit came from.
 /// </summary>
 public sealed record MemoryRecallHit(
-    Memory Memory,
+    Memory.Memory Memory,
     IReadOnlyCollection<string>? MatchedVia = null,
     double PorterScore = 0.0,
     double TrigramScore = 0.0,

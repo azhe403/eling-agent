@@ -1,4 +1,6 @@
 using Eling.Core;
+using Eling.Core.Memory;
+using Eling.Core.Memory.Storage;
 using Microsoft.Data.Sqlite;
 
 namespace Eling.Backend.Tests;

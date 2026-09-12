@@ -38,8 +38,8 @@ Desired semantics, as stated by the user:
 
 ## Non-Goals (YAGNI)
 
-- No changes to reference-based operations (get/update/delete by `MemoryReference`, copy/move/promote) — they already support arbitrary target roots.
-- No new scope tokens in the public API. `project | global | merged | auto` keep their meaning.
+- MCP-layer ancestor CRUD is now exposed via an explicit `project` (logical ancestor name) on `memory_save`, `memory_get`, `memory_delete`, and `memory_copy_to_project`. The Core `MemoryReference`/`CopyToProject` paths already supported arbitrary roots, but the MCP surface now adds a guarded, name-based target (`project`).
+- No new scope tokens. `project | global | merged | auto` keep their meaning (the `project` logical name replaces `projectRoot` paths for the agent surface).
 - No dashboard/HTTP parity work in this pass (noted as follow-up).
 - No auto-adoption and no `ELING_AUTO_INIT`-style silent creation — consent is mandatory for every project `.eling`.
 - No changes to global-scope resolution (`~/.config/eling`).
@@ -149,6 +149,42 @@ Ordering contract for merged results: **level-grouped**. The own scope's results
 
 Contexts without a project layer (uninitialized) return global-only merged results; a blocked `memory_save` returns the init-required signal defined in §3.
 
+### 4.1 Explicit ancestor targeting (`project`) — MCP surface
+
+Merged reads surface ancestor memories, but before this pass the MCP tools could
+not *target* a specific ancestor scope: `memory_save`/`memory_delete` always used
+the head, `memory_get` had no target root, and `memory_copy_to_project` hard-coded
+the head. This pass adds an explicit, guarded target to those tools.
+
+**Parameter.** `memory_save`, `memory_get`, `memory_delete`, and
+`memory_copy_to_project` accept an optional `project` string: the **logical name**
+(last path segment) of an ancestor scope (e.g. the parent `.eling`, `acme-platform`).
+Paths are never accepted from the agent — the name resolves to a chain level the
+backend already knows, so the agent never has to learn where storage lives.
+
+**Guard — requires own scope.** Providing `project` is allowed only when the
+current workspace already has its own `.eling` (own-scope posture). This keeps the
+parent relationship explicit and opted-in rather than an implicit fallback. When
+the workspace has no own scope, or the name matches no ancestor level, resolution
+throws `InvalidProjectTargetException` (the latter case lists the available
+ancestor names). Targeting never creates a scope — only existing chain levels are
+reachable. `memory_save(..., project=...)` additionally rejects `scope=global`
+(contradictory target).
+
+**Core surface.**
+- `IScopedMemoryService.HasOwnScope` — true when level 0 is the cwd itself.
+- `IScopedMemoryService.ResolveAncestorProjectRoot(name)` — resolves a logical
+  ancestor name to its root, enforcing the own-scope guard; throws
+  `InvalidProjectTargetException` on failure.
+- `IScopedMemoryService.SaveToProjectAsync(memory, targetRoot)` — writes into a
+  specific existing chain level (head writes still use `SaveAsync`).
+- `IScopedMemoryService.RebuildProjectIndexAsync(targetRoot)` — rebuilds the
+  index of a single level after a targeted write/delete.
+
+Point reads/deletes by ancestor reuse the existing
+`MemoryReference(id, Project, root)` path; copy/move reuse
+`CopyToProjectAsync/MoveToProjectAsync(source, targetRoot)`.
+
 ### 5. Data flow examples
 
 **Write from nested, un-adopted child (today's behavior, preserved):**
@@ -174,10 +210,11 @@ Human consents → `memory_init_project` creates `payments/.eling`. Next `save` 
 ### 7. Implementation touchpoints
 
 - `Eling.Core/Scope/ProjectScope.cs` — add `DiscoverChain`; keep `Discover` as head-only helper.
-- `Eling.Core/Memory/ScopedMemoryService.cs` — multi-level levels list; head = write target; empty-chain (uninitialized) reporting; blocked-save path.
+- `Eling.Core/Memory/IScopedMemoryService.cs` + `ScopedMemoryService.cs` — multi-level levels list; head = write target; empty-chain (uninitialized) reporting; blocked-save path; plus `HasOwnScope`, `ResolveAncestorProjectRoot`, `SaveToProjectAsync`, `RebuildProjectIndexAsync` (ancestor targeting).
+- `Eling.Core/Exceptions/InvalidProjectTargetException.cs` — guard/name-resolution failure.
 - `Eling.Core/Memory/` merger (interface + implementation) — N-level level-grouped merge with nearest-first ULID dedup.
 - `Eling.Backend/Bootstrap/ProjectContext.cs` (+ `TestAppBuilder`, `McpServiceExtensions`) — build/supply chain; **stop auto-creating the project data dir**; effective project data dir pending when uninitialized.
-- `Eling.Backend/Mcp/Tools/` — add `MemoryProjectStatusTool`, `MemoryInitProjectTool`; update `MemoryWriteTool` blocked-save result; small `ServerInstructions` addition.
+- `Eling.Backend/Mcp/Tools/` — add `MemoryProjectStatusTool`, `MemoryInitProjectTool`; update `MemoryWriteTool` blocked-save result; small `ServerInstructions` addition; plus `project` parameter on `memory_save`, `memory_get`, `memory_delete`, `memory_copy_to_project`.
 - `Eling.Backend/Dtos/` — result DTOs for the two tools and the blocked-save signal; `MemoryRecallMemory` and `ScopedSearchResultDto` gain flat `projectName` + `projectRoot` (both null for global).
 - Tests: `Eling.Core.Tests`, `Eling.Backend.Tests` per conventions below.
 
@@ -185,6 +222,8 @@ Human consents → `memory_init_project` creates `payments/.eling`. Next `save` 
 
 Follow project conventions: run per-csproj, never solution-wide; `--artifacts-path .bin-test`.
 
+- **Ancestor targeting**: `ResolveAncestorProjectRoot` resolves by logical name, rejects unknown names and no-own-scope workspaces; `SaveToProjectAsync` writes to the ancestor level (head untouched); `RebuildProjectIndexAsync` targets the single level.
+- **Tool surface (`project` parameter)**: `memory_save(project=...)` writes to ancestor, `memory_get(project=...)` reads ancestor, `memory_delete(project=...)` deletes ancestor, `memory_copy_to_project(project=...)` copies to ancestor; guard rejects `project` without own scope, unknown names, and `scope=global` + `project`.
 - **Eling.Core.Tests / ScopeTests**: `DiscoverChain` with 2–3 nested levels; `stopAt` seam; user-home exclusion; empty chain when no scope exists. Update any expectations that relied on implicit auto-create at cwd (behavior removed).
 - **ProjectContext**: no project data dir created when uninitialized; runtime dir still provisioned under the user scope.
 - **Merger N-level**: nearest-first priority; same ULID at two levels resolves to the nearer; global always last; N=1 degenerates to today's project+global behavior (regression guard).
@@ -196,7 +235,9 @@ Follow project conventions: run per-csproj, never solution-wide; `--artifacts-pa
 ## Out of scope / follow-ups
 
 - Dashboard parity (projects list showing chain, init/adopt action in UI).
-- Promoting a memory to a specific ancestor level (only global promotion exists today).
+- A dedicated "promote to a specific ancestor" verb (copy/move targeting now works through `memory_copy_to_project(project=...)`; a distinct promote verb is still global-only).
+- Re-adding `memory_update` to the MCP surface: it previously existed (`35173b2` added it) and was intentionally removed in the MCP tool restructure (`d262411`), which changed `MemoryWriteTool` from "create, update, delete" to "create, delete". Core `UpdateAsync` and the REST endpoints still support update; the MCP surface deliberately does not.
+- Origin labeling (`own`/`ancestor`/`global`) per recalled/searched item and an `ancestors` read scope — follow-up to this pass.
 - Auto-adoption flags (`ELING_AUTO_INIT`) — deliberately not included; consent is mandatory.
 
 ## Open questions

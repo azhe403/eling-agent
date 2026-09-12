@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Eling.Core;
+using Eling.Core.Memory;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 

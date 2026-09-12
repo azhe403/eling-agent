@@ -18,4 +18,7 @@ public sealed class MemoryRecallResponse
 
     [JsonPropertyName("stats")]
     public MemoryRecallStatsDto Stats { get; set; } = new();
+
+    [JsonPropertyName("projectScope")]
+    public MemoryRecallProjectScopeDto ProjectScope { get; set; } = new();
 }

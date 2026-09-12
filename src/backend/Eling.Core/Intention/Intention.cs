@@ -1,6 +1,6 @@
-namespace Eling.Core;
+using Eling.Core.Memory;
 
-using System.Collections.ObjectModel;
+namespace Eling.Core.Intention;
 
 public class Intention
 {

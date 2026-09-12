@@ -1,4 +1,5 @@
 using Eling.Core;
+using Eling.Core.Memory;
 
 namespace Eling.Core.Tests;
 
@@ -8,7 +9,7 @@ public class MemoryTests
     public void Constructor_InitializesDefaultValues()
     {
         var before = DateTimeOffset.UtcNow;
-        var memory = new Memory(MemoryType.Fact, "User prefers dark mode");
+        var memory = new Memory.Memory(MemoryType.Fact, "User prefers dark mode");
         var after = DateTimeOffset.UtcNow;
 
         Assert.False(string.IsNullOrWhiteSpace(memory.Id.Value));
@@ -29,7 +30,7 @@ public class MemoryTests
         var updatedAt = DateTimeOffset.UtcNow;
         var tags = new[] { "pref", "ui" };
 
-        var memory = new Memory(
+        var memory = new Memory.Memory(
             type: MemoryType.Preference,
             content: "Use dark theme",
             tags: tags,
@@ -71,7 +72,7 @@ public class MemoryTests
     [Fact]
     public void Constructor_ThrowsArgumentNullException_WhenContentIsNull()
     {
-        Assert.Throws<ArgumentNullException>(() => new Memory(MemoryType.Note, null!));
+        Assert.Throws<ArgumentNullException>(() => new Memory.Memory(MemoryType.Note, null!));
     }
 
     [Theory]
@@ -82,7 +83,7 @@ public class MemoryTests
     [InlineData(MemoryType.Note)]
     public void Memory_SupportsAllMemoryTypes(MemoryType type)
     {
-        var memory = new Memory(type, "test content");
+        var memory = new Memory.Memory(type, "test content");
         Assert.Equal(type, memory.Type);
     }
 
@@ -92,7 +93,7 @@ public class MemoryTests
     [InlineData(MemoryStatus.Archived)]
     public void Memory_SupportsAllMemoryStatuses(MemoryStatus status)
     {
-        var memory = new Memory(MemoryType.Note, "test content", status: status);
+        var memory = new Memory.Memory(MemoryType.Note, "test content", status: status);
         Assert.Equal(status, memory.Status);
     }
 }

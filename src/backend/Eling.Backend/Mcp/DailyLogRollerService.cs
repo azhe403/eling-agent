@@ -1,4 +1,5 @@
 using Eling.Core;
+using Eling.Core.Logging;
 using Microsoft.Extensions.Hosting;
 
 namespace Eling.Backend.Mcp;

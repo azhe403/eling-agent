@@ -1,4 +1,5 @@
 using Eling.Core;
+using Eling.Core.Scope;
 using Microsoft.Extensions.Logging;
 
 namespace Eling.Backend.Bootstrap;

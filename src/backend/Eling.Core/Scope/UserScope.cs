@@ -1,4 +1,4 @@
-namespace Eling.Core;
+namespace Eling.Core.Scope;
 
 public sealed class UserScope
 {

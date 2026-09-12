@@ -76,8 +76,24 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
 
         if (_app is not null)
         {
-            try { await _app.StopAsync(); } catch { /* ignore */ }
-            try { await _app.DisposeAsync(); } catch { /* ignore */ }
+            try
+            {
+                await _app.StopAsync();
+            }
+            catch
+            {
+                /* ignore */
+            }
+
+            try
+            {
+                await _app.DisposeAsync();
+            }
+            catch
+            {
+                /* ignore */
+            }
+
             _app = null;
         }
     }
@@ -106,13 +122,16 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
     /// ordering bugs are not masked. The supplied token bounds the wait.
     /// </summary>
     private static async Task<string> ReadEventDataAsync(
-        StreamReader reader, string expected, CancellationToken ct)
+        StreamReader reader,
+        string expected,
+        CancellationToken ct
+    )
     {
         while (true)
         {
             var line = await reader.ReadLineAsync(ct)
-                ?? throw new InvalidOperationException(
-                    "SSE stream ended before the expected event arrived.");
+                       ?? throw new InvalidOperationException(
+                           "SSE stream ended before the expected event arrived.");
 
             if (line == expected) return line;
             if (line.Length == 0 || line == "data: runtimes") continue;

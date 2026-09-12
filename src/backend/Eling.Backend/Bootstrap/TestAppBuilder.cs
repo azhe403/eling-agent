@@ -1,4 +1,5 @@
 using Eling.Core;
+using Eling.Core.Scope;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Logging;
 

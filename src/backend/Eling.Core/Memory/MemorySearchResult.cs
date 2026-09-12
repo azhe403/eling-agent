@@ -1,6 +1,4 @@
-using Eling.Core;
-
-namespace Eling.Core;
+namespace Eling.Core.Memory;
 
 public readonly record struct MemorySearchResult(
     MemoryId Id,

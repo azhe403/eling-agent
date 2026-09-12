@@ -1,0 +1,102 @@
+using Eling.Core.Scope;
+
+namespace Eling.Core.Tests;
+
+/// <summary>
+/// Pecut 9 scope rules: `.eling` is the ONLY project-scope authority; the user
+/// scope is independent of the project scope.
+/// </summary>
+public sealed class ProjectScopeTests : IDisposable
+{
+    private readonly string _root;
+
+    public ProjectScopeTests()
+    {
+        _root = Path.Combine(Path.GetTempPath(), "eling-scope-tests-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(_root);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_root, recursive: true); } catch { }
+    }
+
+    private string CreateDir(params string[] segments)
+    {
+        var path = Path.Combine([_root, ..segments]);
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    [Fact]
+    public void Discover_AncestorHasElingDirectory_FindsIt()
+    {
+        var project = CreateDir("project");
+        Directory.CreateDirectory(Path.Combine(project, ".eling"));
+        var nested = CreateDir("project", "src", "backend", "Eling.Host");
+
+        var scope = ProjectScope.Discover(nested, stopAtDirectory: _root);
+
+        Assert.Equal(Path.GetFullPath(project), scope.Root);
+        Assert.Equal(Path.Combine(project, ".eling"), scope.DataDirectory);
+    }
+
+    [Fact]
+    public void Discover_MultipleElingDirectories_NearestWins()
+    {
+        var outer = CreateDir("outer");
+        Directory.CreateDirectory(Path.Combine(outer, ".eling"));
+        var inner = CreateDir("outer", "inner");
+        Directory.CreateDirectory(Path.Combine(inner, ".eling"));
+        var leaf = CreateDir("outer", "inner", "deep");
+
+        var scope = ProjectScope.Discover(leaf, stopAtDirectory: _root);
+
+        Assert.Equal(Path.GetFullPath(inner), scope.Root);
+    }
+
+    [Theory]
+    [InlineData("solution.slnx")]
+    [InlineData("solution.sln")]
+    public void Discover_SolutionFileWithoutEling_IsNotScopeAuthority(string solutionFile)
+    {
+        // A solution file without any .eling anywhere must NOT become a scope root.
+        var dir = CreateDir("sln-dir");
+        File.WriteAllText(Path.Combine(dir, solutionFile), "");
+        var nested = CreateDir("sln-dir", "src");
+
+        var scope = ProjectScope.Discover(nested, stopAtDirectory: _root);
+
+        // Falls back to the start directory itself; the .slnx/.sln is ignored.
+        Assert.Equal(Path.GetFullPath(nested), scope.Root);
+    }
+
+    [Fact]
+    public void Discover_NoElingDirectory_FallsBackToStartDirectory()
+    {
+        var dir = CreateDir("fresh");
+
+        var scope = ProjectScope.Discover(dir, stopAtDirectory: _root);
+
+        Assert.Equal(Path.GetFullPath(dir), scope.Root);
+        Assert.Equal(Path.Combine(dir, ".eling"), scope.DataDirectory);
+    }
+
+    [Fact]
+    public void Discover_NoOverride_DefaultsToCurrentWorkingDirectory()
+    {
+        var original = Directory.GetCurrentDirectory();
+        try
+        {
+            Directory.SetCurrentDirectory(_root);
+
+            var scope = ProjectScope.Discover(stopAtDirectory: _root);
+
+            Assert.Equal(Path.GetFullPath(_root), scope.Root);
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(original);
+        }
+    }
+}

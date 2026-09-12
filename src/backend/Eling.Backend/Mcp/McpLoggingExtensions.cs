@@ -1,4 +1,6 @@
 using Eling.Core;
+using Eling.Core.Logging;
+using Eling.Core.Scope;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using Serilog.Events;

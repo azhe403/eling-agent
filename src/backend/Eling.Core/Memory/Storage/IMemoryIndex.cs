@@ -1,6 +1,4 @@
-using Eling.Core;
-
-namespace Eling.Core;
+namespace Eling.Core.Memory.Storage;
 
 public interface IMemoryIndex
 {

@@ -1,9 +1,8 @@
-using Eling.Core;
+using Eling.Core.Intention;
 using YamlDotNet.Serialization;
-using YamlDotNet.Serialization.Converters;
 using YamlDotNet.Serialization.NamingConventions;
 
-namespace Eling.Core;
+namespace Eling.Core.Memory.Serialization;
 
 public class FileSystemIntentionStorage : IIntentionStorage
 {
@@ -41,7 +40,7 @@ public class FileSystemIntentionStorage : IIntentionStorage
         return fullPath;
     }
 
-    public async Task SaveAsync(Intention intention)
+    public async Task SaveAsync(Intention.Intention intention)
     {
         ArgumentNullException.ThrowIfNull(intention);
 
@@ -67,7 +66,7 @@ public class FileSystemIntentionStorage : IIntentionStorage
         await File.WriteAllTextAsync(filePath, markdown);
     }
 
-    public async Task<Intention?> GetByIdAsync(MemoryId id)
+    public async Task<Intention.Intention?> GetByIdAsync(MemoryId id)
     {
         var filePath = GetFilePath(id);
 
@@ -95,15 +94,15 @@ public class FileSystemIntentionStorage : IIntentionStorage
         return Task.FromResult(true);
     }
 
-    public async Task<IReadOnlyCollection<Intention>> ListAllAsync()
+    public async Task<IReadOnlyCollection<Intention.Intention>> ListAllAsync()
     {
         if (!Directory.Exists(_intentionsDir))
         {
-            return Array.Empty<Intention>();
+            return Array.Empty<Intention.Intention>();
         }
 
         var files = Directory.GetFiles(_intentionsDir, "*.md");
-        var intentions = new List<Intention>();
+        var intentions = new List<Intention.Intention>();
 
         foreach (var file in files)
         {
@@ -118,7 +117,7 @@ public class FileSystemIntentionStorage : IIntentionStorage
         return intentions.AsReadOnly();
     }
 
-    private Intention? ParseIntention(string rawMarkdown)
+    private Intention.Intention? ParseIntention(string rawMarkdown)
     {
         if (string.IsNullOrWhiteSpace(rawMarkdown))
         {
@@ -182,7 +181,7 @@ public class FileSystemIntentionStorage : IIntentionStorage
 
         var description = frontMatter.Description ?? string.Empty;
 
-        return new Intention(
+        return new Intention.Intention(
             description: description,
             triggerType,
             frontMatter.Tags,

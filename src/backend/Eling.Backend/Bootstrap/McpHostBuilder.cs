@@ -1,5 +1,7 @@
 using Eling.Backend.Mcp;
 using Eling.Core;
+using Eling.Core.Memory;
+using Eling.Core.Scope;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;

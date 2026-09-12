@@ -1,4 +1,4 @@
-namespace Eling.Core;
+namespace Eling.Core.Scope;
 
 public static class CentralLogDirectory
 {
@@ -22,10 +22,10 @@ public static class CentralLogDirectory
         ArgumentException.ThrowIfNullOrWhiteSpace(home);
 
         // The XDG-style data root is computed uniformly from userHome on every
-        // platform. Windows uses SpecialFolder.UserProfile (e.g.
-        // C:\Users\some-user), giving C:\Users\some-user\.local\share by default —
-        // matching the convention already established on this machine by other
-        // dev tools. %LOCALAPPDATA% is intentionally NOT used.
+        // platform. On Windows, userHome is SpecialFolder.UserProfile, so the
+        // default data root is <user-home>/.local/share — matching the
+        // convention already established by other dev tools.
+        // %LOCALAPPDATA% is intentionally NOT used.
         var dataRoot = !string.IsNullOrWhiteSpace(envXdg)
             ? envXdg!
             : Path.Combine(home, ".local", "share");

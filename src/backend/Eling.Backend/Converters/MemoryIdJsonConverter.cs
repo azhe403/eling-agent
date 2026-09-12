@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Eling.Core;
+using Eling.Core.Memory;
 
 namespace Eling.Backend.Converters;
 

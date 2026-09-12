@@ -1,4 +1,6 @@
 using Eling.Core;
+using Eling.Core.Memory;
+using Eling.Core.Memory.Storage;
 
 namespace Eling.Core.Tests;
 
@@ -15,9 +17,9 @@ public class FtsSearchLayerTests
         return new SqliteMemoryIndex(path);
     }
 
-    private static Memory NewMemory(string content, params string[] tags)
+    private static Memory.Memory NewMemory(string content, params string[] tags)
     {
-        return new Memory(MemoryType.Fact, content, tags: tags);
+        return new Memory.Memory(MemoryType.Fact, content, tags: tags);
     }
 
     [Fact]

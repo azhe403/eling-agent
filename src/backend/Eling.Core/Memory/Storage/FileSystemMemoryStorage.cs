@@ -1,9 +1,8 @@
-using Eling.Core;
+using Eling.Core.Memory.Serialization;
 using YamlDotNet.Serialization;
-using YamlDotNet.Serialization.Converters;
 using YamlDotNet.Serialization.NamingConventions;
 
-namespace Eling.Core;
+namespace Eling.Core.Memory.Storage;
 
 public class FileSystemMemoryStorage : IMemoryStorage
 {

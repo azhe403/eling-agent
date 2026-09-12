@@ -1,6 +1,9 @@
 using Eling.Backend.Dtos;
 using Eling.Backend.Mcp.Tools;
 using Eling.Core;
+using Eling.Core.Memory;
+using Eling.Core.Memory.Storage;
+using Eling.Core.MemoryRecall;
 
 namespace Eling.Backend.Tests;
 

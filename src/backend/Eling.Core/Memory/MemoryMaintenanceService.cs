@@ -1,6 +1,6 @@
-using System.Globalization;
+using Eling.Core.Memory.Storage;
 
-namespace Eling.Core;
+namespace Eling.Core.Memory;
 public class MemoryMaintenanceService : IMemoryMaintenanceService
 {
     private readonly IMemoryService _service;

@@ -1,4 +1,4 @@
-namespace Eling.Core;
+namespace Eling.Core.MemoryRecall;
 
 /// <summary>
 /// Lightweight counters describing the state of the memory store at recall

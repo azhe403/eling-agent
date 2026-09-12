@@ -1,4 +1,5 @@
 using Eling.Core;
+using Eling.Core.Scope;
 
 namespace Eling.Backend.Bootstrap;
 

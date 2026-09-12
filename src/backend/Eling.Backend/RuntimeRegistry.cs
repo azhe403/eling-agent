@@ -1,4 +1,9 @@
 using Eling.Core;
+using Eling.Core.Memory;
+using Eling.Core.Memory.Storage;
+using Eling.Core.Scope;
+using CoordinatorJsonContext = Eling.Core.Runtime.CoordinatorJsonContext;
+using RuntimeInfo = Eling.Core.Runtime.RuntimeInfo;
 
 namespace Eling.Backend;
 
@@ -137,7 +142,7 @@ public sealed class RuntimeRegistry : IDisposable
         }
     }
 
-    private void WriteToDisk(RuntimeRegistration reg)
+    private void WriteToDisk(Core.Runtime.RuntimeRegistration reg)
     {
         try
         {
@@ -164,7 +169,7 @@ public sealed class RuntimeRegistry : IDisposable
         }
     }
 
-    public void Register(RuntimeRegistration registration)
+    public void Register(Core.Runtime.RuntimeRegistration registration)
     {
         lock (_lock)
         {
@@ -236,7 +241,7 @@ public sealed class RuntimeRegistry : IDisposable
             }
             else
             {
-                var reg = new RuntimeRegistration
+                var reg = new Core.Runtime.RuntimeRegistration
                 {
                     ProcessId = runtime.ProcessId,
                     ProjectRoot = runtime.ProjectRoot,

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Eling.Core;
+using Eling.Core.Memory;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 

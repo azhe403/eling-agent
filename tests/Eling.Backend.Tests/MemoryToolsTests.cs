@@ -1,6 +1,9 @@
 using Eling.Backend.Mcp;
 using Eling.Backend.Mcp.Tools;
 using Eling.Core;
+using Eling.Core.Exceptions;
+using Eling.Core.Memory;
+using Eling.Core.Scope;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Server;
@@ -327,6 +330,111 @@ public class MemoryToolsTests
         var tool = new MemoryReadTool(service);
 
         await Assert.ThrowsAsync<ArgumentException>(() => tool.SearchAsync(query!));
+    }
+
+    // ---------- Ancestor targeting (project parameter) ----------
+
+    private const string ChildRoot = @"C:\work\acme\integrations\payments";
+    private const string ParentRoot = @"C:\work\acme\integrations";
+
+    private static (MemoryWriteTool Write, MemoryReadTool Read, MemoryPromoteTool Promote, FakeMemoryService Child, FakeMemoryService Parent, FakeMemoryService Global) BuildScopedTools()
+    {
+        var child = new FakeMemoryService();
+        var parent = new FakeMemoryService();
+        var global = new FakeMemoryService();
+        var scoped = new ScopedMemoryService(
+            [
+                new ProjectLevel(new ProjectScope(ChildRoot), child),
+                new ProjectLevel(new ProjectScope(ParentRoot), parent)
+            ],
+            global,
+            new MemoryScopePolicy(),
+            new MemoryMerger(),
+            ChildRoot);
+        return (
+            new MemoryWriteTool(scoped),
+            new MemoryReadTool(scoped),
+            new MemoryPromoteTool(scoped),
+            child,
+            parent,
+            global);
+    }
+
+    [Fact]
+    public async Task SaveAsync_WithProjectTarget_WritesToAncestor()
+    {
+        var (write, _, _, child, parent, _) = BuildScopedTools();
+
+        var response = await write.SaveAsync("parent rule", project: "integrations");
+
+        Assert.NotNull(response);
+        Assert.Equal("project", response.Scope);
+        Assert.Single(parent.Items);
+        Assert.Empty(child.Items);
+        Assert.True(parent.RebuildIndexCalled);
+    }
+
+    [Fact]
+    public async Task SaveAsync_WithProjectTarget_GlobalScope_Throws()
+    {
+        var (write, _, _, _, _, _) = BuildScopedTools();
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => write.SaveAsync("x", scope: "global", project: "integrations"));
+    }
+
+    [Fact]
+    public async Task SaveAsync_WithUnknownProjectTarget_Throws()
+    {
+        var (write, _, _, _, _, _) = BuildScopedTools();
+
+        await Assert.ThrowsAsync<InvalidProjectTargetException>(
+            () => write.SaveAsync("x", project: "nope"));
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_WithProjectTarget_ReadsAncestor()
+    {
+        var (_, read, _, child, parent, _) = BuildScopedTools();
+        var memory = new Memory(MemoryType.Fact, "parent mem");
+        parent.Items[memory.Id] = memory;
+
+        var result = await read.GetByIdAsync(memory.Id.ToString(), project: "integrations");
+
+        Assert.NotNull(result);
+        Assert.Equal("parent mem", result!.Content);
+        Assert.Empty(child.Items);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_WithProjectTarget_DeletesAncestor()
+    {
+        var (write, _, _, child, parent, _) = BuildScopedTools();
+        var memory = new Memory(MemoryType.Fact, "parent mem");
+        parent.Items[memory.Id] = memory;
+
+        var deleted = await write.DeleteAsync(memory.Id.ToString(), project: "integrations");
+
+        Assert.True(deleted);
+        Assert.Empty(parent.Items);
+        Assert.Empty(child.Items);
+        Assert.True(parent.RebuildIndexCalled);
+    }
+
+    [Fact]
+    public async Task CopyToProjectAsync_WithProjectTarget_CopiesToAncestor()
+    {
+        var (_, _, promote, child, parent, global) = BuildScopedTools();
+        var memory = new Memory(MemoryType.Fact, "shared");
+        global.Items[memory.Id] = memory;
+
+        var result = await promote.CopyToProjectAsync(
+            memory.Id.ToString(), sourceScope: "global", project: "integrations");
+
+        Assert.NotNull(result);
+        Assert.Single(parent.Items);
+        Assert.Empty(child.Items);
+        Assert.True(parent.RebuildIndexCalled);
     }
 
     // ---------- MemoryIndexTool.RebuildIndexAsync ----------

@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 using Eling.Core;
+using Eling.Core.Memory;
+using Eling.Core.MemoryRecall;
 
 namespace Eling.Backend.Dtos;
 

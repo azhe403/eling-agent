@@ -1,3 +1,8 @@
+using Eling.Core.Memory;
+using Eling.Core.Memory.Serialization;
+using Eling.Core.MemoryRecall;
+using Eling.Core.Scope;
+
 namespace Eling.Core.Tests;
 
 /// <summary>
@@ -11,26 +16,26 @@ public sealed class MemoryRecallServiceChainTests
 
     private sealed class FakeRecallMemoryService : IMemoryService
     {
-        private readonly Dictionary<MemoryId, Memory> _items = new();
+        private readonly Dictionary<MemoryId, Memory.Memory> _items = new();
         private readonly Dictionary<string, MemorySearchResult> _searchHits = new();
 
-        public Task<SaveResult> SaveAsync(Memory memory)
+        public Task<SaveResult> SaveAsync(Memory.Memory memory)
         {
             _items[memory.Id] = memory;
             return Task.FromResult(new SaveResult(memory, SaveAction.Created));
         }
 
-        public Task<Memory?> GetByIdAsync(MemoryId id)
+        public Task<Memory.Memory?> GetByIdAsync(MemoryId id)
             => Task.FromResult(_items.TryGetValue(id, out var m) ? m : null);
 
-        public Task<Memory?> UpdateAsync(MemoryId id, string? content = null, MemoryType? type = null, string[]? tags = null, string? source = null, MemoryStatus? status = null)
+        public Task<Memory.Memory?> UpdateAsync(MemoryId id, string? content = null, MemoryType? type = null, string[]? tags = null, string? source = null, MemoryStatus? status = null)
             => Task.FromResult(_items.TryGetValue(id, out var m) ? m : null);
 
         public Task<bool> DeleteAsync(MemoryId id)
             => Task.FromResult(_items.Remove(id));
 
-        public Task<IReadOnlyCollection<Memory>> ListAllAsync()
-            => Task.FromResult<IReadOnlyCollection<Memory>>(_items.Values.ToList());
+        public Task<IReadOnlyCollection<Memory.Memory>> ListAllAsync()
+            => Task.FromResult<IReadOnlyCollection<Memory.Memory>>(_items.Values.ToList());
 
         public Task<IReadOnlyCollection<MemorySearchResult>> SearchAsync(string query)
         {
@@ -47,11 +52,11 @@ public sealed class MemoryRecallServiceChainTests
 
     private sealed class EmptyIntentionStorage : IIntentionStorage
     {
-        public Task SaveAsync(Intention intention) => Task.CompletedTask;
-        public Task<Intention?> GetByIdAsync(MemoryId id) => Task.FromResult<Intention?>(null);
+        public Task SaveAsync(Intention.Intention intention) => Task.CompletedTask;
+        public Task<Intention.Intention?> GetByIdAsync(MemoryId id) => Task.FromResult<Intention.Intention?>(null);
         public Task<bool> DeleteAsync(MemoryId id) => Task.FromResult(true);
-        public Task<IReadOnlyCollection<Intention>> ListAllAsync()
-            => Task.FromResult<IReadOnlyCollection<Intention>>(Array.Empty<Intention>());
+        public Task<IReadOnlyCollection<Intention.Intention>> ListAllAsync()
+            => Task.FromResult<IReadOnlyCollection<Intention.Intention>>(Array.Empty<Intention.Intention>());
     }
 
     private static (ScopedMemoryService Scoped, FakeRecallMemoryService Child, FakeRecallMemoryService Parent, FakeRecallMemoryService Global) Build()
@@ -75,7 +80,7 @@ public sealed class MemoryRecallServiceChainTests
     public async Task Recall_Merged_AncestorHitCarriesAncestorRoot()
     {
         var (scoped, _, parent, _) = Build();
-        await parent.SaveAsync(new Memory(MemoryType.Fact, "parent topic"));
+        await parent.SaveAsync(new Memory.Memory(MemoryType.Fact, "parent topic"));
 
         var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
         var result = await service.RecallAsync(new MemoryRecallContext(["topic"], null, null));
@@ -89,7 +94,7 @@ public sealed class MemoryRecallServiceChainTests
     public async Task Recall_Merged_OwnHitCarriesOwnRoot()
     {
         var (scoped, child, _, _) = Build();
-        await child.SaveAsync(new Memory(MemoryType.Fact, "own topic"));
+        await child.SaveAsync(new Memory.Memory(MemoryType.Fact, "own topic"));
 
         var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
         var result = await service.RecallAsync(new MemoryRecallContext(["topic"], null, null));
@@ -105,11 +110,11 @@ public sealed class MemoryRecallServiceChainTests
         var (scoped, child, parent, global) = Build();
         for (var i = 0; i < 10; i++)
         {
-            await child.SaveAsync(new Memory(MemoryType.Fact, $"topic child {i}"));
+            await child.SaveAsync(new Memory.Memory(MemoryType.Fact, $"topic child {i}"));
         }
-        await parent.SaveAsync(new Memory(MemoryType.Fact, "topic parent 1"));
-        await parent.SaveAsync(new Memory(MemoryType.Fact, "topic parent 2"));
-        await global.SaveAsync(new Memory(MemoryType.Fact, "topic global 1"));
+        await parent.SaveAsync(new Memory.Memory(MemoryType.Fact, "topic parent 1"));
+        await parent.SaveAsync(new Memory.Memory(MemoryType.Fact, "topic parent 2"));
+        await global.SaveAsync(new Memory.Memory(MemoryType.Fact, "topic global 1"));
 
         var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
         var result = await service.RecallAsync(
@@ -132,10 +137,10 @@ public sealed class MemoryRecallServiceChainTests
         var (scoped, child, parent, global) = Build();
         for (var i = 0; i < 10; i++)
         {
-            await child.SaveAsync(new Memory(MemoryType.Fact, $"topic child {i}"));
+            await child.SaveAsync(new Memory.Memory(MemoryType.Fact, $"topic child {i}"));
         }
-        await parent.SaveAsync(new Memory(MemoryType.Fact, "unrelated parent note"));
-        await global.SaveAsync(new Memory(MemoryType.Fact, "topic global 1"));
+        await parent.SaveAsync(new Memory.Memory(MemoryType.Fact, "unrelated parent note"));
+        await global.SaveAsync(new Memory.Memory(MemoryType.Fact, "topic global 1"));
 
         var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
         var result = await service.RecallAsync(
@@ -151,8 +156,8 @@ public sealed class MemoryRecallServiceChainTests
     public async Task Recall_Recent_KeepsScopedProvenance()
     {
         var (scoped, child, _, global) = Build();
-        await child.SaveAsync(new Memory(MemoryType.Fact, "project recent"));
-        await global.SaveAsync(new Memory(MemoryType.Fact, "global recent"));
+        await child.SaveAsync(new Memory.Memory(MemoryType.Fact, "project recent"));
+        await global.SaveAsync(new Memory.Memory(MemoryType.Fact, "global recent"));
 
         var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
         var result = await service.RecallAsync(context: null, recentLimit: 10);

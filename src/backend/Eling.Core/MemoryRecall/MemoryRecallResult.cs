@@ -1,4 +1,6 @@
-namespace Eling.Core;
+using Eling.Core.Memory;
+
+namespace Eling.Core.MemoryRecall;
 
 /// <summary>
 /// Result of a memory recall. <see cref="RecallMemories"/> is derived from

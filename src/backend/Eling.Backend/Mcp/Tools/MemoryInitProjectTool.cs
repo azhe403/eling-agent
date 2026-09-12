@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Eling.Backend.Dtos;
 using Eling.Core;
+using Eling.Core.Scope;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
@@ -38,7 +39,7 @@ public sealed class MemoryInitProjectTool
     }
 
     [McpServerTool(Name = "memory_init_project"), Description("Create a project .eling directory at the current working directory after user consent. Never auto-created by the backend: run this only when the user explicitly approves adopting the current folder as a project scope.")]
-    public Task<ProjectInitResultDto> InitAsync()
+    public async Task<ProjectInitResultDto> InitAsync()
     {
         var userHome = _userHomeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var isUserHome = !string.IsNullOrWhiteSpace(userHome) &&
@@ -49,32 +50,32 @@ public sealed class MemoryInitProjectTool
 
         if (isUserHome)
         {
-            return Task.FromResult(new ProjectInitResultDto("rejected-user-home", null, []));
+            return new ProjectInitResultDto("rejected-user-home", null, []);
         }
 
         var chain = ScopeChain.Discover(_cwd);
         if (chain.HasOwnScope)
         {
-            return Task.FromResult(new ProjectInitResultDto("already-initialized", chain.Head?.Root, ChainRoots(chain)));
+            return new ProjectInitResultDto("already-initialized", chain.Head?.Root, ChainRoots(chain));
         }
 
         var memoriesDir = Path.Combine(_cwd, ProjectScope.DataDirectoryName, "memories");
         Directory.CreateDirectory(memoriesDir);
 
-        var warning = UpdateGitignoreAtNearestRepo(_cwd);
+        var warning = await UpdateGitignoreAtNearestRepoAsync(_cwd);
 
         var fresh = ScopeChain.Discover(_cwd);
-        return Task.FromResult(new ProjectInitResultDto(
+        return new ProjectInitResultDto(
             "created",
             fresh.Head?.Root,
             ChainRoots(fresh),
-            warning));
+            warning);
     }
 
     private static IReadOnlyCollection<string> ChainRoots(ScopeChain chain)
         => chain.Levels.Select(l => l.Root).ToList().AsReadOnly();
 
-    private static string? UpdateGitignoreAtNearestRepo(string cwd)
+    private static async Task<string?> UpdateGitignoreAtNearestRepoAsync(string cwd)
     {
         try
         {
@@ -85,7 +86,7 @@ public sealed class MemoryInitProjectTool
             }
 
             var gitignorePath = Path.Combine(repoRoot, ".gitignore");
-            var existing = File.Exists(gitignorePath) ? File.ReadAllText(gitignorePath) : "";
+            var existing = File.Exists(gitignorePath) ? await File.ReadAllTextAsync(gitignorePath) : "";
             var missing = RuntimeGitignorePatterns.Where(p => !existing.Contains(p, StringComparison.Ordinal)).ToList();
             if (missing.Count == 0)
             {
@@ -95,7 +96,7 @@ public sealed class MemoryInitProjectTool
             var updated = existing.EndsWith('\n') || existing.Length == 0
                 ? existing + string.Join('\n', missing) + "\n"
                 : existing + "\n" + string.Join('\n', missing) + "\n";
-            File.WriteAllText(gitignorePath, updated);
+            await File.WriteAllTextAsync(gitignorePath, updated);
             return null;
         }
         catch (Exception ex)

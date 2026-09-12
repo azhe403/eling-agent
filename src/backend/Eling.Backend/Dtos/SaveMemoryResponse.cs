@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Eling.Core;
+using Eling.Core.Memory;
 
 namespace Eling.Backend.Dtos;
 
@@ -44,6 +45,16 @@ public sealed class SaveMemoryResponse
     [JsonPropertyName("message")]
     public string? Message { get; set; }
 
+    /// <summary>True when a project-targeted save was routed to global because the workspace's policy is <c>disabled</c>.</summary>
+    [JsonPropertyName("projectScopeDisabled")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ProjectScopeDisabled { get; set; }
+
+    /// <summary>Human-readable explanation accompanying a rerouted save or other special outcome.</summary>
+    [JsonPropertyName("note")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Note { get; set; }
+
     public static SaveMemoryResponse FromInitRequired(string cwd) => new()
     {
         Action = "init-required",
@@ -69,7 +80,7 @@ public sealed class SaveMemoryResponse
         PreviousTags = result.Previous?.Tags.ToList()
     };
 
-    public static SaveMemoryResponse From(ScopedSaveResult result) => new()
+    public static SaveMemoryResponse From(ScopedSaveResult result, bool projectScopeDisabled = false, string? note = null) => new()
     {
         Action = result.Action == SaveAction.Created ? "created" : "updated",
         Id = result.Memory.Id,
@@ -82,7 +93,9 @@ public sealed class SaveMemoryResponse
         Source = result.Memory.Source,
         Scope = result.Scope == MemoryScopeKind.Global ? "global" : "project",
         PreviousContent = result.Previous?.Memory.Content,
-        PreviousTags = result.Previous?.Memory.Tags.ToList()
+        PreviousTags = result.Previous?.Memory.Tags.ToList(),
+        ProjectScopeDisabled = projectScopeDisabled,
+        Note = note
     };
 }
 

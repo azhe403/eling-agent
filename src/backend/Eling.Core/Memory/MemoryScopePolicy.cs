@@ -1,6 +1,4 @@
-using Eling.Core;
-
-namespace Eling.Core;
+namespace Eling.Core.Memory;
 
 public sealed class MemoryScopePolicy : IMemoryScopePolicy
 {

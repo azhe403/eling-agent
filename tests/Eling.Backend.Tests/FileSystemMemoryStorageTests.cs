@@ -1,5 +1,7 @@
 using System.Globalization;
 using Eling.Core;
+using Eling.Core.Memory;
+using Eling.Core.Memory.Storage;
 
 namespace Eling.Backend.Tests;
 

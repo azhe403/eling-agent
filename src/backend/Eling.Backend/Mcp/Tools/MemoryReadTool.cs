@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using Eling.Backend.Dtos;
 using Eling.Core;
+using Eling.Core.Exceptions;
+using Eling.Core.Memory;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
@@ -40,10 +42,11 @@ public sealed class MemoryReadTool
         _logger = logger;
     }
 
-    [McpServerTool(Name = "memory_get"), Description("Retrieve a memory by its ID.")]
+    [McpServerTool(Name = "memory_get"), Description("Retrieve a memory by its ID. Provide 'project' to target an existing ancestor scope; this requires the current workspace to already have its own .eling scope.")]
     public async Task<ScopedMemoryDto?> GetByIdAsync(
         [Description("The ULID of the memory to retrieve")] string id,
-        [Description("Scope: project, global, or merged. Defaults to 'project'.")] string scope = "project")
+        [Description("Scope: project, global, or merged. Defaults to 'project'.")] string scope = "project",
+        [Description("Optional logical name of an ancestor project to target (e.g. the parent .eling). Requires this workspace to have its own .eling scope; never creates a scope.")] string? project = null)
     {
         if (string.IsNullOrWhiteSpace(id))
         {
@@ -53,6 +56,18 @@ public sealed class MemoryReadTool
         scope = (scope ?? "project").Trim();
 
         var memoryId = MemoryId.Parse(id);
+        if (!string.IsNullOrWhiteSpace(project))
+        {
+            if (!HasScoped)
+            {
+                throw new InvalidOperationException("Project targeting requires a scoped memory service.");
+            }
+            var targetRoot = _scoped!.ResolveAncestorProjectRoot(project);
+            var targetReference = MemoryReference.ForProject(memoryId, targetRoot);
+            var targetFound = await _scoped.GetByIdAsync(targetReference);
+            _logger?.LogInformation("Retrieved memory '{Id}' from ancestor project '{Project}' (found: {Found})", id, project, targetFound is not null);
+            return targetFound is null ? null : ScopedMemoryDto.From(targetFound.Memory, targetFound.Scope, targetFound.ProjectRoot);
+        }
         if (HasScoped && scope.ToLowerInvariant() == "merged")
         {
             try

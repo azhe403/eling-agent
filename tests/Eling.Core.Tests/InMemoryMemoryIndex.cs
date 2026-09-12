@@ -1,13 +1,15 @@
 using Eling.Core;
+using Eling.Core.Memory;
+using Eling.Core.Memory.Storage;
 
 namespace Eling.Core.Tests;
 
 public sealed class InMemoryMemoryIndex : IMemoryIndex
 {
-    private readonly Dictionary<MemoryId, Memory> _items = new();
+    private readonly Dictionary<MemoryId, Memory.Memory> _items = new();
     private readonly object _lock = new();
 
-    public Task IndexAsync(Memory memory)
+    public Task IndexAsync(Memory.Memory memory)
     {
         lock (_lock)
         {
@@ -25,7 +27,7 @@ public sealed class InMemoryMemoryIndex : IMemoryIndex
         return Task.CompletedTask;
     }
 
-    public Task RebuildAsync(IEnumerable<Memory> memories)
+    public Task RebuildAsync(IEnumerable<Memory.Memory> memories)
     {
         lock (_lock)
         {

@@ -1,6 +1,4 @@
-using Eling.Core;
-
-namespace Eling.Core;
+namespace Eling.Core.Memory;
 
 public interface IScopedMemoryService
 {
@@ -29,5 +27,11 @@ public interface IScopedMemoryService
     IReadOnlyList<string> ChainRoots { get; }
     bool IsInitialized { get; }
     string Cwd { get; }
+
+    // Ancestor targeting (opt-in; requires this workspace to have its own scope)
+    bool HasOwnScope { get; }
+    string ResolveAncestorProjectRoot(string projectName);
+    Task<ScopedSaveResult> SaveToProjectAsync(Memory memory, string targetProjectRoot);
+    Task RebuildProjectIndexAsync(string projectRoot);
 }
 
