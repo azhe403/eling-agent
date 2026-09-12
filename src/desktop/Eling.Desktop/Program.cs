@@ -1,6 +1,8 @@
 ﻿using System;
 using Avalonia;
 using Eling.Core;
+using Eling.Core.Logging;
+using Eling.Core.Scope;
 using Eling.Desktop.Services;
 using Eling.Desktop.ViewModels;
 using Eling.Desktop.Views;

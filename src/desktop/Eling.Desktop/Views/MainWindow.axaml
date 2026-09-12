@@ -5,6 +5,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="using:Eling.Desktop"
+        xmlns:conv="using:Eling.Desktop.Converters"
         mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
         x:Class="Eling.Desktop.Views.MainWindow"
         x:DataType="vm:MainViewModel"
@@ -27,7 +28,7 @@
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <Ellipse Width="8" Height="8" VerticalAlignment="Center">
                                     <Ellipse.Fill>
-                                        <SolidColorBrush Color="{Binding SseStatus, Converter={x:Static local:SseStatusColorConverter.Instance}}"/>
+                                        <SolidColorBrush Color="{Binding SseStatus, Converter={x:Static conv:SseStatusColorConverter.Instance}}"/>
                                     </Ellipse.Fill>
                                 </Ellipse>
                                 <TextBlock Text="{Binding SseStatus}" FontSize="11" Foreground="#9ca3af"
@@ -52,11 +53,11 @@
                         <TextBlock Text="Scope:" FontSize="12" Foreground="#6b7280" VerticalAlignment="Center" Margin="0,0,4,0"/>
                         <Button Content="All Open Projects" Padding="12,5" FontSize="11"
                                 Command="{Binding SelectScopeCommand}" CommandParameter="all"
-                                Background="{Binding SelectedScope, Converter={x:Static local:ScopeButtonConverter.Instance}, ConverterParameter=all}"
+                                Background="{Binding SelectedScope, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter=all}"
                                 Foreground="White" BorderThickness="0"/>
                         <Button Content="🌐 Global" Padding="12,5" FontSize="11"
                                 Command="{Binding SelectScopeCommand}" CommandParameter="global"
-                                Background="{Binding SelectedScope, Converter={x:Static local:ScopeButtonConverter.Instance}, ConverterParameter=global}"
+                                Background="{Binding SelectedScope, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter=global}"
                                 Foreground="White" BorderThickness="0"/>
                         <ItemsControl ItemsSource="{Binding Runtimes}">
                             <ItemsControl.ItemsPanel>
@@ -70,7 +71,7 @@
                                             Padding="12,5" FontSize="11"
                                             Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectScopeCommand}"
                                             CommandParameter="{Binding ProjectRoot}"
-                                            Background="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedScope, Converter={x:Static local:ScopeButtonConverter.Instance}, ConverterParameter={Binding ProjectRoot}}"
+                                            Background="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedScope, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter={Binding ProjectRoot}}"
                                             Foreground="#d1d5db" BorderThickness="0"/>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -91,7 +92,7 @@
                                     <Button Content="{Binding}" Padding="10,5" FontSize="11"
                                             Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectTypeCommand}"
                                             CommandParameter="{Binding}"
-                                            Background="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedType, Converter={x:Static local:ScopeButtonConverter.Instance}, ConverterParameter={Binding}}"
+                                            Background="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedType, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter={Binding}}"
                                             Foreground="#d1d5db" BorderThickness="0"/>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -127,7 +128,7 @@
                                 <!-- Badges -->
                                 <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="6">
                                     <Border Classes="badge"
-                                            Background="{Binding Type, Converter={x:Static local:MemoryTypeColorConverter.Instance}}">
+                                            Background="{Binding Type, Converter={x:Static conv:MemoryTypeColorConverter.Instance}}">
                                         <TextBlock Text="{Binding Type}" FontSize="11" FontWeight="SemiBold" Foreground="White"/>
                                     </Border>
                                     <Border Classes="scope-badge">
@@ -204,7 +205,7 @@
                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
                         <Ellipse Width="8" Height="8" VerticalAlignment="Center">
                             <Ellipse.Fill>
-                                <SolidColorBrush Color="{Binding SseStatus, Converter={x:Static local:SseStatusColorConverter.Instance}}"/>
+                                <SolidColorBrush Color="{Binding SseStatus, Converter={x:Static conv:SseStatusColorConverter.Instance}}"/>
                             </Ellipse.Fill>
                         </Ellipse>
                         <TextBlock Text="{Binding ConnectionDetails}" FontSize="11" Foreground="#9ca3af" VerticalAlignment="Center"/>

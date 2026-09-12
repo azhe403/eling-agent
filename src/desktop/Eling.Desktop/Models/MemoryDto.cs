@@ -22,5 +22,3 @@ public record MemoryDto(
         ? "🌐 Global"
         : (Project != null && !string.IsNullOrWhiteSpace(Project.Id) ? $"📁 {Project.Id}" : "📁 Project");
 }
-
-public record ProjectInfoDto(string Id, string Root);

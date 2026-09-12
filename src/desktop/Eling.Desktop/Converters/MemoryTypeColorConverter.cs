@@ -3,7 +3,7 @@ using System.Globalization;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
 
-namespace Eling.Desktop;
+namespace Eling.Desktop.Converters;
 
 public sealed class MemoryTypeColorConverter : IValueConverter
 {
