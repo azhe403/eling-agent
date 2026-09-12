@@ -1,4 +1,12 @@
+using Eling.Backend.FileSystem;
+using Eling.Backend.Scope;
 using Eling.Core;
+using Eling.Core.FileSystem;
+using Eling.Core.Memory;
+using Eling.Core.Memory.Serialization;
+using Eling.Core.Memory.Storage;
+using Eling.Core.MemoryRecall;
+using Eling.Core.Scope;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ModelContextProtocol.Server;
@@ -46,6 +54,9 @@ public static class McpServiceExtensions
             return new ScopedMemoryService(projectService, globalService, policy, merger, projectScope.Root);
         });
 
+        // Bounded filesystem tools sandboxed to the project root.
+        services.TryAddSingleton<IFileSystemService>(new FileSystemService(projectScope.Root));
+
         services.AddScoped<IMemoryRecallService>(sp =>
             new MemoryRecallService(
                 sp.GetRequiredService<IScopedMemoryService>(),
@@ -55,6 +66,9 @@ public static class McpServiceExtensions
             new MemoryMaintenanceService(
                 sp.GetRequiredService<IMemoryService>(),
                 sp.GetRequiredService<IMemoryIndex>()));
+
+        services.TryAddSingleton<IProjectScopePolicyStore>(sp =>
+            new JsonProjectScopePolicyStore(userScope, logger: sp.GetService<ILogger<JsonProjectScopePolicyStore>>()));
 
         return services;
     }
@@ -121,6 +135,13 @@ public static class McpServiceExtensions
             new MemoryMaintenanceService(
                 sp.GetRequiredService<IMemoryService>(),
                 sp.GetRequiredService<IMemoryIndex>()));
+
+        // Same sandbox wiring for the scope-chain path: head level or cwd.
+        services.TryAddSingleton<IFileSystemService>(
+            new FileSystemService(chain.Head?.Root ?? chain.Cwd));
+
+        services.TryAddSingleton<IProjectScopePolicyStore>(sp =>
+            new JsonProjectScopePolicyStore(userScope, logger: sp.GetService<ILogger<JsonProjectScopePolicyStore>>()));
 
         return services;
     }
