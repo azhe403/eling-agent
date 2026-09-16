@@ -1,4 +1,56 @@
-pnpm lint:frontend
-pnpm typecheck:frontend
-pnpm validate:backend
-pnpm test:backend
+#!/bin/sh
+# Path-aware pre-commit: only run checks relevant to staged changes.
+# - docs-only (no src/frontend|backend|tests) → skip all, instant
+# - backend/docs commits skip frontend lint/typecheck (save 25-70s)
+# - frontend lint + typecheck run in parallel (save 10-20s)
+# - validate:backend redundant (test:backend already restores) → only on FULL_CHECK=1
+# Bypass: SKIP_HOOK=1 git commit --no-verify  or  FULL_CHECK=1 git commit
+
+if [ "$SKIP_HOOK" = "1" ]; then
+  echo "→ SKIP_HOOK=1: skipping pre-commit"
+  exit 0
+fi
+
+CHANGED=$(git diff --cached --name-only 2>/dev/null)
+
+if [ "$FULL_CHECK" = "1" ]; then
+  echo "→ FULL_CHECK=1: running all checks"
+  pnpm lint:frontend || exit 1
+  pnpm typecheck:frontend || exit 1
+  pnpm validate:backend || exit 1
+  pnpm test:backend || exit 1
+  exit 0
+fi
+
+NEED_FRONTEND=0
+NEED_BACKEND=0
+
+if echo "$CHANGED" | grep -q "^src/frontend/"; then
+  NEED_FRONTEND=1
+fi
+
+if echo "$CHANGED" | grep -qE "^(src/backend/|src/desktop/|tests/|Directory\.Build|Eling\.slnx|package\.json)"; then
+  NEED_BACKEND=1
+fi
+
+if [ "$NEED_FRONTEND" = "0" ] && [ "$NEED_BACKEND" = "0" ]; then
+  echo "→ pre-commit: docs/config only, skipping lint/typecheck/test"
+  exit 0
+fi
+
+if [ "$NEED_FRONTEND" = "1" ]; then
+  echo "→ frontend changed: lint + typecheck (parallel)"
+  pnpm lint:frontend & LINT_PID=$!
+  pnpm typecheck:frontend & TYPE_PID=$!
+  wait $LINT_PID || exit 1
+  wait $TYPE_PID || exit 1
+else
+  echo "→ skip frontend (no src/frontend/)"
+fi
+
+if [ "$NEED_BACKEND" = "1" ]; then
+  echo "→ backend changed: test:backend"
+  pnpm test:backend || exit 1
+else
+  echo "→ skip backend (no src/backend|tests|build files)"
+fi
