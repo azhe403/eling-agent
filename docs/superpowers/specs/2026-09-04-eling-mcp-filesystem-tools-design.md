@@ -1,7 +1,7 @@
 # Filesystem MCP Tools — Design
 
 **Date:** 2026-09-04
-**Status:** Implemented (2026-09-11) — the six core tools from this spec plus nine extensions; see §9 for the full 15-tool inventory.
+**Status:** Implemented (2026-09-11) — the six core tools from this spec plus nine extensions; see §9 for the full 15-tool inventory. External read-only access added (2026-09-15).
 **Scope:** Eling backend (`Eling.Backend`, `Eling.Core`) + new tests in `Eling.Backend.Tests`
 
 ---
@@ -167,12 +167,13 @@ Mirrors `FakeMemoryService` from the memory tests. Backed by a `Dictionary<strin
 
 ### 4.1 Resolution rule
 
-Every method on `IFileSystemService` runs the input through this sequence:
+Every method on `IFileSystemService` runs the input through this sequence. Write operations (`file_write`, `file_delete`, `directory_delete`, `file_move`, `directory_move`, `file_copy`, `directory_copy`, `directory_create`) always use strict resolution. Read operations (`path_test`, `directory_list`, `glob`, `file_read`, `file_search`) accept an `allowExternal` flag (default `false`) that gates relaxed resolution.
 
 1. Reject null / empty / whitespace input with `ArgumentException`.
-2. Compute `full = Path.GetFullPath(Path.Combine(_rootPath, input))` so relative inputs land under the root and absolute inputs are still normalised.
+2. **Strict mode** (default): compute `full = Path.GetFullPath(Path.Combine(_rootPath, input))` so relative inputs land under the root and absolute inputs are still normalised.
+   **Relaxed mode** (`allowExternal=true` on read-only tools): compute `full` via `Path.GetFullPath` for relative inputs, or `Path.GetFullPath(input)` directly when `input` is already an absolute OS path (e.g. `C:\Users\...` or `/home/...`). This lets external reads target paths anywhere on disk while keeping the same normalisation semantics.
 3. Compute `rootWithSep = _rootPath` with a trailing separator appended.
-4. If `full` is neither under `rootWithSep` nor equal to the root itself, throw `PathSandboxException`.
+4. If `full` is neither under `rootWithSep` nor equal to the root itself, throw `PathSandboxException`. **This check is skipped only when `allowExternal=true`.**
 5. Return `full` as `ResolvedPath` on the result record.
 
 The trailing separator is the standard pattern for preventing the `/foo-bar` vs `/foo` confusion: if the root is `C:\some-folder\Eling` then the comparison string is `C:\some-folder\Eling\`, and `C:\some-folder\ElingOther` is correctly rejected. The root itself is allowed so that `directory_list` / `glob` may address the sandbox root.
@@ -184,6 +185,22 @@ _rootComparison = OperatingSystem.IsWindows()
     ? StringComparison.OrdinalIgnoreCase
     : StringComparison.Ordinal;
 ```
+
+### 4.2 External read enforcement
+
+Read-only tools accept `allowExternal: bool` (default `false`):
+
+| Tool | Signature extension | Behaviour when `allowExternal=false` (default) | Behaviour when `allowExternal=true` |
+|---|---|---|---|
+| `path_test` | `path, allowExternal = false` | Sandbox to project root | Read outside root; still bounded by byte cap, binary probe |
+| `directory_list` | `path, recursive, maxDepth, pattern, allowExternal = false` | Sandbox to project root | Read outside root; still bounded by depth / result caps |
+| `glob` | `basePath, pattern, maxDepth, maxResults, allowExternal = false` | Sandbox to project root | Read outside root; still bounded by depth / result caps |
+| `file_read` | `path, maxBytes, offset, limit, allowExternal = false` | Sandbox to project root | Read outside root; still bounded by byte cap, binary probe, line clamp |
+| `file_search` | `basePath, pattern, useRegex, caseSensitive, filePattern, maxDepth, maxResults, maxFileBytes, allowExternal = false` | Sandbox to project root | Read outside root; still bounded by depth / result / file-byte caps |
+
+The 10 write/mutate tools (`file_write`, `file_delete`, `directory_delete`, `file_move`, `directory_move`, `file_copy`, `directory_copy`, `directory_create`, `file_edit`, `file_append`) do **not** accept `allowExternal`; they always enforce strict sandbox resolution. A caller passing `allowExternal=true` to a write tool receives no special treatment.
+
+All external reads remain subject to the existing caps (1 MiB byte cap, 8 KiB binary probe, line/depth/result clamps). The flag controls *reachability*, not *boundedness*.
 
 ### 4.2 Symlinks
 
@@ -703,6 +720,13 @@ These are explicitly **not** in this spec and will be raised separately if neede
 
 **Changed:**
 
+- `src/backend/Eling.Core/FileSystem/IFileSystemService.cs` — added `allowExternal = false` param to `TestPath`, `ListDirectory`, `Glob`, `ReadFile`, `SearchFiles`.
+- `src/backend/Eling.Backend/FileSystem/FileSystemService.cs` — added `ResolvePath(path, allowExternal)` overload; relaxed mode skips sandbox check but keeps `Path.GetFullPath` normalisation.
+- `src/backend/Eling.Backend/Mcp/Tools/FileSystemTools.cs` — added `allowExternal` param to five read-only tool methods, passes through to service.
+- `tests/Eling.Backend.Tests/FileSystem/FakeFileSystemService.cs` — mirrors new interface; added `AddExternalFile` / `AddExternalDirectory`; updated `Resolve` to honour `allowExternal` with explicit absolute-path rejection for non-allowed cases.
+- `tests/Eling.Backend.Tests/FileSystem/FileSystemToolsTests.cs` — added 13 tests for external read behaviour (success, blocked by default, write tools stay strict).
+- `tests/Eling.Backend.Tests/FileSystem/FileSystemServiceTests.cs` — added 4 tests for relaxed resolution against real OS paths.
+- `src/backend/Eling.Backend/Eling.Backend.csproj` — added `Microsoft.Extensions.AI.OpenAI` package reference (resolves pre-existing compile error in `MeaiChatGateway.cs`).
 - `src/backend/Eling.Backend/Mcp/McpServiceExtensions.cs` — register `IFileSystemService` in both `AddElingCoreServices` overloads: `projectScope.Root` for the path-based overload, `chain.Head?.Root ?? chain.Cwd` for the scope-chain overload.
 - `file_read` gained `offset`/`limit` pagination beyond the original spec; whole-file reads still return a plain string, and only paginated reads return the JSON envelope.
 
@@ -712,11 +736,22 @@ These are explicitly **not** in this spec and will be raised separately if neede
 
 ---
 
-## 10. Open questions
+## 10. External read-only access (2026-09-15)
 
-None. The clarifications the design depended on were settled in the brainstorm:
+The spec was updated to relax sandbox for read-only tools via `allowExternal`:
 
-- Sandbox: project root only (`ProjectScope.Root`).
+- `path_test`, `directory_list`, `glob`, `file_read`, `file_search` gained an `allowExternal = false` parameter.
+- `IFileSystemService.ResolvePath` (core) and `Resolve` (fake) split into strict vs relaxed branches; relaxed mode skips the parent-prefix check but keeps all other bounds (byte cap, binary probe, depth, result cap).
+- `FileSystemTools` passes the flag through to the service.
+- 13 new tests cover: external read success, external read blocked by default, write tools stay strict even with `allowExternal=true`, real-OS absolute paths, and path traversal normalisation.
+
+Open questions: none. Policy-level gating (`ELING_FILESYSTEM_ALLOW_EXTERNAL_READS` env var or `ProjectScopePolicy`) was intentionally deferred (YAGNI) — the flag only is enough for development; policy can layer on top of the existing `IProjectScopePolicyStore` if needed.
+
+## 11. Open questions (legacy)
+
+These were settled before the external-read extension:
+
+- Sandbox: project root only (`ProjectScope.Root`) — now with opt-in external reads for five tools.
 - Tool set: originally six core tools (`path_test`, `directory_create`, `directory_list`, `glob`, `file_read`, `file_write`); the shipped surface is 15 tools (see §9).
 - List output format: structured JSON.
 - Tests: yes, with a `FakeFileSystemService` following the `FakeMemoryService` pattern.
