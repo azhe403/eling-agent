@@ -47,11 +47,11 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         var ancestorLevels = _levels.Skip(HasOwnScope ? 1 : 0).ToList();
         var available = ancestorLevels.Select(l => ProjectNameOf(l.Scope.Root)).ToList().AsReadOnly();
 
-        if (!HasOwnScope)
+        if (!HasOwnScope && _levels.Count == 0)
         {
             throw new InvalidProjectTargetException(
                 projectName,
-                "this workspace has no own .eling scope; initialize one before targeting an ancestor",
+                "this workspace has no project scope anywhere; initialize one before targeting a project",
                 available);
         }
 
@@ -188,7 +188,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     {
         ArgumentNullException.ThrowIfNull(memory);
         var kind = _policy.Resolve(scope);
-        if (kind == MemoryScopeKind.Project && _levels.Count == 0)
+        if (kind == MemoryScopeKind.Project && !HasOwnScope)
         {
             throw new ProjectScopeNotInitializedException(_cwd);
         }

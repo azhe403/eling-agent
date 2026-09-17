@@ -7,11 +7,11 @@ namespace Eling.Core.FileSystem;
 /// </summary>
 public interface IFileSystemService
 {
-    PathInfo TestPath(string path);
+    PathInfo TestPath(string path, bool allowExternal = false);
     DirectoryCreateResult CreateDirectory(string path);
-    IReadOnlyList<DirectoryEntry> ListDirectory(string path, bool recursive = false, int maxDepth = 3, string? pattern = null);
-    GlobResult Glob(string basePath, string pattern, int maxDepth = 5, int maxResults = 200);
-    FileReadResult ReadFile(string path, int maxBytes = 1048576, int offset = 1, int limit = 0);
+    IReadOnlyList<DirectoryEntry> ListDirectory(string path, bool recursive = false, int maxDepth = 3, string? pattern = null, bool allowExternal = false);
+    GlobResult Glob(string basePath, string pattern, int maxDepth = 5, int maxResults = 200, bool allowExternal = false);
+    FileReadResult ReadFile(string path, int maxBytes = 1048576, int offset = 1, int limit = 0, bool allowExternal = false);
     FileWriteResult WriteFile(string path, string content, bool overwrite = false);
     DeleteResult DeleteFile(string path);
     DeleteResult DeleteDirectory(string path, bool recursive = false);
@@ -21,5 +21,6 @@ public interface IFileSystemService
     CopyResult CopyDirectory(string sourcePath, string destinationPath, bool overwrite = false);
     FileEditResult EditFile(string path, string oldString, string newString, bool replaceAll = false, int maxBytes = 1048576);
     FileAppendResult AppendFile(string path, string content);
-    ContentSearchResult SearchFiles(string basePath, string pattern, bool useRegex = false, bool caseSensitive = false, string? filePattern = null, int maxDepth = 5, int maxResults = 100, int maxFileBytes = 1048576);
+    ContentSearchResult SearchFiles(string basePath, string pattern, bool useRegex = false, bool caseSensitive = false, string? filePattern = null, int maxDepth = 5, int maxResults = 100, int maxFileBytes = 1048576, bool allowExternal = false);
+    string ReadFileAny(string path, int maxBytes = 0);
 }

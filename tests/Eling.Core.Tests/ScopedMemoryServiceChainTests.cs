@@ -86,6 +86,24 @@ public sealed class ScopedMemoryServiceChainTests
     }
 
     [Fact]
+    public async Task SaveAsync_ProjectScope_AncestorOnly_Throws()
+    {
+        var global = new FakeMemoryService();
+        var parent = new FakeMemoryService();
+        var service = new ScopedMemoryService(
+            [new ProjectLevel(new ProjectScope(ParentRoot), parent)],
+            global,
+            new MemoryScopePolicy(),
+            new MemoryMerger(),
+            ChildRoot);
+
+        await Assert.ThrowsAsync<ProjectScopeNotInitializedException>(
+            () => service.SaveAsync(NewMemory("x"), "project"));
+        Assert.True(service.IsInitialized);
+        Assert.False(service.HasOwnScope);
+    }
+
+    [Fact]
     public async Task SaveAsync_Global_Uninitialized_StillWrites()
     {
         var global = new FakeMemoryService();
@@ -184,7 +202,7 @@ public sealed class ScopedMemoryServiceChainTests
     }
 
     [Fact]
-    public void ResolveAncestorProjectRoot_WithoutOwnScope_Throws()
+    public void ResolveAncestorProjectRoot_WithoutOwnScope_ResolvesParentIfLevelExists()
     {
         var service = new ScopedMemoryService(
             [new ProjectLevel(new ProjectScope(ParentRoot), new FakeMemoryService())],
@@ -193,8 +211,8 @@ public sealed class ScopedMemoryServiceChainTests
             new MemoryMerger(),
             ChildRoot);
 
-        Assert.Throws<InvalidProjectTargetException>(() => service.ResolveAncestorProjectRoot("integrations"));
-        Assert.False(service.HasOwnScope);
+        var root = service.ResolveAncestorProjectRoot("integrations");
+        Assert.Equal(ParentRoot, root);
     }
 
     [Fact]
