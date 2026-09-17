@@ -525,7 +525,7 @@ public sealed class ElingApiClient
             using var reader = new StreamReader(stream);
             string? eventName = null;
             var dataBuilder = new StringBuilder();
-            while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+            while (!cancellationToken.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync(cancellationToken);
                 if (line == null) break;

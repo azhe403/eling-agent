@@ -106,7 +106,7 @@ public class SettingsViewModel : ViewModelBase
         try
         {
             var result = await _apiClient.TestProviderAsync();
-            StatusText = result.Ok ? $"OK: {result.Message}" : $"Failed: {result.Message}";
+            StatusText = result?.Ok == true ? $"OK: {result.Message}" : $"Failed: {result?.Message ?? "No response from backend"}";
         }
         catch (Exception ex)
         {
