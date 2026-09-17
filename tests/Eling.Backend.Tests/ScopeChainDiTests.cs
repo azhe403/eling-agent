@@ -50,7 +50,10 @@ public sealed class ScopeChainDiTests : IDisposable
         Assert.Equal([Path.GetFullPath(integrations), Path.GetFullPath(root)], scoped.ChainRoots);
         Assert.Equal(Path.GetFullPath(payments), scoped.Cwd);
 
-        var saved = await scoped.SaveAsync(new Memory(MemoryType.Fact, "head write"));
+        await Assert.ThrowsAsync<ProjectScopeNotInitializedException>(
+            () => scoped.SaveAsync(new Memory(MemoryType.Fact, "uninitialized subproject write")));
+
+        var saved = await scoped.SaveToProjectAsync(new Memory(MemoryType.Fact, "head write"), Path.GetFullPath(integrations));
         Assert.Equal(MemoryScopeKind.Project, saved.Scope);
         Assert.Equal(Path.GetFullPath(integrations), saved.ProjectRoot);
         Assert.True(File.Exists(Path.Combine(integrations, ".eling", "memories", saved.Id.Value + ".md")));

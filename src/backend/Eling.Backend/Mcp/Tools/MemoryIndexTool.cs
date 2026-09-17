@@ -42,14 +42,22 @@ public sealed class MemoryIndexTool
     public async Task RebuildIndexAsync(
         [Description("Scope: project, global, or merged. Defaults to 'merged'.")] string scope = "merged")
     {
-        _logger?.LogInformation("Rebuilding memory index scope '{Scope}'", scope);
-        if (HasScoped)
+        try
         {
-            await _scoped!.RebuildIndexAsync(scope);
-            _logger?.LogInformation("Memory index rebuilt for scope '{Scope}'", scope);
-            return;
+            _logger?.LogInformation("Rebuilding memory index scope '{Scope}'", scope);
+            if (HasScoped)
+            {
+                await _scoped!.RebuildIndexAsync(scope);
+                _logger?.LogInformation("Memory index rebuilt for scope '{Scope}'", scope);
+                return;
+            }
+            await _memory.RebuildIndexAsync();
+            _logger?.LogInformation("Memory index rebuilt successfully");
         }
-        await _memory.RebuildIndexAsync();
-        _logger?.LogInformation("Memory index rebuilt successfully");
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "memory_rebuild_index threw an exception (scope={Scope})", scope);
+            throw;
+        }
     }
 }

@@ -46,60 +46,68 @@ public sealed class MemoryReadTool
     public async Task<ScopedMemoryDto?> GetByIdAsync(
         [Description("The ULID of the memory to retrieve")] string id,
         [Description("Scope: project, global, or merged. Defaults to 'project'.")] string scope = "project",
-        [Description("Optional logical name of an ancestor project to target (e.g. the parent .eling). Requires this workspace to have its own .eling scope; never creates a scope.")] string? project = null)
+        [Description("Optional logical name of an ancestor project to target (e.g. the parent .eling). Requires this workspace to already have its own .eling scope; never creates a scope.")] string? project = null)
     {
-        if (string.IsNullOrWhiteSpace(id))
+        try
         {
-            _logger?.LogWarning("memory_get failed: id is empty");
-            throw new ArgumentException("Id cannot be empty.", nameof(id));
-        }
-        scope = (scope ?? "project").Trim();
-
-        var memoryId = MemoryId.Parse(id);
-        if (!string.IsNullOrWhiteSpace(project))
-        {
-            if (!HasScoped)
+            if (string.IsNullOrWhiteSpace(id))
             {
-                throw new InvalidOperationException("Project targeting requires a scoped memory service.");
+                _logger?.LogWarning("memory_get failed: id is empty");
+                throw new ArgumentException("Id cannot be empty.", nameof(id));
             }
-            var targetRoot = _scoped!.ResolveAncestorProjectRoot(project);
-            var targetReference = MemoryReference.ForProject(memoryId, targetRoot);
-            var targetFound = await _scoped.GetByIdAsync(targetReference);
-            _logger?.LogInformation("Retrieved memory '{Id}' from ancestor project '{Project}' (found: {Found})", id, project, targetFound is not null);
-            return targetFound is null ? null : ScopedMemoryDto.From(targetFound.Memory, targetFound.Scope, targetFound.ProjectRoot);
-        }
-        if (HasScoped && scope.ToLowerInvariant() == "merged")
-        {
-            try
+            scope = (scope ?? "project").Trim();
+
+            var memoryId = MemoryId.Parse(id);
+            if (!string.IsNullOrWhiteSpace(project))
             {
-                var projectRef = new MemoryReference(memoryId, MemoryScopeKind.Project, _scoped!.ProjectRoot);
-                var found = await _scoped.GetByIdAsync(projectRef);
-                if (found is not null)
+                if (!HasScoped)
                 {
-                    _logger?.LogInformation("Retrieved memory '{Id}' merged (found in project)", id);
-                    return ScopedMemoryDto.From(found.Memory, found.Scope, found.ProjectRoot);
+                    throw new InvalidOperationException("Project targeting requires a scoped memory service.");
                 }
+                var targetRoot = _scoped!.ResolveAncestorProjectRoot(project);
+                var targetReference = MemoryReference.ForProject(memoryId, targetRoot);
+                var targetFound = await _scoped.GetByIdAsync(targetReference);
+                _logger?.LogInformation("Retrieved memory '{Id}' from ancestor project '{Project}' (found: {Found})", id, project, targetFound is not null);
+                return targetFound is null ? null : ScopedMemoryDto.From(targetFound.Memory, targetFound.Scope, targetFound.ProjectRoot);
             }
-            catch (ProjectScopeNotInitializedException)
+            if (HasScoped && scope.ToLowerInvariant() == "merged")
             {
-                // Uninitialized project scope: fall through to global lookup.
+                try
+                {
+                    var projectRef = new MemoryReference(memoryId, MemoryScopeKind.Project, _scoped!.ProjectRoot);
+                    var found = await _scoped.GetByIdAsync(projectRef);
+                    if (found is not null)
+                    {
+                        _logger?.LogInformation("Retrieved memory '{Id}' merged (found in project)", id);
+                        return ScopedMemoryDto.From(found.Memory, found.Scope, found.ProjectRoot);
+                    }
+                }
+                catch (ProjectScopeNotInitializedException)
+                {
+                    // Uninitialized project scope: fall through to global lookup.
+                }
+                var global = await _scoped!.GetByIdAsync(MemoryReference.ForGlobal(memoryId));
+                _logger?.LogInformation("Retrieved memory '{Id}' merged (found: {Found})", id, global is not null);
+                return global is null ? null : ScopedMemoryDto.From(global.Memory, global.Scope, global.ProjectRoot);
             }
-            var global = await _scoped!.GetByIdAsync(MemoryReference.ForGlobal(memoryId));
-            _logger?.LogInformation("Retrieved memory '{Id}' merged (found: {Found})", id, global is not null);
-            return global is null ? null : ScopedMemoryDto.From(global.Memory, global.Scope, global.ProjectRoot);
-        }
-        if (HasScoped && _scoped is not null)
-        {
-            var scopeKind = scope.ToLowerInvariant() == "global" ? MemoryScopeKind.Global : MemoryScopeKind.Project;
-            var reference = new MemoryReference(memoryId, scopeKind, scopeKind == MemoryScopeKind.Project ? _scoped.ProjectRoot : null);
-            var scopedResult = await _scoped.GetByIdAsync(reference);
-            _logger?.LogInformation("Retrieved memory '{Id}' scope '{Scope}' (found: {Found})", id, scopeKind, scopedResult is not null);
-            return scopedResult is null ? null : ScopedMemoryDto.From(scopedResult.Memory, scopedResult.Scope, scopedResult.ProjectRoot);
-        }
+            if (HasScoped && _scoped is not null)
+            {
+                var scopeKind = scope.ToLowerInvariant() == "global" ? MemoryScopeKind.Global : MemoryScopeKind.Project;
+                var reference = new MemoryReference(memoryId, scopeKind, scopeKind == MemoryScopeKind.Project ? _scoped.ProjectRoot : null);
+                var scopedResult = await _scoped.GetByIdAsync(reference);
+                _logger?.LogInformation("Retrieved memory '{Id}' scope '{Scope}' (found: {Found})", id, scopeKind, scopedResult is not null);
+                return scopedResult is null ? null : ScopedMemoryDto.From(scopedResult.Memory, scopedResult.Scope, scopedResult.ProjectRoot);
+            }
 
-        var result = await _memory.GetByIdAsync(memoryId);
-        _logger?.LogInformation("Retrieved memory '{Id}' (found: {Found})", id, result is not null);
-        return result is null ? null : ScopedMemoryDto.From(result, MemoryScopeKind.Project, null);
+            var result = await _memory.GetByIdAsync(memoryId);
+            _logger?.LogInformation("Retrieved memory '{Id}' (found: {Found})", id, result is not null);
+            return result is null ? null : ScopedMemoryDto.From(result, MemoryScopeKind.Project, null);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "memory_get threw an exception (id={Id}, scope={Scope}, project={Project})", id, scope, project);
+            throw;
+        }
     }
 
     [McpServerTool(Name = "memory_list"), Description("List memories, optionally filtered by status.")]
@@ -107,42 +115,50 @@ public sealed class MemoryReadTool
         [Description("Filter by status: active, superseded, archived, or 'all'. Defaults to 'active'.")] string status = "active",
         [Description("Scope: project, global, or merged. Defaults to 'merged'.")] string scope = "merged")
     {
-        if (HasScoped)
+        try
         {
-            var normalizedStatus = status;
-            MemoryStatus? filter = null;
-            if (!string.IsNullOrWhiteSpace(normalizedStatus) && !normalizedStatus.Equals("all", StringComparison.OrdinalIgnoreCase))
+            if (HasScoped)
             {
-                if (!Enum.TryParse<MemoryStatus>(normalizedStatus, ignoreCase: true, out var parsed))
+                var normalizedStatus = status;
+                MemoryStatus? filter = null;
+                if (!string.IsNullOrWhiteSpace(normalizedStatus) && !normalizedStatus.Equals("all", StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger?.LogWarning("memory_list failed: invalid status '{Status}'", status);
-                    throw new ArgumentException($"Invalid memory status '{status}'. Valid statuses: {string.Join(", ", Enum.GetNames<MemoryStatus>())}, all", nameof(status));
+                    if (!Enum.TryParse<MemoryStatus>(normalizedStatus, ignoreCase: true, out var parsed))
+                    {
+                        _logger?.LogWarning("memory_list failed: invalid status '{Status}'", status);
+                        throw new ArgumentException($"Invalid memory status '{status}'. Valid statuses: {string.Join(", ", Enum.GetNames<MemoryStatus>())}, all", nameof(status));
+                    }
+                    filter = parsed;
                 }
-                filter = parsed;
+
+                var scoped = await _scoped!.ListAsync(scope, filter);
+                var dtos = scoped.Select(s => ScopedMemoryDto.From(s.Memory, s.Scope, s.ProjectRoot)).ToList().AsReadOnly();
+                _logger?.LogInformation("Listed {Count} memories scope '{Scope}' status '{Status}'", dtos.Count, scope, status);
+                return dtos;
             }
 
-            var scoped = await _scoped!.ListAsync(scope, filter);
-            var dtos = scoped.Select(s => ScopedMemoryDto.From(s.Memory, s.Scope, s.ProjectRoot)).ToList().AsReadOnly();
-            _logger?.LogInformation("Listed {Count} memories scope '{Scope}' status '{Status}'", dtos.Count, scope, status);
-            return dtos;
-        }
+            var all = await _memory.ListAllAsync();
+            if (string.IsNullOrWhiteSpace(status) || status.Equals("all", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger?.LogInformation("Listed all {Count} memories", all.Count);
+                return all.Select(m => ScopedMemoryDto.From(m, MemoryScopeKind.Project, null)).ToList().AsReadOnly();
+            }
 
-        var all = await _memory.ListAllAsync();
-        if (string.IsNullOrWhiteSpace(status) || status.Equals("all", StringComparison.OrdinalIgnoreCase))
+            if (!Enum.TryParse<MemoryStatus>(status, ignoreCase: true, out var memoryStatus))
+            {
+                _logger?.LogWarning("memory_list failed: invalid status '{Status}'", status);
+                throw new ArgumentException($"Invalid memory status '{status}'. Valid statuses: {string.Join(", ", Enum.GetNames<MemoryStatus>())}, all", nameof(status));
+            }
+
+            var filtered = all.Where(m => m.Status == memoryStatus).ToList().AsReadOnly();
+            _logger?.LogInformation("Listed {Count} memories filtered by status '{Status}'", filtered.Count, memoryStatus);
+            return filtered.Select(m => ScopedMemoryDto.From(m, MemoryScopeKind.Project, null)).ToList().AsReadOnly();
+        }
+        catch (Exception ex)
         {
-            _logger?.LogInformation("Listed all {Count} memories", all.Count);
-            return all.Select(m => ScopedMemoryDto.From(m, MemoryScopeKind.Project, null)).ToList().AsReadOnly();
+            _logger?.LogError(ex, "memory_list threw an exception (scope={Scope}, status={Status})", scope, status);
+            throw;
         }
-
-        if (!Enum.TryParse<MemoryStatus>(status, ignoreCase: true, out var memoryStatus))
-        {
-            _logger?.LogWarning("memory_list failed: invalid status '{Status}'", status);
-            throw new ArgumentException($"Invalid memory status '{status}'. Valid statuses: {string.Join(", ", Enum.GetNames<MemoryStatus>())}, all", nameof(status));
-        }
-
-        var filtered = all.Where(m => m.Status == memoryStatus).ToList().AsReadOnly();
-        _logger?.LogInformation("Listed {Count} memories filtered by status '{Status}'", filtered.Count, memoryStatus);
-        return filtered.Select(m => ScopedMemoryDto.From(m, MemoryScopeKind.Project, null)).ToList().AsReadOnly();
     }
 
     [McpServerTool(Name = "memory_search"), Description("Search memories by keyword query.")]
@@ -151,27 +167,35 @@ public sealed class MemoryReadTool
         [Description("Maximum number of results to return. Defaults to 10.")] int limit = 10,
         [Description("Scope: project, global, or merged. Defaults to 'merged' (project + global with project priority).")] string scope = "merged")
     {
-        if (string.IsNullOrWhiteSpace(query))
+        try
         {
-            _logger?.LogWarning("memory_search failed: query is empty");
-            throw new ArgumentException("Query cannot be empty.", nameof(query));
-        }
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                _logger?.LogWarning("memory_search failed: query is empty");
+                throw new ArgumentException("Query cannot be empty.", nameof(query));
+            }
 
-        if (HasScoped)
+            if (HasScoped)
+            {
+                var scopedResults = await _scoped!.SearchAsync(query, scope, limit);
+                var results = scopedResults.Select(ScopedSearchResultDto.From).ToList().AsReadOnly();
+                _logger?.LogInformation("Search for '{Query}' scope '{Scope}' returned {Count} results", query, scope, results.Count);
+                return results;
+            }
+
+            var fallback = await _memory.SearchAsync(query);
+            if (limit > 0 && fallback.Count > limit)
+            {
+                fallback = fallback.Take(limit).ToList().AsReadOnly();
+            }
+
+            _logger?.LogInformation("Search for '{Query}' returned {Count} results", query, fallback.Count);
+            return fallback.Select(r => new ScopedSearchResultDto(r.Id.Value, r.Rank, "project", null, null)).ToList().AsReadOnly();
+        }
+        catch (Exception ex)
         {
-            var scopedResults = await _scoped!.SearchAsync(query, scope, limit);
-            var results = scopedResults.Select(ScopedSearchResultDto.From).ToList().AsReadOnly();
-            _logger?.LogInformation("Search for '{Query}' scope '{Scope}' returned {Count} results", query, scope, results.Count);
-            return results;
+            _logger?.LogError(ex, "memory_search threw an exception (query={Query}, scope={Scope}, limit={Limit})", query, scope, limit);
+            throw;
         }
-
-        var fallback = await _memory.SearchAsync(query);
-        if (limit > 0 && fallback.Count > limit)
-        {
-            fallback = fallback.Take(limit).ToList().AsReadOnly();
-        }
-
-        _logger?.LogInformation("Search for '{Query}' returned {Count} results", query, fallback.Count);
-        return fallback.Select(r => new ScopedSearchResultDto(r.Id.Value, r.Rank, "project", null, null)).ToList().AsReadOnly();
     }
 }

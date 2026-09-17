@@ -48,31 +48,39 @@ public sealed class MemoryRecallTool
         [Description("project | global | merged (default merged).")] string scope = "merged",
         CancellationToken cancellationToken = default)
     {
-        var ctx = context is null
-            ? null
-            : new MemoryRecallContext(context.Topics ?? [], context.FilePath, context.Project);
-
-        var result = await _recall.RecallAsync(ctx, recallLimit, recentLimit, scope, cancellationToken);
-        _logger?.LogInformation(
-            "memory_recall returned {RecallCount} recalled, {RecentCount} recent, {IntentionCount} intention(s) (scope={Scope})",
-            result.RecallMemories.Count, result.RecentMemories.Count, result.Intentions.Count, scope);
-
-        var posture = await ProjectScopePosture.EvaluateAsync(_cwd, _userHomeDirectory, _policyStore);
-
-        return new MemoryRecallResponse
+        try
         {
-            RecallMemories = result.RecallMemories.Select(MemoryRecallMemory.From).ToList().AsReadOnly(),
-            RecentMemories = result.RecentMemories.Select(MemoryRecallMemory.From).ToList().AsReadOnly(),
-            Intentions = result.Intentions.Select(MemoryRecallIntention.From).ToList().AsReadOnly(),
-            Stats = MemoryRecallStatsDto.From(result.Stats),
-            ProjectScope = new MemoryRecallProjectScopeDto
+            var ctx = context is null
+                ? null
+                : new MemoryRecallContext(context.Topics ?? [], context.FilePath, context.Project);
+
+            var result = await _recall.RecallAsync(ctx, recallLimit, recentLimit, scope, cancellationToken);
+            _logger?.LogInformation(
+                "memory_recall returned {RecallCount} recalled, {RecentCount} recent, {IntentionCount} intention(s) (scope={Scope})",
+                result.RecallMemories.Count, result.RecentMemories.Count, result.Intentions.Count, scope);
+
+            var posture = await ProjectScopePosture.EvaluateAsync(_cwd, _userHomeDirectory, _policyStore);
+
+            return new MemoryRecallResponse
             {
-                Posture = posture.Posture,
-                Policy = posture.Policy,
-                Adoptable = posture.Adoptable,
-                Initialized = posture.Initialized,
-                HeadRoot = posture.HeadRoot
-            }
-        };
+                RecallMemories = result.RecallMemories.Select(MemoryRecallMemory.From).ToList().AsReadOnly(),
+                RecentMemories = result.RecentMemories.Select(MemoryRecallMemory.From).ToList().AsReadOnly(),
+                Intentions = result.Intentions.Select(MemoryRecallIntention.From).ToList().AsReadOnly(),
+                Stats = MemoryRecallStatsDto.From(result.Stats),
+                ProjectScope = new MemoryRecallProjectScopeDto
+                {
+                    Posture = posture.Posture,
+                    Policy = posture.Policy,
+                    Adoptable = posture.Adoptable,
+                    Initialized = posture.Initialized,
+                    HeadRoot = posture.HeadRoot
+                }
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "memory_recall threw an exception (scope={Scope}, recallLimit={RecallLimit}, recentLimit={RecentLimit})", scope, recallLimit, recentLimit);
+            throw;
+        }
     }
 }

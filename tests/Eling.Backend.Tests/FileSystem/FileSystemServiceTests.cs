@@ -62,6 +62,79 @@ public sealed class FileSystemServiceTests : IDisposable
     }
 
     [Fact]
+    public void ResolvePath_AbsoluteInputOutsideRoot_AllowedWhenExternalFlagSet()
+    {
+        var outside = Path.Combine(Path.GetTempPath(), "eling-external-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            File.WriteAllText(outside, "test");
+
+            var info = _service.TestPath(outside, allowExternal: true);
+            Assert.Equal(outside, info.ResolvedPath);
+            Assert.True(info.Exists);
+            Assert.Equal(PathKind.File, info.Kind);
+        }
+        finally
+        {
+            if (File.Exists(outside))
+                File.Delete(outside);
+        }
+    }
+
+    [Fact]
+    public void ResolvePath_ExternalPath_TraversalStillResolvedNormalized()
+    {
+        var outside = Path.Combine(_root, "..", "temp", "eling-sibling-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outside)!);
+            File.WriteAllText(outside, "data");
+
+            var info = _service.TestPath(outside, allowExternal: true);
+            Assert.StartsWith(Path.GetTempPath(), info.ResolvedPath, StringComparison.OrdinalIgnoreCase);
+            Assert.True(info.Exists);
+        }
+        finally
+        {
+            if (File.Exists(outside))
+                File.Delete(outside);
+        }
+    }
+
+    [Fact]
+    public void ReadFile_ExternalWithAllowExternal_ReadsContent()
+    {
+        var outside = Path.Combine(Path.GetTempPath(), "eling-read-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            File.WriteAllText(outside, "external content");
+            var read = _service.ReadFile(outside, allowExternal: true);
+            Assert.Equal("external content", read.Content);
+        }
+        finally
+        {
+            if (File.Exists(outside))
+                File.Delete(outside);
+        }
+    }
+
+    [Fact]
+    public void ReadFile_ExternalWithoutAllowExternal_ThrowsPathSandboxException()
+    {
+        var outside = Path.Combine(Path.GetTempPath(), "eling-read-no-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            File.WriteAllText(outside, "external content");
+            Assert.Throws<PathSandboxException>(() => _service.ReadFile(outside, allowExternal: false));
+        }
+        finally
+        {
+            if (File.Exists(outside))
+                File.Delete(outside);
+        }
+    }
+
+    [Fact]
     public void ResolvePath_ParentTraversal_ThrowsPathSandboxException()
     {
         Assert.Throws<PathSandboxException>(() => _service.TestPath("../escaping.txt"));

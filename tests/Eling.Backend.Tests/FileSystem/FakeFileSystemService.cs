@@ -46,9 +46,15 @@ internal sealed class FakeFileSystemService : IFileSystemService
     public void AddOversizedFile(string relativePath, long sizeBytes)
         => _entries[Resolve(relativePath)] = new FakeEntry { Kind = PathKind.File, Content = "x", SizeOverride = sizeBytes };
 
-    public PathInfo TestPath(string path)
+    public void AddExternalFile(string absolutePath, string content)
+        => _entries[Normalize(absolutePath)] = new FakeEntry { Kind = PathKind.File, Content = content };
+
+    public void AddExternalDirectory(string absolutePath)
+        => _entries[Normalize(absolutePath)] = new FakeEntry { Kind = PathKind.Directory };
+
+    public PathInfo TestPath(string path, bool allowExternal = false)
     {
-        var full = Resolve(path);
+        var full = Resolve(path, allowExternal);
         if (_entries.TryGetValue(full, out var entry))
         {
             var size = entry.Kind == PathKind.File ? SizeOf(entry) : (long?)null;
@@ -76,9 +82,9 @@ internal sealed class FakeFileSystemService : IFileSystemService
         return new DirectoryCreateResult(full, true);
     }
 
-    public IReadOnlyList<DirectoryEntry> ListDirectory(string path, bool recursive = false, int maxDepth = 3, string? pattern = null)
+    public IReadOnlyList<DirectoryEntry> ListDirectory(string path, bool recursive = false, int maxDepth = 3, string? pattern = null, bool allowExternal = false)
     {
-        var full = Resolve(path);
+        var full = Resolve(path, allowExternal);
         if (_entries.TryGetValue(full, out var existing) && existing.Kind == PathKind.File)
         {
             throw new NotADirectoryException(full);
@@ -108,10 +114,10 @@ internal sealed class FakeFileSystemService : IFileSystemService
             .AsReadOnly();
     }
 
-    public GlobResult Glob(string basePath, string pattern, int maxDepth = 5, int maxResults = 200)
+    public GlobResult Glob(string basePath, string pattern, int maxDepth = 5, int maxResults = 200, bool allowExternal = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pattern);
-        var baseFull = Resolve(basePath);
+        var baseFull = Resolve(basePath, allowExternal);
         if (_entries.TryGetValue(baseFull, out var existing) && existing.Kind == PathKind.File)
         {
             throw new NotADirectoryException(baseFull);
@@ -138,9 +144,9 @@ internal sealed class FakeFileSystemService : IFileSystemService
         return new GlobResult(baseFull, pattern, page.Count, truncated, page);
     }
 
-    public FileReadResult ReadFile(string path, int maxBytes = 1048576, int offset = 1, int limit = 0)
+    public FileReadResult ReadFile(string path, int maxBytes = 1048576, int offset = 1, int limit = 0, bool allowExternal = false)
     {
-        var full = Resolve(path);
+        var full = Resolve(path, allowExternal);
         if (!_entries.TryGetValue(full, out var entry))
         {
             throw new FileNotFoundException($"File '{full}' does not exist.", full);
@@ -486,7 +492,7 @@ internal sealed class FakeFileSystemService : IFileSystemService
         }
     }
 
-    private string Resolve(string path)
+    private string Resolve(string path, bool allowExternal = false)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -494,10 +500,26 @@ internal sealed class FakeFileSystemService : IFileSystemService
         }
 
         var combined = path.Replace('\\', '/');
-        var full = combined.StartsWith('/')
-            ? Normalize(combined)
-            : Normalize(_rootPath + "/" + combined);
-        if (!full.StartsWith(_rootWithSeparator, _comparison) &&
+        // When allowExternal and the path is absolute (fake-absolute "/foo" or
+        // real OS absolute "C:\..." or "/c/Users/..."), accept it verbatim so
+        // external read tests can exercise out-of-root paths without involving
+        // the fake's relative-only Normalize. Skip sandbox check; the real
+        // FileSystemService tests cover the OS-path sandbox enforcement.
+        if (allowExternal && (combined.StartsWith('/') || combined.Contains(':')))
+        {
+            return Normalize(combined);
+        }
+
+        // Leading slash signals an explicit absolute path in the fake's namespace.
+        // Treated as external: reject unless allowExternal.
+        if (combined.StartsWith('/') && !allowExternal)
+        {
+            throw new PathSandboxException(combined, _rootPath);
+        }
+
+        var full = Normalize(_rootPath + "/" + combined);
+        if (!allowExternal &&
+            !full.StartsWith(_rootWithSeparator, _comparison) &&
             !string.Equals(full, _rootPath, _comparison))
         {
             throw new PathSandboxException(full, _rootPath);
@@ -535,9 +557,12 @@ internal sealed class FakeFileSystemService : IFileSystemService
     private void EnsureParents(string full)
     {
         var dir = ParentOf(full);
-        while (dir is not null && !_entries.ContainsKey(dir))
+        while (dir is not null)
         {
-            _entries[dir] = new FakeEntry { Kind = PathKind.Directory };
+            if (!_entries.ContainsKey(dir))
+            {
+                _entries[dir] = new FakeEntry { Kind = PathKind.Directory };
+            }
             dir = ParentOf(dir);
         }
     }
@@ -643,10 +668,10 @@ internal sealed class FakeFileSystemService : IFileSystemService
         return new FileAppendResult(full, SizeOf(_entries[full]), true);
     }
 
-    public ContentSearchResult SearchFiles(string basePath, string pattern, bool useRegex = false, bool caseSensitive = false, string? filePattern = null, int maxDepth = 5, int maxResults = 100, int maxFileBytes = 1048576)
+    public ContentSearchResult SearchFiles(string basePath, string pattern, bool useRegex = false, bool caseSensitive = false, string? filePattern = null, int maxDepth = 5, int maxResults = 100, int maxFileBytes = 1048576, bool allowExternal = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pattern);
-        var baseFull = Resolve(basePath);
+        var baseFull = Resolve(basePath, allowExternal);
         if (_entries.TryGetValue(baseFull, out var existing) && existing.Kind == PathKind.File)
         {
             throw new NotADirectoryException(baseFull);
@@ -726,6 +751,28 @@ internal sealed class FakeFileSystemService : IFileSystemService
             .ToList()
             .AsReadOnly();
         return new ContentSearchResult(baseFull, pattern, page.Count, truncated, page);
+    }
+
+    public string ReadFileAny(string path, int maxBytes = 0)
+    {
+        var full = Resolve(path, allowExternal: true);
+        if (!_entries.TryGetValue(full, out var entry))
+        {
+            throw new FileNotFoundException($"File '{full}' does not exist.", full);
+        }
+
+        if (entry.Kind != PathKind.File)
+        {
+            throw new NotAFileException(full);
+        }
+
+        var size = SizeOf(entry);
+        if (maxBytes > 0 && size > maxBytes)
+        {
+            throw new FileTooLargeException(full, size, maxBytes);
+        }
+
+        return entry.Content;
     }
 
     private static int CountOccurrences(string text, string needle)

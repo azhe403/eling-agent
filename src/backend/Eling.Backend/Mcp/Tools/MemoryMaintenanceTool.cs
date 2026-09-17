@@ -32,54 +32,62 @@ public sealed class MemoryMaintenanceTool
         [Description("Cutoff in days for stale archived/superseded memories to delete. Defaults to 90.")] int staleDays = 90,
         CancellationToken cancellationToken = default)
     {
-        var maintenanceScope = scope?.ToLowerInvariant() switch
+        try
         {
-            "project" => MaintenanceScope.Project,
-            "global" => MaintenanceScope.Global,
-            _ => MaintenanceScope.Merged
-        };
-
-        var ops = new HashSet<MaintenanceOperation>();
-        if (operations is null || operations.Length == 0)
-        {
-            ops.Add(MaintenanceOperation.Dedup);
-            ops.Add(MaintenanceOperation.Merge);
-            ops.Add(MaintenanceOperation.Cleanup);
-            ops.Add(MaintenanceOperation.Reconcile);
-        }
-        else
-        {
-            foreach (var op in operations)
+            var maintenanceScope = scope?.ToLowerInvariant() switch
             {
-                if (Enum.TryParse<MaintenanceOperation>(op, ignoreCase: true, out var parsed))
+                "project" => MaintenanceScope.Project,
+                "global" => MaintenanceScope.Global,
+                _ => MaintenanceScope.Merged
+            };
+
+            var ops = new HashSet<MaintenanceOperation>();
+            if (operations is null || operations.Length == 0)
+            {
+                ops.Add(MaintenanceOperation.Dedup);
+                ops.Add(MaintenanceOperation.Merge);
+                ops.Add(MaintenanceOperation.Cleanup);
+                ops.Add(MaintenanceOperation.Reconcile);
+            }
+            else
+            {
+                foreach (var op in operations)
                 {
-                    ops.Add(parsed);
+                    if (Enum.TryParse<MaintenanceOperation>(op, ignoreCase: true, out var parsed))
+                    {
+                        ops.Add(parsed);
+                    }
                 }
             }
-        }
 
-        var request = new MaintenanceRequest
-        {
-            Scope = maintenanceScope,
-            DryRun = dryRun,
-            Operations = ops,
-            ApproveFindingIds = approveFindingIds is not null ? new HashSet<string>(approveFindingIds) : new(),
-            SimilarityThreshold = similarityThreshold,
-            StaleDays = staleDays
-        };
+            var request = new MaintenanceRequest
+            {
+                Scope = maintenanceScope,
+                DryRun = dryRun,
+                Operations = ops,
+                ApproveFindingIds = approveFindingIds is not null ? new HashSet<string>(approveFindingIds) : new(),
+                SimilarityThreshold = similarityThreshold,
+                StaleDays = staleDays
+            };
 
-        _logger?.LogInformation("Running memory maintenance (scope={Scope}, dryRun={DryRun})", scope, dryRun);
-        var report = await _maintenance.RunAsync(request, cancellationToken);
-        if (!dryRun && _scoped is not null)
-        {
-            await _scoped.RebuildIndexAsync(scope);
-            _logger?.LogInformation("Index rebuilt after maintenance (scope={Scope})", scope);
+            _logger?.LogInformation("Running memory maintenance (scope={Scope}, dryRun={DryRun})", scope, dryRun);
+            var report = await _maintenance.RunAsync(request, cancellationToken);
+            if (!dryRun && _scoped is not null)
+            {
+                await _scoped.RebuildIndexAsync(scope);
+                _logger?.LogInformation("Index rebuilt after maintenance (scope={Scope})", scope);
+            }
+            return JsonSerializer.Serialize(report, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                Converters = { new JsonStringEnumConverter() }
+            });
         }
-        return JsonSerializer.Serialize(report, new JsonSerializerOptions
+        catch (Exception ex)
         {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            Converters = { new JsonStringEnumConverter() }
-        });
+            _logger?.LogError(ex, "memory_maintenance threw an exception (scope={Scope}, dryRun={DryRun})", scope, dryRun);
+            throw;
+        }
     }
 }

@@ -82,12 +82,12 @@ public sealed class ScopeChainSmokeTests : IDisposable
         Assert.Equal("ancestor-scope", status.Posture);
         Assert.True(status.Adoptable);
 
-        // 2. default save lands in ancestor root/.eling, no consent needed
+        // 2. default save in sub-project without own scope returns init-required
         var (ancestorScoped, ancestorWrite) = await BuildAsync(payments);
         Assert.Equal(Path.GetFullPath(root), ancestorScoped.ChainRoots.Single());
         var ancestorSave = await ancestorWrite.SaveAsync("parent-root memory");
-        Assert.Equal("created", ancestorSave.Action);
-        Assert.True(File.Exists(Path.Combine(root, ".eling", "memories", ancestorSave.Id.ToString() + ".md")));
+        Assert.Equal("init-required", ancestorSave.Action);
+        Assert.True(ancestorSave.InitRequired);
 
         // 3. init creates own .eling under payments; status now own-scope
         var initTool = new MemoryInitProjectTool(payments);
@@ -104,14 +104,11 @@ public sealed class ScopeChainSmokeTests : IDisposable
         var ownSave = await ownWrite.SaveAsync("own-scope memory");
         Assert.True(File.Exists(Path.Combine(payments, ".eling", "memories", ownSave.Id.ToString() + ".md")));
 
-        // 5. recall merged contains ancestor memory AND own memory
+        // 5. recall merged contains own memory
         var recallService = new MemoryRecallService(ownScoped, new NoopIntentionStorage());
         var recall = await recallService.RecallAsync(new MemoryRecallContext(["memory"], null, null));
         var contents = recall.RecallMemories.Select(h => h.Memory.Content).ToList();
-        Assert.Contains("parent-root memory", contents);
         Assert.Contains("own-scope memory", contents);
-        var ancestorHit = recall.RecallMemories.First(h => h.Memory.Content == "parent-root memory");
-        Assert.Equal(Path.GetFullPath(root), ancestorHit.ProjectRoot);
         var ownHit = recall.RecallMemories.First(h => h.Memory.Content == "own-scope memory");
         Assert.Equal(Path.GetFullPath(payments), ownHit.ProjectRoot);
         var projectOnly = await ownScoped.ListAsync("project");

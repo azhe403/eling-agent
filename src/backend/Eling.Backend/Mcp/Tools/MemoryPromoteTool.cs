@@ -31,59 +31,67 @@ public sealed class MemoryPromoteTool
         [Description("The ULID of the memory to copy")] string id,
         [Description("Source scope: global or project. Defaults to 'global'.")] string sourceScope = "global",
         [Description("Operation: 'copy' (default, keeps source) or 'move' (deletes source).")] string operation = "copy",
-        [Description("Optional logical name of an ancestor project to target (e.g. the parent .eling). Requires this workspace to have its own .eling scope; never creates a scope.")] string? project = null)
+        [Description("Optional logical name of an ancestor project to target (e.g. the parent .eling). Requires this workspace to already have its own .eling scope; never creates a scope.")] string? project = null)
     {
-        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be empty.", nameof(id));
-        var op = operation.Trim().ToLowerInvariant();
-        if (op != "copy" && op != "move")
+        try
         {
-            throw new ArgumentException("Operation must be 'copy' or 'move'.", nameof(operation));
-        }
-
-        var memoryId = MemoryId.Parse(id);
-        var sourceKind = sourceScope.Trim().ToLowerInvariant() == "project" ? MemoryScopeKind.Project : MemoryScopeKind.Global;
-        var source = new MemoryReference(memoryId, sourceKind, sourceKind == MemoryScopeKind.Project ? _scoped.ProjectRoot : null);
-
-        var targetRoot = _scoped.ProjectRoot;
-        var hasProjectTarget = !string.IsNullOrWhiteSpace(project);
-        if (!string.IsNullOrWhiteSpace(project))
-        {
-            targetRoot = _scoped.ResolveAncestorProjectRoot(project);
-        }
-        if (string.IsNullOrWhiteSpace(targetRoot))
-        {
-            throw new InvalidOperationException("No project scope is available to copy into.");
-        }
-
-        _logger?.LogInformation(
-            "Memory '{Id}' {Operation} to project '{Target}' (sourceScope={SourceScope})",
-            id, op, project ?? "(own)", sourceScope);
-        ScopedMemory? result;
-        if (op == "move")
-        {
-            result = await _scoped.MoveToProjectAsync(source, targetRoot);
-        }
-        else
-        {
-            result = await _scoped.CopyToProjectAsync(source, targetRoot);
-        }
-
-        _logger?.LogInformation(
-            "Memory '{Id}' {Operation}d to project (result: {Result})",
-            id, op, result is not null);
-        if (result is not null)
-        {
-            await _notifier.NotifyAsync("mcp");
-            if (hasProjectTarget)
+            if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be empty.", nameof(id));
+            var op = operation.Trim().ToLowerInvariant();
+            if (op != "copy" && op != "move")
             {
-                await _scoped.RebuildProjectIndexAsync(targetRoot);
+                throw new ArgumentException("Operation must be 'copy' or 'move'.", nameof(operation));
+            }
+
+            var memoryId = MemoryId.Parse(id);
+            var sourceKind = sourceScope.Trim().ToLowerInvariant() == "project" ? MemoryScopeKind.Project : MemoryScopeKind.Global;
+            var source = new MemoryReference(memoryId, sourceKind, sourceKind == MemoryScopeKind.Project ? _scoped.ProjectRoot : null);
+
+            var targetRoot = _scoped.ProjectRoot;
+            var hasProjectTarget = !string.IsNullOrWhiteSpace(project);
+            if (!string.IsNullOrWhiteSpace(project))
+            {
+                targetRoot = _scoped.ResolveAncestorProjectRoot(project);
+            }
+            if (string.IsNullOrWhiteSpace(targetRoot))
+            {
+                throw new InvalidOperationException("No project scope is available to copy into.");
+            }
+
+            _logger?.LogInformation(
+                "Memory '{Id}' {Operation} to project '{Target}' (sourceScope={SourceScope})",
+                id, op, project ?? "(own)", sourceScope);
+            ScopedMemory? result;
+            if (op == "move")
+            {
+                result = await _scoped.MoveToProjectAsync(source, targetRoot);
             }
             else
             {
-                await _scoped.RebuildIndexAsync("project");
+                result = await _scoped.CopyToProjectAsync(source, targetRoot);
             }
+
+            _logger?.LogInformation(
+                "Memory '{Id}' {Operation}d to project (result: {Result})",
+                id, op, result is not null);
+            if (result is not null)
+            {
+                await _notifier.NotifyAsync("mcp");
+                if (hasProjectTarget)
+                {
+                    await _scoped.RebuildProjectIndexAsync(targetRoot);
+                }
+                else
+                {
+                    await _scoped.RebuildIndexAsync("project");
+                }
+            }
+            return result?.Memory;
         }
-        return result?.Memory;
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "memory_copy_to_project threw an exception (id={Id}, sourceScope={SourceScope}, operation={Operation})", id, sourceScope, operation);
+            throw;
+        }
     }
 
     [McpServerTool(Name = "memory_promote_to_global"), Description("Promote a project memory to global. Use operation='copy' to keep source, 'move' to delete source.")]
@@ -91,37 +99,45 @@ public sealed class MemoryPromoteTool
         [Description("The ULID of the memory to promote")] string id,
         [Description("Operation: 'copy' (default, keeps source) or 'move' (deletes source).")] string operation = "copy")
     {
-        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be empty.", nameof(id));
-        var op = operation.Trim().ToLowerInvariant();
-        if (op != "copy" && op != "move")
+        try
         {
-            throw new ArgumentException("Operation must be 'copy' or 'move'.", nameof(operation));
-        }
+            if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be empty.", nameof(id));
+            var op = operation.Trim().ToLowerInvariant();
+            if (op != "copy" && op != "move")
+            {
+                throw new ArgumentException("Operation must be 'copy' or 'move'.", nameof(operation));
+            }
 
-        var memoryId = MemoryId.Parse(id);
-        var source = new MemoryReference(memoryId, MemoryScopeKind.Project, _scoped.ProjectRoot);
+            var memoryId = MemoryId.Parse(id);
+            var source = new MemoryReference(memoryId, MemoryScopeKind.Project, _scoped.ProjectRoot);
 
-        _logger?.LogInformation(
-            "Memory '{Id}' {Operation} to global",
-            id, op);
-        ScopedMemory? result;
-        if (op == "move")
-        {
-            result = await _scoped.MoveToGlobalAsync(source);
-        }
-        else
-        {
-            result = await _scoped.CopyToGlobalAsync(source);
-        }
+            _logger?.LogInformation(
+                "Memory '{Id}' {Operation} to global",
+                id, op);
+            ScopedMemory? result;
+            if (op == "move")
+            {
+                result = await _scoped.MoveToGlobalAsync(source);
+            }
+            else
+            {
+                result = await _scoped.CopyToGlobalAsync(source);
+            }
 
-        _logger?.LogInformation(
-            "Memory '{Id}' {Operation}d to global (result: {Result})",
-            id, op, result is not null);
-        if (result is not null)
-        {
-            await _notifier.NotifyAsync("mcp");
-            await _scoped.RebuildIndexAsync("global");
+            _logger?.LogInformation(
+                "Memory '{Id}' {Operation}d to global (result: {Result})",
+                id, op, result is not null);
+            if (result is not null)
+            {
+                await _notifier.NotifyAsync("mcp");
+                await _scoped.RebuildIndexAsync("global");
+            }
+            return result?.Memory;
         }
-        return result?.Memory;
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "memory_promote_to_global threw an exception (id={Id}, operation={Operation})", id, operation);
+            throw;
+        }
     }
 }

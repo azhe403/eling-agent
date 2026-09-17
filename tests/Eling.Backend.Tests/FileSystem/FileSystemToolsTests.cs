@@ -700,4 +700,166 @@ public class FileSystemToolsTests
 
         Assert.Equal("invalid_argument", CodeOf(tool.CopyDirectory(".", "copy-of-root")));
     }
+
+    // ---------- allowExternal (read-only tools only) ----------
+
+    [Fact]
+    public void PathTest_ExternalAbsoluteWithAllowExternal_ReturnsNotFound()
+    {
+        // The fake has no /absent/external.txt entry; it returns not-found
+        // (external resolution skips sandbox check).
+        var tool = CreateTool();
+
+        var root = Parse(tool.PathTest("/absent/external.txt", allowExternal: true)).RootElement;
+        Assert.Equal("notFound", root.GetProperty("kind").GetString());
+        Assert.False(root.GetProperty("exists").GetBoolean());
+    }
+
+    [Fact]
+    public void PathTest_AbsoluteOutsideRoot_WithoutAllowExternal_ReturnsSandboxError()
+    {
+        var tool = CreateTool();
+
+        Assert.Equal("sandbox_violation", CodeOf(tool.PathTest("/etc/passwd")));
+    }
+
+    [Fact]
+    public void PathTest_ExternalAbsoluteFile_WithAllowExternal_ReturnsFileInfo()
+    {
+        var service = new FakeFileSystemService();
+        service.AddExternalFile("/external", "");
+        service.AddExternalFile("/external/secret.txt", "x");
+        var tool = CreateTool(service);
+
+        var root = Parse(tool.PathTest("/external/secret.txt", allowExternal: true)).RootElement;
+        Assert.True(root.GetProperty("exists").GetBoolean());
+        Assert.Equal("file", root.GetProperty("kind").GetString());
+    }
+
+    [Fact]
+    public void PathTest_ExternalAbsoluteFile_WithoutAllowExternal_ReturnsSandboxError()
+    {
+        var tool = CreateTool();
+
+        Assert.Equal("sandbox_violation", CodeOf(tool.PathTest("/external/secret.txt", allowExternal: false)));
+    }
+
+    [Fact]
+    public void DirectoryList_ExternalWithAllowExternal_ReturnsContents()
+    {
+        var service = new FakeFileSystemService();
+        service.AddExternalFile("/external/a.txt", "1");
+        service.AddExternalFile("/external/b.md", "2");
+        service.AddExternalDirectory("/external/sub");
+        service.AddExternalFile("/external/sub/c.txt", "3");
+        var tool = CreateTool(service);
+
+        var names = Parse(tool.ListDirectory("/external/sub", allowExternal: true)).RootElement
+            .EnumerateArray().Select(e => e.GetProperty("name").GetString()).ToList();
+        Assert.Contains("c.txt", names);
+        Assert.DoesNotContain("a.txt", names);
+    }
+
+    [Fact]
+    public void DirectoryList_ExternalWithoutAllowExternal_ReturnsSandboxError()
+    {
+        var tool = CreateTool();
+
+        Assert.Equal("sandbox_violation", CodeOf(tool.ListDirectory("/external", allowExternal: false)));
+    }
+
+    [Fact]
+    public void Glob_ExternalWithAllowExternal_FindsFiles()
+    {
+        var service = new FakeFileSystemService();
+        service.AddExternalFile("/other/src/a.cs", "1");
+        service.AddExternalFile("/other/src/b.cs", "2");
+        var tool = CreateTool(service);
+
+        var root = Parse(tool.Glob("/other/src", "*.cs", allowExternal: true)).RootElement;
+        Assert.Equal(2, root.GetProperty("matchCount").GetInt32());
+    }
+
+    [Fact]
+    public void Glob_ExternalWithoutAllowExternal_ReturnsSandboxError()
+    {
+        var tool = CreateTool();
+
+        Assert.Equal("sandbox_violation", CodeOf(tool.Glob("/other/src", "*.cs", allowExternal: false)));
+    }
+
+    [Fact]
+    public void FileRead_ExternalWithAllowExternal_ReturnsContent()
+    {
+        var service = new FakeFileSystemService();
+        service.AddExternalFile("/external/hello.txt", "hello world");
+        var tool = CreateTool(service);
+
+        Assert.Equal("hello world", tool.ReadFile("/external/hello.txt", allowExternal: true));
+    }
+
+    [Fact]
+    public void FileRead_ExternalWithoutAllowExternal_ReturnsSandboxError()
+    {
+        var tool = CreateTool();
+
+        Assert.Equal("sandbox_violation", CodeOf(tool.ReadFile("/external/hello.txt", allowExternal: false)));
+    }
+
+    [Fact]
+    public void SearchFiles_ExternalWithAllowExternal_FindsHits()
+    {
+        var service = new FakeFileSystemService();
+        service.AddExternalFile("/other/a.cs", "hello world\nnothing");
+        service.AddExternalFile("/other/b.md", "unrelated");
+        var tool = CreateTool(service);
+
+        var root = Parse(tool.SearchFiles("/other", "hello", allowExternal: true)).RootElement;
+        Assert.Equal(1, root.GetProperty("matchCount").GetInt32());
+    }
+
+    [Fact]
+    public void SearchFiles_ExternalWithoutAllowExternal_ReturnsSandboxError()
+    {
+        var tool = CreateTool();
+
+        Assert.Equal("sandbox_violation", CodeOf(tool.SearchFiles("/other", "hello", allowExternal: false)));
+    }
+
+    // write tools stay strict even with allowExternal=true
+    [Fact]
+    public void WriteFile_ExternalEvenWithAllowExternal_ReturnsSandboxError()
+    {
+        var tool = CreateTool();
+
+        Assert.Equal("sandbox_violation", CodeOf(tool.WriteFile("/external/outside.txt", "data")));
+    }
+
+    [Fact]
+    public void DeleteFile_ExternalEvenWithAllowExternal_ReturnsSandboxError()
+    {
+        var tool = CreateTool();
+
+        Assert.Equal("sandbox_violation", CodeOf(tool.DeleteFile("/external/x.txt")));
+    }
+
+    // ---------- file_read_any (no sandbox) ----------
+
+    [Fact]
+    public void FileReadAny_AnyPath_ReadsContent()
+    {
+        var service = new FakeFileSystemService();
+        service.AddExternalFile("/external/hello.txt", "hello external world");
+        var tool = CreateTool(service);
+
+        Assert.Equal("hello external world", tool.ReadFileAny("/external/hello.txt"));
+    }
+
+    [Fact]
+    public void FileReadAny_MissingFile_ReturnsNotFound()
+    {
+        var tool = CreateTool();
+
+        Assert.Equal("not_found", CodeOf(tool.ReadFileAny("/external/missing.txt")));
+    }
 }

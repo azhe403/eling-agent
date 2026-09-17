@@ -39,9 +39,9 @@ public sealed class FileSystemService : IFileSystemService
         _logger = logger;
     }
 
-    public PathInfo TestPath(string path)
+    public PathInfo TestPath(string path, bool allowExternal = false)
     {
-        var full = ResolvePath(path);
+        var full = ResolvePath(path, allowExternal);
         if (IsSymlink(full))
         {
             return new PathInfo(full, true, PathKind.Symlink, null);
@@ -87,9 +87,9 @@ public sealed class FileSystemService : IFileSystemService
         }
     }
 
-    public IReadOnlyList<DirectoryEntry> ListDirectory(string path, bool recursive = false, int maxDepth = 3, string? pattern = null)
+    public IReadOnlyList<DirectoryEntry> ListDirectory(string path, bool recursive = false, int maxDepth = 3, string? pattern = null, bool allowExternal = false)
     {
-        var full = ResolvePath(path);
+        var full = ResolvePath(path, allowExternal);
         if (File.Exists(full) || IsFileLink(full))
         {
             throw new NotADirectoryException(full);
@@ -114,10 +114,10 @@ public sealed class FileSystemService : IFileSystemService
         return SortEntries(entries);
     }
 
-    public GlobResult Glob(string basePath, string pattern, int maxDepth = 5, int maxResults = 200)
+    public GlobResult Glob(string basePath, string pattern, int maxDepth = 5, int maxResults = 200, bool allowExternal = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pattern);
-        var baseFull = ResolvePath(basePath);
+        var baseFull = ResolvePath(basePath, allowExternal);
         if (File.Exists(baseFull) || IsFileLink(baseFull))
         {
             throw new NotADirectoryException(baseFull);
@@ -156,9 +156,9 @@ public sealed class FileSystemService : IFileSystemService
         return new GlobResult(baseFull, pattern, sorted.Count, truncated, sorted);
     }
 
-    public FileReadResult ReadFile(string path, int maxBytes = 1048576, int offset = 1, int limit = 0)
+    public FileReadResult ReadFile(string path, int maxBytes = 1048576, int offset = 1, int limit = 0, bool allowExternal = false)
     {
-        var full = ResolvePath(path);
+        var full = ResolvePath(path, allowExternal);
         if (Directory.Exists(full) && !File.Exists(full))
         {
             throw new NotAFileException(full);
@@ -197,6 +197,38 @@ public sealed class FileSystemService : IFileSystemService
         var start = Math.Max(offset, 1);
         var (slice, end, totalLines) = SliceLines(content, start, limit);
         return new FileReadResult(full, size, slice, start, end, totalLines, end < totalLines);
+    }
+
+    public string ReadFileAny(string path, int maxBytes = 0)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new ArgumentException("Path cannot be empty.", nameof(path));
+        }
+
+        var full = Path.GetFullPath(path);
+        if (!File.Exists(full) || Directory.Exists(full))
+        {
+            throw new FileNotFoundException($"File '{full}' does not exist.", full);
+        }
+
+        var size = new FileInfo(full).Length;
+        if (maxBytes > 0 && size > maxBytes)
+        {
+            throw new FileTooLargeException(full, size, maxBytes);
+        }
+
+        try
+        {
+            var bytes = File.ReadAllBytes(full);
+            var content = StripBom(Encoding.UTF8.GetString(bytes));
+            return content;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger?.LogWarning(ex, "ReadFileAny failed for '{Path}'", full);
+            throw;
+        }
     }
 
     public FileWriteResult WriteFile(string path, string content, bool overwrite = false)
@@ -684,10 +716,10 @@ public sealed class FileSystemService : IFileSystemService
         return new FileAppendResult(full, new FileInfo(full).Length, created);
     }
 
-    public ContentSearchResult SearchFiles(string basePath, string pattern, bool useRegex = false, bool caseSensitive = false, string? filePattern = null, int maxDepth = 5, int maxResults = 100, int maxFileBytes = 1048576)
+    public ContentSearchResult SearchFiles(string basePath, string pattern, bool useRegex = false, bool caseSensitive = false, string? filePattern = null, int maxDepth = 5, int maxResults = 100, int maxFileBytes = 1048576, bool allowExternal = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pattern);
-        var baseFull = ResolvePath(basePath);
+        var baseFull = ResolvePath(basePath, allowExternal);
         if (File.Exists(baseFull) || IsFileLink(baseFull))
         {
             throw new NotADirectoryException(baseFull);
@@ -917,15 +949,16 @@ public sealed class FileSystemService : IFileSystemService
         }
     }
 
-    internal string ResolvePath(string path)
+    internal string ResolvePath(string path, bool allowExternal = false)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
             throw new ArgumentException("Path cannot be empty.", nameof(path));
         }
 
-        var full = Path.GetFullPath(Path.Combine(_rootPath, path));
-        if (!full.StartsWith(_rootWithSeparator, _rootComparison) &&
+        var full = Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(_rootPath, path));
+        if (!allowExternal &&
+            !full.StartsWith(_rootWithSeparator, _rootComparison) &&
             !string.Equals(full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), _rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), _rootComparison))
         {
             throw new PathSandboxException(full, _rootPath);
