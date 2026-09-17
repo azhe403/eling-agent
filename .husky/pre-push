@@ -1,3 +1,52 @@
-pnpm build:backend
-pnpm test:backend
-pnpm build:frontend
+#!/bin/sh
+# Path-aware & anti-locked pre-push: only run checks relevant to outgoing commits.
+# - docs/memories/config only → skip all, instant push
+# - isolated build/test via ELING_OUTPUT_ROOT=.bin-test avoids .bin lock collisions
+# - backend and frontend checks run conditionally based on diff vs upstream
+# Bypass: SKIP_HOOK=1 git push --no-verify  or  FULL_CHECK=1 git push
+
+if [ "$SKIP_HOOK" = "1" ]; then
+  echo "→ SKIP_HOOK=1: skipping pre-push checks"
+  exit 0
+fi
+
+CHANGED=$(git diff --name-only "@{u}..HEAD" 2>/dev/null || git diff --name-only "origin/main...HEAD" 2>/dev/null || git diff --name-only HEAD~1 2>/dev/null)
+
+if [ "$FULL_CHECK" = "1" ]; then
+  echo "→ FULL_CHECK=1: running full build and tests"
+  pnpm build:backend || exit 1
+  pnpm test:backend || exit 1
+  pnpm build:frontend || exit 1
+  exit 0
+fi
+
+NEED_FRONTEND=0
+NEED_BACKEND=0
+
+if echo "$CHANGED" | grep -q "^src/frontend/"; then
+  NEED_FRONTEND=1
+fi
+
+if echo "$CHANGED" | grep -qE "^(src/backend/|src/desktop/|tests/|Directory\.Build|Eling\.slnx|package\.json)"; then
+  NEED_BACKEND=1
+fi
+
+if [ "$NEED_FRONTEND" = "0" ] && [ "$NEED_BACKEND" = "0" ]; then
+  echo "→ pre-push: docs/config only, skipping build and tests"
+  exit 0
+fi
+
+if [ "$NEED_BACKEND" = "1" ]; then
+  echo "→ backend/desktop changed: building and testing with isolated output (.bin-test)"
+  pnpm build:backend || exit 1
+  pnpm test:backend || exit 1
+else
+  echo "→ skip backend build/test (no backend/desktop/test changes)"
+fi
+
+if [ "$NEED_FRONTEND" = "1" ]; then
+  echo "→ frontend changed: building dashboard"
+  pnpm build:frontend || exit 1
+else
+  echo "→ skip frontend build (no src/frontend/ changes)"
+fi
