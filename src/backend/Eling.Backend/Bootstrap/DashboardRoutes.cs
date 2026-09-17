@@ -30,6 +30,10 @@ public static class DashboardRoutes
         app.MapMemoryRoutes();
         app.MapScopedMemoryRoutes();
         app.MapMemoryMaintenanceEndpoints();
+        app.MapAgentEndpoints();
+        app.MapAgentWorkspaceEndpoints();
+        app.MapAgentHostEndpoints();
+        app.MapAgentChatEndpoints();
         app.MapFallbackToFile("index.html");
     }
 

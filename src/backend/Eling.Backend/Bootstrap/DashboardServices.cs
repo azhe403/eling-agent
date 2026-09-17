@@ -1,5 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Eling.Backend.Agent.Infrastructure.Ai;
+using Eling.Backend.Agent.Ports;
+using Eling.Backend.Agent.Services;
 using Eling.Backend.Converters;
 using Eling.Backend.Mcp;
 using Eling.Core;
@@ -70,6 +73,30 @@ public static class DashboardServices
         services.AddSingleton<IMemoryMerger, MemoryMerger>();
         services.AddScoped<IMemoryService>(sp =>
             sp.GetRequiredService<RuntimeRegistry>().ResolveMemoryService());
+
+        // Agent HTTP surface (/api/agent/*): workspaces/files, provider,
+        // host browse, chats. Thread-safe stores are singletons rooted at the
+        // effective data dir; turn orchestration stays scoped.
+        var agentDataDir = context.EffectiveDataDir;
+        var agentLegacyDir = context.UserScope.GlobalDataDirectory;
+        services.AddSingleton(sp => new WorkspaceRegistry(
+            Path.Combine(agentDataDir, "agent-workspaces.json"),
+            sp.GetRequiredService<ILogger<WorkspaceRegistry>>(),
+            Path.Combine(agentLegacyDir, "agent-workspaces.json")));
+        services.AddSingleton(sp => new ProviderStore(
+            agentDataDir,
+            sp.GetRequiredService<ILogger<ProviderStore>>(),
+            agentLegacyDir));
+        services.AddSingleton(sp => new BackendChatStore(
+            Path.Combine(agentDataDir, "agent-chats"),
+            sp.GetRequiredService<ILogger<BackendChatStore>>(),
+            Path.Combine(agentLegacyDir, "agent-chats")));
+        services.AddSingleton<BackendFileTools>();
+        services.AddSingleton<HostBrowseService>();
+        services.AddHttpClient();
+        services.AddScoped<IProviderClient, HttpProviderClient>();
+        services.AddScoped<IChatGateway, MeaiChatGateway>();
+        services.AddScoped<AgentTurnService>();
 
         // Only the dashboard owner maps the SSE endpoint, so only it needs the
         // runtime-directory watcher. The watcher turns cross-process runtime
