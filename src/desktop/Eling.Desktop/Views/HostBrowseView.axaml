@@ -1,0 +1,43 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Eling.Desktop.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="640" d:DesignHeight="440"
+             x:Class="Eling.Desktop.Views.HostBrowseView"
+             x:DataType="vm:HostBrowseViewModel">
+
+    <Grid RowDefinitions="Auto,*,Auto,Auto" Margin="16">
+        <!-- Path bar -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+            <Button Content="↑ Up" Command="{Binding UpCommand}" Padding="8,4" FontSize="12"/>
+            <TextBox Text="{Binding CurrentPath}" MinWidth="360" PlaceholderText="Backend path"
+                     FontSize="12" Padding="6,4"/>
+            <Button Content="Go" Command="{Binding GoCommand}" Padding="8,4" FontSize="12"/>
+        </StackPanel>
+
+        <!-- Drives / files list -->
+        <ListBox Grid.Row="1" ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}"
+                 DoubleTapped="OnEntryDoubleTapped"
+                 Background="Transparent" BorderThickness="0">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Text="{Binding DisplayName}" FontSize="12" Foreground="#e5e7eb"
+                               Padding="4,3"/>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- Status -->
+        <TextBlock Grid.Row="2" Text="{Binding StatusText}" FontSize="11" Foreground="#6b7280"
+                   Margin="0,6,0,0" TextTrimming="CharacterEllipsis"/>
+
+        <!-- Action buttons -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Spacing="8" Margin="0,10,0,0">
+            <Button Content="Cancel" Click="OnCancel" Classes="subtle" Padding="10,6" FontSize="12"/>
+            <Button Content="Use This Folder" Click="OnUseFolder" Classes="primary" Padding="10,6" FontSize="12"/>
+        </StackPanel>
+    </Grid>
+
+</UserControl>

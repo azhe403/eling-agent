@@ -1,0 +1,83 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Eling.Desktop.ViewModels"
+             xmlns:views="using:Eling.Desktop.Views"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="870" d:DesignHeight="700"
+             x:Class="Eling.Desktop.Views.FoldersView"
+             x:DataType="vm:FoldersViewModel">
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+        <!-- Add workspace: browse a folder, then Add -->
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="16,12,16,8">
+            <Button Grid.Column="0" Content="Browse..." Click="OnBrowse" Classes="subtle" Padding="10,4" Margin="0,0,8,0" ToolTip.Tip="Pick a folder on disk"/>
+            <TextBox Grid.Column="1" Text="{Binding NewRootPath}" PlaceholderText="Browse or paste a folder path..." VerticalAlignment="Center"/>
+            <Button Grid.Column="2" Content="Add" Click="OnAddRoot" Classes="primary" Padding="12,4" Margin="8,0,0,0" ToolTip.Tip="Browse a folder, then add it as a workspace"/>
+        </Grid>
+
+        <!-- Workspace list + remove from list -->
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="16,0,16,6">
+            <TextBlock Grid.Column="0" Text="Workspaces" FontSize="13" FontWeight="SemiBold" Foreground="#e5e7eb" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" Content="✕ Remove from list" Command="{Binding RemoveRootCommand}" Classes="subtle" Padding="10,4" FontSize="11" ToolTip.Tip="Only removes from the workspace list — files on disk are safe"/>
+        </Grid>
+        <ListBox x:Name="RootsListBox" Grid.Row="2" ItemsSource="{Binding Roots}" SelectedItem="{Binding SelectedRoot}" Height="140" Margin="16,0,16,8" Padding="4" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Text="{Binding StringFormat='📁 {0}'}" FontSize="12" Foreground="#e5e7eb" TextTrimming="CharacterEllipsis"/>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- Files list + breadcrumb nav -->
+        <Grid Grid.Row="3" RowDefinitions="Auto,*" Margin="16,0,16,0">
+            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,6">
+                <Button Grid.Column="0" Content="↑" Command="{Binding GoUpCommand}" Classes="subtle" Padding="8,2"
+                        ToolTip.Tip="Up one folder" IsEnabled="{Binding CanGoUp}"/>
+                <TextBlock Grid.Column="1" Text="{Binding CurrentPath}" FontSize="11" Foreground="#9ca3af"
+                           VerticalAlignment="Center" Margin="8,0" TextTrimming="CharacterEllipsis"/>
+                <Button Grid.Column="2" Content="⟳" Command="{Binding RefreshCommand}" Classes="subtle" Padding="8,2"
+                        ToolTip.Tip="Refresh"/>
+            </Grid>
+            <ListBox x:Name="EntriesListBox" Grid.Row="1" ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Border Classes="memory-card" Padding="8,6" Margin="0,2">
+                            <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Path}" FontSize="12" FontWeight="SemiBold" Foreground="#e5e7eb" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding IsDirectory, StringFormat='{}'}" FontSize="10" Foreground="#9ca3af"/>
+                                <Button Grid.Row="0" Grid.Column="1" Content="→" FontSize="10" Padding="4,2" Command="{Binding $parent[Window].((vm:FoldersViewModel)DataContext).OpenEntryCommand}" CommandParameter="{Binding}" Classes="subtle" Margin="4,0,0,0" ToolTip.Tip="Open"/>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
+
+        <!-- Status -->
+        <Border Grid.Row="4" BorderBrush="#2a2a2a" BorderThickness="1"
+                CornerRadius="4" Background="#111113" Padding="10,6" Margin="16,8,16,12">
+            <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#6b7280"
+                       TextTrimming="CharacterEllipsis"/>
+        </Border>
+
+        <!-- Folder browser modal overlay (inline, inside the window) -->
+        <Border Grid.RowSpan="5" Background="#aa000000" IsVisible="{Binding ShowBrowser}">
+            <Border Width="660" Height="520" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="#1e1e1e" BorderBrush="#3b3b3b" BorderThickness="1" CornerRadius="12">
+                <Grid RowDefinitions="Auto,*,Auto" Margin="0">
+                    <!-- Title bar -->
+                    <Border Grid.Row="0" Background="#252525" BorderBrush="#3b3b3b" BorderThickness="0,0,0,1"
+                            Padding="16,12" CornerRadius="12,12,0,0">
+                        <TextBlock Text="Browse Host Folders" FontSize="13" FontWeight="SemiBold"
+                                   Foreground="#e5e7eb"/>
+                    </Border>
+                    <!-- Browser content -->
+                    <views:HostBrowseView x:Name="Browser" Grid.Row="1"/>
+                    <!-- Bottom spacer -->
+                    <Border Grid.Row="2" Height="8" Background="Transparent"/>
+                </Grid>
+            </Border>
+        </Border>
+    </Grid>
+</UserControl>

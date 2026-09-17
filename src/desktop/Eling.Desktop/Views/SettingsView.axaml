@@ -1,0 +1,47 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Eling.Desktop.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="870" d:DesignHeight="700"
+             x:Class="Eling.Desktop.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+
+    <ScrollViewer Padding="24">
+        <StackPanel Spacing="12" MaxWidth="560" HorizontalAlignment="Left">
+            <TextBlock Text="Settings" FontSize="20" FontWeight="Bold"/>
+
+            <Border Background="#161616" BorderBrush="#2a2a2a" BorderThickness="1" CornerRadius="8" Padding="14">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Backend" FontSize="14" FontWeight="Bold"/>
+                    <TextBlock Text="Empty = auto-detect local backend." FontSize="11" Foreground="#6b7280" TextWrapping="Wrap"/>
+                    <TextBlock Text="Backend URL" FontSize="12" Foreground="#9ca3af"/>
+                    <TextBox Text="{Binding BackendUrl}" PlaceholderText="e.g. http://192.168.1.10:4417"/>
+                </StackPanel>
+            </Border>
+
+            <Border Background="#161616" BorderBrush="#2a2a2a" BorderThickness="1" CornerRadius="8" Padding="14">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Provider" FontSize="14" FontWeight="Bold"/>
+                    <TextBlock Text="Stored on the backend." FontSize="11" Foreground="#6b7280" TextWrapping="Wrap"/>
+                    <TextBlock Text="Provider base URL" FontSize="12" Foreground="#9ca3af"/>
+                    <TextBox Text="{Binding ProviderBaseUrl}" PlaceholderText="e.g. http://127.0.0.1:11434/v1"/>
+                    <TextBlock Text="API key (never shown again)" FontSize="12" Foreground="#9ca3af"/>
+                    <TextBox x:Name="ApiKeyBox" PasswordChar="•" PlaceholderText="Leave empty to keep stored key"/>
+                    <TextBlock Text="Model" FontSize="12" Foreground="#9ca3af"/>
+                    <ComboBox ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}"
+                              IsEditable="True" HorizontalAlignment="Stretch"
+                              PlaceholderText="Fetch models or type manually"/>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="Fetch Models" Command="{Binding FetchModelsCommand}" IsEnabled="{Binding !IsBusy}"/>
+                        <Button Content="Test" Command="{Binding TestCommand}" IsEnabled="{Binding !IsBusy}"/>
+                        <Button Content="Save" Command="{Binding SaveCommand}" Classes="primary" IsEnabled="{Binding !IsBusy}"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="#9ca3af" TextWrapping="Wrap"/>
+        </StackPanel>
+    </ScrollViewer>
+
+</UserControl>

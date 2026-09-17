@@ -6,6 +6,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="using:Eling.Desktop"
         xmlns:conv="using:Eling.Desktop.Converters"
+        xmlns:views="using:Eling.Desktop.Views"
         mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
         x:Class="Eling.Desktop.Views.MainWindow"
         x:DataType="vm:MainViewModel"
@@ -15,10 +16,10 @@
 
     <Grid>
         <!-- Main Application Layout -->
-        <Grid RowDefinitions="Auto,Auto,*,Auto">
+        <Grid ColumnDefinitions="*,96" RowDefinitions="Auto,*,Auto">
 
             <!-- Top Bar -->
-            <Border Grid.Row="0" Background="#1a1a1a" Padding="16,12" BorderBrush="#2a2a2a" BorderThickness="0,0,0,1">
+            <Border Grid.Row="0" Grid.Column="0" Background="#1a1a1a" Padding="16,12" BorderBrush="#2a2a2a" BorderThickness="0,0,0,1">
                 <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12">
                         <TextBlock Text="🧠 Eling" FontSize="20" FontWeight="Bold"
@@ -36,171 +37,209 @@
                             </StackPanel>
                         </Border>
                     </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                        <Button Command="{Binding CreateMemoryCommand}" Content="+ New Memory"
-                                Classes="primary" Padding="12,6"/>
-                        <Button Command="{Binding RefreshCommand}" Content="↻ Refresh"
-                                IsEnabled="{Binding !IsLoading}"/>
-                    </StackPanel>
                 </Grid>
             </Border>
 
-            <!-- Filter Bar -->
-            <Border Grid.Row="1" Background="#161616" Padding="16,10" BorderBrush="#2a2a2a" BorderThickness="0,0,0,1">
-                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
-                    <!-- Scope Tabs -->
-                    <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
-                        <TextBlock Text="Scope:" FontSize="12" Foreground="#6b7280" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                        <Button Content="All Open Projects" Padding="12,5" FontSize="11"
-                                Command="{Binding SelectScopeCommand}" CommandParameter="all"
-                                Background="{Binding SelectedScope, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter=all}"
-                                Foreground="White" BorderThickness="0"/>
-                        <Button Content="🌐 Global" Padding="12,5" FontSize="11"
-                                Command="{Binding SelectScopeCommand}" CommandParameter="global"
-                                Background="{Binding SelectedScope, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter=global}"
-                                Foreground="White" BorderThickness="0"/>
-                        <ItemsControl ItemsSource="{Binding Runtimes}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="6"/>
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="m:RuntimeDto">
-                                    <Button Content="{Binding Name, StringFormat='📁 {0}'}"
-                                            Padding="12,5" FontSize="11"
-                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectScopeCommand}"
-                                            CommandParameter="{Binding ProjectRoot}"
-                                            Background="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedScope, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter={Binding ProjectRoot}}"
-                                            Foreground="#d1d5db" BorderThickness="0"/>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-
-                    <!-- Type Filter Chips -->
-                    <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <TextBlock Text="Type:" FontSize="12" Foreground="#6b7280" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                        <ItemsControl ItemsSource="{Binding TypeFilters}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="4"/>
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Button Content="{Binding}" Padding="10,5" FontSize="11"
-                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectTypeCommand}"
-                                            CommandParameter="{Binding}"
-                                            Background="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedType, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter={Binding}}"
-                                            Foreground="#d1d5db" BorderThickness="0"/>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-
-                    <!-- Search Box with Clear Button -->
-                    <Border Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" VerticalAlignment="Center" Margin="16,0,0,0">
-                        <Grid ColumnDefinitions="*,Auto" Width="280">
-                            <TextBox Text="{Binding SearchQuery}" PlaceholderText="Search content or ID..."
-                                     Padding="10,6,28,6"/>
-                            <Button Grid.Column="1" Content="✕"
-                                    Command="{Binding ClearSearchCommand}"
-                                    Classes="subtle"
-                                    IsVisible="{Binding SearchQuery, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                    FontSize="11" Margin="0,0,4,0"
-                                    VerticalAlignment="Center" HorizontalAlignment="Right"/>
-                        </Grid>
-                    </Border>
-                </Grid>
-            </Border>
-
-            <!-- Memory List -->
-            <ListBox Grid.Row="2"
-                     ItemsSource="{Binding FilteredMemories}"
-                     Padding="6"
-                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                <ListBox.ItemTemplate>
-                    <DataTemplate DataType="m:MemoryDto">
-                        <Border Classes="memory-card">
-                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
-
-                                <!-- Badges -->
-                                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="6">
-                                    <Border Classes="badge"
-                                            Background="{Binding Type, Converter={x:Static conv:MemoryTypeColorConverter.Instance}}">
-                                        <TextBlock Text="{Binding Type}" FontSize="11" FontWeight="SemiBold" Foreground="White"/>
-                                    </Border>
-                                    <Border Classes="scope-badge">
-                                        <TextBlock Text="{Binding ScopeDisplay}" FontSize="10" Foreground="#9ca3af"/>
-                                    </Border>
+            <!-- Content -->
+            <Grid Grid.Row="1" Grid.Column="0" Margin="6">
+                <Grid>
+                    <views:ChatView x:Name="ChatPanel" />
+                    <views:FoldersView x:Name="WorkspacesPanel" IsVisible="False" />
+                    <Grid x:Name="MemoryPanel" IsVisible="False">
+                        <Grid.RowDefinitions>Auto,Auto,*</Grid.RowDefinitions>
+                        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+                            <Button Command="{Binding CreateMemoryCommand}" Content="+ New Memory"
+                                    Classes="primary" Padding="12,6"/>
+                            <Button Command="{Binding RefreshCommand}" Content="↻ Refresh"
+                                    IsEnabled="{Binding !IsLoading}"/>
+                        </StackPanel>
+                        <Border Grid.Row="1" Background="#161616" Padding="16,10" BorderBrush="#2a2a2a" BorderThickness="0,0,0,1">
+                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                                <!-- Scope Tabs -->
+                                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8">
+                                    <TextBlock Text="Scope:" FontSize="12" Foreground="#6b7280" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                    <Button Content="All Open Projects" Padding="12,5" FontSize="11"
+                                            Command="{Binding SelectScopeCommand}" CommandParameter="all"
+                                            Background="{Binding SelectedScope, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter=all}"
+                                            Foreground="White" BorderThickness="0"/>
+                                    <Button Content="🌐 Global" Padding="12,5" FontSize="11"
+                                            Command="{Binding SelectScopeCommand}" CommandParameter="global"
+                                            Background="{Binding SelectedScope, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter=global}"
+                                            Foreground="White" BorderThickness="0"/>
+                                    <ItemsControl ItemsSource="{Binding Runtimes}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal" Spacing="6"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="m:RuntimeDto">
+                                                <Button Content="{Binding Name, StringFormat='📁 {0}'}"
+                                                        Padding="12,5" FontSize="11"
+                                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectScopeCommand}"
+                                                        CommandParameter="{Binding ProjectRoot}"
+                                                        Background="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedScope, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter={Binding ProjectRoot}}"
+                                                        Foreground="#d1d5db" BorderThickness="0"/>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                 </StackPanel>
 
-                                <!-- Action Buttons -->
-                                <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="4">
-                                    <Button Content="↑ Promote" FontSize="11" Padding="8,4" CornerRadius="4"
-                                            Background="#142e1f" Foreground="#4ade80" BorderBrush="#1f4a30" BorderThickness="1"
-                                            IsVisible="{Binding IsProjectScope}"
-                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).PromptPromoteCommand}"
-                                            CommandParameter="{Binding}"
-                                            ToolTip.Tip="Promote memory to Global scope"/>
-                                    <Button Content="↓ Project" FontSize="11" Padding="8,4" CornerRadius="4"
-                                            Background="#14263b" Foreground="#60a5fa" BorderBrush="#1e3a5f" BorderThickness="1"
-                                            IsVisible="{Binding IsGlobalScope}"
-                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).PromptCopyCommand}"
-                                            CommandParameter="{Binding}"
-                                            ToolTip.Tip="Copy or move memory to a Project"/>
-                                    <Button Content="✏ Edit" FontSize="11" Padding="8,4" CornerRadius="4"
-                                            Background="#262626" Foreground="#9ca3af" BorderThickness="0"
-                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).StartEditCommand}"
-                                            CommandParameter="{Binding}"/>
-                                    <Button Content="🗑 Delete" FontSize="11" Padding="8,4" CornerRadius="4"
-                                            Background="#331818" Foreground="#ef4444" BorderThickness="0"
-                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).PromptDeleteCommand}"
-                                            CommandParameter="{Binding}"/>
+                                <!-- Type Filter Chips -->
+                                <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <TextBlock Text="Type:" FontSize="12" Foreground="#6b7280" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                    <ItemsControl ItemsSource="{Binding TypeFilters}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal" Spacing="4"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Content="{Binding}" Padding="10,5" FontSize="11"
+                                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectTypeCommand}"
+                                                        CommandParameter="{Binding}"
+                                                        Background="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectedType, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter={Binding}}"
+                                                        Foreground="#d1d5db" BorderThickness="0"/>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                 </StackPanel>
 
-                                <!-- Content -->
-                                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
-                                           Text="{Binding Content}" FontSize="13" Foreground="#e5e7eb"
-                                           TextWrapping="Wrap" MaxLines="4" Margin="0,4,0,0"/>
-
-                                <!-- Tags -->
-                                <ItemsControl Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
-                                              ItemsSource="{Binding Tags}" Margin="0,3,0,0">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <WrapPanel/>
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <Border Classes="tag">
-                                                <TextBlock Text="{Binding StringFormat='#{0}'}" FontSize="10" Foreground="#d1d5db"/>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-
-                                <!-- ID + Timestamps -->
-                                <StackPanel Grid.Row="3" Grid.Column="0" Orientation="Horizontal" Spacing="8" Margin="0,2,0,0">
-                                    <TextBlock Text="{Binding Id, StringFormat='ID: {0}'}" FontSize="10"
-                                               Foreground="#6b7280" FontFamily="Cascadia Code,Consolas,Menlo"/>
-                                    <TextBlock Text="{Binding CreatedAt, StringFormat='Created: {0:yyyy-MM-dd HH:mm}'}"
-                                               FontSize="10" Foreground="#6b7280"/>
-                                </StackPanel>
-                                <TextBlock Grid.Row="3" Grid.Column="1" Margin="0,2,0,0"
-                                           Text="{Binding UpdatedAt, StringFormat='Updated: {0:yyyy-MM-dd HH:mm}'}"
-                                           FontSize="10" Foreground="#6b7280"/>
-
+                                <!-- Search Box with Clear Button -->
+                                <Border Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" VerticalAlignment="Center" Margin="16,0,0,0">
+                                    <Grid ColumnDefinitions="*,Auto" Width="280">
+                                        <TextBox Text="{Binding SearchQuery}" PlaceholderText="Search content or ID..."
+                                                 Padding="10,6,28,6"/>
+                                        <Button Grid.Column="1" Content="✕"
+                                                Command="{Binding ClearSearchCommand}"
+                                                Classes="subtle"
+                                                IsVisible="{Binding SearchQuery, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                                FontSize="11" Margin="0,0,4,0"
+                                                VerticalAlignment="Center" HorizontalAlignment="Right"/>
+                                    </Grid>
+                                </Border>
                             </Grid>
                         </Border>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
+                        <ListBox Grid.Row="2"
+                                 ItemsSource="{Binding FilteredMemories}"
+                                 Padding="6"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="m:MemoryDto">
+                                    <Border Classes="memory-card">
+                                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+
+                                            <!-- Badges -->
+                                            <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                                                <Border Classes="badge"
+                                                        Background="{Binding Type, Converter={x:Static conv:MemoryTypeColorConverter.Instance}}">
+                                                    <TextBlock Text="{Binding Type}" FontSize="11" FontWeight="SemiBold" Foreground="White"/>
+                                                </Border>
+                                                <Border Classes="scope-badge">
+                                                    <TextBlock Text="{Binding ScopeDisplay}" FontSize="10" Foreground="#9ca3af"/>
+                                                </Border>
+                                            </StackPanel>
+
+                                            <!-- Action Buttons -->
+                                            <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                                                <Button Content="↑ Promote" FontSize="11" Padding="8,4" CornerRadius="4"
+                                                        Background="#142e1f" Foreground="#4ade80" BorderBrush="#1f4a30" BorderThickness="1"
+                                                        IsVisible="{Binding IsProjectScope}"
+                                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).PromptPromoteCommand}"
+                                                        CommandParameter="{Binding}"
+                                                        ToolTip.Tip="Promote memory to Global scope"/>
+                                                <Button Content="↓ Project" FontSize="11" Padding="8,4" CornerRadius="4"
+                                                        Background="#14263b" Foreground="#60a5fa" BorderBrush="#1e3a5f" BorderThickness="1"
+                                                        IsVisible="{Binding IsGlobalScope}"
+                                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).PromptCopyCommand}"
+                                                        CommandParameter="{Binding}"
+                                                        ToolTip.Tip="Copy or move memory to a Project"/>
+                                                <Button Content="✏ Edit" FontSize="11" Padding="8,4" CornerRadius="4"
+                                                        Background="#262626" Foreground="#9ca3af" BorderThickness="0"
+                                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).StartEditCommand}"
+                                                        CommandParameter="{Binding}"/>
+                                                <Button Content="🗑 Delete" FontSize="11" Padding="8,4" CornerRadius="4"
+                                                        Background="#331818" Foreground="#ef4444" BorderThickness="0"
+                                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).PromptDeleteCommand}"
+                                                        CommandParameter="{Binding}"/>
+                                            </StackPanel>
+
+                                            <!-- Content -->
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                                       Text="{Binding Content}" FontSize="13" Foreground="#e5e7eb"
+                                                       TextWrapping="Wrap" MaxLines="4" Margin="0,4,0,0"/>
+
+                                            <!-- Tags -->
+                                            <ItemsControl Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                                                          ItemsSource="{Binding Tags}" Margin="0,3,0,0">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel/>
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Classes="tag">
+                                                            <TextBlock Text="{Binding StringFormat='#{0}'}" FontSize="10" Foreground="#d1d5db"/>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+
+                                            <!-- ID + Timestamps -->
+                                            <StackPanel Grid.Row="3" Grid.Column="0" Orientation="Horizontal" Spacing="8" Margin="0,2,0,0">
+                                                <TextBlock Text="{Binding Id, StringFormat='ID: {0}'}" FontSize="10"
+                                                           Foreground="#6b7280" FontFamily="Cascadia Code,Consolas,Menlo"/>
+                                                <TextBlock Text="{Binding CreatedAt, StringFormat='Created: {0:yyyy-MM-dd HH:mm}'}"
+                                                           FontSize="10" Foreground="#6b7280"/>
+                                            </StackPanel>
+                                            <TextBlock Grid.Row="3" Grid.Column="1" Margin="0,2,0,0"
+                                                       Text="{Binding UpdatedAt, StringFormat='Updated: {0:yyyy-MM-dd HH:mm}'}"
+                                                       FontSize="10" Foreground="#6b7280"/>
+
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+                    <views:SettingsView x:Name="SettingsPanel" IsVisible="False" />
+                </Grid>
+            </Grid>
+
+            <!-- Right rail: full height, VSCode-like -->
+            <Border Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" Background="#131313" BorderBrush="#2a2a2a" BorderThickness="1,0,0,0" Padding="4,12,0,12" Margin="0,6,6,6">
+                <StackPanel Spacing="6">
+                    <Button Click="SidebarChat_Click" MinHeight="76" HorizontalAlignment="Stretch" Background="#262626" BorderThickness="0" CornerRadius="8" Padding="4">
+                        <StackPanel Spacing="2" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock Text="💬" FontSize="22" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Chat" FontSize="11" HorizontalAlignment="Center" Foreground="#e5e7eb"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Click="SidebarWorkspaces_Click" MinHeight="76" HorizontalAlignment="Stretch" Background="#262626" BorderThickness="0" CornerRadius="8" Padding="4">
+                        <StackPanel Spacing="2" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock Text="📁" FontSize="22" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Workspaces" FontSize="11" HorizontalAlignment="Center" Foreground="#e5e7eb"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Click="SidebarMemory_Click" MinHeight="76" HorizontalAlignment="Stretch" Background="#262626" BorderThickness="0" CornerRadius="8" Padding="4">
+                        <StackPanel Spacing="2" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock Text="🧠" FontSize="22" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Memory" FontSize="11" HorizontalAlignment="Center" Foreground="#e5e7eb"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Click="SidebarSettings_Click" MinHeight="76" HorizontalAlignment="Stretch" Background="#262626" BorderThickness="0" CornerRadius="8" Padding="4">
+                        <StackPanel Spacing="2" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock Text="⚙" FontSize="22" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Settings" FontSize="11" HorizontalAlignment="Center" Foreground="#e5e7eb"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Border>
 
             <!-- Bottom Status Bar -->
-            <Border Grid.Row="3" Background="#161616" Padding="16,8" BorderBrush="#2a2a2a" BorderThickness="0,1,0,0">
+            <Border Grid.Row="2" Grid.Column="0" Background="#161616" Padding="16,8" BorderBrush="#2a2a2a" BorderThickness="0,1,0,0">
                 <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
                         <Ellipse Width="8" Height="8" VerticalAlignment="Center">

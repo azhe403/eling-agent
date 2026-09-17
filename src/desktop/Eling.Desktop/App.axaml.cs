@@ -13,6 +13,8 @@ public partial class App : Application
 
     public App() : this(null) { }
 
+    public IServiceProvider? Services => _services;
+
     public App(IServiceProvider? services)
     {
         _services = services;

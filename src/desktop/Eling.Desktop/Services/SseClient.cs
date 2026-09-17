@@ -60,7 +60,7 @@ public sealed class SseClient : IDisposable
                 {
                     var line = await reader.ReadLineAsync(cancellationToken);
                     if (line == null) break;
-                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    if (string.IsNullOrWhiteSpace(line)) continue; // SSE keep-alive / event separator
 
                     if (line.StartsWith("data:"))
                     {

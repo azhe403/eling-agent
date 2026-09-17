@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Avalonia;
 using Eling.Core;
 using Eling.Core.Logging;
@@ -55,6 +55,10 @@ sealed class Program
         services.AddSingleton<BackendSupervisor>();
         services.AddSingleton<ElingApiClient>();
         services.AddSingleton<MainViewModel>();
+        services.AddSingleton<DesktopSettingsStore>();
+        services.AddTransient<ChatViewModel>();
+        services.AddTransient<FoldersViewModel>();
+        services.AddTransient<SettingsViewModel>();
         services.AddTransient<MainWindow>();
     }
 
