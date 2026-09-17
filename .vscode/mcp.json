@@ -1,0 +1,19 @@
+{
+  "servers": {
+    "eling_dev": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": [
+        "watch",
+        "--project",
+        "src/backend/Eling.Backend/Eling.Backend.csproj"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "ELING_OUTPUT_ROOT": ".bin-vscode",
+        "ELING_DASHBOARD_PORT": "4417"
+      }
+    }
+  },
+  "inputs": []
+}

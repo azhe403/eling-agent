@@ -6,7 +6,7 @@
       "command": [
         "eling-backend"
       ],
-      "enabled": false
+      "enabled": true
     },
     "eling_dev": {
       "enabled": true,
