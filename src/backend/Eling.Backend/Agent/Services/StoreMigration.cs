@@ -38,7 +38,7 @@ public static class StoreMigration
     {
         try
         {
-            if (SamePath(globalDir, legacyDir) || Directory.Exists(globalDir))
+            if (SamePath(globalDir, legacyDir))
             {
                 return;
             }
@@ -48,7 +48,21 @@ public static class StoreMigration
                 return;
             }
 
-            var parent = Path.GetDirectoryName(globalDir.TrimEnd(Path.DirectorySeparatorChar));
+            if (Directory.Exists(globalDir))
+            {
+                foreach (var file in Directory.EnumerateFiles(legacyDir))
+                {
+                    var dest = Path.Combine(globalDir, Path.GetFileName(file));
+                    if (!File.Exists(dest))
+                    {
+                        File.Move(file, dest);
+                    }
+                }
+                try { Directory.Delete(legacyDir, true); } catch { }
+                return;
+            }
+
+            var parent = Path.GetDirectoryName(globalDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
             if (!string.IsNullOrEmpty(parent))
             {
                 Directory.CreateDirectory(parent);
@@ -65,7 +79,7 @@ public static class StoreMigration
 
     private static bool SamePath(string a, string b) =>
         string.Equals(
-            Path.GetFullPath(a).TrimEnd(Path.DirectorySeparatorChar),
-            Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar),
+            Path.GetFullPath(a).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
             StringComparison.OrdinalIgnoreCase);
 }
