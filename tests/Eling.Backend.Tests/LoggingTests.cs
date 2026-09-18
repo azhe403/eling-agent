@@ -53,12 +53,12 @@ public class LoggingTests : IDisposable
     [Fact]
     public void Sink_WritesCurrentLogsTo_McpLog()
     {
-        using var sink = new RollingDailyFileSink(_tempLogsDir, "mcp.log", "mcp");
+        using var sink = new RollingDailyFileSink(_tempLogsDir, "backend.log", "backend");
         var evt = CreateLogEvent(DateTimeOffset.Now, "Test active log message");
 
         sink.Emit(evt);
 
-        var activePath = Path.Combine(_tempLogsDir, "mcp.log");
+        var activePath = Path.Combine(_tempLogsDir, "backend.log");
         Assert.True(File.Exists(activePath));
         var content = ReadFileShared(activePath);
         Assert.Contains("Test active log message", content);
@@ -67,12 +67,12 @@ public class LoggingTests : IDisposable
     [Fact]
     public void Sink_UsesGenericTemplate_BackendAndDesktopDifferOnlyByFileName()
     {
-        using var sink = new RollingDailyFileSink(_tempLogsDir, "mcp.log", "mcp");
+        using var sink = new RollingDailyFileSink(_tempLogsDir, "backend.log", "backend");
         var evt = CreateLogEvent(DateTimeOffset.Now, "Uniform template message");
 
         sink.Emit(evt);
 
-        var activePath = Path.Combine(_tempLogsDir, "mcp.log");
+        var activePath = Path.Combine(_tempLogsDir, "backend.log");
         var content = ReadFileShared(activePath);
         Assert.Contains("Uniform template message", content);
         Assert.DoesNotContain("[pid:", content);
@@ -85,20 +85,20 @@ public class LoggingTests : IDisposable
         var day1 = new DateTimeOffset(2026, 8, 13, 10, 0, 0, TimeSpan.FromHours(7));
         var day2 = new DateTimeOffset(2026, 8, 14, 10, 0, 0, TimeSpan.FromHours(7));
 
-        using var sink = new RollingDailyFileSink(_tempLogsDir, "mcp.log", "mcp");
+        using var sink = new RollingDailyFileSink(_tempLogsDir, "backend.log", "backend");
 
         // Emit day 1 event
         sink.Emit(CreateLogEvent(day1, "Message on Day 1"));
 
-        var activePath = Path.Combine(_tempLogsDir, "mcp.log");
+        var activePath = Path.Combine(_tempLogsDir, "backend.log");
         Assert.True(File.Exists(activePath));
         Assert.Contains("Message on Day 1", ReadFileShared(activePath));
 
         // Emit day 2 event (triggers rollover)
         sink.Emit(CreateLogEvent(day2, "Message on Day 2"));
 
-        var archiveDay1 = Path.Combine(_tempLogsDir, "mcp-2026-08-13.log");
-        Assert.True(File.Exists(archiveDay1), "mcp-2026-08-13.log should exist after rollover");
+        var archiveDay1 = Path.Combine(_tempLogsDir, "backend-2026-08-13.log");
+        Assert.True(File.Exists(archiveDay1), "backend-2026-08-13.log should exist after rollover");
 
         var archiveContent = ReadFileShared(archiveDay1);
         Assert.Contains("Message on Day 1", archiveContent);
@@ -111,7 +111,7 @@ public class LoggingTests : IDisposable
     [Fact]
     public void Startup_SeparatesExistingMixedLogsIntoArchiveAndActive()
     {
-        var activePath = Path.Combine(_tempLogsDir, "mcp.log");
+        var activePath = Path.Combine(_tempLogsDir, "backend.log");
         var yesterday = DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd");
         var today = DateTime.Today.ToString("yyyy-MM-dd");
         var existingContent = new StringBuilder()
@@ -123,9 +123,9 @@ public class LoggingTests : IDisposable
         File.WriteAllText(activePath, existingContent, Encoding.UTF8);
 
         // Creating the sink on 2026-08-14 will trigger startup rollover
-        using var sink = new RollingDailyFileSink(_tempLogsDir, "mcp.log", "mcp");
+        using var sink = new RollingDailyFileSink(_tempLogsDir, "backend.log", "backend");
 
-        var archivePath = Path.Combine(_tempLogsDir, $"mcp-{yesterday}.log");
+        var archivePath = Path.Combine(_tempLogsDir, $"backend-{yesterday}.log");
         Assert.True(File.Exists(archivePath));
 
         var archiveLines = ReadFileShared(archivePath);
@@ -144,13 +144,13 @@ public class LoggingTests : IDisposable
         var oldDate = DateTime.Today.AddDays(-10).ToString("yyyy-MM-dd");
         var recentDate = DateTime.Today.AddDays(-3).ToString("yyyy-MM-dd");
 
-        var oldFile = Path.Combine(_tempLogsDir, $"mcp-{oldDate}.log");
-        var recentFile = Path.Combine(_tempLogsDir, $"mcp-{recentDate}.log");
+        var oldFile = Path.Combine(_tempLogsDir, $"backend-{oldDate}.log");
+        var recentFile = Path.Combine(_tempLogsDir, $"backend-{recentDate}.log");
 
         File.WriteAllText(oldFile, "old log");
         File.WriteAllText(recentFile, "recent log");
 
-        using var sink = new RollingDailyFileSink(_tempLogsDir, "mcp.log", "mcp", retainedDays: 7);
+        using var sink = new RollingDailyFileSink(_tempLogsDir, "backend.log", "backend", retainedDays: 7);
 
         Assert.False(File.Exists(oldFile), "Old log file beyond 7 days should be pruned");
         Assert.True(File.Exists(recentFile), "Recent log file within 7 days should be kept");
