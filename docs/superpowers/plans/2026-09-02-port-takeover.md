@@ -55,7 +55,7 @@ No new files, no new project references.
     ```
     Resolves when `IsLoopbackListening(port)` returns `false` (or cancellation).
 
-- [ ] **Step 1: Add `ResolveTakeoverMs` to `DashboardPort`**
+- [x] **Step 1: Add `ResolveTakeoverMs` to `DashboardPort`**
 
 Edit `src/backend/Eling.Backend/Bootstrap/DashboardPort.cs`. Add a new public static method (after the existing `Resolve()` at line 20-23, before `IsLoopbackListening`):
 
@@ -87,7 +87,7 @@ Also update the stale class-level doc comment (line 12) to acknowledge that the 
 
 No imports needed — `TimeSpan` is in `System`, already in scope via global usings.
 
-- [ ] **Step 2: Add `PortMonitor` class in `McpHostArchitecture.cs`**
+- [x] **Step 2: Add `PortMonitor` class in `McpHostArchitecture.cs`**
 
 After the `HttpLoop` class closing brace (line 289), add a new `internal static class PortMonitor` inside the same `Eling.Backend` namespace:
 
@@ -137,7 +137,7 @@ internal static class PortMonitor
 }
 ```
 
-- [ ] **Step 3: Build the backend csproj to confirm no compile errors**
+- [x] **Step 3: Build the backend csproj to confirm no compile errors**
 
 Run (PowerShell):
 ```powershell
@@ -145,7 +145,7 @@ dotnet build src/backend/Eling.Backend/Eling.Backend.csproj
 ```
 Expected: `Build succeeded. 0 Error(s)`.
 
-- [ ] **Step 4: Commit (only if user asks — otherwise report and stop)**
+- [x] **Step 4: Commit (only if user asks — otherwise report and stop)**
 
 Per global constraints, do NOT auto-commit. Instead, report:
 - "Task 1 done. Files changed: `DashboardPort.cs`, `McpHostArchitecture.cs`. Build green. Working tree dirty."
@@ -162,7 +162,7 @@ Per global constraints, do NOT auto-commit. Instead, report:
 - Consumes: `DashboardPort.ResolveTakeoverMs()` (Task 1); `PortMonitor.WaitForPortFreeAsync` (Task 1); existing `BuildWebApplication`, `TrySpawnPnpmFrontend`, `DelayWithJitterAsync`, `cancellationToken`.
 - Produces: Same `Task<int>` return; same exit codes (0 on clean shutdown/cancel, 1 on unhandled exception).
 
-- [ ] **Step 1: Modify `RunAsync` to detect peer mode and poll**
+- [x] **Step 1: Modify `RunAsync` to detect peer mode and poll**
 
 Replace the body inside the `while (!cancellationToken.IsCancellationRequested)` block (lines 149-203 in current source). The new flow: after `BuildWebApplication` returns, check `ownerMode` BEFORE calling `app.RunAsync`. If peer, dispose the app, poll for free port, then `continue` the loop (so the next iteration rebuilds as owner). If owner, behave exactly as today.
 
@@ -211,7 +211,7 @@ Replace the `try { ... }` block at lines 153-195 with:
 
 The `try/catch/finally` structure around this stays the same. The `finally` at line 197-202 will dispose the app in either branch.
 
-- [ ] **Step 2: Build to confirm no compile errors**
+- [x] **Step 2: Build to confirm no compile errors**
 
 Run (PowerShell):
 ```powershell
@@ -219,11 +219,11 @@ dotnet build src/backend/Eling.Backend/Eling.Backend.csproj
 ```
 Expected: `Build succeeded. 0 Error(s)`.
 
-- [ ] **Step 3: Verify the local var `ownerMode` doesn't collide with the existing `DashboardServices.Register(... ownerMode)` argument**
+- [x] **Step 3: Verify the local var `ownerMode` doesn't collide with the existing `DashboardServices.Register(... ownerMode)` argument**
 
 The existing `BuildWebApplication` uses an internal `ownerMode` local (line 219). RunAsync never sees that — it re-evaluates. Confirm by reading line 219 of the file post-edit: the internal `ownerMode` inside `BuildWebApplication` is still scoped to that method. No collision.
 
-- [ ] **Step 4: Commit (only if user asks — otherwise report and stop)**
+- [x] **Step 4: Commit (only if user asks — otherwise report and stop)**
 
 Report working-tree state.
 
@@ -239,7 +239,7 @@ Report working-tree state.
 - Consumes: `TestProcesses.TestTimingEnv` (existing); `TestProcesses.WaitForDashboardPidAsync`, `DashboardAliveAsync`, `GracefulStopAsync`, `WaitForRuntimeCountAsync` (existing helpers).
 - Produces: One renamed + flipped test asserting that a peer promotes to owner within a bounded window.
 
-- [ ] **Step 1: Add `ELING_TEST_TAKEOVER_MS` to `TestTimingEnv`**
+- [x] **Step 1: Add `ELING_TEST_TAKEOVER_MS` to `TestTimingEnv`**
 
 Edit `tests/Eling.Backend.Tests/TestProcesses.cs` lines 35-42. The dictionary currently has heartbeat/sweep/stale/grace/shutdown-debounce. Add takeover:
 
@@ -257,7 +257,7 @@ Edit `tests/Eling.Backend.Tests/TestProcesses.cs` lines 35-42. The dictionary cu
 
 The 300ms interval is the **poll** cadence for the peer; combined with the 10s wait window below, takeover should be observed within ~600ms after the owner dies.
 
-- [ ] **Step 2: Rename and flip the test**
+- [x] **Step 2: Rename and flip the test**
 
 In `tests/Eling.Backend.Tests/DashboardLifecycleTests.cs`, replace the `Owner_exit_leaves_port_free_peer_does_not_take_over` test (lines 283-319) with the new `Peer_takes_over_port_when_owner_exits`:
 
@@ -315,7 +315,7 @@ In `tests/Eling.Backend.Tests/DashboardLifecycleTests.cs`, replace the `Owner_ex
 
 The `WaitForRuntimeCountAsync(1)` at the end re-uses the existing helper; after promotion, the promotee self-registers and `/api/coordinator/runtimes` returns 1 alive entry (the peer that became owner). The original owner (pid `first.Id`) is dead and swept by the liveness sweeper within `ELING_TEST_STALE_MS` (800ms) + margin; we wait up to `LifecycleTimeout` (20s).
 
-- [ ] **Step 3: Build to confirm**
+- [x] **Step 3: Build to confirm**
 
 Run (PowerShell):
 ```powershell
@@ -323,7 +323,7 @@ dotnet build tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj
 ```
 Expected: `Build succeeded. 0 Error(s)`.
 
-- [ ] **Step 4: Run only the flipped test**
+- [x] **Step 4: Run only the flipped test**
 
 Run (PowerShell):
 ```powershell
@@ -331,7 +331,7 @@ dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter "Fully
 ```
 Expected: `Passed Eling.Backend.Tests.DashboardLifecycleTests.Peer_takes_over_port_when_owner_exits` and `Test Run Successful`.
 
-- [ ] **Step 5: Commit (only if user asks — otherwise report and stop)**
+- [x] **Step 5: Commit (only if user asks — otherwise report and stop)**
 
 Report working-tree state.
 
@@ -347,7 +347,7 @@ Report working-tree state.
 
 **Why these fail today:** the four tests were copied from the old `Eling.Host.Tests` and assume a *separate* `eling-dashboard` process. In the merged single-binary `Eling.Backend`, the backend process IS the dashboard (`/health` returns its own PID via `Environment.ProcessId`). The `--no-dashboard` flag no longer exists in `Program.cs`. The pre-existing `TestProcesses` fixes I made (renaming `HostDll` to the real `eling-backend.dll`, fixing `RepoRoot`) merely *enabled* these tests to run against the real binary — they were always broken but never surfaced.
 
-- [ ] **Step 1: Fix `First_runtime_starts_dashboard_and_registers_itself`**
+- [x] **Step 1: Fix `First_runtime_starts_dashboard_and_registers_itself`**
 
 In `DashboardLifecycleTests.cs:166`, change:
 
@@ -364,25 +364,25 @@ to:
         Assert.Equal(dashboardPid, runtime.Id);
 ```
 
-- [ ] **Step 2: Fix `Second_runtime_reuses_the_same_dashboard`**
+- [x] **Step 2: Fix `Second_runtime_reuses_the_same_dashboard`**
 
 This test calls `TestProcesses.GetRuntimesAsync(_client)` and asserts that both temp project roots appear in the runtimes list. The current `/api/coordinator/runtimes` endpoint returns `registry.Alive()` which **filters** out the `"UserScope"` sentinel and other root user-home entries. The temp dirs (`eling-lifecycle-XXXXXXXX`) are real project roots so they should appear.
 
 Run the suite after Task 3 alone; if this test passes without changes, skip this step. If it still fails, capture and report the actual set to the user rather than re-engineering the assertion.
 
-- [ ] **Step 3: Fix `Disconnect_removes_only_that_runtime_and_keeps_dashboard_alive`**
+- [x] **Step 3: Fix `Disconnect_removes_only_that_runtime_and_keeps_dashboard_alive`**
 
 Same as Step 2 — run after Task 3. If it fails: raise `LifecycleTimeout` from 20s to 30s (line 17) and re-run. If still failing, capture actual runtimes and report.
 
 **Try this step only if the test fails after Task 3.**
 
-- [ ] **Step 4: Remove `No_dashboard_flag_skips_dashboard_startup`**
+- [x] **Step 4: Remove `No_dashboard_flag_skips_dashboard_startup`**
 
 In `tests/Eling.Backend.Tests/McpProcessTests.cs`, delete the entire test method `No_dashboard_flag_skips_dashboard_startup` (including its `[Fact]` attribute). The behavior is now covered by `Mcp_continues_when_dashboard_port_is_blocked`, which uses a `TcpListener` blocker to assert that an occupied port doesn't break MCP stdio.
 
 After deletion, also delete the `using System.Net.Http;` import if it becomes unused. Check by reading the file post-deletion: `Mcp_continues_when_dashboard_port_is_blocked` does NOT use `HttpClient`, and `No_dashboard_flag_skips_dashboard_startup` is the only test that did. After removal, the import is dead — remove it.
 
-- [ ] **Step 5: Build to confirm**
+- [x] **Step 5: Build to confirm**
 
 Run (PowerShell):
 ```powershell
@@ -390,7 +390,7 @@ dotnet build tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj
 ```
 Expected: `Build succeeded. 0 Error(s)`.
 
-- [ ] **Step 6: Run the full DashboardLifecycleTests + McpProcessTests collection**
+- [x] **Step 6: Run the full DashboardLifecycleTests + McpProcessTests collection**
 
 Run (PowerShell):
 ```powershell
@@ -399,7 +399,7 @@ dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter "Fully
 
 Expected: All 11 tests pass (6 lifecycle + 1 new peer-takeover + 4 MCP). If any fail, **stop**, report the failure (per the `@stop_on_failure` rule), and propose a fix.
 
-- [ ] **Step 7: Commit (only if user asks — otherwise report and stop)**
+- [x] **Step 7: Commit (only if user asks — otherwise report and stop)**
 
 Report working-tree state.
 
@@ -409,7 +409,7 @@ Report working-tree state.
 
 **Files:** none.
 
-- [ ] **Step 1: Run all `Eling.Backend.Tests`**
+- [x] **Step 1: Run all `Eling.Backend.Tests`**
 
 Run (PowerShell):
 ```powershell
@@ -418,7 +418,7 @@ dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --no-build -v n
 
 Expected: All tests pass. Capture total counts and timings.
 
-- [ ] **Step 2: Run `Eling.Core.Tests` to confirm no collateral**
+- [x] **Step 2: Run `Eling.Core.Tests` to confirm no collateral**
 
 Run (PowerShell):
 ```powershell
@@ -427,7 +427,7 @@ dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj --no-build -v n
 
 Expected: All tests pass (no production change in `Eling.Core`).
 
-- [ ] **Step 3: Report and stop**
+- [x] **Step 3: Report and stop**
 
 Per `@stop_on_failure`: if any test fails, STOP. Report which test, the failure message, and proposed fix (do NOT auto-fix). If all green, summarize:
 
@@ -442,14 +442,14 @@ Per `@stop_on_failure`: if any test fails, STOP. Report which test, the failure 
 
 **Files:** none (memory save only).
 
-- [ ] **Step 1: Run `git status --short` to capture working-tree state**
+- [x] **Step 1: Run `git status --short` to capture working-tree state**
 
 Run (PowerShell):
 ```powershell
 git status --short
 ```
 
-- [ ] **Step 2: Save the new design + verification to Eling memory**
+- [x] **Step 2: Save the new design + verification to Eling memory**
 
 Use the `mcp_eling_dev_memory_save` tool. Save the verification result as a `Fact`:
 
@@ -463,7 +463,7 @@ Use the `mcp_eling_dev_memory_save` tool. Save the verification result as a `Fac
 
 If the memory save times out (as it did earlier), retry once. If it still fails, log the failure to the user and proceed without persisting.
 
-- [ ] **Step 3: Final report to user**
+- [x] **Step 3: Final report to user**
 
 Summarize:
 - What was implemented (Tasks 1-4) — short prose

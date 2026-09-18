@@ -1,9 +1,9 @@
 # In-Place Port Takeover Design
 
-> Status: Draft (pending user review).
+> Status: Implemented (approved & verified).
 > Supersedes: none.
-> Plan: to be created via writing-plans after approval.
-> Tracker: created 2026-09-02.
+> Plan: [`docs/superpowers/plans/2026-09-02-port-takeover.md`](../plans/2026-09-02-port-takeover.md)
+> Tracker: created 2026-09-02, completed 2026-09-02.
 
 ## 1. Purpose
 
