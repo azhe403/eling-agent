@@ -18,12 +18,14 @@ public static class ServerInstructions
 
         "All memory operations MUST use Eling MCP tools — never read, search, or write '.eling/memories/' files directly.",
 
-        "Memory Save Rule: ALWAYS use scope=project by default so the memory is written to '.eling/memories/' and survives session changes; use scope=global only for cross-project rules.",
+        "Memory Save & Scope Rules: Default to scope=project for repo-specific architecture decisions, local conventions, and project-bound lessons. Use scope=global for general coding knowledge, cross-project preferences, language snippets, or global user guidelines. Write memory content in English by default (or the user's preferred native language if requested), but ALWAYS use lowercase English tags for consistent indexing.",
 
-        "Consistency Rules: Use clean lowercase memory tags (no underscores, no mixed language). Keep memories portable — avoid machine-specific absolute paths and personal usernames; use relative paths or generic placeholders so memories stay consistent across machines and platforms.",
+        "Consistency Rules: Use clean lowercase English memory tags (no underscores, single words/concise phrases). Keep memories portable — avoid machine-specific absolute paths and personal usernames; use relative paths or generic placeholders so memories stay consistent across machines and platforms.",
 
-        "Memory Recall Strategy: Hydrate context at session start, before significant actions, and after major milestones; avoid redundant recall on every micro-turn to preserve latency and context window.",
-        "Project scope initialization requires user consent. ALWAYS check scope posture at session start via `memory_recall` (`projectScope.adoptable`) or `memory_project_status`. If `adoptable: true` (e.g. uninitialized or ancestor-scope without its own local .eling), PROACTIVELY ask the user for consent to initialize local project memory via `memory_init_project` BEFORE performing any project-scoped `memory_save`. A default `memory_save` will be blocked with `init-required` if the workspace does not have its own .eling scope. When `projectScope.policy` is `disabled`, do not offer initialization — use `scope=global`. If the user asks to enable project memory again for a disabled workspace, set the policy back to `ask` (or clear the entry) via `memory_project_scope_policy`, then offer consent-gated initialization. The backend never creates `.eling` on its own.",
+        "Memory Recall Strategy: Trigger `memory_recall` on clear phase transitions — (1) Before starting a new task/spec implementation to check project rules, (2) Before preparing git commits to verify repo hygiene, (3) When debugging recurring errors/failures, or (4) On explicit user recall ('eling <topic>'). DO NOT recall on greeting/casual chat or repeated micro-steps in the same task to preserve context window and latency.",
+
+        "Project Scope Initialization: Local project memory requires explicit user consent before initializing. Check project posture via `memory_project_status` (or `projectScope.adoptable` in recall results) before the first project save. If `adoptable: true`, PROACTIVELY ask the user for consent before calling `memory_init_project`. If policy is disabled, route saves to scope=global without prompting for init.",
+
         "Tool responses carry provenance: `projectName`/`projectRoot` identify the scope level a memory lives in (own, an ancestor, or null for global); `memory_get`/`list`/`search` return scoped payloads."
     ];
 
