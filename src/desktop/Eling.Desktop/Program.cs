@@ -36,11 +36,10 @@ sealed class Program
     private static void ConfigureServices(IServiceCollection services)
     {
         var logsDir = CentralLogDirectory.Resolve();
-        var sink = new RollingDailyFileSink(logsDir, "desktop.log", "desktop");
+        var sink = ElingLoggingConfig.CreateSink(logsDir, "desktop.log", "desktop");
 
         Log.Logger = new LoggerConfiguration()
-            .MinimumLevel.Debug()
-            .WriteTo.Sink(sink)
+            .ConfigureElingDefaults(sink, projectId: "desktop")
             .CreateLogger();
 
         var loggerFactory = LoggerFactory.Create(builder =>

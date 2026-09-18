@@ -17,6 +17,21 @@ public static class DashboardRoutes
         // so deep links reach the SPA fallback instead of being captured earlier.
         app.UseDefaultFiles();
         app.UseStaticFiles();
+
+        app.Use(async (context, next) =>
+        {
+            var correlationId = context.Request.Headers["X-Correlation-ID"].FirstOrDefault()
+                ?? context.Request.Headers["X-Request-ID"].FirstOrDefault()
+                ?? ("http-" + Guid.NewGuid().ToString("N")[..8]);
+
+            context.Response.Headers["X-Correlation-ID"] = correlationId;
+
+            using (Serilog.Context.LogContext.PushProperty("CorrelationId", correlationId))
+            {
+                await next(context);
+            }
+        });
+
         app.UseRouting();
 
         // Registered only in owner mode (see DashboardServices); start watching

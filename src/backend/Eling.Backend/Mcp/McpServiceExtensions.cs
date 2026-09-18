@@ -1,4 +1,5 @@
 using Eling.Backend.FileSystem;
+using Eling.Backend.Mcp.Telemetry;
 using Eling.Backend.Scope;
 using Eling.Core;
 using Eling.Core.FileSystem;
@@ -9,6 +10,8 @@ using Eling.Core.MemoryRecall;
 using Eling.Core.Scope;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Server;
 
 namespace Eling.Backend.Mcp;
@@ -153,7 +156,11 @@ public static class McpServiceExtensions
             options.ServerInstructions = ServerInstructions.Default;
         })
         .WithStdioServerTransport()
-        .WithToolsFromAssembly();
+        .WithToolsFromAssembly()
+        .WithRequestFilters(filters =>
+        {
+            filters.AddCallToolFilter(ToolTelemetryFilter.Create());
+        });
 
         return services;
     }

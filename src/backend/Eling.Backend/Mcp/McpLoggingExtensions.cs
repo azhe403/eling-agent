@@ -22,19 +22,14 @@ public static class McpLoggingExtensions
 
         Directory.CreateDirectory(logsDirectory);
 
-        var sink = new RollingDailyFileSink(logsDirectory, "backend.log", "backend");
+        var sink = ElingLoggingConfig.CreateSink(logsDirectory, "backend.log", "backend");
         services.AddSingleton(sink);
         services.AddHostedService(sp => new DailyLogRollerService(logsDirectory, sp.GetService<RollingDailyFileSink>()));
 
-        var effectiveProjectId = projectId ?? "unknown";
-
         return services.AddSerilog((_, lc) => lc
-            .MinimumLevel.Debug()
-            .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
-            .Enrich.FromLogContext()
-            .Enrich.WithProperty("ProcessId", Environment.ProcessId)
-            .Enrich.WithProperty("ProjectId", effectiveProjectId)
-            .WriteTo.Console(standardErrorFromLevel: LogEventLevel.Verbose)
-            .WriteTo.Sink(sink));
+            .ConfigureElingDefaults(sink, projectId: projectId)
+            .WriteTo.Console(
+                outputTemplate: ElingLoggingConfig.DefaultOutputTemplate,
+                standardErrorFromLevel: LogEventLevel.Verbose));
     }
 }

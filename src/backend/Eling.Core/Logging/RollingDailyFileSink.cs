@@ -14,7 +14,7 @@ public sealed class RollingDailyFileSink : ILogEventSink, IDisposable
     private const int DefaultRetainedDays = 7;
     private const string DefaultActiveFileName = "eling.log";
     private const string DefaultArchivePrefix = "eling";
-    private const string DefaultOutputTemplate = "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}";
+    private const string DefaultOutputTemplate = ElingLoggingConfig.DefaultOutputTemplate;
 
     private readonly string _logsDirectory;
     private readonly string _activeFileName;

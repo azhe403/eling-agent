@@ -65,7 +65,7 @@ public class LoggingTests : IDisposable
     }
 
     [Fact]
-    public void Sink_UsesGenericTemplate_BackendAndDesktopDifferOnlyByFileName()
+    public void Sink_UsesDefaultElingTemplate_ByDefault()
     {
         using var sink = new RollingDailyFileSink(_tempLogsDir, "backend.log", "backend");
         var evt = CreateLogEvent(DateTimeOffset.Now, "Uniform template message");
@@ -75,8 +75,29 @@ public class LoggingTests : IDisposable
         var activePath = Path.Combine(_tempLogsDir, "backend.log");
         var content = ReadFileShared(activePath);
         Assert.Contains("Uniform template message", content);
-        Assert.DoesNotContain("[pid:", content);
-        Assert.DoesNotContain("[project:", content);
+        Assert.Contains("[pid:", content);
+        Assert.Contains("[project:", content);
+    }
+
+    [Fact]
+    public void ConfigureElingDefaults_FallsBackToHyphenForCorrelationId_WhenNotInFlow()
+    {
+        using var sink = ElingLoggingConfig.CreateSink(_tempLogsDir, "backend.log", "backend");
+        using var logger = new LoggerConfiguration()
+            .ConfigureElingDefaults(sink, projectId: "test-proj", processId: 12345)
+            .CreateLogger();
+
+        logger.Information("Startup without flow");
+
+        using (Serilog.Context.LogContext.PushProperty("CorrelationId", "flow-abc"))
+        {
+            logger.Information("Inside active flow");
+        }
+
+        var activePath = Path.Combine(_tempLogsDir, "backend.log");
+        var content = ReadFileShared(activePath);
+        Assert.Contains("[pid:12345] [project:test-proj] [-] Startup without flow", content);
+        Assert.Contains("[pid:12345] [project:test-proj] [flow-abc] Inside active flow", content);
     }
 
     [Fact]
