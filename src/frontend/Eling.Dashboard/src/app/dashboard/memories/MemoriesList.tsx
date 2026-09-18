@@ -7,7 +7,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Plus, RefreshCw } from "lucide-react"
 
 import {
@@ -70,6 +70,8 @@ export function MemoriesList() {
     editingIdRef.current = editingId
   }, [editingId])
 
+  const searchParams = useSearchParams()
+  const scope = searchParams.get("scope") ?? "all"
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [promoteTarget, setPromoteTarget] = useState<Memory | null>(null)
   const [promoteAsMove, setPromoteAsMove] = useState(false)
@@ -77,7 +79,6 @@ export function MemoriesList() {
   const [copyAsMove, setCopyAsMove] = useState(false)
   const [copyProjectRoot, setCopyProjectRoot] = useState<string>("")
   const [deleteTarget, setDeleteTarget] = useState<Memory | null>(null)
-  const [scope, setScope] = useState<string>("all")
   const [runtimes, setRuntimes] = useState<Runtime[]>([])
 
   const copyToClipboard = useCallback((text: string, id: string) => {
@@ -377,46 +378,7 @@ export function MemoriesList() {
 
       <div className="flex flex-1 flex-col gap-4 p-4 pt-4">
         <div className="sticky top-0 z-10 flex flex-col gap-2 bg-background pb-2 pt-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground">
-              Scope:
-            </span>
-            <button
-              onClick={() => setScope("all")}
-              className={
-                scope === "all"
-                  ? "rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
-                  : "rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"
-              }
-            >
-              All Open Projects
-            </button>
-            <button
-              onClick={() => setScope("global")}
-              className={
-                scope === "global"
-                  ? "rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
-                  : "rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"
-              }
-            >
-              🌐 Global
-            </button>
-            {runtimes.map((r) => (
-              <button
-                key={r.projectRoot}
-                onClick={() => setScope(r.projectRoot)}
-                className={
-                  scope === r.projectRoot
-                    ? "rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
-                    : "rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"
-                }
-                title={r.projectRoot}
-              >
-                📁 {r.projectRoot.split("\\").pop() ?? r.projectRoot.split("/").pop()}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <Input
               placeholder="Search content or memory ID..."
               value={query}

@@ -1,27 +1,115 @@
+"use client"
+
 import * as React from "react"
 import Link from "next/link"
-import { Brain, LayoutDashboard, Database } from "lucide-react"
+import {
+  Brain,
+  LayoutDashboard,
+  Database,
+} from "lucide-react"
 
+import { NavMain } from "@/components/nav-main"
+import { NavUser } from "@/components/nav-user"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
 } from "@/components/ui/sidebar"
-import { ThemeToggle } from "@/components/theme-toggle"
+import type { Runtime } from "@/lib/types"
 
-const navItems = [
-  { title: "Dashboard", url: "/dashboard/", icon: LayoutDashboard },
-  { title: "Memories", url: "/dashboard/memories/", icon: Database },
-]
+const user = {
+  name: "Bang Azhe",
+  email: "developer@eling.local",
+  avatar: "",
+}
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const [runtimes, setRuntimes] = React.useState<Runtime[]>([])
+
+  const refreshRuntimes = React.useCallback(async () => {
+    try {
+      const res = await fetch(`/api/coordinator/runtimes?_t=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (Array.isArray(data)) {
+          setRuntimes(data)
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  React.useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const res = await fetch(`/api/coordinator/runtimes?_t=${Date.now()}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+        })
+        if (res.ok && !cancelled) {
+          const data = await res.json()
+          if (Array.isArray(data)) {
+            setRuntimes(data)
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Realtime runtimes update via SSE
+  useMemoriesSse(React.useCallback(() => {}, []), refreshRuntimes)
+
+  const navMain = React.useMemo(() => {
+    const dynamicProjectScopes = runtimes.map((r) => {
+      const projectName =
+        r.projectRoot.split("\\").pop() ?? r.projectRoot.split("/").pop() ?? "Project"
+      return {
+        title: `📁 ${projectName}`,
+        url: `/dashboard/memories?scope=${encodeURIComponent(r.projectRoot)}`,
+      }
+    })
+
+    return [
+      {
+        title: "Dashboard",
+        url: "/dashboard",
+        icon: <LayoutDashboard className="size-4" />,
+        isActive: true,
+      },
+      {
+        title: "Memories",
+        url: "/dashboard/memories",
+        icon: <Database className="size-4" />,
+        isActive: true,
+        items: [
+          { title: "All Memories", url: "/dashboard/memories" },
+          { title: "🌐 Global Scope", url: "/dashboard/memories?scope=global" },
+          ...dynamicProjectScopes,
+        ],
+      },
+    ]
+  }, [runtimes])
+
   return (
-    <Sidebar variant="floating" collapsible="icon" {...props}>
+    <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -31,29 +119,22 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               </div>
               <div className="flex flex-col gap-0.5 leading-none">
                 <span className="font-medium">Eling</span>
-                <span className="">Memory Platform</span>
+                <span className="text-xs text-muted-foreground">Memory Platform</span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarMenu>
-            {navItems.map((item) => (
-              <SidebarMenuItem key={item.title}>
-                <SidebarMenuButton tooltip={item.title} render={<Link href={item.url} />}>
-                  <item.icon className="size-4" />
-                  <span>{item.title}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
-        </SidebarGroup>
+        <NavMain items={navMain} />
       </SidebarContent>
-      <SidebarFooter className="p-2 border-t border-sidebar-border">
-        <ThemeToggle />
+      <SidebarFooter className="gap-2">
+        <div className="px-1 group-data-[collapsible=icon]:hidden">
+          <ThemeToggle />
+        </div>
+        <NavUser user={user} />
       </SidebarFooter>
+      <SidebarRail />
     </Sidebar>
   )
 }

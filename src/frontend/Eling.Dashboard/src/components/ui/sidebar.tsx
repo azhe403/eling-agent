@@ -4,9 +4,9 @@ import * as React from "react"
 import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
 import { cva, type VariantProps } from "class-variance-authority"
+import { cn } from "cn"
 
 import { useIsMobile } from "@/hooks/use-mobile"
-import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
@@ -26,12 +26,10 @@ import {
 import { PanelLeftIcon } from "lucide-react"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
-export { SIDEBAR_COOKIE_NAME }
-const SIDEBAR_STORAGE_KEY = "eling_sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
-const SIDEBAR_WIDTH_ICON = "4.25rem"
+const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
 type SidebarContextProps = {
@@ -71,44 +69,36 @@ function SidebarProvider({
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = React.useState(false)
 
-  // Initial open state comes from the server layout via the sidebar_state
-  // cookie (see dashboard/layout.tsx), so the server render and the client's
-  // first (hydration) render agree. setOpen below keeps cookie and
-  // localStorage in sync after hydration.
+  // This is the internal state of the sidebar.
+  // We use openProp and setOpenProp for control from outside the component.
   const [_open, _setOpen] = React.useState(defaultOpen)
   const open = openProp ?? _open
-
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
-      _setOpen((prev) => {
-        const next = typeof value === "function" ? value(prev) : value
-        if (setOpenProp) {
-          setOpenProp(next)
-        }
+      const openState = typeof value === "function" ? value(open) : value
+      if (setOpenProp) {
+        setOpenProp(openState)
+      } else {
+        _setOpen(openState)
+      }
 
-        // Persist to localStorage and cookie
-        try {
-          localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next))
-          if (!next) {
-            document.documentElement.setAttribute("data-sidebar-collapsed", "true")
-          } else {
-            document.documentElement.removeAttribute("data-sidebar-collapsed")
-          }
-        } catch {
-          // ignore
+      // This sets the cookie to keep the sidebar state.
+      document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+      try {
+        localStorage.setItem("eling_sidebar_state", String(openState))
+        if (openState) {
+          document.documentElement.removeAttribute("data-sidebar-collapsed")
+        } else {
+          document.documentElement.setAttribute("data-sidebar-collapsed", "true")
         }
-        document.cookie = `${SIDEBAR_COOKIE_NAME}=${next}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
-        return next
-      })
+      } catch {}
     },
-    [setOpenProp]
+    [setOpenProp, open]
   )
 
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
-    return isMobile
-      ? setOpenMobile((prev) => !prev)
-      : setOpen((prev) => !prev)
+    return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
   }, [isMobile, setOpen, setOpenMobile])
 
   // Adds a keyboard shortcut to toggle the sidebar.
@@ -148,13 +138,11 @@ function SidebarProvider({
     <SidebarContext.Provider value={contextValue}>
       <div
         data-slot="sidebar-wrapper"
-        style={
-          {
-            "--sidebar-width": SIDEBAR_WIDTH,
-            "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
-            ...style,
-          } as React.CSSProperties
-        }
+style={{
+        ...(style as React.CSSProperties),
+        "--sidebar-width": (style as Record<string, string>)?.["--sidebar-width"] ?? SIDEBAR_WIDTH,
+        "--sidebar-width-icon": (style as Record<string, string>)?.["--sidebar-width-icon"] ?? SIDEBAR_WIDTH_ICON,
+      } as React.CSSProperties}
         className={cn(
           "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
           className
