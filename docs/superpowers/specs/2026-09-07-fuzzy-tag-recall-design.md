@@ -1,7 +1,7 @@
 # Fuzzy Tag Recall — Design Specification
 
 **Date:** 2026-09-07
-**Status:** Draft — pending user approval
+**Status:** Implemented — verified with tests
 **Author:** Eling Agent
 
 ---
