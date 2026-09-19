@@ -60,15 +60,8 @@ public static class McpServiceExtensions
         // Bounded filesystem tools sandboxed to the project root.
         services.TryAddSingleton<IFileSystemService>(new FileSystemService(projectScope.Root));
 
-        services.AddScoped<IMemoryRecallService>(sp =>
-            new MemoryRecallService(
-                sp.GetRequiredService<IScopedMemoryService>(),
-                sp.GetRequiredService<IIntentionStorage>()));
-
-        services.AddScoped<IMemoryMaintenanceService>(sp =>
-            new MemoryMaintenanceService(
-                sp.GetRequiredService<IMemoryService>(),
-                sp.GetRequiredService<IMemoryIndex>()));
+        services.AddScoped<IMemoryRecallService, MemoryRecallService>();
+        services.AddScoped<IMemoryMaintenanceService, MemoryMaintenanceService>();
 
         services.TryAddSingleton<IProjectScopePolicyStore>(sp =>
             new JsonProjectScopePolicyStore(userScope, logger: sp.GetService<ILogger<JsonProjectScopePolicyStore>>()));
@@ -129,15 +122,8 @@ public static class McpServiceExtensions
             return new ScopedMemoryService(levels, globalService, policy, merger, chain.Cwd);
         });
 
-        services.AddScoped<IMemoryRecallService>(sp =>
-            new MemoryRecallService(
-                sp.GetRequiredService<IScopedMemoryService>(),
-                sp.GetRequiredService<IIntentionStorage>()));
-
-        services.AddScoped<IMemoryMaintenanceService>(sp =>
-            new MemoryMaintenanceService(
-                sp.GetRequiredService<IMemoryService>(),
-                sp.GetRequiredService<IMemoryIndex>()));
+        services.AddScoped<IMemoryRecallService, MemoryRecallService>();
+        services.AddScoped<IMemoryMaintenanceService, MemoryMaintenanceService>();
 
         // Same sandbox wiring for the scope-chain path: head level or cwd.
         services.TryAddSingleton<IFileSystemService>(
