@@ -11,6 +11,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     private readonly IMemoryScopePolicy _policy;
     private readonly IMemoryMerger _merger;
     private readonly string _cwd;
+    private readonly SmartSaveOptions _smartSave;
 
     public IReadOnlyList<string> ChainRoots => _levels.Select(l => l.Scope.Root).ToList().AsReadOnly();
 
@@ -91,12 +92,33 @@ public sealed class ScopedMemoryService : IScopedMemoryService
                 "not a known project scope level of this workspace",
                 _levels.Select(l => ProjectNameOf(l.Scope.Root)).ToList().AsReadOnly());
 
-        var saveResult = await level.Service.SaveAsync(memory);
-        var scoped = new ScopedMemory(saveResult.Memory, MemoryScopeKind.Project, level.Scope.Root);
-        ScopedMemory? previous = saveResult.Previous is null
+        var targetResult = await level.Service.SaveAsync(memory);
+        var targetScoped = new ScopedMemory(targetResult.Memory, MemoryScopeKind.Project, level.Scope.Root);
+        ScopedMemory? targetPrevious = targetResult.Previous is null
             ? null
-            : new ScopedMemory(saveResult.Previous, MemoryScopeKind.Project, level.Scope.Root);
-        return new ScopedSaveResult(scoped, saveResult.Action, previous);
+            : new ScopedMemory(targetResult.Previous, MemoryScopeKind.Project, level.Scope.Root);
+
+        var duplicateHints = new List<string>();
+        for (int i = 0; i < _levels.Count; i++)
+        {
+            var otherLevel = _levels[i];
+            if (string.Equals(otherLevel.Scope.Root, level.Scope.Root, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var otherMatch = await otherLevel.Service.FindActiveSimilarAsync(memory, _smartSave.CrossScopeDuplicateThreshold);
+            if (otherMatch is not null)
+                duplicateHints.Add($"project '{ProjectNameOf(otherLevel.Scope.Root)}' (memory '{otherMatch.Id}')");
+        }
+
+        var globalDup = await _globalService.FindActiveSimilarAsync(memory, _smartSave.CrossScopeDuplicateThreshold);
+        if (globalDup is not null)
+            duplicateHints.Add($"global scope (memory '{globalDup.Id}')");
+
+        var combinedReason = targetResult.Reason;
+        if (duplicateHints.Count > 0)
+            combinedReason = $"{combinedReason}; similar active memory also exists in {string.Join(", ", duplicateHints)} — consider promote/move to consolidate";
+
+        return new ScopedSaveResult(targetScoped, targetResult.Action, targetPrevious, targetResult.NearMatches, combinedReason, targetResult.MatchScore);
     }
 
     /// <summary>Rebuilds the search index of a single project level of the chain.</summary>
@@ -144,7 +166,8 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         IMemoryService globalService,
         IMemoryScopePolicy policy,
         IMemoryMerger merger,
-        string cwd)
+        string cwd,
+        SmartSaveOptions? smartSave = null)
     {
         ArgumentNullException.ThrowIfNull(levels);
         ArgumentNullException.ThrowIfNull(globalService);
@@ -156,6 +179,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         _policy = policy;
         _merger = merger;
         _cwd = Path.GetFullPath(cwd);
+        _smartSave = smartSave ?? new SmartSaveOptions();
     }
 
     private IMemoryService ResolveService(MemoryScopeKind kind) =>
@@ -192,12 +216,66 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         {
             throw new ProjectScopeNotInitializedException(_cwd);
         }
-        var service = kind == MemoryScopeKind.Project ? _levels[0].Service : _globalService;
-        var saveResult = await service.SaveAsync(memory);
-        var root = kind == MemoryScopeKind.Project ? _levels[0].Scope.Root : null;
-        var scoped = new ScopedMemory(saveResult.Memory, kind, root);
-        ScopedMemory? previous = saveResult.Previous is null ? null : new ScopedMemory(saveResult.Previous, kind, root);
-        return new ScopedSaveResult(scoped, saveResult.Action, previous);
+
+        var primaryService = kind == MemoryScopeKind.Project ? _levels[0].Service : _globalService;
+        var primaryRoot = kind == MemoryScopeKind.Project ? _levels[0].Scope.Root : null;
+
+        var matchInPrimary = await primaryService.FindActiveSimilarAsync(memory, _smartSave.DuplicateThreshold);
+        if (matchInPrimary is not null)
+        {
+            var saveResult = await primaryService.SaveAsync(memory);
+            var scoped = new ScopedMemory(saveResult.Memory, kind, primaryRoot);
+            ScopedMemory? previous = saveResult.Previous is null ? null : new ScopedMemory(saveResult.Previous, kind, primaryRoot);
+            return new ScopedSaveResult(scoped, saveResult.Action, previous, saveResult.NearMatches, saveResult.Reason, saveResult.MatchScore);
+        }
+
+        if (kind == MemoryScopeKind.Project)
+        {
+            for (int i = 1; i < _levels.Count; i++)
+            {
+                var ancestor = _levels[i];
+                var ancestorMatch = await ancestor.Service.FindActiveSimilarAsync(memory, _smartSave.CrossScopeDuplicateThreshold);
+                if (ancestorMatch is not null)
+                {
+                    var saveResult = await ancestor.Service.SaveAsync(memory);
+                    var scoped = new ScopedMemory(saveResult.Memory, MemoryScopeKind.Project, ancestor.Scope.Root);
+                    ScopedMemory? previous = saveResult.Previous is null ? null : new ScopedMemory(saveResult.Previous, MemoryScopeKind.Project, ancestor.Scope.Root);
+                    var reason = $"cross-scope-match: updated existing active memory '{ancestorMatch.Id}' in ancestor project '{ProjectNameOf(ancestor.Scope.Root)}'";
+                    return new ScopedSaveResult(scoped, saveResult.Action, previous, saveResult.NearMatches, reason, saveResult.MatchScore);
+                }
+            }
+
+            var globalMatch = await _globalService.FindActiveSimilarAsync(memory, _smartSave.CrossScopeDuplicateThreshold);
+            if (globalMatch is not null)
+            {
+                var saveResult = await _globalService.SaveAsync(memory);
+                var scoped = new ScopedMemory(saveResult.Memory, MemoryScopeKind.Global, null);
+                ScopedMemory? previous = saveResult.Previous is null ? null : new ScopedMemory(saveResult.Previous, MemoryScopeKind.Global, null);
+                var reason = $"cross-scope-match: updated existing active memory '{globalMatch.Id}' in global scope";
+                return new ScopedSaveResult(scoped, saveResult.Action, previous, saveResult.NearMatches, reason, saveResult.MatchScore);
+            }
+        }
+        else if (kind == MemoryScopeKind.Global)
+        {
+            for (int i = 0; i < _levels.Count; i++)
+            {
+                var level = _levels[i];
+                var projectMatch = await level.Service.FindActiveSimilarAsync(memory, _smartSave.CrossScopeDuplicateThreshold);
+                if (projectMatch is not null)
+                {
+                    var saveResult = await level.Service.SaveAsync(memory);
+                    var scoped = new ScopedMemory(saveResult.Memory, MemoryScopeKind.Project, level.Scope.Root);
+                    ScopedMemory? previous = saveResult.Previous is null ? null : new ScopedMemory(saveResult.Previous, MemoryScopeKind.Project, level.Scope.Root);
+                    var reason = $"cross-scope-match: updated existing active memory '{projectMatch.Id}' in project scope '{ProjectNameOf(level.Scope.Root)}'";
+                    return new ScopedSaveResult(scoped, saveResult.Action, previous, saveResult.NearMatches, reason, saveResult.MatchScore);
+                }
+            }
+        }
+
+        var createdResult = await primaryService.SaveAsync(memory);
+        var createdScoped = new ScopedMemory(createdResult.Memory, kind, primaryRoot);
+        ScopedMemory? createdPrevious = createdResult.Previous is null ? null : new ScopedMemory(createdResult.Previous, kind, primaryRoot);
+        return new ScopedSaveResult(createdScoped, createdResult.Action, createdPrevious, createdResult.NearMatches, createdResult.Reason, createdResult.MatchScore);
     }
 
     public async Task<ScopedMemory?> GetByIdAsync(MemoryReference reference)

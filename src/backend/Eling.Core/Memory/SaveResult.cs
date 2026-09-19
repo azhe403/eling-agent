@@ -1,6 +1,8 @@
 namespace Eling.Core.Memory;
 
-public readonly record struct SaveResult(Memory Memory, SaveAction Action, Memory? Previous = null)
+public readonly record struct NearMatch(MemoryId Id, string ContentPreview, double Score, MemoryType Type, IReadOnlyCollection<string> Tags);
+
+public readonly record struct SaveResult(Memory Memory, SaveAction Action, Memory? Previous = null, IReadOnlyCollection<NearMatch>? NearMatches = null, string? Reason = null, double? MatchScore = null)
 {
     public MemoryId Id => Memory.Id;
     public MemoryType Type => Memory.Type;
@@ -10,6 +12,7 @@ public readonly record struct SaveResult(Memory Memory, SaveAction Action, Memor
     public DateTimeOffset CreatedAt => Memory.CreatedAt;
     public DateTimeOffset UpdatedAt => Memory.UpdatedAt;
     public string? Source => Memory.Source;
+    public IReadOnlyCollection<NearMatch> NearMatches { get; init; } = NearMatches ?? [];
 
     public static implicit operator Memory(SaveResult result) => result.Memory;
 }

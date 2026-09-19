@@ -40,6 +40,21 @@ public sealed class SaveMemoryResponse
     [JsonPropertyName("previousTags")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyCollection<string>? PreviousTags { get; set; }
+    [JsonPropertyName("nearMatches")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyCollection<NearMatchDto>? NearMatches { get; set; }
+    [JsonPropertyName("reason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Reason { get; set; }
+    [JsonPropertyName("matchScore")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? MatchScore { get; set; }
+    [JsonPropertyName("projectName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProjectName { get; set; }
+    [JsonPropertyName("projectRoot")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProjectRoot { get; set; }
     [JsonPropertyName("initRequired")]
     public bool InitRequired { get; set; }
     [JsonPropertyName("message")]
@@ -77,7 +92,10 @@ public sealed class SaveMemoryResponse
         Source = result.Memory.Source,
         Scope = scope,
         PreviousContent = result.Previous?.Content,
-        PreviousTags = result.Previous?.Tags.ToList()
+        PreviousTags = result.Previous?.Tags.ToList(),
+        NearMatches = result.NearMatches.Count > 0 ? result.NearMatches.Select(NearMatchDto.From).ToList() : null,
+        Reason = result.Reason,
+        MatchScore = result.MatchScore
     };
 
     public static SaveMemoryResponse From(ScopedSaveResult result, bool projectScopeDisabled = false, string? note = null) => new()
@@ -94,8 +112,40 @@ public sealed class SaveMemoryResponse
         Scope = result.Scope == MemoryScopeKind.Global ? "global" : "project",
         PreviousContent = result.Previous?.Memory.Content,
         PreviousTags = result.Previous?.Memory.Tags.ToList(),
+        NearMatches = result.NearMatches.Count > 0 ? result.NearMatches.Select(NearMatchDto.From).ToList() : null,
+        Reason = result.Reason,
+        MatchScore = result.MatchScore,
+        ProjectName = result.ProjectName,
+        ProjectRoot = result.ProjectRoot,
         ProjectScopeDisabled = projectScopeDisabled,
         Note = note
+    };
+}
+
+public sealed class NearMatchDto
+{
+    [JsonPropertyName("id")]
+    public MemoryId Id { get; set; }
+
+    [JsonPropertyName("contentPreview")]
+    public string ContentPreview { get; set; } = "";
+
+    [JsonPropertyName("score")]
+    public double Score { get; set; }
+
+    [JsonPropertyName("type")]
+    public MemoryType Type { get; set; }
+
+    [JsonPropertyName("tags")]
+    public IReadOnlyCollection<string> Tags { get; set; } = [];
+
+    public static NearMatchDto From(NearMatch match) => new()
+    {
+        Id = match.Id,
+        ContentPreview = match.ContentPreview,
+        Score = match.Score,
+        Type = match.Type,
+        Tags = match.Tags
     };
 }
 

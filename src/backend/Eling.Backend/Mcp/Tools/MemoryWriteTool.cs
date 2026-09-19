@@ -120,9 +120,22 @@ public sealed class MemoryWriteTool
                 try
                 {
                     var scoped = await _scoped.SaveAsync(memory, effectiveScope);
-                    _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' scope '{Scope}' type '{Type}'", scoped.Id, scoped.Action, scoped.Memory.Type, scoped.Scope);
+                    _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' scope '{Scope}' type '{Type}' ({Reason})", scoped.Id, scoped.Action, scoped.Memory.Type, scoped.Scope, scoped.Reason);
                     await _notifier.NotifyAsync("mcp");
-                    await _scoped.RebuildIndexAsync(effectiveScope);
+
+                    if (scoped.Scope == MemoryScopeKind.Global)
+                    {
+                        await _scoped.RebuildIndexAsync("global");
+                    }
+                    else if (!string.IsNullOrWhiteSpace(scoped.ProjectRoot) && !string.Equals(scoped.ProjectRoot.TrimEnd(Path.DirectorySeparatorChar), _scoped.Cwd.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+                    {
+                        await _scoped.RebuildProjectIndexAsync(scoped.ProjectRoot);
+                    }
+                    else
+                    {
+                        await _scoped.RebuildIndexAsync("project");
+                    }
+
                     return SaveMemoryResponse.From(
                         scoped,
                         projectScopeDisabled,
@@ -136,7 +149,7 @@ public sealed class MemoryWriteTool
             }
 
             var saved = await _memory.SaveAsync(memory);
-            _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' type '{Type}' and {TagCount} tags", saved.Id, saved.Action, saved.Type, saved.Tags.Count);
+            _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' type '{Type}' and {TagCount} tags ({Reason})", saved.Id, saved.Action, saved.Type, saved.Tags.Count, saved.Reason);
             await _notifier.NotifyAsync("mcp");
             await _memory.RebuildIndexAsync();
             return SaveMemoryResponse.From(saved, scope);

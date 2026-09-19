@@ -98,6 +98,47 @@ public class MemoryToolsTests
     }
 
     [Fact]
+    public async Task SaveAsync_WithNearMatches_ReturnsPopulatedNearMatchesDto()
+    {
+        var service = new FakeMemoryService();
+        var matchId = MemoryId.NewId();
+        var tool = new MemoryWriteTool(new FakeNearMatchMemoryService(matchId));
+
+        var response = await tool.SaveAsync(content: "Architecture decision on MCP");
+
+        Assert.NotNull(response);
+        Assert.NotNull(response.NearMatches);
+        Assert.Single(response.NearMatches);
+        var match = response.NearMatches.First();
+        Assert.Equal(matchId, match.Id);
+        Assert.Equal("Existing preview", match.ContentPreview);
+        Assert.Equal(0.65, match.Score);
+    }
+
+    private sealed class FakeNearMatchMemoryService : IMemoryService
+    {
+        private readonly MemoryId _matchId;
+
+        public FakeNearMatchMemoryService(MemoryId matchId) => _matchId = matchId;
+
+        public Task<SaveResult> SaveAsync(Memory memory)
+        {
+            var matches = new List<NearMatch>
+            {
+                new(_matchId, "Existing preview", 0.65, MemoryType.Decision, ["arch"])
+            };
+            return Task.FromResult(new SaveResult(memory, SaveAction.Created, null, matches));
+        }
+
+        public Task<Memory?> GetByIdAsync(MemoryId id) => Task.FromResult<Memory?>(null);
+        public Task<Memory?> UpdateAsync(MemoryId id, string? content = null, MemoryType? type = null, string[]? tags = null, string? source = null, MemoryStatus? status = null) => Task.FromResult<Memory?>(null);
+        public Task<bool> DeleteAsync(MemoryId id) => Task.FromResult(false);
+        public Task<IReadOnlyCollection<Memory>> ListAllAsync() => Task.FromResult<IReadOnlyCollection<Memory>>([]);
+        public Task<IReadOnlyCollection<MemorySearchResult>> SearchAsync(string query) => Task.FromResult<IReadOnlyCollection<MemorySearchResult>>([]);
+        public Task RebuildIndexAsync() => Task.CompletedTask;
+    }
+
+    [Fact]
     public async Task SaveAsync_WithDefaultType_UsesFactType()
     {
         var service = new FakeMemoryService();

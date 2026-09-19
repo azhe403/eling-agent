@@ -4,7 +4,7 @@ namespace Eling.Core.Memory;
 
 public static class MemorySimilarity
 {
-    private static readonly Regex TokenSplitRegex = new(@"[\s\p{P}]+", RegexOptions.Compiled);
+    private static readonly Regex TokenSplitRegex = new(@"[\s\p{P}\p{S}]+", RegexOptions.Compiled);
 
     /// <summary>
     /// Tokenizes a string into a set of lowercase tokens (length > 1), split on whitespace and punctuation.

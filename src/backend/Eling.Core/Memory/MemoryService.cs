@@ -22,26 +22,35 @@ public class MemoryService : IMemoryService
 
     public async Task<SaveResult> SaveAsync(Memory memory)
     {
-        var existing = await FindActiveSimilarAsync(memory);
+        var (existing, nearMatches, reason, matchScore) = await FindActiveSimilarAndNearMatchesAsync(memory);
         if (existing is not null)
         {
             var merged = await MergeIntoAsync(existing, memory);
-            return new SaveResult(merged, SaveAction.Updated, existing);
+            return new SaveResult(merged, SaveAction.Updated, existing, nearMatches, reason, matchScore);
         }
 
         await _storage.SaveAsync(memory);
         await _index.IndexAsync(memory);
-        return new SaveResult(memory, SaveAction.Created);
+        return new SaveResult(memory, SaveAction.Created, null, nearMatches, reason, matchScore);
+    }
+
+    public async Task<Memory?> FindActiveSimilarAsync(Memory memory, double? threshold = null)
+    {
+        var (bestMatch, _, _, _) = await FindActiveSimilarAndNearMatchesAsync(memory, threshold);
+        return bestMatch;
     }
 
     private static string NormalizeContent(string content) => content.Trim();
 
-    private async Task<Memory?> FindActiveSimilarAsync(Memory incoming)
+    private async Task<(Memory? BestMatch, IReadOnlyCollection<NearMatch> NearMatches, string Reason, double? MatchScore)> FindActiveSimilarAndNearMatchesAsync(Memory incoming, double? duplicateThreshold = null)
     {
+        var activeThreshold = duplicateThreshold ?? _smartSave.DuplicateThreshold;
         var normalized = NormalizeContent(incoming.Content);
         var all = await _storage.ListAllAsync();
         Memory? bestMatch = null;
         double bestScore = 0.0;
+        bool isExactMatch = false;
+        var candidatesWithScores = new List<(Memory Memory, double Score)>();
 
         foreach (var candidate in all)
         {
@@ -51,20 +60,71 @@ public class MemoryService : IMemoryService
                 continue;
 
             if (string.Equals(NormalizeContent(candidate.Content), normalized, StringComparison.OrdinalIgnoreCase))
-                return candidate;
+            {
+                bestMatch = candidate;
+                bestScore = 1.0;
+                isExactMatch = true;
+                continue;
+            }
 
             if (!_smartSave.EnableFuzzyMatch)
                 continue;
 
             var score = MemorySimilarity.CalculateSimilarity(candidate.Content, incoming.Content);
-            if (score >= _smartSave.DuplicateThreshold && score > bestScore)
+            if (score >= activeThreshold && score > bestScore)
             {
                 bestMatch = candidate;
                 bestScore = score;
             }
+
+            if (score >= _smartSave.NearMatchThreshold)
+            {
+                candidatesWithScores.Add((candidate, score));
+            }
         }
 
-        return bestMatch;
+        var nearMatches = candidatesWithScores
+            .Where(c => bestMatch == null || c.Memory.Id != bestMatch.Id)
+            .OrderByDescending(c => c.Score)
+            .Take(5)
+            .Select(c => new NearMatch(
+                c.Memory.Id,
+                c.Memory.Content.Length > 120 ? string.Concat(c.Memory.Content.AsSpan(0, 120), "...") : c.Memory.Content,
+                Math.Round(c.Score, 4),
+                c.Memory.Type,
+                c.Memory.Tags))
+            .ToList()
+            .AsReadOnly();
+
+        string reason;
+        double? matchScore = null;
+
+        if (bestMatch is not null)
+        {
+            if (isExactMatch)
+            {
+                reason = $"exact-match: content is identical to active memory '{bestMatch.Id}'";
+                matchScore = 1.0;
+            }
+            else
+            {
+                var roundedScore = Math.Round(bestScore, 4);
+                reason = $"fuzzy-match: jaccard similarity {roundedScore} >= threshold {activeThreshold} with active memory '{bestMatch.Id}'";
+                matchScore = roundedScore;
+            }
+        }
+        else if (nearMatches.Count > 0)
+        {
+            var top = nearMatches[0];
+            reason = $"new-memory: closest match score {top.Score} < threshold {activeThreshold} with memory '{top.Id}'";
+            matchScore = top.Score;
+        }
+        else
+        {
+            reason = "new-memory: no similar active memory found in scope";
+        }
+
+        return (bestMatch, nearMatches, reason, matchScore);
     }
 
     private async Task<Memory> MergeIntoAsync(Memory existing, Memory incoming)

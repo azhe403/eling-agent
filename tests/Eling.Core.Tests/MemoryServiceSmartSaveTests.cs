@@ -109,4 +109,31 @@ public class MemoryServiceSmartSaveTests
         Assert.Single(secondResult.Previous!.Tags);
         Assert.Contains("git", secondResult.Previous!.Tags);
     }
+
+    [Fact]
+    public async Task SaveAsync_PartialOverlap_PopulatesNearMatches()
+    {
+        var storage = new InMemoryMemoryStorage();
+        var index = new InMemoryMemoryIndex();
+        var service = new MemoryService(storage, index);
+
+        var initial = new Memory.Memory(
+            MemoryType.Preference,
+            "Always check git status and current branch before starting any feature work",
+            new[] { "git", "workflow" });
+        var firstResult = await service.SaveAsync(initial);
+        Assert.Equal(SaveAction.Created, firstResult.Action);
+
+        var related = new Memory.Memory(
+            MemoryType.Preference,
+            "Check git status before pushing commits to ensure branch is clean",
+            new[] { "git", "release" });
+        var secondResult = await service.SaveAsync(related);
+
+        Assert.Equal(SaveAction.Created, secondResult.Action);
+        Assert.NotEmpty(secondResult.NearMatches);
+        var match = secondResult.NearMatches.First();
+        Assert.Equal(firstResult.Memory.Id, match.Id);
+        Assert.True(match.Score >= 0.35);
+    }
 }
