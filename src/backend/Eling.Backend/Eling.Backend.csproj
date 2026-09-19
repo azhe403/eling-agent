@@ -5,6 +5,7 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>eling-backend</AssemblyName>
     <RootNamespace>Eling.Backend</RootNamespace>
+    <RunWorkingDirectory Condition="'$(RunWorkingDirectory)' == ''">$(MSBuildStartupDirectory)</RunWorkingDirectory>
   </PropertyGroup>
 
   <ItemGroup>
