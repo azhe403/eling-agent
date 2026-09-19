@@ -420,7 +420,7 @@ export function MemoriesList() {
             No memories found.
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
             {filtered.map((m) =>
               editingId === m.id ? (
                 <MemoryEditor
