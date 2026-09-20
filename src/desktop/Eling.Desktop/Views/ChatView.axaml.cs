@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Reactive.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -13,6 +15,8 @@ public partial class ChatView : UserControl
 {
     private ScrollViewer? _scrollViewer;
     private ToggleSwitch? _autoScrollToggle;
+    private INotifyCollectionChanged? _currentMessagesCollection;
+    private ChatViewModel? _currentViewModel;
     private bool _programmaticScroll;
 
     private bool AutoScrollEnabled => _autoScrollToggle?.IsChecked ?? true;
@@ -20,11 +24,17 @@ public partial class ChatView : UserControl
     public ChatView()
     {
         InitializeComponent();
+        DataContextChanged += OnDataContextChanged;
     }
 
     private void InitializeComponent()
     {
         AvaloniaXamlLoader.Load(this);
+    }
+
+    private void OnDataContextChanged(object? sender, EventArgs e)
+    {
+        BindViewModel(DataContext as ChatViewModel);
     }
 
     private void OnLoaded(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -44,11 +54,11 @@ public partial class ChatView : UserControl
             Avalonia.Interactivity.RoutingStrategies.Bubble,
             handledEventsToo: true);
 
-        if (DataContext is ChatViewModel vm)
+        BindViewModel(DataContext as ChatViewModel);
+        if (_currentViewModel is not null)
         {
-            vm.Messages.CollectionChanged += OnMessagesChanged;
-            _ = vm.LoadAsync();
-            Dispatcher.UIThread.Post(ScrollToBottom);
+            _ = _currentViewModel.LoadAsync();
+            Dispatcher.UIThread.Post(ScrollToBottom, DispatcherPriority.Loaded);
         }
     }
 
@@ -58,22 +68,82 @@ public partial class ChatView : UserControl
             _scrollViewer.ScrollChanged -= OnScrollChanged;
         if (_autoScrollToggle is not null)
             _autoScrollToggle.IsCheckedChanged -= OnAutoScrollToggled;
-        if (DataContext is ChatViewModel vm)
-            vm.Messages.CollectionChanged -= OnMessagesChanged;
+
+        UnbindViewModel();
+    }
+
+    private void BindViewModel(ChatViewModel? vm)
+    {
+        if (ReferenceEquals(_currentViewModel, vm))
+        {
+            UpdateMessagesSubscription(vm?.Messages);
+            return;
+        }
+
+        UnbindViewModel();
+        _currentViewModel = vm;
+
+        if (_currentViewModel is not null)
+        {
+            _currentViewModel.PropertyChanged += OnViewModelPropertyChanged;
+            UpdateMessagesSubscription(_currentViewModel.Messages);
+        }
+    }
+
+    private void UnbindViewModel()
+    {
+        if (_currentViewModel is not null)
+        {
+            _currentViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            _currentViewModel = null;
+        }
+        UpdateMessagesSubscription(null);
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ChatViewModel.Messages) && _currentViewModel is not null)
+        {
+            UpdateMessagesSubscription(_currentViewModel.Messages);
+            if (AutoScrollEnabled)
+            {
+                Dispatcher.UIThread.Post(ScrollToBottom, DispatcherPriority.Loaded);
+            }
+        }
+    }
+
+    private void UpdateMessagesSubscription(INotifyCollectionChanged? newCollection)
+    {
+        if (ReferenceEquals(_currentMessagesCollection, newCollection)) return;
+
+        if (_currentMessagesCollection is not null)
+        {
+            _currentMessagesCollection.CollectionChanged -= OnMessagesChanged;
+        }
+
+        _currentMessagesCollection = newCollection;
+
+        if (_currentMessagesCollection is not null)
+        {
+            _currentMessagesCollection.CollectionChanged += OnMessagesChanged;
+        }
     }
 
     private void OnAutoScrollToggled(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (_autoScrollToggle?.IsChecked == true)
         {
-            ScrollToBottom();
+            Dispatcher.UIThread.Post(ScrollToBottom, DispatcherPriority.Loaded);
         }
     }
 
     private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
         if (_scrollViewer is null || _programmaticScroll) return;
-        var atBottom = _scrollViewer.Offset.Y >= _scrollViewer.Extent.Height - _scrollViewer.Viewport.Height - 1;
+
+        var maxScroll = Math.Max(0, _scrollViewer.Extent.Height - _scrollViewer.Viewport.Height);
+        var atBottom = _scrollViewer.Offset.Y >= maxScroll - 5;
+
         if (_autoScrollToggle is not null && !atBottom && e.OffsetDelta.Y < -0.5)
         {
             _autoScrollToggle.IsChecked = false;
@@ -84,7 +154,7 @@ public partial class ChatView : UserControl
     {
         if (AutoScrollEnabled)
         {
-            Dispatcher.UIThread.Post(ScrollToBottom);
+            Dispatcher.UIThread.Post(ScrollToBottom, DispatcherPriority.Loaded);
         }
     }
 
@@ -93,7 +163,7 @@ public partial class ChatView : UserControl
         if (_scrollViewer is null) return;
         _programmaticScroll = true;
         _scrollViewer.ScrollToEnd();
-        Dispatcher.UIThread.Post(() => _programmaticScroll = false);
+        Dispatcher.UIThread.Post(() => _programmaticScroll = false, DispatcherPriority.Background);
     }
 
     private void OnInputKeyDown(object? sender, KeyEventArgs e)
