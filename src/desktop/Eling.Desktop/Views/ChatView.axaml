@@ -8,9 +8,9 @@
              x:DataType="vm:ChatViewModel"
              Loaded="OnLoaded" Unloaded="OnUnloaded">
 
-    <Grid ColumnDefinitions="240,*" Margin="12,10">
+    <Grid ColumnDefinitions="240,*" Margin="0">
         <!-- Sidebar: Chat History & Workspaces -->
-        <Border Grid.Column="0" Background="#141416" BorderBrush="#252528" BorderThickness="1" CornerRadius="6" Margin="0,0,10,0" Padding="8">
+        <Border Grid.Column="0" Background="#141416" BorderBrush="#252528" BorderThickness="1" CornerRadius="6" Margin="0,0,6,0" Padding="8">
             <Grid RowDefinitions="Auto,*,Auto">
                 <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="4,4,4,8">
                     <TextBlock Text="Chats &amp; Folders" FontSize="12" FontWeight="SemiBold" Foreground="#e5e7eb" VerticalAlignment="Center"/>
@@ -89,15 +89,60 @@
                                                 FontSize="10"
                                                 Padding="6,2"/>
                                     </Grid>
-                                    <Border Grid.Row="1" Height="1" Background="#2a2a2a" Margin="0,8,0,8"
-                                            IsVisible="{Binding IsExpanded}"/>
-                                    <SelectableTextBlock Grid.Row="2"
-                                                         Text="{Binding Text}"
-                                                         FontSize="{Binding FontSize}"
-                                                         FontFamily="{Binding FontFamily}"
-                                                         Foreground="{Binding TextColor}"
-                                                         IsVisible="{Binding IsExpanded}"
-                                                         TextWrapping="Wrap"/>
+                                <Border Grid.Row="1" Height="1" Background="#2a2a2a" Margin="0,8,0,8"
+                                        IsVisible="{Binding IsExpanded}"/>
+
+                                <!-- Message content body: parsed markdown blocks -->
+                                <ItemsControl Grid.Row="2"
+                                              ItemsSource="{Binding Blocks}"
+                                              IsVisible="{Binding IsExpanded}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:MessageBlock">
+                                            <Panel Margin="0,2,0,4">
+                                                <!-- Plain Text Block -->
+                                                <SelectableTextBlock Text="{Binding Content}"
+                                                                     IsVisible="{Binding IsText}"
+                                                                     FontSize="13.5"
+                                                                     FontFamily="Inter,Segoe UI,sans-serif"
+                                                                     Foreground="#f8fafc"
+                                                                     TextWrapping="Wrap"/>
+
+                                                <!-- Code Block Container -->
+                                                <Border IsVisible="{Binding IsCode}"
+                                                        Background="#0f0f11"
+                                                        BorderBrush="#2d2d32"
+                                                        BorderThickness="1"
+                                                        CornerRadius="6"
+                                                        Padding="10,8"
+                                                        Margin="0,4,0,4">
+                                                    <Grid RowDefinitions="Auto,*">
+                                                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+                                                            <TextBlock Grid.Column="0"
+                                                                       Text="{Binding LanguageDisplay}"
+                                                                       FontSize="11"
+                                                                       FontWeight="SemiBold"
+                                                                       Foreground="#94a3b8"
+                                                                       VerticalAlignment="Center"/>
+                                                            <Button Grid.Column="1"
+                                                                    Content="📋 Copy"
+                                                                    Command="{Binding CopyToClipboard}"
+                                                                    Classes="subtle"
+                                                                    FontSize="10"
+                                                                    Padding="6,2"/>
+                                                        </Grid>
+                                                        <Border Grid.Row="0" Height="1" Background="#27272a" Margin="0,22,0,0"/>
+                                                        <SelectableTextBlock Grid.Row="1"
+                                                                             Text="{Binding Content}"
+                                                                             FontSize="12"
+                                                                             FontFamily="Cascadia Code,Consolas,Menlo,monospace"
+                                                                             Foreground="#e2e8f0"
+                                                                             TextWrapping="Wrap"/>
+                                                    </Grid>
+                                                </Border>
+                                            </Panel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                                 </Grid>
                             </Border>
                         </DataTemplate>
