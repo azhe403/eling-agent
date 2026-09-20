@@ -144,9 +144,16 @@ public partial class ChatView : UserControl
         var maxScroll = Math.Max(0, _scrollViewer.Extent.Height - _scrollViewer.Viewport.Height);
         var atBottom = _scrollViewer.Offset.Y >= maxScroll - 5;
 
-        if (_autoScrollToggle is not null && !atBottom && e.OffsetDelta.Y < -0.5)
+        if (_autoScrollToggle is not null)
         {
-            _autoScrollToggle.IsChecked = false;
+            if (!atBottom && e.OffsetDelta.Y < -0.5)
+            {
+                _autoScrollToggle.IsChecked = false;
+            }
+            else if (atBottom && _autoScrollToggle.IsChecked == false)
+            {
+                _autoScrollToggle.IsChecked = true;
+            }
         }
     }
 
