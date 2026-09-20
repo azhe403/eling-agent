@@ -24,7 +24,8 @@ public static class TestAppBuilder
         Directory.CreateDirectory(Path.Combine(tempDir, ".eling"));
 
         var chain = ScopeChain.Discover(tempDir);
-        var userScope = UserScope.Resolve(Environment.GetEnvironmentVariable("ELING_USER_SCOPE"));
+        var userScope = UserScope.Resolve(Path.Combine(tempDir, "user_scope"));
+        Environment.SetEnvironmentVariable("ELING_AGENT_DATA_DIR", Path.Combine(tempDir, "agent_data"));
         var context = new ProjectContext(
             chain,
             userScope,

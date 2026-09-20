@@ -24,4 +24,11 @@ public class SidebarRow
     public string Workspace { get; }
     public string? ChatId { get; }
     public ChatSummaryDto? Chat { get; }
+
+    public string Icon => IsFolder ? "📁" : "💬";
+    public string ItemDisplay => $"{Icon} {DisplayName}";
+    public double FontSize => IsFolder ? 12.0 : 11.5;
+    public string FontWeight => IsFolder ? "SemiBold" : "Normal";
+    public string TextColor => IsFolder ? "#e5e7eb" : "#9ca3af";
+    public string BackgroundColor => IsFolder ? "#1e1e24" : "Transparent";
 }

@@ -40,6 +40,21 @@ public partial class MainWindow : Window
             if (this.FindControl<Control>(name) is { } control)
                 control.IsVisible = control == panel;
         }
+
+        if (panel == this.FindControl<Control>("ChatPanel"))
+        {
+            if (this.FindControl<ChatView>("ChatPanel")?.DataContext is ChatViewModel chatVm)
+            {
+                _ = chatVm.LoadAsync();
+            }
+        }
+        else if (panel == this.FindControl<Control>("SettingsPanel"))
+        {
+            if (this.FindControl<SettingsView>("SettingsPanel")?.DataContext is SettingsViewModel settingsVm)
+            {
+                _ = settingsVm.LoadAsync();
+            }
+        }
     }
 
     private void SidebarChat_Click(object? sender, RoutedEventArgs e) =>

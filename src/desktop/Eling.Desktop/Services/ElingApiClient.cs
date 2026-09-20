@@ -519,7 +519,12 @@ public sealed class ElingApiClient
         {
             using var client = GetClient();
             var payload = new { workspace, message, chatId };
-            using var response = await client.PostAsJsonAsync("api/agent/chats/stream", payload, JsonOptions, cancellationToken);
+            var json = JsonSerializer.Serialize(payload, JsonOptions);
+            using var request = new HttpRequestMessage(HttpMethod.Post, "api/agent/chats/stream")
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var reader = new StreamReader(stream);

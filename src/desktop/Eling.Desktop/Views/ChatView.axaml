@@ -8,62 +8,113 @@
              x:DataType="vm:ChatViewModel"
              Loaded="OnLoaded" Unloaded="OnUnloaded">
 
-    <Grid RowDefinitions="Auto,*,Auto,Auto,Auto" Margin="16,12">
-        <Border Grid.Row="0" Background="#161616" BorderBrush="#2a2a2a" BorderThickness="1" CornerRadius="6" Padding="12,8" Margin="0,0,0,8">
-            <Grid ColumnDefinitions="*,Auto">
-                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <TextBlock Text="📁" FontSize="12" VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding FolderDisplayName}" FontSize="13" FontWeight="SemiBold" Foreground="#e5e7eb" VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding ActiveWorkspace, StringFormat='({0})'}" FontSize="11" Foreground="#6b7280" VerticalAlignment="Center" Margin="4,0,0,0"/>
-                </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                    <ToggleSwitch x:Name="AutoScrollToggle" OnContent="Auto-scroll" OffContent="Auto-scroll" IsChecked="True" FontSize="11"/>
-                    <Button Content="+ New Chat" Command="{Binding NewChatCommand}" Classes="subtle" Padding="8,4" FontSize="11"/>
-                </StackPanel>
+    <Grid ColumnDefinitions="240,*" Margin="12,10">
+        <!-- Sidebar: Chat History & Workspaces -->
+        <Border Grid.Column="0" Background="#141416" BorderBrush="#252528" BorderThickness="1" CornerRadius="6" Margin="0,0,10,0" Padding="8">
+            <Grid RowDefinitions="Auto,*,Auto">
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="4,4,4,8">
+                    <TextBlock Text="Chats &amp; Folders" FontSize="12" FontWeight="SemiBold" Foreground="#e5e7eb" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" Content="+" Command="{Binding NewChatCommand}" Classes="subtle" Padding="6,2" FontSize="12" ToolTip.Tip="New Chat"/>
+                </Grid>
+
+                <ListBox Grid.Row="1" ItemsSource="{Binding SidebarItems}" SelectedItem="{Binding SelectedRow}" Background="Transparent" BorderThickness="0" Padding="0">
+                    <ListBox.Styles>
+                        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                            <Setter Property="Background" Value="#27272a"/>
+                        </Style>
+                        <Style Selector="ListBoxItem:selected TextBlock">
+                            <Setter Property="Foreground" Value="#ffffff"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                        </Style>
+                    </ListBox.Styles>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:SidebarRow">
+                            <Border CornerRadius="4" Padding="8,5" Margin="0,1">
+                                <TextBlock Text="{Binding ItemDisplay}"
+                                           FontSize="{Binding FontSize}"
+                                           FontWeight="{Binding FontWeight}"
+                                           Foreground="{Binding TextColor}"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+
+                <ComboBox Grid.Row="2" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}"
+                          HorizontalAlignment="Stretch" Margin="2,8,2,2" PlaceholderText="Select model" FontSize="11"/>
             </Grid>
         </Border>
 
-        <ScrollViewer Grid.Row="1" x:Name="MessagesScrollViewer"
-                      Margin="0,4"
-                      HorizontalScrollBarVisibility="Disabled"
-                      VerticalScrollBarVisibility="Auto">
-            <ItemsControl x:Name="MessagesItemsControl"
-                          ItemsSource="{Binding Messages}">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:ChatMessageRow">
-                        <Border Classes="memory-card">
-                            <Grid RowDefinitions="Auto,Auto,Auto">
-                                <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="6">
-                                    <Border Background="{Binding HeaderColor}" CornerRadius="4" Padding="8,2">
-                                        <TextBlock Text="{Binding HeaderDisplay}" FontSize="11" FontWeight="SemiBold" Foreground="White"/>
-                                    </Border>
-                                </StackPanel>
-                                <Border Grid.Row="1" Height="1" Background="#2a2a2a" Margin="0,8,0,8"/>
-                                <SelectableTextBlock Grid.Row="2"
-                                                     Text="{Binding Text}"
-                                                     FontSize="{Binding FontSize}"
-                                                     FontFamily="{Binding FontFamily}"
-                                                     Foreground="{Binding TextColor}"
-                                                     TextWrapping="Wrap"/>
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
+        <!-- Main Chat Area -->
+        <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto,Auto">
+            <Border Grid.Row="0" Background="#161616" BorderBrush="#2a2a2a" BorderThickness="1" CornerRadius="6" Padding="12,8" Margin="0,0,0,8">
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <TextBlock Text="📁" FontSize="12" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding FolderDisplayName}" FontSize="13" FontWeight="SemiBold" Foreground="#e5e7eb" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding ActiveWorkspace, StringFormat='({0})'}" FontSize="11" Foreground="#6b7280" VerticalAlignment="Center" Margin="4,0,0,0" TextTrimming="CharacterEllipsis" MaxWidth="350"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                        <ToggleSwitch x:Name="AutoScrollToggle" OnContent="Auto-scroll" OffContent="Auto-scroll" IsChecked="True" FontSize="11"/>
+                        <Button Content="+ New Chat" Command="{Binding NewChatCommand}" Classes="subtle" Padding="8,4" FontSize="11"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
 
-        <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,8,0,0">
-            <TextBox Grid.Column="0" x:Name="InputBox" Text="{Binding Input}" PlaceholderText="Ask about the project... (Enter to send, Shift+Enter for new line)"
-                     AcceptsReturn="True" TextWrapping="Wrap"/>
-            <Button Grid.Column="1" Content="Send" Command="{Binding SendCommand}"
-                    Classes="primary" Margin="8,0,0,0" IsEnabled="{Binding !IsBusy}"/>
+            <ScrollViewer Grid.Row="1" x:Name="MessagesScrollViewer"
+                          Margin="0,4"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <ItemsControl x:Name="MessagesItemsControl"
+                              ItemsSource="{Binding Messages}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ChatMessageRow">
+                            <Border Classes="memory-card" Margin="0,3,0,6">
+                                <Grid RowDefinitions="Auto,Auto,Auto">
+                                    <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                                            <Border Background="{Binding HeaderColor}" CornerRadius="4" Padding="8,2">
+                                                <TextBlock Text="{Binding HeaderDisplay}" FontSize="11" FontWeight="SemiBold" Foreground="White"/>
+                                            </Border>
+                                            <TextBlock Text="{Binding Arguments, StringFormat='args: {0}'}"
+                                                       IsVisible="{Binding HasArguments}"
+                                                       FontSize="11" Foreground="#9ca3af" VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis" MaxWidth="450"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1"
+                                                Content="{Binding ExpandButtonText}"
+                                                Command="{Binding ToggleExpand}"
+                                                IsVisible="{Binding IsTool}"
+                                                Classes="subtle"
+                                                FontSize="10"
+                                                Padding="6,2"/>
+                                    </Grid>
+                                    <Border Grid.Row="1" Height="1" Background="#2a2a2a" Margin="0,8,0,8"
+                                            IsVisible="{Binding IsExpanded}"/>
+                                    <SelectableTextBlock Grid.Row="2"
+                                                         Text="{Binding Text}"
+                                                         FontSize="{Binding FontSize}"
+                                                         FontFamily="{Binding FontFamily}"
+                                                         Foreground="{Binding TextColor}"
+                                                         IsVisible="{Binding IsExpanded}"
+                                                         TextWrapping="Wrap"/>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,8,0,0">
+                <TextBox Grid.Column="0" x:Name="InputBox" Text="{Binding Input}" PlaceholderText="Ask about the project... (Enter to send, Shift+Enter for new line)"
+                         AcceptsReturn="True" TextWrapping="Wrap"/>
+                <Button Grid.Column="1" Content="Send" Command="{Binding SendCommand}"
+                        Classes="primary" Margin="8,0,0,0" IsEnabled="{Binding !IsBusy}"/>
+            </Grid>
+
+            <TextBlock Grid.Row="3" Text="{Binding StatusText}" FontSize="11" Foreground="#6b7280" Margin="0,4,0,0"
+                       IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
         </Grid>
-
-        <ComboBox Grid.Row="3" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}"
-                  MinWidth="220" HorizontalAlignment="Left" Margin="0,4,0,0" PlaceholderText="Select model"/>
-
-        <TextBlock Grid.Row="4" Text="{Binding StatusText}" FontSize="11" Foreground="#6b7280" Margin="0,2,0,0"
-                   IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
     </Grid>
 
 </UserControl>

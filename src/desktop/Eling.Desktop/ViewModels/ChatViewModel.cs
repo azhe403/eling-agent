@@ -11,27 +11,48 @@ using ReactiveUI;
 
 namespace Eling.Desktop.ViewModels;
 
-public class ChatMessageRow
+public class ChatMessageRow : ReactiveObject
 {
+    private bool _isExpanded;
+
     public string Role { get; }
     public string Text { get; }
     public string? ToolName { get; }
+    public string? Arguments { get; }
 
     public bool IsUser => string.Equals(Role, "User", StringComparison.OrdinalIgnoreCase);
     public bool IsAssistant => string.Equals(Role, "Assistant", StringComparison.OrdinalIgnoreCase);
     public bool IsTool => string.Equals(Role, "Tool", StringComparison.OrdinalIgnoreCase);
 
-    public string HeaderDisplay => IsUser ? "You" : IsAssistant ? "Eling" : $"Tool: {ToolName ?? "call"}";
-    public string HeaderColor => IsUser ? "#1d4ed8" : IsAssistant ? "#15803d" : "#b45309";
-    public string TextColor => IsTool ? "#94a3b8" : "#f3f4f6";
+    public string HeaderDisplay => IsUser ? "You" : IsAssistant ? "Eling" : $"🔧 Tool: {ToolName ?? "Execution"}";
+    public string HeaderColor => IsUser ? "#2563eb" : IsAssistant ? "#16a34a" : "#d97706";
+    public string TextColor => IsTool ? "#cbd5e1" : "#f8fafc";
     public string FontFamily => IsTool ? "Cascadia Code,Consolas,Menlo,monospace" : "Inter,Segoe UI,sans-serif";
-    public double FontSize => IsTool ? 11.5 : 13.0;
+    public double FontSize => IsTool ? 12.0 : 13.5;
 
-    public ChatMessageRow(string role, string text, string? toolName)
+    public bool HasArguments => !string.IsNullOrWhiteSpace(Arguments);
+
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set => this.RaiseAndSetIfChanged(ref _isExpanded, value);
+    }
+
+    public string ExpandButtonText => IsExpanded ? "▲ Hide Output" : "▼ Show Output";
+
+    public void ToggleExpand()
+    {
+        IsExpanded = !IsExpanded;
+        this.RaisePropertyChanged(nameof(ExpandButtonText));
+    }
+
+    public ChatMessageRow(string role, string text, string? toolName, string? arguments = null)
     {
         Role = role;
         Text = text;
         ToolName = toolName;
+        Arguments = arguments;
+        _isExpanded = !IsTool; // Default tool output collapsed, messages expanded
     }
 }
 
@@ -225,13 +246,12 @@ public class ChatViewModel : ViewModelBase, IDisposable
     {
         _logger.LogInformation("Chat new conversation in {Workspace}", workspace);
         ActiveWorkspace = workspace;
-        if (_current.ChatId == null && _current.Items.Count == 0 && _current.Workspace == workspace)
-        {
-            SwitchToSession(_current);
-            return;
-        }
+        Input = "";
+        _selectedRow = null;
+        this.RaisePropertyChanged(nameof(SelectedRow));
 
-        SwitchToSession(new ChatSession(workspace, null));
+        var newSession = new ChatSession(workspace, null);
+        SwitchToSession(newSession);
     }
 
     public void SwitchToWorkspace(string workspace)

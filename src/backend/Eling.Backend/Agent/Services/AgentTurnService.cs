@@ -15,7 +15,9 @@ public sealed class AgentTurnService(
     private const int HistoryCap = 40;
 
     private const string SystemPromptTemplate =
-        "You are Eling, an intelligent coding and persistent memory assistant. Workspace roots: {0}. " +
+        "You are Eling, an intelligent coding and persistent memory assistant.\n" +
+        "Your current working directory (CWD) is: {0}\n" +
+        "You must strictly operate within this active workspace directory: {0}\n" +
         "You have direct access to Eling's official MCP tools: memory_recall, memory_save, file_read, file_write, directory_list, glob, file_search, etc. " +
         "Always prefer recalling relevant memories with memory_recall and checking files before answering. " +
         "If a tool reports an error, state it honestly.";
@@ -37,8 +39,7 @@ public sealed class AgentTurnService(
         await Emit(new TurnStarted(chat.Id));
 
         var toolList = tools.ToList();
-        var roots = string.Join(", ", registry.List());
-        var systemPrompt = string.Format(SystemPromptTemplate, roots);
+        var systemPrompt = string.Format(SystemPromptTemplate, workspace);
         var executedCalls = new List<ToolCallDto>();
         string finalText = string.Empty;
         const int MaxHops = 3;

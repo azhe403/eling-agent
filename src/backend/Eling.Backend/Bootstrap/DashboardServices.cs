@@ -74,23 +74,31 @@ public static class DashboardServices
         services.AddScoped<IMemoryService>(sp =>
             sp.GetRequiredService<RuntimeRegistry>().ResolveMemoryService());
 
-        // Agent HTTP surface (/api/agent/*): workspaces/files, provider,
-        // host browse, chats. Thread-safe stores are singletons rooted at the
-        // effective data dir; turn orchestration stays scoped.
-        var agentDataDir = context.EffectiveDataDir;
-        var agentLegacyDir = context.UserScope.GlobalDataDirectory;
+        var globalAgentDir = CentralAgentDirectory.Resolve();
+        var legacyProjectDir = context.EffectiveDataDir;
+        var legacyConfigDir = context.UserScope.GlobalDataDirectory;
+
         services.AddSingleton(sp => new WorkspaceRegistry(
-            Path.Combine(agentDataDir, "agent-workspaces.json"),
+            Path.Combine(globalAgentDir, "agent-workspaces.json"),
             sp.GetRequiredService<ILogger<WorkspaceRegistry>>(),
-            Path.Combine(agentLegacyDir, "agent-workspaces.json")));
+            File.Exists(Path.Combine(legacyProjectDir, "agent-workspaces.json"))
+                ? Path.Combine(legacyProjectDir, "agent-workspaces.json")
+                : Path.Combine(legacyConfigDir, "agent-workspaces.json")));
+
         services.AddSingleton(sp => new ProviderStore(
-            agentDataDir,
+            globalAgentDir,
             sp.GetRequiredService<ILogger<ProviderStore>>(),
-            agentLegacyDir));
+            File.Exists(Path.Combine(legacyProjectDir, "agent-provider.json"))
+                ? legacyProjectDir
+                : legacyConfigDir));
+
+        var chatDataDir = Path.Combine(globalAgentDir, "chats");
+        var chatLegacyDir = Path.Combine(legacyProjectDir, "agent-chats");
+        var chatLegacyDir2 = Path.Combine(legacyConfigDir, "agent-chats");
         services.AddSingleton(sp => new BackendChatStore(
-            Path.Combine(agentDataDir, "agent-chats"),
+            chatDataDir,
             sp.GetRequiredService<ILogger<BackendChatStore>>(),
-            Path.Combine(agentLegacyDir, "agent-chats")));
+            Directory.Exists(chatLegacyDir) ? chatLegacyDir : chatLegacyDir2));
         services.AddSingleton<BackendFileTools>();
         services.AddSingleton<HostBrowseService>();
         services.AddHttpClient();

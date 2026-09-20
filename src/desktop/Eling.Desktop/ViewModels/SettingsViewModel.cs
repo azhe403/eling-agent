@@ -58,11 +58,17 @@ public class SettingsViewModel : ViewModelBase
             if (provider != null)
             {
                 ProviderBaseUrl = provider.BaseUrl ?? "";
-                SelectedModel = provider.Model ?? "";
+                _selectedModel = provider.Model ?? "";
+                this.RaisePropertyChanged(nameof(SelectedModel));
                 Models.Clear();
                 foreach (var model in provider.ModelsCached)
                 {
                     Models.Add(model);
+                }
+
+                if (!string.IsNullOrEmpty(_selectedModel) && !Models.Contains(_selectedModel))
+                {
+                    Models.Insert(0, _selectedModel);
                 }
             }
         }
@@ -84,6 +90,11 @@ public class SettingsViewModel : ViewModelBase
             foreach (var model in models)
             {
                 Models.Add(model);
+            }
+
+            if (!string.IsNullOrEmpty(SelectedModel) && !Models.Contains(SelectedModel))
+            {
+                Models.Insert(0, SelectedModel);
             }
 
             StatusText = models.Count == 0 ? "No models returned." : $"Found {models.Count} model(s).";

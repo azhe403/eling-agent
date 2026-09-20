@@ -100,11 +100,7 @@ public sealed class BackendSupervisor(ILogger<BackendSupervisor> logger) : IDisp
         else
         {
             // Check in .bin directory if available
-            var binExe = Path.Combine(repoRoot, ".bin", "Debug", "net10.0", "eling-backend.exe");
-            if (!File.Exists(binExe))
-            {
-                binExe = Path.Combine(repoRoot, ".bin", "Release", "net10.0", "eling-backend.exe");
-            }
+            var binExe = Path.Combine(repoRoot, ".bin", "eling-backend.exe");
 
             if (File.Exists(binExe))
             {
