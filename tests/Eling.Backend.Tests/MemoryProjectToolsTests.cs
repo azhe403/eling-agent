@@ -130,7 +130,7 @@ public sealed class MemoryProjectToolsTests : IDisposable
         await tool.InitAsync();
 
         var gitignore = File.ReadAllText(Path.Combine(cwd, ".gitignore"));
-        Assert.Contains(".eling/index.db*", gitignore);
+        Assert.Contains(".eling/memory.db*", gitignore);
         Assert.Contains(".eling/*.db-journal", gitignore);
         Assert.Contains(".eling/*.db-wal", gitignore);
         Assert.Contains(".eling/runtime/", gitignore);
@@ -142,7 +142,7 @@ public sealed class MemoryProjectToolsTests : IDisposable
     {
         var cwd = CreateDir("repo");
         InitGitRepo(cwd);
-        var original = "# patterns\n.eling/index.db*\n.eling/*.db-journal\n.eling/*.db-wal\n.eling/runtime/\n";
+        var original = "# patterns\n.eling/memory.db*\n.eling/*.db-journal\n.eling/*.db-wal\n.eling/runtime/\n";
         File.WriteAllText(Path.Combine(cwd, ".gitignore"), original);
         var tool = new MemoryInitProjectTool(cwd);
 

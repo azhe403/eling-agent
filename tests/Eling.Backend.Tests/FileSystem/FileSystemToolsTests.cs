@@ -22,6 +22,17 @@ public class FileSystemToolsTests
     private static string CodeOf(string errorJson)
         => Parse(errorJson).RootElement.GetProperty("code").GetString()!;
 
+    // ---------- workspace_root ----------
+
+    [Fact]
+    public void WorkspaceRoot_ReturnsSandboxRoot()
+    {
+        var tool = CreateTool(new FakeFileSystemService("/proj"));
+
+        var root = Parse(tool.WorkspaceRoot()).RootElement;
+        Assert.Equal("/proj", root.GetProperty("root").GetString());
+    }
+
     // ---------- path_test ----------
 
     [Fact]
@@ -52,8 +63,8 @@ public class FileSystemToolsTests
     {
         var tool = CreateTool();
 
-        Assert.Equal("sandbox_violation", CodeOf(tool.PathTest("../outside.txt")));
-        Assert.Equal("sandbox_violation", CodeOf(tool.PathTest("/etc/passwd")));
+        Assert.Equal("sandbox_violation", CodeOf(tool.PathTest("../outside.txt", allowExternal: false)));
+        Assert.Equal("sandbox_violation", CodeOf(tool.PathTest("/etc/passwd", allowExternal: false)));
     }
 
     [Fact]
@@ -183,7 +194,7 @@ public class FileSystemToolsTests
     {
         var tool = CreateTool();
 
-        Assert.Equal("sandbox_violation", CodeOf(tool.Glob("..", "*.cs")));
+        Assert.Equal("sandbox_violation", CodeOf(tool.Glob("..", "*.cs", allowExternal: false)));
     }
 
     // ---------- file_read ----------
@@ -234,6 +245,26 @@ public class FileSystemToolsTests
         var tool = CreateTool(service);
 
         Assert.Equal("a\nb\nc", tool.ReadFile("w.txt"));
+    }
+
+    [Fact]
+    public void FileRead_LineNumbers_PrefixesEachLine()
+    {
+        var service = new FakeFileSystemService();
+        service.AddFile("n.txt", "a\nb\nc");
+        var tool = CreateTool(service);
+
+        Assert.Equal("1: a\n2: b\n3: c", tool.ReadFile("n.txt", lineNumbers: true));
+    }
+
+    [Fact]
+    public void FileRead_LineNumbersWithCrlf_NormalizesLineNumbers()
+    {
+        var service = new FakeFileSystemService();
+        service.AddFile("crlf.txt", "a\r\nb");
+        var tool = CreateTool(service);
+
+        Assert.Equal("1: a\n2: b", tool.ReadFile("crlf.txt", lineNumbers: true));
     }
 
     [Fact]
@@ -720,7 +751,7 @@ public class FileSystemToolsTests
     {
         var tool = CreateTool();
 
-        Assert.Equal("sandbox_violation", CodeOf(tool.PathTest("/etc/passwd")));
+        Assert.Equal("sandbox_violation", CodeOf(tool.PathTest("/etc/passwd", allowExternal: false)));
     }
 
     [Fact]
