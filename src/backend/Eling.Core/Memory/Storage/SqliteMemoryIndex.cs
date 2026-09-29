@@ -466,7 +466,11 @@ public sealed class SqliteMemoryIndex : IMemoryIndex
         return rows;
     }
 
-    private sealed record MemoryTableRow(string Id, string Content, string Tags, string? Source);
+    private sealed record MemoryTableRow(
+        string Id,
+        string Content,
+        string Tags,
+        string? Source);
 
     private static async Task<bool> HasLegacySchemaAsync(DbConnection connection)
     {

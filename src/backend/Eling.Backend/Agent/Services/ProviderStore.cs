@@ -137,5 +137,9 @@ public sealed class ProviderStore
         }
     }
 
-    private sealed record ProviderDocument(string? BaseUrl, string? Model, string? ApiKey, List<string>? ModelsCached);
+    private sealed record ProviderDocument(
+        string? BaseUrl,
+        string? Model,
+        string? ApiKey,
+        List<string>? ModelsCached);
 }

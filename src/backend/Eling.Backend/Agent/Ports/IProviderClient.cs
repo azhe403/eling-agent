@@ -1,6 +1,8 @@
 namespace Eling.Backend.Agent.Ports;
 
-public record ProviderProbe(bool Ok, string Message);
+public record ProviderProbe(
+    bool Ok,
+    string Message);
 
 public interface IProviderClient
 {

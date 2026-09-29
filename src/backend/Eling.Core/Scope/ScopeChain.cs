@@ -5,7 +5,9 @@ namespace Eling.Core.Scope;
 /// the nearest initialized ancestor, nearest first. Level 0 is the write
 /// target; an empty chain means the project scope is uninitialized.
 /// </summary>
-public sealed record ScopeChain(string Cwd, IReadOnlyList<ProjectScope> Levels)
+public sealed record ScopeChain(
+    string Cwd,
+    IReadOnlyList<ProjectScope> Levels)
 {
     public ProjectScope? Head => Levels.Count > 0 ? Levels[0] : null;
 
