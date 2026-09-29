@@ -4,7 +4,7 @@ import { useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { useAutoHeight } from "@/hooks/use-auto-height"
-import { formatDate } from "@/lib/date-utils"
+import { utcToLocal } from "@/lib/date-utils"
 import { EDIT_TYPES, STATUSES } from "@/lib/types"
 import type { Memory } from "@/lib/types"
 
@@ -31,7 +31,7 @@ export function MemoryEditor({ memory, onCancel, onSave }: MemoryEditorProps) {
         <span className="font-medium text-foreground">
           Editing Memory · ID: {memory.id}
         </span>
-        <span>Created: {formatDate(memory.createdAt)}</span>
+        <span>Created: {utcToLocal(memory.createdAt)}</span>
       </div>
       <textarea
         ref={textareaRef}

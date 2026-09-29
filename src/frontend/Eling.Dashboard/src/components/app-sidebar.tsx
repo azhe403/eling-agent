@@ -6,6 +6,7 @@ import {
   Brain,
   LayoutDashboard,
   Database,
+  BookOpen,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -92,6 +93,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         title: "Dashboard",
         url: "/dashboard",
         icon: <LayoutDashboard className="size-4" />,
+        isActive: true,
+      },
+      {
+        title: "Codebase",
+        url: "/dashboard/codebase",
+        icon: <BookOpen className="size-4" />,
         isActive: true,
       },
       {

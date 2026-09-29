@@ -41,7 +41,7 @@ import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
-import { formatDate } from "@/lib/date-utils"
+import { utcToLocal } from "@/lib/date-utils"
 import { TYPES } from "@/lib/types"
 import type { Memory, Runtime } from "@/lib/types"
 
@@ -481,7 +481,7 @@ export function MemoriesList() {
                   {promoteTarget.type} · ID: {promoteTarget.id}
                 </span>
                 <span className="text-[11px] font-normal text-muted-foreground">
-                  {formatDate(promoteTarget.createdAt)}
+                  {utcToLocal(promoteTarget.createdAt)}
                 </span>
               </div>
               <div className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-foreground font-sans pr-1 leading-relaxed">
@@ -600,7 +600,7 @@ export function MemoriesList() {
                   {copyTarget.type} · ID: {copyTarget.id}
                 </span>
                 <span className="text-[11px] font-normal text-muted-foreground">
-                  {formatDate(copyTarget.createdAt)}
+                  {utcToLocal(copyTarget.createdAt)}
                 </span>
               </div>
               <div className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-foreground font-sans pr-1 leading-relaxed">
@@ -695,7 +695,7 @@ export function MemoriesList() {
                   {deleteTarget.type} · ID: {deleteTarget.id}
                 </span>
                 <span className="text-[11px] font-normal text-muted-foreground">
-                  {formatDate(deleteTarget.createdAt)}
+                  {utcToLocal(deleteTarget.createdAt)}
                 </span>
               </div>
               <div className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-foreground font-sans pr-1 leading-relaxed">

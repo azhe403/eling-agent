@@ -3,7 +3,7 @@
 import { Check, Copy, Pencil, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { formatDate } from "@/lib/date-utils"
+import { utcToLocal } from "@/lib/date-utils"
 import { statusBadge, typeBadge } from "@/lib/types"
 import type { Memory, Runtime } from "@/lib/types"
 
@@ -135,9 +135,9 @@ export function MemoryCard({
         </button>
 
         <span>•</span>
-        <span>Created: {formatDate(m.createdAt)}</span>
+        <span>Created: {utcToLocal(m.createdAt)}</span>
         <span>•</span>
-        <span>Updated: {formatDate(m.updatedAt || m.createdAt)}</span>
+        <span>Updated: {utcToLocal(m.updatedAt || m.createdAt)}</span>
       </div>
     </div>
   )
