@@ -39,3 +39,18 @@ export function getSidebarAttribute(stored: string | null): { name: string; valu
 export function getSidebarInlineScript(): string {
   return `(function(){try{document.documentElement.classList.add('preload');var s=localStorage.getItem('${SIDEBAR_STORAGE_KEY}');if(${isSidebarCollapsed.toString()}(s)){document.documentElement.setAttribute('data-sidebar-collapsed','true')}else{document.documentElement.removeAttribute('data-sidebar-collapsed')}window.addEventListener('DOMContentLoaded',function(){requestAnimationFrame(function(){requestAnimationFrame(function(){document.documentElement.classList.remove('preload')})})})}catch(e){console.warn('eling sidebar preload failed',e)}})()`
 }
+
+/**
+ * Generates the inline script string placed immediately after the sidebar
+ * markup in the dashboard layout. The head script can only touch <html>
+ * (body isn't parsed yet), so the server-rendered sidebar still carries
+ * expanded attributes at first paint — wide content in a narrowed frame.
+ * This script runs synchronously during parsing, right after the sidebar
+ * element exists, and stamps the collapsed attributes before first paint.
+ * Tailwind's group-data selectors react to the attributes via pure CSS, so
+ * the first paint is already a correct narrow sidebar with no React involved.
+ * On soft navigations the InlineScript wrapper renders it inert (text/plain).
+ */
+export function getSidebarBodyScript(): string {
+  return `(function(){try{var s=localStorage.getItem('${SIDEBAR_STORAGE_KEY}');if(${isSidebarCollapsed.toString()}(s)){var el=document.querySelector('[data-slot="sidebar"]');if(el){el.setAttribute('data-state','collapsed');el.setAttribute('data-collapsible','icon')}}}catch(e){console.warn('eling sidebar pre-paint failed',e)}})()`
+}

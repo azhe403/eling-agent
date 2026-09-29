@@ -127,14 +127,16 @@
     animation: none !important;
   }
 
-  /* Anti-flicker instant sidebar collapse on initial paint */
+  /* Anti-flicker instant sidebar collapse on initial paint.
+     Must match SIDEBAR_WIDTH_ICON ("3rem") in components/ui/sidebar.tsx so the
+     pre-paint layout and the hydrated React layout agree. */
   html[data-sidebar-collapsed="true"] [data-slot="sidebar-wrapper"] {
-    --sidebar-width: var(--sidebar-width-icon, 4.25rem) !important;
+    --sidebar-width: var(--sidebar-width-icon, 3rem) !important;
   }
   html[data-sidebar-collapsed="true"] [data-slot="sidebar-gap"] {
-    width: calc(var(--sidebar-width-icon, 4.25rem) + 1rem) !important;
+    width: var(--sidebar-width-icon, 3rem) !important;
   }
   html[data-sidebar-collapsed="true"] [data-slot="sidebar-container"] {
-    width: var(--sidebar-width-icon, 4.25rem) !important;
+    width: var(--sidebar-width-icon, 3rem) !important;
   }
 }

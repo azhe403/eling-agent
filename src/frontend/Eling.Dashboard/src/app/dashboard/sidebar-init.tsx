@@ -47,5 +47,14 @@ export function DashboardSidebar({
     getServerSidebarOpenSnapshot,
   )
 
-  return <SidebarProvider defaultOpen={defaultOpen} style={style}>{children}</SidebarProvider>
+  // SidebarProvider captures defaultOpen via useState (initial render only), so
+  // the post-hydration correction (server true -> stored false) would otherwise
+  // leave it stuck expanded while <html> says collapsed — expanded content in
+  // a narrow container reads as a "dented" sidebar. Remounting on that single
+  // transition aligns them without effects. No-op when already open.
+  return (
+    <SidebarProvider key={String(defaultOpen)} defaultOpen={defaultOpen} style={style}>
+      {children}
+    </SidebarProvider>
+  )
 }

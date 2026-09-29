@@ -219,6 +219,10 @@ function Sidebar({
       data-variant={variant}
       data-side={side}
       data-slot="sidebar"
+      // The body inline script corrects these attributes during HTML parsing
+      // (before first paint) when the persisted state is collapsed, so the DOM
+      // intentionally differs from the server render here. Accept the DOM.
+      suppressHydrationWarning
     >
       {/* This is what handles the sidebar gap on desktop */}
       <div
