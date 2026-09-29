@@ -1,7 +1,10 @@
+using Eling.Backend.Bootstrap;
+using Eling.Backend.Codebase;
 using Eling.Backend.FileSystem;
 using Eling.Backend.Mcp.Telemetry;
 using Eling.Backend.Scope;
 using Eling.Core;
+using Eling.Core.Codebase;
 using Eling.Core.FileSystem;
 using Eling.Core.Memory;
 using Eling.Core.Memory.Serialization;
@@ -59,6 +62,8 @@ public static class McpServiceExtensions
 
         // Bounded filesystem tools sandboxed to the project root.
         services.TryAddSingleton<IFileSystemService>(new FileSystemService(projectScope.Root));
+
+        AddCodebaseServices(services, projectScope.Root);
 
         services.AddScoped<IMemoryRecallService, MemoryRecallService>();
         services.AddScoped<IMemoryMaintenanceService, MemoryMaintenanceService>();
@@ -129,6 +134,12 @@ public static class McpServiceExtensions
         services.TryAddSingleton<IFileSystemService>(
             new FileSystemService(chain.Head?.Root ?? chain.Cwd));
 
+        // The codebase index is rooted at the working directory — the
+        // workspace the backend was launched in — never at the nearest
+        // .eling ancestor. Memory scope follows .eling; code follows where
+        // the agent actually works.
+        AddCodebaseServices(services, chain.Cwd);
+
         services.TryAddSingleton<IProjectScopePolicyStore>(sp =>
             new JsonProjectScopePolicyStore(userScope, logger: sp.GetService<ILogger<JsonProjectScopePolicyStore>>()));
 
@@ -149,5 +160,23 @@ public static class McpServiceExtensions
         });
 
         return services;
+    }
+
+    /// <summary>
+    /// Registers the codebase services for one workspace root: the index
+    /// (global store, per-workspace DB file), the watcher singleton, and the
+    /// dashboard's multi-project rebuild job with its progress channel.
+    /// The watcher loop itself starts only on the dashboard owner.
+    /// Single home for both <c>AddElingCoreServices</c> overloads.
+    /// </summary>
+    private static void AddCodebaseServices(IServiceCollection services, string projectRoot)
+    {
+        services.TryAddSingleton(sp => new CodebaseIndexService(
+            projectRoot,
+            new SqliteCodebaseIndex(Eling.Core.Scope.ElingPaths.ResolveCodebaseDbPath(projectRoot)),
+            sp.GetService<ILogger<CodebaseIndexService>>()));
+        services.TryAddSingleton<CodebaseWatcherService>();
+        services.TryAddSingleton<CodebaseRebuildBroadcaster>();
+        services.TryAddSingleton<CodebaseRebuildJobRunner>();
     }
 }

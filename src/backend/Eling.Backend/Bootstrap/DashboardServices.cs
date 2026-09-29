@@ -6,10 +6,12 @@ using Eling.Backend.Agent.Services;
 using Eling.Backend.Converters;
 using Eling.Backend.Mcp;
 using Eling.Core;
+using Eling.Core.Codebase;
 using Eling.Core.Memory;
 using Eling.Core.Scope;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
 namespace Eling.Backend.Bootstrap;
@@ -46,6 +48,28 @@ public static class DashboardServices
         // Serilog to file + stderr, so stdout stays clean for MCP stdio JSON-RPC.
             services.AddElingLogging(projectId: ProjectId.FromScope(context.ProjectScope, context.IsUserHome));
         services.AddElingCoreServices(context.Chain, context.UserScope);
+
+        // Minimal codebase index service (dashboard scope only — no embeddings)
+        // Registered via TryAdd: McpServiceExtensions already provides the shared
+        // singleton, this is a fallback when DashboardServices is used standalone.
+        // Rooted at the working directory like the shared one, not at .eling.
+        services.TryAddSingleton(sp =>
+        {
+            var root = context.Chain.Cwd;
+            var dbPath = Eling.Core.Scope.ElingPaths.ResolveCodebaseDbPath(root);
+            return new CodebaseIndexService(root, new SqliteCodebaseIndex(dbPath));
+        });
+
+        // Codebase watcher loop runs only on the dashboard owner of a real,
+        // non-excluded project session, so exactly one process indexes in
+        // the background. User-home (global-only) and excluded (temporal)
+        // sessions never trail their working directory. This gate is the only
+        // control: the watcher is on by default, with no opt-out flag.
+        if (isOwnerMode && !context.IsUserHome && !Eling.Core.Scope.ElingPaths.IsCodebaseExcluded(context.Chain.Cwd))
+        {
+            services.AddHostedService(sp => sp.GetRequiredService<CodebaseWatcherService>());
+        }
+
         // NOTE: do NOT call AddElingMcpServerStdio() here. The MCP stdio transport
         // is owned exclusively by the GenericHost in Program.cs so that peer-mode
         // processes (which never build a WebApplication) still have an active
@@ -107,15 +131,21 @@ public static class DashboardServices
         services.AddScoped<AgentTurnService>();
 
         // Only the dashboard owner maps the SSE endpoint, so only it needs the
-        // runtime-directory watcher. The watcher turns cross-process runtime
+        // directory watchers. The runtime watcher turns cross-process
         // membership changes (files appearing/disappearing in the shared
-        // runtime dir) into SSE "runtimes" broadcasts for every subscriber.
+        // runtime dir) into SSE "runtimes" broadcasts; the codebase watcher
+        // turns any index rebuild in the shared store into "codebase"
+        // broadcasts — both for every subscriber.
         if (isOwnerMode)
         {
             services.AddSingleton<RuntimeDirWatcher>(sp => new RuntimeDirWatcher(
                 sp.GetRequiredService<RuntimeRegistry>().UserScope.RuntimeDirectory,
                 sp.GetRequiredService<MemoryChangeBroadcaster>(),
                 sp.GetRequiredService<ILogger<RuntimeDirWatcher>>()));
+            services.AddSingleton<CodebaseDirWatcher>(sp => new CodebaseDirWatcher(
+                Eling.Core.Scope.ElingPaths.ResolveCodebaseDir(),
+                sp.GetRequiredService<MemoryChangeBroadcaster>(),
+                sp.GetRequiredService<ILogger<CodebaseDirWatcher>>()));
         }
         services.ConfigureHttpJsonOptions(options =>
         {
@@ -123,5 +153,6 @@ public static class DashboardServices
             options.SerializerOptions.Converters.Add(new MemoryIdJsonConverter());
             options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
         });
+
     }
 }

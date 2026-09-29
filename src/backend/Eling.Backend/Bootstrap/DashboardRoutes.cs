@@ -1,3 +1,6 @@
+using System.Text.Json;
+using Eling.Backend.Codebase;
+using Eling.Backend.Dtos;
 using Eling.Backend.Endpoints;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -36,8 +39,10 @@ public static class DashboardRoutes
 
         // Registered only in owner mode (see DashboardServices); start watching
         // the shared runtime dir so cross-process membership changes push SSE
-        // "runtimes" events to connected subscribers.
+        // "runtimes" events to connected subscribers. Same for the shared
+        // codebase dir ("codebase" events on any index rebuild).
         app.Services.GetService<RuntimeDirWatcher>()?.Start();
+        app.Services.GetService<CodebaseDirWatcher>()?.Start();
 
         app.MapGet("/health", () => Results.Ok(new { status = "Healthy", pid = Environment.ProcessId }));
         app.MapSseEvents();
@@ -49,42 +54,79 @@ public static class DashboardRoutes
         app.MapAgentWorkspaceEndpoints();
         app.MapAgentHostEndpoints();
         app.MapAgentChatEndpoints();
+        app.MapCodebaseRoutes();
         app.MapFallbackToFile("index.html");
     }
 
-    private static void MapSseEvents(this WebApplication app)
+    internal static void MapSseEvents(this WebApplication app)
     {
-        app.MapGet("/api/events/memories", async (HttpContext context, MemoryChangeBroadcaster broadcaster) =>
+        app.MapGet("/api/events/memories", (HttpContext context, MemoryChangeBroadcaster broadcaster) =>
         {
             var ct = context.RequestAborted;
-            context.Response.Headers.ContentType = "text/event-stream";
-            context.Response.Headers.CacheControl = "no-cache, no-transform";
-            context.Response.Headers.Connection = "keep-alive";
-            context.Response.Headers["X-Accel-Buffering"] = "no";
-
-            await context.Response.WriteAsync("data: connected\n\n", ct);
-            await context.Response.Body.FlushAsync(ct);
-
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
-            var subscribeTask = Task.Run(async () =>
-            {
-                await foreach (var evt in broadcaster.SubscribeAsync(ct))
-                {
-                    await context.Response.WriteAsync($"data: {evt}\n\n", ct);
-                    await context.Response.Body.FlushAsync(ct);
-                }
-            }, ct);
-
-            var pingTask = Task.Run(async () =>
-            {
-                while (await timer.WaitForNextTickAsync(ct))
-                {
-                    await context.Response.WriteAsync(": ping\n\n", ct);
-                    await context.Response.Body.FlushAsync(ct);
-                }
-            }, ct);
-
-            await Task.WhenAny(subscribeTask, pingTask);
+            return WriteSseAsync(context, broadcaster.SubscribeAsync(ct), item => item, ct);
         });
+
+        // Rebuild progress is a typed payload, so it rides its own channel
+        // instead of widening the topic-name stream the memory UI already uses.
+        app.MapGet("/api/events/codebase-rebuild", (HttpContext context, CodebaseRebuildBroadcaster broadcaster) =>
+        {
+            var ct = context.RequestAborted;
+            return WriteSseAsync(context, broadcaster.SubscribeAsync(ct), SerializeRebuildProgress, ct);
+        });
+    }
+
+    // SSE frames must stay on a single line: the event format terminates a
+    // frame at a newline, and clients parse the `data:` payload as JSON
+    // directly. The shared defaults are indented because they back on-disk
+    // payloads, so the stream gets its own compact instance.
+    private static readonly JsonSerializerOptions SseJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    private static string SerializeRebuildProgress(CodebaseRebuildProgress snapshot) =>
+        JsonSerializer.Serialize(snapshot, SseJsonOptions);
+
+    /// <summary>
+    /// Writes one <c>text/event-stream</c> response: an initial
+    /// <c>data: connected</c> frame so clients know the stream is live, every
+    /// source item as a <c>data:</c> frame, and a comment ping every 15s to
+    /// keep proxies from closing an idle connection. Returns as soon as either
+    /// the source or the ping loop ends.
+    /// </summary>
+    private static async Task WriteSseAsync<T>(
+        HttpContext context,
+        IAsyncEnumerable<T> source,
+        Func<T, string> serialize,
+        CancellationToken ct)
+    {
+        context.Response.Headers.ContentType = "text/event-stream";
+        context.Response.Headers.CacheControl = "no-cache, no-transform";
+        context.Response.Headers.Connection = "keep-alive";
+        context.Response.Headers["X-Accel-Buffering"] = "no";
+
+        await context.Response.WriteAsync("data: connected\n\n", ct);
+        await context.Response.Body.FlushAsync(ct);
+
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        var subscribeTask = Task.Run(async () =>
+        {
+            await foreach (var item in source)
+            {
+                await context.Response.WriteAsync($"data: {serialize(item)}\n\n", ct);
+                await context.Response.Body.FlushAsync(ct);
+            }
+        }, ct);
+
+        var pingTask = Task.Run(async () =>
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                await context.Response.WriteAsync(": ping\n\n", ct);
+                await context.Response.Body.FlushAsync(ct);
+            }
+        }, ct);
+
+        await Task.WhenAny(subscribeTask, pingTask);
     }
 }

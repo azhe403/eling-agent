@@ -108,6 +108,8 @@ public sealed class RuntimeRegistry : IDisposable
                     if (existing is not null)
                     {
                         existing.ProjectRoot = reg.ProjectRoot;
+                        existing.WorkspaceRoot = reg.WorkspaceRoot;
+                        existing.CodebaseEnabled = reg.CodebaseEnabled;
                         existing.DataDirectory = reg.DataDirectory;
                         existing.StartTime = reg.StartTime;
                         existing.McpEnabled = reg.McpEnabled;
@@ -121,6 +123,8 @@ public sealed class RuntimeRegistry : IDisposable
                         {
                             ProcessId = reg.ProcessId,
                             ProjectRoot = reg.ProjectRoot,
+                            WorkspaceRoot = reg.WorkspaceRoot,
+                            CodebaseEnabled = reg.CodebaseEnabled,
                             DataDirectory = reg.DataDirectory,
                             StartTime = reg.StartTime,
                             McpEnabled = reg.McpEnabled,
@@ -181,6 +185,8 @@ public sealed class RuntimeRegistry : IDisposable
             if (existing is not null)
             {
                 existing.ProjectRoot = registration.ProjectRoot;
+                existing.WorkspaceRoot = registration.WorkspaceRoot;
+                existing.CodebaseEnabled = registration.CodebaseEnabled;
                 existing.DataDirectory = registration.DataDirectory;
                 existing.StartTime = registration.StartTime;
                 existing.McpEnabled = registration.McpEnabled;
@@ -194,6 +200,8 @@ public sealed class RuntimeRegistry : IDisposable
             {
                 ProcessId = registration.ProcessId,
                 ProjectRoot = registration.ProjectRoot,
+                WorkspaceRoot = registration.WorkspaceRoot,
+                CodebaseEnabled = registration.CodebaseEnabled,
                 DataDirectory = registration.DataDirectory,
                 StartTime = registration.StartTime,
                 McpEnabled = registration.McpEnabled,
@@ -245,6 +253,8 @@ public sealed class RuntimeRegistry : IDisposable
                 {
                     ProcessId = runtime.ProcessId,
                     ProjectRoot = runtime.ProjectRoot,
+                    WorkspaceRoot = runtime.WorkspaceRoot,
+                    CodebaseEnabled = runtime.CodebaseEnabled,
                     DataDirectory = runtime.DataDirectory,
                     StartTime = runtime.StartTime,
                     McpEnabled = runtime.McpEnabled,
@@ -435,6 +445,8 @@ public sealed class RuntimeRegistry : IDisposable
                     {
                         ProcessId = Environment.ProcessId,
                         ProjectRoot = Directory.GetCurrentDirectory(),
+                        WorkspaceRoot = Directory.GetCurrentDirectory(),
+                        CodebaseEnabled = true,
                         DataDirectory = localDataDir,
                         StartTime = DateTimeOffset.UtcNow,
                         McpEnabled = true,

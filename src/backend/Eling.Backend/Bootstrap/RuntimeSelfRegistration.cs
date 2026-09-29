@@ -18,6 +18,8 @@ public static class RuntimeSelfRegistration
     {
         ProcessId = Environment.ProcessId,
         ProjectRoot = context.IsUserHome ? "UserScope" : context.ProjectScope.Root,
+        WorkspaceRoot = context.IsUserHome ? "UserScope" : context.Chain.Cwd,
+        CodebaseEnabled = !context.IsUserHome && !Eling.Core.Scope.ElingPaths.IsCodebaseExcluded(context.Chain.Cwd),
         DataDirectory = context.EffectiveDataDir,
         StartTime = ProcessStartTime.Get(),
         McpEnabled = true,
