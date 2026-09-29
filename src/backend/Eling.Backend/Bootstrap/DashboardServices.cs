@@ -1,9 +1,12 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Eling.Backend.Agent.Infrastructure.Ai;
 using Eling.Backend.Agent.Ports;
 using Eling.Backend.Agent.Services;
+using Eling.Backend.Agent.Services.Tools;
 using Eling.Backend.Converters;
+using Eling.Backend.Identity;
 using Eling.Backend.Mcp;
 using Eling.Core;
 using Eling.Core.Codebase;
@@ -101,20 +104,21 @@ public static class DashboardServices
         var globalAgentDir = CentralAgentDirectory.Resolve();
         var legacyProjectDir = context.EffectiveDataDir;
         var legacyConfigDir = context.UserScope.GlobalDataDirectory;
+        var isTestIsolation = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ELING_AGENT_DATA_DIR"));
 
         services.AddSingleton(sp => new WorkspaceRegistry(
             Path.Combine(globalAgentDir, "agent-workspaces.json"),
             sp.GetRequiredService<ILogger<WorkspaceRegistry>>(),
-            File.Exists(Path.Combine(legacyProjectDir, "agent-workspaces.json"))
+            !isTestIsolation && File.Exists(Path.Combine(legacyProjectDir, "agent-workspaces.json"))
                 ? Path.Combine(legacyProjectDir, "agent-workspaces.json")
-                : Path.Combine(legacyConfigDir, "agent-workspaces.json")));
+                : (!isTestIsolation ? Path.Combine(legacyConfigDir, "agent-workspaces.json") : null)));
 
         services.AddSingleton(sp => new ProviderStore(
             globalAgentDir,
             sp.GetRequiredService<ILogger<ProviderStore>>(),
-            File.Exists(Path.Combine(legacyProjectDir, "agent-provider.json"))
+            !isTestIsolation && File.Exists(Path.Combine(legacyProjectDir, "agent-provider.json"))
                 ? legacyProjectDir
-                : legacyConfigDir));
+                : (!isTestIsolation ? legacyConfigDir : null)));
 
         var chatDataDir = Path.Combine(globalAgentDir, "chats");
         var chatLegacyDir = Path.Combine(legacyProjectDir, "agent-chats");
@@ -122,12 +126,15 @@ public static class DashboardServices
         services.AddSingleton(sp => new BackendChatStore(
             chatDataDir,
             sp.GetRequiredService<ILogger<BackendChatStore>>(),
-            Directory.Exists(chatLegacyDir) ? chatLegacyDir : chatLegacyDir2));
+            !isTestIsolation && Directory.Exists(chatLegacyDir) ? chatLegacyDir : (!isTestIsolation ? chatLegacyDir2 : null)));
         services.AddSingleton<BackendFileTools>();
         services.AddSingleton<HostBrowseService>();
+        services.AddSingleton<IGitConfigReader, GitConfigReader>();
+        services.AddSingleton<GitIdentityService>();
         services.AddHttpClient();
         services.AddScoped<IProviderClient, HttpProviderClient>();
         services.AddScoped<IChatGateway, MeaiChatGateway>();
+        services.AddElingAgentTools();
         services.AddScoped<AgentTurnService>();
 
         // Only the dashboard owner maps the SSE endpoint, so only it needs the
@@ -154,5 +161,26 @@ public static class DashboardServices
             options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
         });
 
+        // Controllers read from a different options bag than minimal APIs, so
+        // they need the same three settings mirrored here. Without this the
+        // casing and converters diverge between the two styles and the same
+        // DTO serializes differently depending on which one served it.
+        var mvc = services.AddControllers().AddJsonOptions(options =>
+        {
+            options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+            options.JsonSerializerOptions.Converters.Add(new MemoryIdJsonConverter());
+            options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+        });
+
+        // MVC discovers controllers from the entry assembly. Under a test
+        // harness that is the test runner, so no controller is ever found and
+        // every route 404s. Adding the backend assembly is skipped in the real
+        // host, where the entry assembly already contributes it — registering
+        // it twice would discover SystemController twice and make its route
+        // ambiguous.
+        if (Assembly.GetEntryAssembly() != typeof(GitIdentityService).Assembly)
+        {
+            mvc.AddApplicationPart(typeof(GitIdentityService).Assembly);
+        }
     }
 }

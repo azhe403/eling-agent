@@ -55,6 +55,7 @@ public static class DashboardRoutes
         app.MapAgentHostEndpoints();
         app.MapAgentChatEndpoints();
         app.MapCodebaseRoutes();
+        app.MapControllers();
         app.MapFallbackToFile("index.html");
     }
 

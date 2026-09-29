@@ -57,7 +57,9 @@ export function NavUser({
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
               <span className="truncate font-medium">{user.name}</span>
-              <span className="truncate text-xs text-muted-foreground">{user.email}</span>
+              {user.email && (
+                <span className="truncate text-xs text-muted-foreground">{user.email}</span>
+              )}
             </div>
             <ChevronsUpDownIcon className="ml-auto size-4" />
           </DropdownMenuTrigger>
@@ -78,7 +80,9 @@ export function NavUser({
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="truncate font-medium">{user.name}</span>
-                    <span className="truncate text-xs text-muted-foreground">{user.email}</span>
+                    {user.email && (
+                      <span className="truncate text-xs text-muted-foreground">{user.email}</span>
+                    )}
                   </div>
                 </div>
               </DropdownMenuLabel>
