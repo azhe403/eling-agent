@@ -48,6 +48,33 @@ import type { Memory, Runtime } from "@/lib/types"
 import { MemoryCard } from "./MemoryCard"
 import { MemoryEditor } from "./MemoryEditor"
 
+function projectName(root: string | undefined | null) {
+  if (!root) return "—"
+  const parts = root.split(/[/\\]+/).filter(Boolean)
+  return parts.length ? parts[parts.length - 1] : root
+}
+
+function scopeLabel(value: string | undefined | null) {
+  if (!value) return "Select scope..."
+  if (value === "all") return "🌐 All projects"
+  if (value === "global") return "🌐 Global Scope"
+  return "📁 " + projectName(value)
+}
+
+function distinctProjectRoots(runtimes: Runtime[]) {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const r of runtimes) {
+    const root = r.projectRoot
+    if (!root) continue
+    const key = root.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(root)
+  }
+  return out
+}
+
 export function MemoriesList() {
   const router = useRouter()
 
@@ -73,6 +100,12 @@ export function MemoriesList() {
   const searchParams = useSearchParams()
   const scope = searchParams.get("scope") ?? "all"
   const [copiedId, setCopiedId] = useState<string | null>(null)
+
+  const handleScopeChange = useCallback((value: string | null) => {
+    if (!value) return
+    if (value === "all") router.push("/dashboard/memories")
+    else router.push("/dashboard/memories?scope=" + encodeURIComponent(value))
+  }, [router])
   const [promoteTarget, setPromoteTarget] = useState<Memory | null>(null)
   const [promoteAsMove, setPromoteAsMove] = useState(false)
   const [copyTarget, setCopyTarget] = useState<Memory | null>(null)
@@ -80,6 +113,7 @@ export function MemoriesList() {
   const [copyProjectRoot, setCopyProjectRoot] = useState<string>("")
   const [deleteTarget, setDeleteTarget] = useState<Memory | null>(null)
   const [runtimes, setRuntimes] = useState<Runtime[]>([])
+  const projectRoots = distinctProjectRoots(runtimes)
 
   const copyToClipboard = useCallback((text: string, id: string) => {
     navigator.clipboard.writeText(text).catch(() => {
@@ -377,14 +411,78 @@ export function MemoriesList() {
       </header>
 
       <div className="flex flex-1 flex-col gap-4 p-4 pt-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {loading ? (
+            Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-20 rounded-lg" />
+            ))
+          ) : (
+            <>
+              <div className="rounded-lg border p-3 text-sm">
+                <div className="text-muted-foreground">Total</div>
+                <div className="text-xl font-medium">{memories.length}</div>
+              </div>
+              <div className="rounded-lg border p-3 text-sm">
+                <div className="text-muted-foreground">Showing</div>
+                <div className="text-xl font-medium">{filtered.length}</div>
+              </div>
+              <div className="rounded-lg border p-3 text-sm">
+                <div className="text-muted-foreground">Scope</div>
+                <div className="truncate text-sm" title={scope}>
+                  {scopeLabel(scope)}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="truncate text-xs text-muted-foreground" title={projectRoots.join("\n")}>
+          {projectRoots.length} {projectRoots.length === 1 ? "project" : "projects"} available
+        </div>
+
         <div className="sticky top-0 z-10 flex flex-col gap-2 bg-background pb-2 pt-1">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Input
-              placeholder="Search content or memory ID..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="max-w-xs"
-            />
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <Input
+                placeholder="Search content or memory ID..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="max-w-xs"
+              />
+              <Select value={scope} onValueChange={handleScopeChange}>
+                <SelectTrigger
+                  aria-label="Memory scope"
+                  title={scope}
+                  className="w-full max-w-44 shrink-0 truncate sm:max-w-72"
+                >
+                  <SelectValue placeholder="Select scope...">
+                    {(v: string | null) => scopeLabel(v)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent
+                  side="bottom"
+                  align="start"
+                  alignItemWithTrigger={false}
+                  style={{
+                    width: "auto",
+                    maxWidth: "min(36rem, calc(100vw - 2rem))",
+                  }}
+                >
+                  <SelectItem value="all">🌐 All projects</SelectItem>
+                  <SelectItem value="global">🌐 Global Scope</SelectItem>
+                  {projectRoots.map((root) => (
+                    <SelectItem key={root} value={root} title={root}>
+                      <span className="flex min-w-0 flex-col items-start">
+                        <span>📁 {projectName(root)}</span>
+                        <span className="text-xs whitespace-normal break-all text-muted-foreground">
+                          {root}
+                        </span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex flex-wrap gap-1">
               {TYPES.map((t) => (
                 <button
