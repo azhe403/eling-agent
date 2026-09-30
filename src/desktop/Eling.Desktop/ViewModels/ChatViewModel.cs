@@ -4,126 +4,13 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Eling.Desktop.Formatting;
 using Eling.Desktop.Models;
 using Eling.Desktop.Services;
 using Microsoft.Extensions.Logging;
 using ReactiveUI;
 
 namespace Eling.Desktop.ViewModels;
-
-public class ChatMessageRow : ReactiveObject
-{
-    private bool _isExpanded;
-    private bool _isCodeMode;
-
-    public string Role { get; }
-    public string Text { get; }
-    public string? ToolName { get; }
-    public string? Arguments { get; }
-
-    public bool IsUser => string.Equals(Role, "User", StringComparison.OrdinalIgnoreCase);
-    public bool IsAssistant => string.Equals(Role, "Assistant", StringComparison.OrdinalIgnoreCase);
-    public bool IsTool => string.Equals(Role, "Tool", StringComparison.OrdinalIgnoreCase);
-    public bool IsToolError => IsTool && ToolOutputFormatter.IsError(Text);
-
-    public string HeaderDisplay => IsUser ? "You" : IsAssistant ? "Eling" : $"🔧 Tool: {ToolName ?? "Execution"}";
-    public string HeaderColor => IsUser ? "#2563eb" : IsAssistant ? "#16a34a" : IsToolError ? "#dc2626" : "#d97706";
-    public string TextColor => IsTool ? (IsToolError ? "#fca5a5" : "#cbd5e1") : "#f8fafc";
-    public string FontFamily => IsTool ? "Cascadia Code,Consolas,Menlo,monospace" : "Inter,Segoe UI,sans-serif";
-    public double FontSize => IsTool ? 12.0 : 13.5;
-
-    public string ArgumentsDisplay => ToolOutputFormatter.FormatArguments(Arguments);
-    public bool HasArguments => !string.IsNullOrWhiteSpace(ArgumentsDisplay);
-
-    /// Navigable JSON tree: the full payload, collapsible at every level.
-    public IReadOnlyList<JsonTreeNode> TreeNodes { get; }
-
-    /// Pretty-printed payload, monospaced, exact and copyable.
-    public IReadOnlyList<MessageBlock> CodeBlocks { get; }
-
-    public bool HasTree => TreeNodes.Count > 0;
-    public bool IsCodeMode => _isCodeMode;
-    public bool ShowTree => HasTree && !IsCodeMode;
-    public double BodyMaxHeight => Text.Length > 1200 ? 360 : 2000;
-
-    public string ModeToggleText => IsCodeMode ? "🗂 Navigable" : "{ } Code";
-
-    public bool IsExpanded
-    {
-        get => _isExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isExpanded, value);
-    }
-
-    public string ExpandButtonText => IsExpanded ? "▲ Hide Output" : "▼ Show Output";
-
-    public void ToggleExpand()
-    {
-        IsExpanded = !IsExpanded;
-        this.RaisePropertyChanged(nameof(ExpandButtonText));
-    }
-
-    public void ToggleMode()
-    {
-        _isCodeMode = !_isCodeMode;
-        this.RaisePropertyChanged(nameof(IsCodeMode));
-        this.RaisePropertyChanged(nameof(ShowTree));
-        this.RaisePropertyChanged(nameof(ModeToggleText));
-    }
-
-    public ChatMessageRow(string role, string text, string? toolName, string? arguments = null)
-    {
-        Role = role;
-        Text = text;
-        ToolName = toolName;
-        Arguments = arguments;
-        _isExpanded = true;
-
-        CodeBlocks = IsAssistant
-            ? SimpleMarkdownParser.Parse(text)
-            : ToolOutputFormatter.BuildRawBlocks(text);
-
-        TreeNodes = IsTool && !ToolOutputFormatter.IsError(text)
-            ? JsonTreeNode.Parse(text)
-            : [];
-    }
-}
-
-public sealed class ChatSession
-{
-    public ChatSession(string workspace, string? chatId)
-    {
-        Workspace = workspace;
-        ChatId = chatId;
-        HistoryRequested = chatId is null;
-    }
-
-    public string Workspace { get; }
-    public string? ChatId { get; set; }
-    public ObservableCollection<ChatMessageRow> Items { get; } = [];
-    public bool HistoryRequested { get; set; }
-    public string Status { get; set; } = "";
-    public CancellationTokenSource? Cts { get; private set; }
-    public bool IsBusy => Cts is not null;
-
-    public void BeginTurn()
-    {
-        Cts?.Cancel();
-        Cts?.Dispose();
-        Cts = new CancellationTokenSource();
-    }
-
-    public void EndTurn()
-    {
-        Cts?.Dispose();
-        Cts = null;
-    }
-
-    public void CancelTurn()
-    {
-        Cts?.Cancel();
-        EndTurn();
-    }
-}
 
 public class ChatViewModel : ViewModelBase, IDisposable
 {
@@ -218,9 +105,11 @@ public class ChatViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Retry budget for the first load, so a backend that is still booting does not look like an empty workspace.</summary>
-    public int ApiLoadRetryAttempts { get; set; } = BackendResilience.BootAttempts;
+    public int ApiLoadRetryAttempts { get; set; } = BackendResilience.DefaultAttempts;
 
-    public TimeSpan ApiLoadRetryDelay { get; set; } = BackendResilience.BootDelay;
+    public TimeSpan ApiLoadRetryDelay { get; set; } = BackendResilience.BaseDelay;
+
+    public TimeSpan ApiLoadRetryMaxDelay { get; set; } = BackendResilience.MaxDelay;
 
     public async Task LoadAsync()
     {
@@ -235,6 +124,7 @@ public class ChatViewModel : ViewModelBase, IDisposable
                 _logger,
                 ApiLoadRetryAttempts,
                 ApiLoadRetryDelay,
+                ApiLoadRetryMaxDelay,
                 "chat-load");
 
             var roots = await pipeline.ExecuteAsync<IReadOnlyList<string>?>(
@@ -245,8 +135,16 @@ public class ChatViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            ActiveWorkspace = roots.FirstOrDefault() ?? "";
-            StartChatIn(ActiveWorkspace);
+            // Only adopt a workspace while nothing is open yet. The chat panel is
+            // re-shown on every navigation and each one re-runs this load, so
+            // starting a chat unconditionally wiped the transcript and discarded
+            // the unsent draft every time the user switched away and back.
+            if (_current.Workspace.Length == 0)
+            {
+                ActiveWorkspace = roots.FirstOrDefault() ?? "";
+                StartChatIn(ActiveWorkspace);
+            }
+
             await RefreshSidebarAsync();
             await LoadModelsAsync();
         }
@@ -370,7 +268,10 @@ public class ChatViewModel : ViewModelBase, IDisposable
             {
                 foreach (var message in history)
                 {
-                    session.Items.Add(new ChatMessageRow(message.Role, message.Text, message.ToolName));
+                    // History arrives collapsed: one large chat can carry megabytes of
+                    // tool output, and expanding every row on open built a visual for
+                    // all of it at once.
+                    session.Items.Add(new ChatMessageRow(message.Role, message.Text, message.ToolName, startsExpanded: false));
                 }
             }
 

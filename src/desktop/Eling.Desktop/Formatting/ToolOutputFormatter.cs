@@ -1,15 +1,19 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
+using Eling.Desktop.Models;
 
-namespace Eling.Desktop.ViewModels;
+namespace Eling.Desktop.Formatting;
 
+/// <summary>
 /// Prepares tool output for display in a chat row.
-///
+/// </summary>
+/// <para>
 /// Tool payloads are always JSON, so there is exactly one renderer: a navigable
-/// tree (see JsonTreeNode) and a pretty-printed code view. Only the tool ARGUMENTS
-/// need bespoke handling, because those arrive as a raw JSON string on the header
-/// line rather than as a payload.
+/// tree (see <c>JsonTreeNode</c>) and a pretty-printed code view. Only the tool
+/// ARGUMENTS need bespoke handling, because those arrive as a raw JSON string on
+/// the header line rather than as a payload.
+/// </para>
 public static class ToolOutputFormatter
 {
     private const int MaxArgumentValueLength = 60;

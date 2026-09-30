@@ -139,7 +139,10 @@ public class AgentChatStreamTests : IDisposable
         }
     }
 
-    private sealed record Harness(WorkspaceRegistry Registry, AgentTurnService Turns, FakeStreamingGateway Gateway);
+    private sealed record Harness(
+        WorkspaceRegistry Registry,
+        AgentTurnService Turns,
+        FakeStreamingGateway Gateway);
 
     private sealed class FakeStreamingGateway : IChatGateway
     {

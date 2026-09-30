@@ -92,6 +92,40 @@ public class ChatLoadResilienceTests
     }
 
     [Fact]
+    public async Task LoadAsync_RunAgain_KeepsTheOpenChatAndTheUnsentDraft()
+    {
+        var handler = new StubHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/api/agent/workspaces/"))
+            {
+                return Json("""{"roots":["C:\\work"]}""");
+            }
+
+            if (path.EndsWith("/api/agent/chats/"))
+            {
+                return Json("""[{"id":"c1","workspace":"C:\\work","title":"First chat","updatedAt":"2026-09-30T00:00:00+00:00"}]""");
+            }
+
+            return Json("""{"baseUrl":null,"model":null,"hasKey":false,"modelsCached":[]}""");
+        });
+        var vm = CreateViewModel(handler, attempts: 2, delay: TimeSpan.FromMilliseconds(1));
+
+        await vm.LoadAsync();
+        var opened = vm.Messages;
+        vm.Input = "half-written question";
+
+        // Showing the chat panel again re-runs the load. It must not replace the
+        // session: that discarded the transcript and the draft the user had not
+        // sent yet, and there is no way to get either back.
+        await vm.LoadAsync();
+
+        Assert.Same(opened, vm.Messages);
+        Assert.Equal("half-written question", vm.Input);
+        Assert.Equal("C:\\work", vm.ActiveWorkspace);
+    }
+
+    [Fact]
     public async Task LoadAsync_ReportsFailure_WhenTheRetryBudgetRunsOut()
     {
         var handler = new StubHandler(_ => throw new HttpRequestException("connection refused"));

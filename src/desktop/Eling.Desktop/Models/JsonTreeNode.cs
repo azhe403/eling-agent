@@ -1,15 +1,15 @@
-using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
+using ReactiveUI;
 
-namespace Eling.Desktop.ViewModels;
+namespace Eling.Desktop.Models;
 
+/// <summary>
 /// One node of a navigable JSON tree. Children are themselves nodes, so the view
 /// can render the structure to any depth; each node carries its own expand state
 /// because a collapsed branch must not reopen when an unrelated sibling expands.
-public sealed class JsonTreeNode : INotifyPropertyChanged
+/// </summary>
+public sealed class JsonTreeNode : ReactiveObject
 {
     private bool _isExpanded;
 
@@ -18,11 +18,17 @@ public sealed class JsonTreeNode : INotifyPropertyChanged
     public IReadOnlyList<JsonTreeNode> Children { get; }
 
     public bool IsLeaf => Children.Count == 0;
-    public bool IsExpanded => _isExpanded;
     public string Chevron => IsLeaf ? string.Empty : _isExpanded ? "▾" : "▸";
     public string Display => Value is null ? Label : $"{Label}: {Value}";
 
-    public event PropertyChangedEventHandler? PropertyChanged;
+    // Set rather than computed from the field so the raise happens where
+    // CallerMemberName resolves to IsExpanded. Calling RaiseAndSetIfChanged from
+    // Toggle() instead would announce "Toggle" and the binding would never fire.
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set => this.RaiseAndSetIfChanged(ref _isExpanded, value);
+    }
 
     public JsonTreeNode(
         string label,
@@ -42,9 +48,9 @@ public sealed class JsonTreeNode : INotifyPropertyChanged
 
     public void Toggle()
     {
-        _isExpanded = !_isExpanded;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsExpanded)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Chevron)));
+        IsExpanded = !IsExpanded;
+        // Derived from the same field, so the setter's raise does not cover it.
+        this.RaisePropertyChanged(nameof(Chevron));
     }
 
     public static IReadOnlyList<JsonTreeNode> Parse(string json)

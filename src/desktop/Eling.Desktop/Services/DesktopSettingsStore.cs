@@ -116,7 +116,14 @@ public sealed class DesktopSettingsStore(ILogger<DesktopSettingsStore> logger)
 
     private static string SettingsPath() => Path.Combine(SettingsDirectory(), FileName);
 
-    private sealed record SettingsDocument(string? BackendUrl, WindowBounds? Window);
+    private sealed record SettingsDocument(
+        string? BackendUrl,
+        WindowBounds? Window);
 
-    public sealed record WindowBounds(double X, double Y, double Width, double Height, bool IsMaximized);
+    public sealed record WindowBounds(
+        double X,
+        double Y,
+        double Width,
+        double Height,
+        bool IsMaximized);
 }

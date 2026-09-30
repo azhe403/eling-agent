@@ -122,30 +122,3 @@ public sealed class SaveMemoryResponse
     };
 }
 
-public sealed class NearMatchDto
-{
-    [JsonPropertyName("id")]
-    public MemoryId Id { get; set; }
-
-    [JsonPropertyName("contentPreview")]
-    public string ContentPreview { get; set; } = "";
-
-    [JsonPropertyName("score")]
-    public double Score { get; set; }
-
-    [JsonPropertyName("type")]
-    public MemoryType Type { get; set; }
-
-    [JsonPropertyName("tags")]
-    public IReadOnlyCollection<string> Tags { get; set; } = [];
-
-    public static NearMatchDto From(MemoryNearMatch match) => new()
-    {
-        Id = match.Id,
-        ContentPreview = match.ContentPreview,
-        Score = match.Score,
-        Type = match.Type,
-        Tags = match.Tags
-    };
-}
-

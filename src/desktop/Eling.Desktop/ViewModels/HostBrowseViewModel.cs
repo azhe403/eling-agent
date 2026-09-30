@@ -2,18 +2,12 @@ using System;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
+using Eling.Desktop.Models;
 using Eling.Desktop.Services;
 using Microsoft.Extensions.Logging;
 using ReactiveUI;
 
 namespace Eling.Desktop.ViewModels;
-
-public class HostEntry(string displayName, string fullPath, bool isDirectory)
-{
-    public string DisplayName { get; } = displayName;
-    public string FullPath { get; } = fullPath;
-    public bool IsDirectory { get; } = isDirectory;
-}
 
 public class HostBrowseViewModel : ViewModelBase
 {

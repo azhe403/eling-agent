@@ -18,7 +18,9 @@ public sealed class CodebaseRebuildJobRunnerTests
     private const string RootB = @"C:\repos\beta";
     private const string RootC = @"C:\repos\gamma";
 
-    private sealed record RecordedCall(string Root, bool Full);
+    private sealed record RecordedCall(
+        string Root,
+        bool Full);
 
     [Fact]
     public async Task Start_SingleTarget_IndexesOnlyThatRoot()

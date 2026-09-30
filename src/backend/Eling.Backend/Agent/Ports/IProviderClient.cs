@@ -1,9 +1,5 @@
 namespace Eling.Backend.Agent.Ports;
 
-public record ProviderProbe(
-    bool Ok,
-    string Message);
-
 public interface IProviderClient
 {
     Task<IReadOnlyList<string>> ListModelsAsync(string baseUrl, string? apiKey, CancellationToken ct);

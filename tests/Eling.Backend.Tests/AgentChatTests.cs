@@ -178,7 +178,11 @@ public class AgentChatTests : IAsyncLifetime, IDisposable
         }
     }
 
-    private sealed record Harness(WorkspaceRegistry Registry, BackendChatStore Chats, FakeGateway Gateway, AgentTurnService Turns);
+    private sealed record Harness(
+        WorkspaceRegistry Registry,
+        BackendChatStore Chats,
+        FakeGateway Gateway,
+        AgentTurnService Turns);
 
     private sealed class FakeGateway : IChatGateway
     {

@@ -82,8 +82,12 @@ public sealed class BackendSupervisor(ILogger<BackendSupervisor> logger) : IDisp
             logger.LogDebug("Port {Port}: {Status}", port, response.StatusCode);
             return response.IsSuccessStatusCode;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            // Only the probe's own timeout lands here. A cancellation the caller
+            // actually asked for is not a health verdict, and treating it as one
+            // made a cancelled EnsureBackendRunningAsync fall through and spawn a
+            // backend it had just been told to abandon.
             return false;
         }
         catch (Exception ex)

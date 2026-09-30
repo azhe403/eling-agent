@@ -1,6 +1,4 @@
-using Eling.Desktop.Models;
-
-namespace Eling.Desktop.ViewModels;
+namespace Eling.Desktop.Models;
 
 public class SidebarRow
 {

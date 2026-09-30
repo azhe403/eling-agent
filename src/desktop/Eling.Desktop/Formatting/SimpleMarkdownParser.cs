@@ -1,50 +1,13 @@
-using System;
-using System.Collections.Generic;
 using System.Text.RegularExpressions;
-using Avalonia;
-using Avalonia.Input.Platform;
+using Eling.Desktop.Models;
 
-namespace Eling.Desktop.ViewModels;
+namespace Eling.Desktop.Formatting;
 
-public enum MessageBlockType
-{
-    Text,
-    Code
-}
-
-public sealed class MessageBlock
-{
-    public MessageBlockType Type { get; }
-    public string Content { get; }
-    public string? Language { get; }
-
-    public bool IsCode => Type == MessageBlockType.Code;
-    public bool IsText => Type == MessageBlockType.Text;
-    public string LanguageDisplay => string.IsNullOrWhiteSpace(Language) ? "code" : Language.ToLowerInvariant();
-
-    public MessageBlock(MessageBlockType type, string content, string? language = null)
-    {
-        Type = type;
-        Content = content;
-        Language = language;
-    }
-
-    public async void CopyToClipboard()
-    {
-        try
-        {
-            if (Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop &&
-                desktop.MainWindow?.Clipboard is { } clipboard)
-            {
-                await clipboard.SetTextAsync(Content);
-            }
-        }
-        catch
-        {
-        }
-    }
-}
-
+/// <summary>
+/// Splits a markdown message into the text and fenced-code blocks a chat row
+/// renders. Deliberately fence-only: inline spans are handled by the view's
+/// <c>InlineFormattedTextBlock</c>, so this stays a pure function of the input.
+/// </summary>
 public static class SimpleMarkdownParser
 {
     private static readonly Regex CodeFenceRegex = new(@"\x60\x60\x60([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)\x60\x60\x60", RegexOptions.Compiled);

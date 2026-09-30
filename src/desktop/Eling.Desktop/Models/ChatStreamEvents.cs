@@ -6,9 +6,13 @@ public record StreamStarted(string ChatId) : ChatStreamEvent;
 
 public record StreamDelta(string Delta) : ChatStreamEvent;
 
-public record StreamTool(string Name, string Arguments) : ChatStreamEvent;
+public record StreamTool(
+    string Name,
+    string Arguments) : ChatStreamEvent;
 
-public record StreamToolResult(string Name, string Output) : ChatStreamEvent;
+public record StreamToolResult(
+    string Name,
+    string Output) : ChatStreamEvent;
 
 public record StreamDone(TurnDto Turn) : ChatStreamEvent;
 

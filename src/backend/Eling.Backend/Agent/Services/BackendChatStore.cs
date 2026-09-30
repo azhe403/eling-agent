@@ -8,15 +8,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Eling.Backend.Agent.Services;
 
-public sealed class ChatRecord
-{
-    public string Id { get; set; } = string.Empty;
-    public string Workspace { get; set; } = string.Empty;
-    public string Title { get; set; } = string.Empty;
-    public DateTimeOffset UpdatedAt { get; set; }
-    public List<AgentMessage> Messages { get; set; } = [];
-}
-
 public sealed class BackendChatStore
 {
     private static JsonSerializerOptions JsonOptions => JsonDefaults.Shared;

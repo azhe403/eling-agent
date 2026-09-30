@@ -1,7 +1,8 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Eling.Desktop.ViewModels"
-             xmlns:views="using:Eling.Desktop.Views"
+             xmlns:models="using:Eling.Desktop.Models"
+             xmlns:controls="using:Eling.Desktop.Controls"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="870" d:DesignHeight="700"
@@ -10,7 +11,7 @@
              Loaded="OnLoaded" Unloaded="OnUnloaded">
 
     <UserControl.Resources>
-        <DataTemplate x:Key="JsonNodeTemplate" x:DataType="vm:JsonTreeNode">
+        <DataTemplate x:Key="JsonNodeTemplate" x:DataType="models:JsonTreeNode">
             <StackPanel>
                 <StackPanel Orientation="Horizontal">
                     <Button Background="Transparent" BorderThickness="0" Padding="0"
@@ -63,7 +64,7 @@
                         </Style>
                     </ListBox.Styles>
                     <ListBox.ItemTemplate>
-                        <DataTemplate x:DataType="vm:SidebarRow">
+                        <DataTemplate x:DataType="models:SidebarRow">
                             <Border CornerRadius="4" Padding="8,5" Margin="0,1">
                                 <TextBlock Text="{Binding ItemDisplay}"
                                            FontSize="{Binding FontSize}"
@@ -103,7 +104,7 @@
                 <ItemsControl x:Name="MessagesItemsControl"
                               ItemsSource="{Binding Messages}">
                     <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:ChatMessageRow">
+                        <DataTemplate x:DataType="models:ChatMessageRow">
                             <Border Classes="memory-card" Margin="0,3,0,6">
                                 <Grid RowDefinitions="Auto,Auto,Auto">
                                     <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
@@ -151,10 +152,10 @@
                                         <ItemsControl ItemsSource="{Binding CodeBlocks}"
                                                       IsVisible="{Binding !ShowTree}">
                                     <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="vm:MessageBlock">
+                                        <DataTemplate x:DataType="models:MessageBlock">
                                             <Panel Margin="0,2,0,4">
                                                 <!-- Plain Text Block -->
-                                                <views:InlineFormattedTextBlock Source="{Binding Content}"
+                                                <controls:InlineFormattedTextBlock Source="{Binding Content}"
                                                                                  IsVisible="{Binding IsText}"
                                                                                  FontSize="13.5"
                                                                                  FontFamily="Inter,Segoe UI,sans-serif"

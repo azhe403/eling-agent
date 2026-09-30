@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Reactive.Threading.Tasks;
 using System.Threading;
 using System.Threading.Tasks;
+using Eling.Desktop.Formatting;
 using Eling.Desktop.Services;
 using Eling.Desktop.ViewModels;
 using Microsoft.Extensions.Logging.Abstractions;

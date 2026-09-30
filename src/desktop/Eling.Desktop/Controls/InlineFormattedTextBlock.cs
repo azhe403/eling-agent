@@ -5,11 +5,23 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Media;
 
-namespace Eling.Desktop.Views;
+namespace Eling.Desktop.Controls;
 
-/// Renders inline markdown inside a text block: `code`, **bold** and *italic*.
-/// The block-level parser only handles fenced blocks, so without this an assistant
-/// line like CWD: `C:\some\path` shows its backticks verbatim.
+/// <summary>
+/// Renders inline markdown inside a text block: <c>`code`</c>, <c>**bold**</c>
+/// and <c>*italic*</c>. The block-level parser only handles fenced blocks, so
+/// without this an assistant line like <c>CWD: `C:\some\path`</c> shows its
+/// backticks verbatim.
+/// </summary>
+/// <remarks>
+/// Flat by construction: <see cref="Rebuild"/> makes one pass and never recurses,
+/// so an emphasised span cannot contain a styled span. Two consequences to know
+/// about before trusting it with arbitrary model output — a single <c>*</c> on
+/// each side of ordinary text renders as italic (<c>2 * 3 * 4</c> loses its
+/// asterisks), and <c>**bold with *italic* inside**</c> leaves a stray <c>*</c>
+/// because the content pattern stops at the first inner asterisk. Fixing this
+/// means either recursing per span or taking a markdown dependency.
+/// </remarks>
 public sealed class InlineFormattedTextBlock : TextBlock
 {
     private static readonly Regex TokenRegex = new(
