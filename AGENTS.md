@@ -9,6 +9,11 @@ Backend dev (`eling_dev`) → **4417**; Frontend → **4427** (proxy `/api/*` �
 ## Memory & Conventions
 - All memory operations and context hydration use Eling MCP tools (`eling_dev_*` / `eling_*`).
 
+## Weekly NuGet Check (every prompt)
+- Read `NUGET-WEEKLY-CHECK.md` at the start of every session. If its "Last run" is **7+ days old** (or absent), the check is due: run `dotnet list package --outdated --include-prerelease` and update "Last run".
+- Bump scope is **patch + minor only, stable releases, same major**. Skip major bumps, RCs, and CI/dev builds.
+- That file is a provisional stand-in for an Eling memory that could not be written (wedged MCP link). Once opencode is restarted, migrate it to Eling memory, then delete the file and this section.
+
 ## C# Code Organization (enforced by `CodeOrganizationConventionTests`)
 - One top-level type per file. The only exception is records grouped per area (e.g. `Dtos/*Dtos.cs`, `*Models.cs`) — never extend the test's allowlist, split the file instead.
 - Records with more than one parameter are chopped one-param-per-line, never single-line.

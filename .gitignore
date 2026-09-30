@@ -18,15 +18,17 @@ build/
 *.log
 
 # Databases / Caches
+# *.db matches the database itself; *.db-* matches every SQLite sidecar
+# (-journal, -wal, -shm, -wal2). Prefer this over naming each suffix: sidecars
+# are always "<name>.db-<suffix>", so the pattern stays complete as SQLite adds
+# more, and it does not over-match unrelated names like *.dbf or *.dbg.
 *.db
-*.db-journal
-*.db-wal
+*.db-*
 
 # Eling (generated runtime files; .eling/memories/ is tracked in git)
+# Databases are already covered by the *.db / *.db-* rules above, so only the
+# runtime directory is named here.
 .eling/index.db*
-.eling/*.db
-.eling/*.db-journal
-.eling/*.db-wal
 .eling/runtime/
 
 # Superpowers scratch directory

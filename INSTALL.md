@@ -31,7 +31,7 @@ curl http://127.0.0.1:4317/health
 
 ## Option A — Prebuilt binary (recommended for users & agents)
 
-No prerequisites. No DB setup. Storage is `.eling/memories/*.md` + `index.db` (auto-created).
+No prerequisites. No DB setup. Storage is `.eling/memories/*.md` + `memory.db` (auto-created).
 
 Pick the asset for your need (full matrix: `docs/release.md`):
 
@@ -186,7 +186,7 @@ eling_install:
   publish_staging: scripts/publish-global.ps1  # Release self-contained single-file → user-local bin + smoke test
   ports: { staging: 4317, dev: 4417, frontend: 4427 }
   storage_canonical: .eling/memories/*.md   # tracked in Git
-  storage_cache: .eling/index.db*           # gitignored, rebuildable
+  storage_cache: .eling/memory.db*          # gitignored, rebuildable
   runtime_probe: "GET http://127.0.0.1:$PORT/health"
   mcp_transport: stdio
   session_start_tool: memory_recall   # on-demand context hydration (renamed from session_start; call any time during a conversation)

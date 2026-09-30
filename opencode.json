@@ -1,76 +1,45 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "eling": {
-      "type": "local",
-      "command": [
-        "eling-backend"
-      ],
-      "enabled": true
-    },
-    "eling_dev": {
-      "enabled": true,
-      "type": "local",
-      "command": [
-        "dotnet",
-        "watch",
-        "--project",
-        "src/backend/Eling.Backend/Eling.Backend.csproj"
-      ],
-      "cwd": ".",
-      "environment": {
-        "ELING_OUTPUT_ROOT": ".bin-opencode",
-        "ELING_DASHBOARD_PORT": "4417",
-        "ELING_WATCH_DASHBOARD": "1"
+    "servers": {
+      "eling_dev": {
+        "type": "local",
+        "command": [
+          "dotnet",
+          "watch",
+          "--project",
+          "src/backend/Eling.Backend/Eling.Backend.csproj"
+        ],
+        "cwd": ".",
+        "environment": {
+          "ELING_OUTPUT_ROOT": ".bin-opencode",
+          "ELING_DASHBOARD_PORT": "4417",
+          "ELING_WATCH_DASHBOARD": "1",
+          "XDOTNET_WATCH_RESTART_ON_RUDE_EDIT": "1"
+        },
+        "disabled": false,
+        "timeout": {
+          "startup": 60000,
+          "catalog": 30000,
+          "execution": 30000
+        }
+      },
+      "eling": {
+        "type": "local",
+        "command": [
+          "eling-backend"
+        ],
+        "disabled": false
+      },
+      "shadcn": {
+        "type": "local",
+        "command": [
+          "npx",
+          "shadcn@latest",
+          "mcp"
+        ],
+        "disabled": false
       }
-    },
-    "shadcn": {
-      "type": "local",
-      "command": [
-        "npx",
-        "shadcn@latest",
-        "mcp"
-      ],
-      "enabled": true
-    },
-    "next-devtools": {
-      "type": "local",
-      "command": [
-        "npx",
-        "-y",
-        "@vercel/next-devtools-mcp"
-      ],
-      "enabled": true
-    },
-    "playwright": {
-      "enabled": true,
-      "type": "local",
-      "command": [
-        "npx",
-        "-y",
-        "@playwright/mcp@latest"
-      ]
-    },
-    "github": {
-      "enabled": true,
-      "type": "local",
-      "command": [
-        "npx",
-        "-y",
-        "@modelcontextprotocol/server-github"
-      ],
-      "environment": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "${env:GITHUB_PERSONAL_ACCESS_TOKEN}"
-      }
-    },
-    "context7": {
-      "enabled": true,
-      "type": "local",
-      "command": [
-        "npx",
-        "-y",
-        "@upstash/context7-mcp"
-      ]
     }
   }
 }
