@@ -11,12 +11,53 @@
          a flat layout inside each folder (all projects' output side-by-side).
          obj/ stays per-project (default `obj/<Config>/<Framework>/`). -->
     <ElingOutputRoot Condition="'$(ElingOutputRoot)' == ''">$([System.Environment]::GetEnvironmentVariable('ELING_OUTPUT_ROOT'))</ElingOutputRoot>
+    <!-- Remember whether the caller chose the root. A test project must not
+         silently inherit the dev root just because the variable was unset. -->
+    <ElingOutputRootExplicit Condition="'$(ElingOutputRoot)' != ''">true</ElingOutputRootExplicit>
     <ElingOutputRoot Condition="'$(ElingOutputRoot)' == ''">.bin</ElingOutputRoot>
     <!-- OutputPath relative to solution root (where Directory.Build.props lives).
-         The SDK will append the target framework (and RID) automatically. -->
-    <OutputPath>$(MSBuildThisFileDirectory)$(ElingOutputRoot)\$(Configuration)\</OutputPath>
+         Flat layout: all projects' binaries land side-by-side in one folder.
+         AppendTargetFrameworkToOutputPath / AppendConfigurationToOutputPath
+         are disabled so the SDK does not append net10.0 or Debug subfolders. -->
+    <OutputPath>$(MSBuildThisFileDirectory)$(ElingOutputRoot)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendConfigurationToOutputPath>false</AppendConfigurationToOutputPath>
     <!-- eling-live MCP launches via `dotnet run`: any MSBuild output would pollute
           the stdout JSON-RPC stream. Keep restore/build output silent repo-wide. -->
     <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+
+  <!-- Test projects get their own output root by default, so a bare
+       `dotnet test` works with no environment variable set.
+       The tool/MCP exes keep the flat $(ElingOutputRoot) folder, which is what
+       that layout exists for; sharing one folder with test projects is what
+       breaks test runs:
+         - the test SDK copies testhost.exe (an apphost) into the output root on
+           every build, and an apphost resolves hostfxr app-locally first — so a
+           hostfxr.dll sitting in that folder makes it look for a shared/
+           framework beside it, fail, and fall back to whatever install is
+           registered;
+         - the process-spawning tests (McpProcessTests, DashboardLifecycleTests)
+           start the backend exe from the output root, inheriting whatever
+           runtime files happen to be there.
+       An explicit ELING_OUTPUT_ROOT always wins, so `pnpm test:backend` and
+       scripts/ci-check.sh keep working unchanged.
+       UseAppHost=false does NOT fix the first problem: it suppresses the
+       project's own apphost, not the testhost.exe the test SDK copies in. -->
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <!-- Root choice and per-project separation are two separate concerns. An
+         explicit ELING_OUTPUT_ROOT still picks WHICH root; the subfolder is
+         unconditional, because three test projects sharing one directory race
+         each other copying the same dependency (MSB3026, file locked by
+         testhost) no matter which root that is. Gating the subfolder on
+         "was the variable set?" left pnpm test:backend — which does set it —
+         as exactly the case that collides. -->
+    <ElingOutputRoot Condition="'$(ElingOutputRootExplicit)' != 'true'">.bin-test</ElingOutputRoot>
+    <!-- Re-derive OutputPath: it was already expanded with the dev root in
+         the PropertyGroup above, so changing ElingOutputRoot alone is not
+         enough (MSBuild properties are not re-evaluated retroactively).
+         Product binaries stay in the root itself, which is where
+         TestProcesses looks when it spawns the backend. -->
+    <OutputPath>$(MSBuildThisFileDirectory)$(ElingOutputRoot)\$(MSBuildProjectName)\</OutputPath>
   </PropertyGroup>
 </Project>

@@ -1,4 +1,5 @@
 <Solution>
+  <Folder Name="/src/" />
   <Folder Name="/src/backend/">
     <Project Path="src/backend/Eling.Core/Eling.Core.csproj" />
     <Project Path="src/backend/Eling.Backend/Eling.Backend.csproj" />
@@ -9,5 +10,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/Eling.Core.Tests/Eling.Core.Tests.csproj" />
     <Project Path="tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj" />
+    <Project Path="tests/Eling.Desktop.Tests/Eling.Desktop.Tests.csproj" />
   </Folder>
 </Solution>

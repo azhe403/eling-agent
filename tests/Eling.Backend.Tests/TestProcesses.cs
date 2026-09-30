@@ -33,26 +33,32 @@ public static class TestProcesses
         return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", ".."));
     }
 
-    public static string HostDll { get; } =
-        ResolveTestBinary("Eling.Backend", "eling-backend.dll");
+    public static string HostDll { get; } = ResolveHostBinary("eling-backend.dll");
 
-    private static string ResolveTestBinary(string projectName, string binaryName)
+    /// <summary>
+    /// Resolves a product binary. Products are built into the dev output root,
+    /// not into the per-project test folder, which now holds test assemblies
+    /// only — so the output root decides, never the file timestamps. Ranking
+    /// both roots by mtime let a stale copy in the test root shadow the real
+    /// build, which is the opposite of what a test should exercise.
+    /// </summary>
+    private static string ResolveHostBinary(string binaryName)
     {
-        var candidates = new[]
+        var configured = Environment.GetEnvironmentVariable("ELING_OUTPUT_ROOT");
+        var roots = new[]
         {
-            Path.Combine(RepoRoot, ".bin-test", "bin", projectName, "debug", binaryName),
-            Path.Combine(RepoRoot, ".bin", "Debug", "net10.0", binaryName),
-            Path.Combine(RepoRoot, ".bin", "net10.0", binaryName),
-            Path.Combine(RepoRoot, ".bin", "Debug", binaryName),
-            Path.Combine(RepoRoot, ".bin", binaryName)
+            string.IsNullOrWhiteSpace(configured) ? ".bin" : configured,
+            ".bin",
+            ".bin-test",
         };
 
-        var existing = candidates
-            .Where(File.Exists)
-            .OrderByDescending(File.GetLastWriteTimeUtc)
-            .FirstOrDefault();
+        foreach (var root in roots)
+        {
+            var path = Path.Combine(RepoRoot, root, binaryName);
+            if (File.Exists(path)) return path;
+        }
 
-        return existing ?? candidates[0];
+        return Path.Combine(RepoRoot, roots[0], binaryName);
     }
 
     /// <summary>Fast liveness intervals so lifecycle tests finish in seconds.</summary>

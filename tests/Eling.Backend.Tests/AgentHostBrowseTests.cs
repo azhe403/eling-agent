@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 
 namespace Eling.Backend.Tests;
 
+[Collection(ElingDataDirCollection.Name)]
 public class AgentHostBrowseTests : IAsyncLifetime, IDisposable
 {
     private WebApplication? _app;

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 
 namespace Eling.Backend.Tests;
 
+[Collection(ElingDataDirCollection.Name)]
 public class AgentProviderTests : IAsyncLifetime, IDisposable
 {
     private WebApplication? _app;
