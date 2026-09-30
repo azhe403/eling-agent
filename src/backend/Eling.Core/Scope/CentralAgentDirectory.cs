@@ -3,8 +3,9 @@ namespace Eling.Core.Scope;
 public static class CentralAgentDirectory
 {
     /// <summary>
-    /// Resolves the central Eling agent directory under ~/.local/share/eling/
+    /// Resolves the central Eling agent directory under data-root/eling/
     /// for global configuration and data (workspaces, provider, chats).
+    /// Data root follows <see cref="ElingPaths.ResolveDataDir"/>.
     /// </summary>
     public static string Resolve(string? subDirectory = null, string? xdgDataHome = null, string? userHome = null)
     {
@@ -19,20 +20,7 @@ public static class CentralAgentDirectory
             return customPath;
         }
 
-        var envXdg = !string.IsNullOrWhiteSpace(xdgDataHome)
-            ? xdgDataHome
-            : Environment.GetEnvironmentVariable("XDG_DATA_HOME");
-
-        var home = string.IsNullOrWhiteSpace(userHome)
-            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
-            : userHome;
-        ArgumentException.ThrowIfNullOrWhiteSpace(home);
-
-        var dataRoot = !string.IsNullOrWhiteSpace(envXdg)
-            ? envXdg!
-            : Path.Combine(home, ".local", "share");
-
-        var basePath = Path.Combine(dataRoot, "eling");
+        var basePath = ElingPaths.ResolveDataDir(xdgDataHome, userHome);
         var path = string.IsNullOrWhiteSpace(subDirectory)
             ? basePath
             : Path.Combine(basePath, subDirectory);

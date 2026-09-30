@@ -11,6 +11,8 @@ namespace Eling.Backend.Tests.FileSystem;
 /// </summary>
 internal sealed class FakeFileSystemService : IFileSystemService
 {
+    public string WorkspaceRoot => _rootPath;
+
     private sealed class FakeEntry
     {
         public PathKind Kind { get; set; }

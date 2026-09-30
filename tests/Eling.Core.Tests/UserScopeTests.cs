@@ -9,12 +9,13 @@ public sealed class UserScopeTests
     {
         var scope = UserScope.Resolve();
 
-        var expected = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".config", "eling");
-        Assert.Equal(expected, scope.Root);
-        Assert.Equal(Path.Combine(expected, "config"), scope.ConfigDirectory);
-        Assert.Equal(Path.Combine(expected, "runtime"), scope.RuntimeDirectory);
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var expectedConfig = Path.Combine(home, ".config", "eling");
+        var expectedData = Path.Combine(home, ".local", "share", "eling");
+
+        Assert.Equal(expectedConfig, scope.Root);
+        Assert.Equal(Path.Combine(expectedConfig, "config"), scope.ConfigDirectory);
+        Assert.Equal(Path.Combine(expectedData, "runtime"), scope.RuntimeDirectory);
     }
 
     [Fact]

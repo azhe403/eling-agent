@@ -7,6 +7,11 @@ namespace Eling.Core.FileSystem;
 /// </summary>
 public interface IFileSystemService
 {
+    /// <summary>
+    /// Absolute sandbox root that every relative path resolves under.
+    /// </summary>
+    string WorkspaceRoot { get; }
+
     PathInfo TestPath(string path, bool allowExternal = false);
     DirectoryCreateResult CreateDirectory(string path);
     IReadOnlyList<DirectoryEntry> ListDirectory(string path, bool recursive = false, int maxDepth = 3, string? pattern = null, bool allowExternal = false);

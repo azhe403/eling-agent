@@ -343,7 +343,7 @@ public sealed class RuntimeRegistry : IDisposable
             {
                 service = new MemoryService(
                     new FileSystemMemoryStorage(directory),
-                    new SqliteMemoryIndex(Path.Combine(directory, "index.db")));
+                    new SqliteMemoryIndex(Path.Combine(directory, "memory.db")));
                 _memoryByDataDirectory[directory] = service;
             }
 
@@ -358,7 +358,7 @@ public sealed class RuntimeRegistry : IDisposable
             if (_globalService is not null) return _globalService;
             _globalService = new MemoryService(
                 new FileSystemMemoryStorage(_userScope.GlobalDataDirectory),
-                new SqliteMemoryIndex(Path.Combine(_userScope.GlobalDataDirectory, "index.db")));
+                new SqliteMemoryIndex(Path.Combine(_userScope.GlobalDataDirectory, "memory.db")));
             return _globalService;
         }
     }
@@ -374,7 +374,7 @@ public sealed class RuntimeRegistry : IDisposable
             {
                 service = new MemoryService(
                     new FileSystemMemoryStorage(runtime.DataDirectory),
-                    new SqliteMemoryIndex(Path.Combine(runtime.DataDirectory, "index.db")));
+                    new SqliteMemoryIndex(Path.Combine(runtime.DataDirectory, "memory.db")));
                 _memoryByDataDirectory[runtime.DataDirectory] = service;
             }
 
@@ -393,7 +393,7 @@ public sealed class RuntimeRegistry : IDisposable
             {
                 service = new MemoryService(
                     new FileSystemMemoryStorage(runtime.DataDirectory),
-                    new SqliteMemoryIndex(Path.Combine(runtime.DataDirectory, "index.db")));
+                    new SqliteMemoryIndex(Path.Combine(runtime.DataDirectory, "memory.db")));
                 _memoryByDataDirectory[runtime.DataDirectory] = service;
             }
 
@@ -421,7 +421,7 @@ public sealed class RuntimeRegistry : IDisposable
                 {
                     service = new MemoryService(
                         new FileSystemMemoryStorage(runtimeDataDir),
-                        new SqliteMemoryIndex(Path.Combine(runtimeDataDir, "index.db")));
+                        new SqliteMemoryIndex(Path.Combine(runtimeDataDir, "memory.db")));
                     _memoryByDataDirectory[runtimeDataDir] = service;
                 }
 
@@ -437,7 +437,7 @@ public sealed class RuntimeRegistry : IDisposable
                     {
                         localService = new MemoryService(
                             new FileSystemMemoryStorage(localDataDir),
-                            new SqliteMemoryIndex(Path.Combine(localDataDir, "index.db")));
+                            new SqliteMemoryIndex(Path.Combine(localDataDir, "memory.db")));
                         _memoryByDataDirectory[localDataDir] = localService;
                     }
 

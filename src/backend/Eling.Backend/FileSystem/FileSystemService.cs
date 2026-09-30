@@ -39,6 +39,8 @@ public sealed class FileSystemService : IFileSystemService
         _logger = logger;
     }
 
+    public string WorkspaceRoot => _rootPath;
+
     public PathInfo TestPath(string path, bool allowExternal = false)
     {
         var full = ResolvePath(path, allowExternal);
