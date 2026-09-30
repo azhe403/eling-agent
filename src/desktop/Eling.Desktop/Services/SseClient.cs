@@ -48,8 +48,19 @@ public sealed class SseClient : IDisposable
                 // Every execution starts the ramp again at the base delay, so a stream
                 // that was healthy reconnects quickly while a backend that never comes
                 // up settles onto the cap instead of being retried in a tight loop.
-                await pipeline.ExecuteAsync<object?>(
-                    token => new ValueTask<object?>(RunStreamAsync(token)),
+                //
+                // ExecuteAsync<bool> around ValueTask<bool>, not ExecuteAsync<object?>
+                // around a plain Task. ValueTask<object?> has no ctor taking a
+                // non-generic Task, so the compiler picks ValueTask(object?), which
+                // stores the Task as the *result* and completes instantly. The stream
+                // then runs unobserved, this policy never sees a failure so it never
+                // retries, and the loop below opens a new connection every delay.
+                //
+                // The result type has to be bool and not object?: Task<T> is invariant,
+                // so Task<bool> would not bind to ValueTask<object?> either - the
+                // types have to match on both sides or the same trap reopens.
+                await pipeline.ExecuteAsync<bool>(
+                    token => new ValueTask<bool>(RunStreamAsync(token)),
                     cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -76,7 +87,18 @@ public sealed class SseClient : IDisposable
         }
     }
 
-    private async Task RunStreamAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Holds the stream open until the server closes it or the caller cancels.
+    /// </summary>
+    /// <remarks>
+    /// The result is never read - <c>ForExceptions</c> retries on exception, not on
+    /// value. It returns <c>Task&lt;bool&gt;</c> rather than a plain <c>Task</c> so
+    /// the call site can bind <c>ValueTask&lt;bool&gt;(Task&lt;bool&gt;)</c>. A
+    /// non-generic Task silently resolves to the <c>ValueTask(object?)</c>
+    /// constructor instead, which starts the stream without awaiting it and turns
+    /// the retry policy off.
+    /// </remarks>
+    private async Task<bool> RunStreamAsync(CancellationToken cancellationToken)
     {
         OnStatusChanged?.Invoke("connecting");
         _logger.LogDebug("Connecting to SSE stream...");
@@ -108,6 +130,11 @@ public sealed class SseClient : IDisposable
                     OnMemoryChanged?.Invoke();
             }
         }
+
+        // The server closed the stream. Not a failure: anything worth retrying was
+        // already retried inside the policy, so returning hands control back to the
+        // reconnect delay in the caller.
+        return true;
     }
 
     public void Dispose()
