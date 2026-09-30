@@ -47,8 +47,15 @@ if [ "$HAS_BACKEND" -eq 1 ]; then
   echo "[eling] backend: restore + build (solution)"
   cross-env ELING_OUTPUT_ROOT=.bin-test dotnet restore Eling.slnx
   cross-env ELING_OUTPUT_ROOT=.bin-push dotnet build Eling.slnx
-  echo "[eling] backend: tests (solution, excluding DashboardLifecycleTests)"
-  cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test Eling.slnx --filter FullyQualifiedName!~DashboardLifecycleTests
+  echo "[eling] backend: tests (per project, excluding DashboardLifecycleTests)"
+  # dotnet test driven through Eling.slnx starts the backend test host and then
+  # never reports a result for it, while still exiting 0. Every backend assertion
+  # was therefore dropped from this gate and the hook looked green. Verified by
+  # A/B: the same project invoked directly reports all 413 tests, with and without
+  # ELING_OUTPUT_ROOT set, so the solution file is the trigger and not the env var.
+  cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj
+  cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests
+  cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test tests/Eling.Desktop.Tests/Eling.Desktop.Tests.csproj
 fi
 
 if [ "$HAS_FRONTEND" -eq 1 ]; then

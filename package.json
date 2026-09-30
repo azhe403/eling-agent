@@ -11,10 +11,11 @@
     "typecheck:frontend": "pnpm --prefix src/frontend/Eling.Dashboard exec tsc --noEmit",
     "validate:backend": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet restore Eling.slnx",
     "build:backend": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet build Eling.slnx",
-    "test:backend": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test Eling.slnx --filter FullyQualifiedName!~DashboardLifecycleTests",
+    "test:backend": "pnpm run test:backend:core && pnpm run test:backend:api && pnpm run test:backend:desktop",
     "test:backend:full": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test Eling.slnx",
     "test:backend:core": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj",
-    "test:backend:api": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj",
+    "test:backend:api": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests",
+    "test:backend:desktop": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test tests/Eling.Desktop.Tests/Eling.Desktop.Tests.csproj",
     "build:frontend": "pnpm --prefix src/frontend/Eling.Dashboard build"
   },
   "devDependencies": {
