@@ -67,11 +67,30 @@ public class FoldersViewModel : ViewModelBase
         CancelEditCommand = ReactiveCommand.Create(() => { IsEditing = false; });
     }
 
+    /// <summary>Retry budget for the first load, so a backend that is still booting does not look like an empty workspace.</summary>
+    public int ApiLoadRetryAttempts { get; set; } = BackendResilience.BootAttempts;
+
+    public TimeSpan ApiLoadRetryDelay { get; set; } = BackendResilience.BootDelay;
+
     public async Task LoadAsync()
     {
         try
         {
-            var roots = await _apiClient.GetWorkspacesAsync();
+            var pipeline = BackendResilience.ForResult<IReadOnlyList<string>?>(
+                static roots => roots is null,
+                _logger,
+                ApiLoadRetryAttempts,
+                ApiLoadRetryDelay,
+                "folder-load");
+
+            var roots = await pipeline.ExecuteAsync<IReadOnlyList<string>?>(
+                _ => new ValueTask<IReadOnlyList<string>?>(_apiClient.GetWorkspacesAsync()));
+            if (roots is null)
+            {
+                _logger.LogWarning("Folder load gave up: the backend did not respond");
+                return;
+            }
+
             Roots.Clear();
             foreach (var root in roots)
             {

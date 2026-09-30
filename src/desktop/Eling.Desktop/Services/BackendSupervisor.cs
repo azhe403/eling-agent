@@ -42,15 +42,31 @@ public sealed class BackendSupervisor(ILogger<BackendSupervisor> logger) : IDisp
 
         // 4. Poll until healthy
         var sw = Stopwatch.StartNew();
-        while (sw.Elapsed < TimeSpan.FromSeconds(20) && !cancellationToken.IsCancellationRequested)
+        var probe = BackendResilience.ForResult<bool>(
+            static healthy => !healthy,
+            logger,
+            name: "health-probe");
+
+        bool healthy;
+        try
         {
-            if (await IsHealthyAsync(4417, cancellationToken))
-            {
-                ActivePort = 4417;
-                logger.LogInformation("Backend started on port {Port} after {Elapsed}s", ActivePort, sw.ElapsedMilliseconds / 1000.0);
-                return BaseUrl!;
-            }
-            await Task.Delay(500, cancellationToken);
+            healthy = await probe.ExecuteAsync<bool>(
+                _ => new ValueTask<bool>(IsHealthyAsync(4417, cancellationToken)),
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Backend health probe gave up");
+            throw new InvalidOperationException(
+                "Backend failed to start or respond to health check within 20 seconds.",
+                ex);
+        }
+
+        if (healthy)
+        {
+            ActivePort = 4417;
+            logger.LogInformation("Backend started on port {Port} after {Elapsed}s", ActivePort, sw.ElapsedMilliseconds / 1000.0);
+            return BaseUrl!;
         }
 
         throw new InvalidOperationException("Backend failed to start or respond to health check within 20 seconds.");

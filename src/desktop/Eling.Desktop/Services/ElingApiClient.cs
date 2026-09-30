@@ -311,7 +311,7 @@ public sealed class ElingApiClient
         return null;
     }
 
-    public async Task<IReadOnlyList<string>> GetWorkspacesAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<string>?> GetWorkspacesAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -328,7 +328,7 @@ public sealed class ElingApiClient
         {
             _logger.LogError(ex, "Error fetching workspaces");
         }
-        return [];
+        return null;
     }
 
     public async Task<bool> AddWorkspaceAsync(string path, CancellationToken cancellationToken = default)

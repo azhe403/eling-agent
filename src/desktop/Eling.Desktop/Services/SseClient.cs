@@ -14,6 +14,14 @@ public sealed class SseClient : IDisposable
     private CancellationTokenSource? _cts;
     private Task? _listenTask;
 
+    /// <summary>
+    /// Shared with the other boot policies so one place owns the reconnect budget.
+    /// The loop itself stays deliberately unbounded: the event stream is the one
+    /// connection the app cannot afford to give up on, so it reconnects forever
+    /// rather than exhausting a retry budget and going quiet.
+    /// </summary>
+    private static readonly TimeSpan ReconnectDelay = BackendResilience.ReconnectDelay;
+
     public event Action? OnMemoryChanged;
     public event Action? OnRuntimesChanged;
     public event Action<string>? OnStatusChanged;
@@ -80,12 +88,12 @@ public sealed class SseClient : IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "SSE connection lost, reconnecting in 3s...");
+                _logger.LogWarning(ex, "SSE connection lost, reconnecting after {Delay}...", ReconnectDelay);
                 OnStatusChanged?.Invoke("error");
 
                 try
                 {
-                    await Task.Delay(3000, cancellationToken);
+                    await Task.Delay(ReconnectDelay, cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
