@@ -1,8 +1,12 @@
 using System.Net;
 using System.Net.Sockets;
 using Eling.Core;
+using Eling.Core.Logging;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Logging;
+// Aliased: `ILogger` is ambiguous with Microsoft.Extensions.Logging.ILogger
+// once Serilog is imported unqualified, and this file logs through both.
+using SerilogLog = Serilog.Log;
 
 namespace Eling.Backend.Bootstrap;
 
@@ -139,6 +143,19 @@ public static class HttpLoop
         DashboardServices.Register(builder.Services, context, shared, ownerMode);
 
         var app = builder.Build();
+
+        // Ground truth for the [env:] field the enricher stamps on every line.
+        // The enricher re-implements the host's precedence rule; logging the
+        // host's own resolved name next to it makes a divergence visible instead
+        // of letting the log quietly report an environment the host disagrees
+        // with. Read from the built app, not the env vars, so this is the value
+        // the web stack actually runs under.
+        SerilogLog.Information(
+            "ASP.NET environment: {HostEnvironment} (enricher reports {EnrichedEnvironment})",
+            app.Environment.EnvironmentName,
+            AspNetEnvironmentEnricher.Resolve(
+                Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"),
+                Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")));
 
         if (ownerMode)
         {

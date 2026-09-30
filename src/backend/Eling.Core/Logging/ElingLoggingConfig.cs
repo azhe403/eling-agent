@@ -7,7 +7,7 @@ namespace Eling.Core.Logging;
 public static class ElingLoggingConfig
 {
     public const string DefaultOutputTemplate =
-        "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [pid:{ProcessId}] [project:{ProjectId}] [{CorrelationId}] {Message:lj}{NewLine}{Exception}";
+        "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [pid:{ProcessId}] [project:{ProjectId}] [env:{AspNetEnvironment}] [{CorrelationId}] {Message:lj}{NewLine}{Exception}";
 
     public static MessageTemplateTextFormatter CreateDefaultFormatter(string? outputTemplate = null) =>
         new(outputTemplate ?? DefaultOutputTemplate);
@@ -44,6 +44,7 @@ public static class ElingLoggingConfig
             .Enrich.WithProperty("ProcessId", effectiveProcessId)
             .Enrich.WithProperty("ProjectId", effectiveProjectId)
             .Enrich.WithProperty("CorrelationId", "-")
+            .Enrich.With<AspNetEnvironmentEnricher>()
             .WriteTo.Sink(sink);
     }
 }

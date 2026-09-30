@@ -112,6 +112,8 @@ public sealed class BackendSupervisor(ILogger<BackendSupervisor> logger) : IDisp
         {
             logger.LogInformation("Using backend exe: {Path}", localExe);
             psi.FileName = localExe;
+            logger.LogInformation(
+                "Spawn mode: exe (inherits this process environment unchanged; launchSettings.json does not apply)");
         }
         else
         {
@@ -122,6 +124,8 @@ public sealed class BackendSupervisor(ILogger<BackendSupervisor> logger) : IDisp
             {
                 logger.LogInformation("Using backend exe: {Path}", binExe);
                 psi.FileName = binExe;
+                logger.LogInformation(
+                    "Spawn mode: exe (inherits this process environment unchanged; launchSettings.json does not apply)");
             }
             else
             {
@@ -130,6 +134,15 @@ public sealed class BackendSupervisor(ILogger<BackendSupervisor> logger) : IDisp
                 logger.LogInformation("Using dotnet run: {Project}", backendCsProj);
                 psi.FileName = "dotnet";
                 psi.Arguments = $"run --project \"{backendCsProj}\" -p:ElingSkipDashboard=true";
+
+                // The one branch that can disagree with this process. `dotnet run`
+                // reads Properties/launchSettings.json and applies it on top of
+                // the inherited environment, so ASPNETCORE_ENVIRONMENT lands in
+                // the child as Development even when it is unset here. The [env:]
+                // field on this process is NOT the backend's environment; the
+                // backend's own log line is authoritative.
+                logger.LogInformation(
+                    "Spawn mode: dotnet run (launchSettings.json applies ASPNETCORE_ENVIRONMENT over the inherited value; read the backend log for the backend's environment)");
             }
         }
 

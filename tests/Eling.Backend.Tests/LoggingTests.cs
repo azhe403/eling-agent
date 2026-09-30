@@ -96,8 +96,14 @@ public class LoggingTests : IDisposable
 
         var activePath = Path.Combine(_tempLogsDir, "backend.log");
         var content = ReadFileShared(activePath);
-        Assert.Contains("[pid:12345] [project:test-proj] [-] Startup without flow", content);
-        Assert.Contains("[pid:12345] [project:test-proj] [flow-abc] Inside active flow", content);
+        // Assert on the correlation token where it meets the message, not on the
+        // whole "[pid] [project] [correlation]" prefix. The prefix is a shared
+        // output template that legitimately gains fields; pinning it here made
+        // this test break on an unrelated template change while still saying
+        // nothing extra about correlation ids. pid/project have their own
+        // assertions above.
+        Assert.Contains("[-] Startup without flow", content);
+        Assert.Contains("[flow-abc] Inside active flow", content);
     }
 
     [Fact]
