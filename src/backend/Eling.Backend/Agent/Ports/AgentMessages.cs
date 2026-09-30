@@ -8,18 +8,36 @@ public enum AgentRole
     Tool
 }
 
-public record AgentMessage(AgentRole Role, string Text, string? ToolCallId = null, string? ToolName = null);
+public record AgentMessage(
+    AgentRole Role,
+    string Text,
+    string? ToolCallId = null,
+    string? ToolName = null);
 
-public record ToolDefinition(string Name, string Description, string ParametersJsonSchema);
+public record ToolDefinition(
+    string Name,
+    string Description,
+    string ParametersJsonSchema);
 
-public record ToolCallRequest(string Id, string Name, string ArgumentsJson);
+public record ToolCallRequest(
+    string Id,
+    string Name,
+    string ArgumentsJson);
 
-public record SingleShotRequest(string Model, IReadOnlyList<AgentMessage> Messages, IReadOnlyList<ToolDefinition> Tools);
+public record SingleShotRequest(
+    string Model,
+    IReadOnlyList<AgentMessage> Messages,
+    IReadOnlyList<ToolDefinition> Tools);
 
-public record SingleShotResult(string? AssistantText, IReadOnlyList<ToolCallRequest> ToolCalls);
+public record SingleShotResult(
+    string? AssistantText,
+    IReadOnlyList<ToolCallRequest> ToolCalls,
+    string? FinishReason = null);
 
 public abstract record ChatStreamEvent;
 
 public record ChatTextDelta(string Delta) : ChatStreamEvent;
 
 public record ChatToolRequest(ToolCallRequest Call) : ChatStreamEvent;
+
+public record ChatFinishReasonEvent(string Reason) : ChatStreamEvent;

@@ -229,7 +229,24 @@ public class AgentApiTests
         Assert.Equal("User", vm.Messages[0].Role);
         Assert.Equal("Assistant", vm.Messages[1].Role);
         Assert.Equal("hello", vm.Messages[1].Text);
+        Assert.Single(vm.Messages[1].CodeBlocks);
+        Assert.Equal("hello", vm.Messages[1].CodeBlocks[0].Content);
         Assert.Equal("Tool", vm.Messages[2].Role);
+    }
+
+    [Fact]
+    public void MarkdownParser_ParsesCodeBlocksAndText()
+    {
+        var input = "Here is code:\n```csharp\nvar x = 1;\n```\nAnd more text.";
+        var blocks = SimpleMarkdownParser.Parse(input);
+        Assert.Equal(3, blocks.Count);
+        Assert.True(blocks[0].IsText);
+        Assert.Equal("Here is code:", blocks[0].Content);
+        Assert.True(blocks[1].IsCode);
+        Assert.Equal("var x = 1;", blocks[1].Content);
+        Assert.Equal("csharp", blocks[1].Language);
+        Assert.True(blocks[2].IsText);
+        Assert.Equal("And more text.", blocks[2].Content);
     }
 
     [Fact]

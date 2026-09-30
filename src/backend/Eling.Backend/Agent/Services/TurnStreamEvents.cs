@@ -10,6 +10,10 @@ public record TurnTextDelta(string Delta) : TurnStreamEvent;
 
 public record TurnToolCall(ToolCallDto Call) : TurnStreamEvent;
 
+public record TurnToolResult(
+    string ToolName,
+    string Output) : TurnStreamEvent;
+
 public record TurnDone(TurnResponse Response) : TurnStreamEvent;
 
 public record TurnFailed(string Message) : TurnStreamEvent;

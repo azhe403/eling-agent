@@ -565,6 +565,10 @@ public sealed class ElingApiClient
                                     var t = JsonSerializer.Deserialize<StreamTool>(data, JsonOptions);
                                     if (t != null) onEvent(t);
                                     break;
+                                case "tool_result":
+                                    var tr = JsonSerializer.Deserialize<StreamToolResult>(data, JsonOptions);
+                                    if (tr != null) onEvent(tr);
+                                    break;
                                 case "done":
                                     var done = JsonSerializer.Deserialize<StreamDone>(data, JsonOptions);
                                     if (done != null) onEvent(done);

@@ -45,20 +45,24 @@ public class AgentChatStreamTests : IDisposable
             TurnStarted => "started",
             TurnTextDelta => "delta",
             TurnToolCall => "tool",
+            TurnToolResult => "result",
             TurnDone => "done",
             _ => "other"
         }).ToList();
-        Assert.Equal(["started", "delta", "delta", "tool", "delta", "done"], kinds);
+        Assert.Equal(["started", "delta", "delta", "tool", "result", "delta", "done"], kinds);
         var tool = events.OfType<TurnToolCall>().Single();
         Assert.Equal("file_read", tool.Call.Name);
+        var result = events.OfType<TurnToolResult>().Single();
+        Assert.Equal("file_read", result.ToolName);
+        Assert.Contains("tool not available", result.Output);
     }
 
     [Fact]
-    public async Task StreamedTurn_StopsAfterThreeHops()
+    public async Task StreamedTurn_StopsAfterTwentyFiveHops()
     {
         var harness = CreateHarness();
         harness.Registry.Add(_workspace);
-        for (var i = 0; i < 5; i++)
+        for (var i = 0; i < 30; i++)
         {
             harness.Gateway.Enqueue([new ChatToolRequest(new ToolCallRequest($"t{i}", "directory_list", """{"path":""}"""))]);
         }
@@ -70,9 +74,10 @@ public class AgentChatStreamTests : IDisposable
             return Task.CompletedTask;
         });
 
-        Assert.Equal(3, toolEvents);
-        Assert.Equal(3, response.ToolCalls.Count);
-        Assert.Contains("3 tool hops", response.Assistant);
+        Assert.Equal(25, toolEvents);
+        Assert.Equal(25, response.ToolCalls.Count);
+        Assert.Contains("Safety limit 25", response.Assistant);
+        Assert.Contains("[done]", response.Assistant);
     }
 
     [Fact]
@@ -116,7 +121,7 @@ public class AgentChatStreamTests : IDisposable
         var sp = services.BuildServiceProvider();
 
         var tools = Array.Empty<IAgentTool>();
-        var turns = new AgentTurnService(gateway, tools, chats, registry, provider, NullLogger<AgentTurnService>.Instance);
+        var turns = new AgentTurnService(gateway, tools, chats, provider, NullLogger<AgentTurnService>.Instance);
         return new Harness(registry, turns, gateway);
     }
 
@@ -174,10 +179,10 @@ public class AgentChatStreamTests : IDisposable
     {
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Memory> _items = new();
 
-        public Task<SaveResult> SaveAsync(Memory memory)
+        public Task<MemorySaveResult> SaveAsync(Memory memory)
         {
             _items[memory.Id.Value] = memory;
-            return Task.FromResult(new SaveResult(memory, SaveAction.Created));
+            return Task.FromResult(new MemorySaveResult(memory, SaveAction.Created));
         }
 
         public Task<Memory?> GetByIdAsync(MemoryId id) =>

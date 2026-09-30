@@ -16,6 +16,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Eling.Backend.Tests;
 
+[Collection(ElingDataDirCollection.Name)]
 public class AgentChatTests : IAsyncLifetime, IDisposable
 {
     private readonly string _tempDir;
@@ -54,18 +55,19 @@ public class AgentChatTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
-    public async Task HopCap_StopsAfterThreeExecutions()
+    public async Task HopCap_StopsAfterTwentyFiveExecutions()
     {
         var harness = CreateHarness();
         harness.Registry.Add(_workspace);
-        for (var i = 0; i < 5; i++)
+        for (var i = 0; i < 30; i++)
         {
             harness.Gateway.Enqueue(new SingleShotResult(null, [new ToolCallRequest($"t{i}", "directory_list", """{"path":""}""")]));
         }
 
         var turn = await harness.Turns.SendAsync(_workspace, null, "list", CancellationToken.None);
-        Assert.Equal(3, turn.ToolCalls.Count);
-        Assert.Contains("3 tool hops", turn.Assistant);
+        Assert.Equal(25, turn.ToolCalls.Count);
+        Assert.Contains("Safety limit 25", turn.Assistant);
+        Assert.Contains("[done]", turn.Assistant);
     }
 
     [Fact]
@@ -129,7 +131,7 @@ public class AgentChatTests : IAsyncLifetime, IDisposable
         var sp = services.BuildServiceProvider();
 
         var tools = Array.Empty<IAgentTool>();
-        var turns = new AgentTurnService(gateway, tools, chats, registry, provider, NullLogger<AgentTurnService>.Instance);
+        var turns = new AgentTurnService(gateway, tools, chats, provider, NullLogger<AgentTurnService>.Instance);
         return new Harness(registry, chats, gateway, turns);
     }
 
@@ -202,10 +204,10 @@ public class AgentChatTests : IAsyncLifetime, IDisposable
     {
         private readonly ConcurrentDictionary<string, Memory> _items = new();
 
-        public Task<SaveResult> SaveAsync(Memory memory)
+        public Task<MemorySaveResult> SaveAsync(Memory memory)
         {
             _items[memory.Id.Value] = memory;
-            return Task.FromResult(new SaveResult(memory, SaveAction.Created));
+            return Task.FromResult(new MemorySaveResult(memory, SaveAction.Created));
         }
 
         public Task<Memory?> GetByIdAsync(MemoryId id) =>

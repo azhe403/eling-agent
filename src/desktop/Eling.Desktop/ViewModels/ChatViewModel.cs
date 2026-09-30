@@ -14,6 +14,7 @@ namespace Eling.Desktop.ViewModels;
 public class ChatMessageRow : ReactiveObject
 {
     private bool _isExpanded;
+    private bool _isCodeMode;
 
     public string Role { get; }
     public string Text { get; }
@@ -23,14 +24,29 @@ public class ChatMessageRow : ReactiveObject
     public bool IsUser => string.Equals(Role, "User", StringComparison.OrdinalIgnoreCase);
     public bool IsAssistant => string.Equals(Role, "Assistant", StringComparison.OrdinalIgnoreCase);
     public bool IsTool => string.Equals(Role, "Tool", StringComparison.OrdinalIgnoreCase);
+    public bool IsToolError => IsTool && ToolOutputFormatter.IsError(Text);
 
     public string HeaderDisplay => IsUser ? "You" : IsAssistant ? "Eling" : $"🔧 Tool: {ToolName ?? "Execution"}";
-    public string HeaderColor => IsUser ? "#2563eb" : IsAssistant ? "#16a34a" : "#d97706";
-    public string TextColor => IsTool ? "#cbd5e1" : "#f8fafc";
+    public string HeaderColor => IsUser ? "#2563eb" : IsAssistant ? "#16a34a" : IsToolError ? "#dc2626" : "#d97706";
+    public string TextColor => IsTool ? (IsToolError ? "#fca5a5" : "#cbd5e1") : "#f8fafc";
     public string FontFamily => IsTool ? "Cascadia Code,Consolas,Menlo,monospace" : "Inter,Segoe UI,sans-serif";
     public double FontSize => IsTool ? 12.0 : 13.5;
 
-    public bool HasArguments => !string.IsNullOrWhiteSpace(Arguments);
+    public string ArgumentsDisplay => ToolOutputFormatter.FormatArguments(Arguments);
+    public bool HasArguments => !string.IsNullOrWhiteSpace(ArgumentsDisplay);
+
+    /// Navigable JSON tree: the full payload, collapsible at every level.
+    public IReadOnlyList<JsonTreeNode> TreeNodes { get; }
+
+    /// Pretty-printed payload, monospaced, exact and copyable.
+    public IReadOnlyList<MessageBlock> CodeBlocks { get; }
+
+    public bool HasTree => TreeNodes.Count > 0;
+    public bool IsCodeMode => _isCodeMode;
+    public bool ShowTree => HasTree && !IsCodeMode;
+    public double BodyMaxHeight => Text.Length > 1200 ? 360 : 2000;
+
+    public string ModeToggleText => IsCodeMode ? "🗂 Navigable" : "{ } Code";
 
     public bool IsExpanded
     {
@@ -46,13 +62,29 @@ public class ChatMessageRow : ReactiveObject
         this.RaisePropertyChanged(nameof(ExpandButtonText));
     }
 
+    public void ToggleMode()
+    {
+        _isCodeMode = !_isCodeMode;
+        this.RaisePropertyChanged(nameof(IsCodeMode));
+        this.RaisePropertyChanged(nameof(ShowTree));
+        this.RaisePropertyChanged(nameof(ModeToggleText));
+    }
+
     public ChatMessageRow(string role, string text, string? toolName, string? arguments = null)
     {
         Role = role;
         Text = text;
         ToolName = toolName;
         Arguments = arguments;
-        _isExpanded = !IsTool; // Default tool output collapsed, messages expanded
+        _isExpanded = true;
+
+        CodeBlocks = IsAssistant
+            ? SimpleMarkdownParser.Parse(text)
+            : ToolOutputFormatter.BuildRawBlocks(text);
+
+        TreeNodes = IsTool && !ToolOutputFormatter.IsError(text)
+            ? JsonTreeNode.Parse(text)
+            : [];
     }
 }
 
@@ -416,6 +448,7 @@ public class ChatViewModel : ViewModelBase, IDisposable
             session.Items.Add(new ChatMessageRow("User", text, null));
             ChatMessageRow? live = null;
             var toolCount = 0;
+            var pendingTools = new Queue<ChatMessageRow>();
 
             void AppendDelta(string delta)
             {
@@ -463,9 +496,33 @@ public class ChatViewModel : ViewModelBase, IDisposable
                         toolCount++;
                         live = null;
                         var preview = tool.Arguments.Length > 160 ? tool.Arguments[..160] + "..." : tool.Arguments;
-                        void AddTool() => session.Items.Add(new ChatMessageRow("Tool", tool.Name + " " + preview, tool.Name));
+                        void AddTool()
+                        {
+                            var row = new ChatMessageRow("Tool", tool.Name + " " + preview, tool.Name, tool.Arguments);
+                            session.Items.Add(row);
+                            pendingTools.Enqueue(row);
+                        }
                         if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess()) AddTool();
                         else Avalonia.Threading.Dispatcher.UIThread.Post(AddTool);
+                        break;
+                    case StreamToolResult result:
+                        void ApplyResult()
+                        {
+                            var args = (string?)null;
+                            var index = -1;
+                            if (pendingTools.Count > 0)
+                            {
+                                var row = pendingTools.Dequeue();
+                                args = row.Arguments;
+                                index = session.Items.IndexOf(row);
+                            }
+                            var updated = new ChatMessageRow("Tool", result.Output, result.Name, args);
+                            updated.IsExpanded = true;
+                            if (index >= 0) session.Items[index] = updated;
+                            else session.Items.Add(updated);
+                        }
+                        if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess()) ApplyResult();
+                        else Avalonia.Threading.Dispatcher.UIThread.Post(ApplyResult);
                         break;
                     case StreamDone done:
                     {

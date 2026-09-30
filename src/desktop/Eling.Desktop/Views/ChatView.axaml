@@ -1,12 +1,47 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Eling.Desktop.ViewModels"
+             xmlns:views="using:Eling.Desktop.Views"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="870" d:DesignHeight="700"
              x:Class="Eling.Desktop.Views.ChatView"
              x:DataType="vm:ChatViewModel"
              Loaded="OnLoaded" Unloaded="OnUnloaded">
+
+    <UserControl.Resources>
+        <DataTemplate x:Key="JsonNodeTemplate" x:DataType="vm:JsonTreeNode">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Button Background="Transparent" BorderThickness="0" Padding="0"
+                            Margin="-4,0,0,0" VerticalAlignment="Center"
+                            IsVisible="{Binding !IsLeaf}"
+                            Command="{Binding Toggle}">
+                        <TextBlock Text="{Binding Chevron}" FontSize="9" Foreground="#7c8798"
+                                   VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    </Button>
+                    <TextBlock Text="{Binding Display}"
+                               FontSize="11"
+                               FontFamily="Cascadia Code,Consolas,Menlo,monospace"
+                               Foreground="#b6c2d1"
+                               TextWrapping="Wrap"
+                               VerticalAlignment="Center"
+                               IsVisible="{Binding IsLeaf}"/>
+                    <TextBlock Text="{Binding Label}"
+                               FontSize="11"
+                               FontFamily="Cascadia Code,Consolas,Menlo,monospace"
+                               FontWeight="SemiBold"
+                               Foreground="#dbe4ee"
+                               VerticalAlignment="Center"
+                               IsVisible="{Binding !IsLeaf}"/>
+                </StackPanel>
+                <ItemsControl ItemsSource="{Binding Children}"
+                              IsVisible="{Binding IsExpanded}"
+                              ItemTemplate="{StaticResource JsonNodeTemplate}"
+                              Margin="12,0,0,0"/>
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.Resources>
 
     <Grid ColumnDefinitions="240,*" Margin="0">
         <!-- Sidebar: Chat History & Workspaces -->
@@ -50,7 +85,7 @@
             <Border Grid.Row="0" Background="#161616" BorderBrush="#2a2a2a" BorderThickness="1" CornerRadius="6" Padding="12,8" Margin="0,0,0,8">
                 <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <TextBlock Text="📁" FontSize="12" VerticalAlignment="Center"/>
+                        <TextBlock Text="≡ƒôü" FontSize="12" VerticalAlignment="Center"/>
                         <TextBlock Text="{Binding FolderDisplayName}" FontSize="13" FontWeight="SemiBold" Foreground="#e5e7eb" VerticalAlignment="Center"/>
                         <TextBlock Text="{Binding ActiveWorkspace, StringFormat='({0})'}" FontSize="11" Foreground="#6b7280" VerticalAlignment="Center" Margin="4,0,0,0" TextTrimming="CharacterEllipsis" MaxWidth="350"/>
                     </StackPanel>
@@ -76,36 +111,55 @@
                                             <Border Background="{Binding HeaderColor}" CornerRadius="4" Padding="8,2">
                                                 <TextBlock Text="{Binding HeaderDisplay}" FontSize="11" FontWeight="SemiBold" Foreground="White"/>
                                             </Border>
-                                            <TextBlock Text="{Binding Arguments, StringFormat='args: {0}'}"
+                                            <TextBlock Text="{Binding ArgumentsDisplay, StringFormat='args: {0}'}"
                                                        IsVisible="{Binding HasArguments}"
                                                        FontSize="11" Foreground="#9ca3af" VerticalAlignment="Center"
                                                        TextTrimming="CharacterEllipsis" MaxWidth="450"/>
+                                            <Border Background="#7f1d1d" CornerRadius="4" Padding="6,1"
+                                                    IsVisible="{Binding IsToolError}">
+                                                <TextBlock Text="error" FontSize="10" FontWeight="SemiBold" Foreground="#fecaca"/>
+                                            </Border>
                                         </StackPanel>
-                                        <Button Grid.Column="1"
-                                                Content="{Binding ExpandButtonText}"
-                                                Command="{Binding ToggleExpand}"
-                                                IsVisible="{Binding IsTool}"
-                                                Classes="subtle"
-                                                FontSize="10"
-                                                Padding="6,2"/>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                                            <Button Content="{Binding ModeToggleText}"
+                                                    Command="{Binding ToggleMode}"
+                                                    IsVisible="{Binding HasTree}"
+                                                    Classes="subtle"
+                                                    FontSize="10"
+                                                    Padding="6,2"
+                                                    ToolTip.Tip="Switch between navigable JSON and raw JSON code"/>
+                                            <Button Content="{Binding ExpandButtonText}"
+                                                    Command="{Binding ToggleExpand}"
+                                                    IsVisible="{Binding IsTool}"
+                                                    Classes="subtle"
+                                                    FontSize="10"
+                                                    Padding="6,2"/>
+                                        </StackPanel>
                                     </Grid>
                                 <Border Grid.Row="1" Height="1" Background="#2a2a2a" Margin="0,8,0,8"
                                         IsVisible="{Binding IsExpanded}"/>
 
                                 <!-- Message content body: parsed markdown blocks -->
-                                <ItemsControl Grid.Row="2"
-                                              ItemsSource="{Binding Blocks}"
+                                <ScrollViewer Grid.Row="2"
+                                              MaxHeight="{Binding BodyMaxHeight}"
+                                              VerticalScrollBarVisibility="Auto"
                                               IsVisible="{Binding IsExpanded}">
+                                    <Grid>
+                                        <ItemsControl ItemsSource="{Binding TreeNodes}"
+                                                      ItemTemplate="{StaticResource JsonNodeTemplate}"
+                                                      IsVisible="{Binding ShowTree}"/>
+                                        <ItemsControl ItemsSource="{Binding CodeBlocks}"
+                                                      IsVisible="{Binding !ShowTree}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="vm:MessageBlock">
                                             <Panel Margin="0,2,0,4">
                                                 <!-- Plain Text Block -->
-                                                <SelectableTextBlock Text="{Binding Content}"
-                                                                     IsVisible="{Binding IsText}"
-                                                                     FontSize="13.5"
-                                                                     FontFamily="Inter,Segoe UI,sans-serif"
-                                                                     Foreground="#f8fafc"
-                                                                     TextWrapping="Wrap"/>
+                                                <views:InlineFormattedTextBlock Source="{Binding Content}"
+                                                                                 IsVisible="{Binding IsText}"
+                                                                                 FontSize="13.5"
+                                                                                 FontFamily="Inter,Segoe UI,sans-serif"
+                                                                                 Foreground="#f8fafc"
+                                                                                 TextWrapping="Wrap"/>
 
                                                 <!-- Code Block Container -->
                                                 <Border IsVisible="{Binding IsCode}"
@@ -124,7 +178,7 @@
                                                                        Foreground="#94a3b8"
                                                                        VerticalAlignment="Center"/>
                                                             <Button Grid.Column="1"
-                                                                    Content="📋 Copy"
+                                                                    Content="≡ƒôï Copy"
                                                                     Command="{Binding CopyToClipboard}"
                                                                     Classes="subtle"
                                                                     FontSize="10"
@@ -143,6 +197,8 @@
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
+                                    </Grid>
+                                </ScrollViewer>
                                 </Grid>
                             </Border>
                         </DataTemplate>

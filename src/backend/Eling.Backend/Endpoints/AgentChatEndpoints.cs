@@ -75,6 +75,7 @@ public static class AgentChatEndpoints
                     TurnStarted started => ("started", (object)new { chatId = started.ChatId }),
                     TurnTextDelta delta => ("delta", (object)new { delta = delta.Delta }),
                     TurnToolCall tool => ("tool", (object)new { name = tool.Call.Name, arguments = tool.Call.Arguments }),
+                    TurnToolResult result => ("tool_result", (object)new { name = result.ToolName, output = result.Output }),
                     TurnDone done => ("done", (object)done.Response),
                     TurnFailed failed => ("failed", (object)new { message = failed.Message }),
                     _ => ("message", (object)new { })

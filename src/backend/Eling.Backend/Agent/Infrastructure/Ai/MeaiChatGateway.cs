@@ -63,7 +63,9 @@ public sealed class MeaiChatGateway(ProviderStore store, ILogger<MeaiChatGateway
                 .Select(t => new ToolCallRequest(t.Id, t.FunctionName, t.FunctionArguments.ToString()))
                 .ToList();
 
-            return new SingleShotResult(string.IsNullOrEmpty(text) ? null : text, toolCalls);
+            var finishReason = completion.FinishReason.ToString().ToLowerInvariant();
+
+            return new SingleShotResult(string.IsNullOrEmpty(text) ? null : text, toolCalls, finishReason);
         }
         catch (Exception ex) when (ex is not InvalidOperationException)
         {
@@ -146,6 +148,15 @@ using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
                 timeoutCts.CancelAfter(Timeout.InfiniteTimeSpan);
                 var update = enumerator.Current;
+                // Normalise through a string before lowercasing: the provider
+                // finish reason is an optional enum whose ToString() is not
+                // known to be non-null, and a blank reason carries no
+                // information worth emitting.
+                var streamFinish = update.FinishReason?.ToString();
+                if (!string.IsNullOrEmpty(streamFinish))
+                {
+                    yield return new ChatFinishReasonEvent(streamFinish.ToLowerInvariant());
+                }
                 foreach (var part in update.ContentUpdate)
                 {
                     if (part.Kind == ChatMessageContentPartKind.Text && !string.IsNullOrEmpty(part.Text))
@@ -154,7 +165,7 @@ using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     }
                 }
 
-foreach (var toolUpdate in update.ToolCallUpdates)
+                foreach (var toolUpdate in update.ToolCallUpdates)
             {
                 // OpenAI-compatible providers may omit ToolCallId on continuation
                 // deltas (only the first chunk of a tool call carries it). The SDK
