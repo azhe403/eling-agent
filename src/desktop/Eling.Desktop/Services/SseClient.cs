@@ -14,14 +14,6 @@ public sealed class SseClient : IDisposable
     private CancellationTokenSource? _cts;
     private Task? _listenTask;
 
-    /// <summary>
-    /// Shared with the other boot policies so one place owns the reconnect budget.
-    /// The loop itself stays deliberately unbounded: the event stream is the one
-    /// connection the app cannot afford to give up on, so it reconnects forever
-    /// rather than exhausting a retry budget and going quiet.
-    /// </summary>
-    private static readonly TimeSpan ReconnectDelay = BackendResilience.ReconnectDelay;
-
     public event Action? OnMemoryChanged;
     public event Action? OnRuntimesChanged;
     public event Action<string>? OnStatusChanged;
@@ -47,40 +39,18 @@ public sealed class SseClient : IDisposable
 
     private async Task ListenAsync(CancellationToken cancellationToken)
     {
+        var pipeline = BackendResilience.ForExceptions(_logger, name: "sse");
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                OnStatusChanged?.Invoke("connecting");
-                _logger.LogDebug("Connecting to SSE stream...");
-
-                var request = new HttpRequestMessage(HttpMethod.Get, "api/events/memories");
-                var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-                response.EnsureSuccessStatusCode();
-
-                OnStatusChanged?.Invoke("connected");
-                _logger.LogInformation("SSE stream connected");
-
-                using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                using var reader = new StreamReader(stream);
-
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    var line = await reader.ReadLineAsync(cancellationToken);
-                    if (line == null) break;
-                    if (string.IsNullOrWhiteSpace(line)) continue; // SSE keep-alive / event separator
-
-                    if (line.StartsWith("data:"))
-                    {
-                        var data = line[5..].Trim();
-                        _logger.LogDebug("SSE event: {Data}", data);
-
-                        if (data == "runtimes")
-                            OnRuntimesChanged?.Invoke();
-                        else if (!string.IsNullOrEmpty(data) && data != "connected")
-                            OnMemoryChanged?.Invoke();
-                    }
-                }
+                // Every execution starts the ramp again at the base delay, so a stream
+                // that was healthy reconnects quickly while a backend that never comes
+                // up settles onto the cap instead of being retried in a tight loop.
+                await pipeline.ExecuteAsync<object?>(
+                    token => new ValueTask<object?>(RunStreamAsync(token)),
+                    cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -88,17 +58,54 @@ public sealed class SseClient : IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "SSE connection lost, reconnecting after {Delay}...", ReconnectDelay);
+                _logger.LogWarning(ex, "SSE exhausted its retry budget, starting a fresh cycle");
                 OnStatusChanged?.Invoke("error");
+            }
 
-                try
-                {
-                    await Task.Delay(ReconnectDelay, cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
+            // Polly only backs off on failure, and a stream the server closes
+            // immediately counts as a success, so reconnecting straight away would
+            // spin. Pause before every new cycle, using the same policy delay.
+            try
+            {
+                await Task.Delay(BackendResilience.BaseDelay, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    private async Task RunStreamAsync(CancellationToken cancellationToken)
+    {
+        OnStatusChanged?.Invoke("connecting");
+        _logger.LogDebug("Connecting to SSE stream...");
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "api/events/memories");
+        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        OnStatusChanged?.Invoke("connected");
+        _logger.LogInformation("SSE stream connected");
+
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line == null) break;
+            if (string.IsNullOrWhiteSpace(line)) continue; // SSE keep-alive / event separator
+
+            if (line.StartsWith("data:"))
+            {
+                var data = line[5..].Trim();
+                _logger.LogDebug("SSE event: {Data}", data);
+
+                if (data == "runtimes")
+                    OnRuntimesChanged?.Invoke();
+                else if (!string.IsNullOrEmpty(data) && data != "connected")
+                    OnMemoryChanged?.Invoke();
             }
         }
     }

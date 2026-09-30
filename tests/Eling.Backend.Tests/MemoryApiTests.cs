@@ -485,14 +485,31 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
         var regResp = await client.PostAsJsonAsync("/api/coordinator/register", reg, cts.Token);
         regResp.EnsureSuccessStatusCode();
 
-        var evt1 = await reader.ReadLineAsync(cts.Token);
-        Assert.Equal("data: runtimes", evt1);
+        await ReadRuntimesEventAsync(reader, cts.Token);
         await reader.ReadLineAsync(cts.Token);
 
         var unregResp = await client.DeleteAsync($"/api/coordinator/unregister/{testPid}", cts.Token);
         unregResp.EnsureSuccessStatusCode();
 
-        var evt2 = await reader.ReadLineAsync(cts.Token);
-        Assert.Equal("data: runtimes", evt2);
+        await ReadRuntimesEventAsync(reader, cts.Token);
+    }
+
+    /// <summary>
+    /// The events endpoint multiplexes runtime, codebase and memory notifications on
+    /// one stream, so a runtimes event is not necessarily the next line. Wait for the
+    /// event under test instead of assuming an order that any other feature can break.
+    /// </summary>
+    private static async Task ReadRuntimesEventAsync(StreamReader reader, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken)
+                ?? throw new InvalidOperationException("stream closed before a runtimes event arrived");
+
+            if (line == "data: runtimes")
+            {
+                return;
+            }
+        }
     }
 }

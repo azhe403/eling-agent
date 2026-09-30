@@ -8,25 +8,31 @@ using Polly.Retry;
 namespace Eling.Desktop.Services;
 
 /// <summary>
-/// One resilience story for every place the desktop waits on a backend that may
-/// still be booting. The profiles differ only in budget and pause, so a stall
-/// reads the same in a log wherever it happened.
+/// One resilience policy for every place the desktop waits on a backend. Every
+/// profile shares the same shape: retry with exponential backoff starting at one
+/// second and capped at thirty, then start over at one second the next time the
+/// pipeline is used. A backend that is merely slow to boot therefore gets short
+/// waits early, while one that is genuinely down stops being hammered.
 /// </summary>
 public static class BackendResilience
 {
-    /// <summary>Attempts and pause sized to cover a cold backend start, about 20 seconds.</summary>
-    public const int BootAttempts = 40;
+    /// <summary>Attempts before a pipeline gives up. The caller decides what to do next.</summary>
+    public const int DefaultAttempts = 10;
 
-    public static readonly TimeSpan BootDelay = TimeSpan.FromMilliseconds(500);
-    public static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(3);
+    /// <summary>First pause between attempts.</summary>
+    public static readonly TimeSpan BaseDelay = TimeSpan.FromSeconds(1);
+
+    /// <summary>Ceiling the exponential ramp settles on.</summary>
+    public static readonly TimeSpan MaxDelay = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Retries while the operation throws, for work that either connects or does not.
     /// </summary>
     public static ResiliencePipeline ForExceptions(
         ILogger? logger = null,
-        int maxAttempts = BootAttempts,
+        int maxAttempts = DefaultAttempts,
         TimeSpan? delay = null,
+        TimeSpan? maxDelay = null,
         string name = "boot") =>
         new ResiliencePipelineBuilder()
             .AddRetry(new RetryStrategyOptions
@@ -35,7 +41,9 @@ public static class BackendResilience
                     .Handle<HttpRequestException>()
                     .Handle<TaskCanceledException>(static ex => ex.InnerException is TimeoutException),
                 MaxRetryAttempts = maxAttempts,
-                Delay = delay ?? BootDelay,
+                Delay = delay ?? BaseDelay,
+                MaxDelay = maxDelay ?? MaxDelay,
+                BackoffType = DelayBackoffType.Exponential,
                 OnRetry = Report<object>(logger, name),
             })
             .Build();
@@ -50,8 +58,9 @@ public static class BackendResilience
     public static ResiliencePipeline<TResult> ForResult<TResult>(
         Func<TResult, bool> isFailure,
         ILogger? logger = null,
-        int maxAttempts = BootAttempts,
+        int maxAttempts = DefaultAttempts,
         TimeSpan? delay = null,
+        TimeSpan? maxDelay = null,
         string name = "boot")
     {
         ArgumentNullException.ThrowIfNull(isFailure);
@@ -61,7 +70,9 @@ public static class BackendResilience
             {
                 ShouldHandle = new PredicateBuilder<TResult>().HandleResult(isFailure),
                 MaxRetryAttempts = maxAttempts,
-                Delay = delay ?? BootDelay,
+                Delay = delay ?? BaseDelay,
+                MaxDelay = maxDelay ?? MaxDelay,
+                BackoffType = DelayBackoffType.Exponential,
                 OnRetry = Report<TResult>(logger, name),
             })
             .Build();

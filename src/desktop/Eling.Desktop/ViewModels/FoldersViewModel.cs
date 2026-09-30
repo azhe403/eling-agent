@@ -68,9 +68,11 @@ public class FoldersViewModel : ViewModelBase
     }
 
     /// <summary>Retry budget for the first load, so a backend that is still booting does not look like an empty workspace.</summary>
-    public int ApiLoadRetryAttempts { get; set; } = BackendResilience.BootAttempts;
+    public int ApiLoadRetryAttempts { get; set; } = BackendResilience.DefaultAttempts;
 
-    public TimeSpan ApiLoadRetryDelay { get; set; } = BackendResilience.BootDelay;
+    public TimeSpan ApiLoadRetryDelay { get; set; } = BackendResilience.BaseDelay;
+
+    public TimeSpan ApiLoadRetryMaxDelay { get; set; } = BackendResilience.MaxDelay;
 
     public async Task LoadAsync()
     {
@@ -81,6 +83,7 @@ public class FoldersViewModel : ViewModelBase
                 _logger,
                 ApiLoadRetryAttempts,
                 ApiLoadRetryDelay,
+                ApiLoadRetryMaxDelay,
                 "folder-load");
 
             var roots = await pipeline.ExecuteAsync<IReadOnlyList<string>?>(
