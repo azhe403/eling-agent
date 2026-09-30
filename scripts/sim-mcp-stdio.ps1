@@ -39,8 +39,8 @@ $root = Split-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) -Parent
 # --- resolve binary ------------------------------------------------------------
 if (-not $Binary) {
     $candidates = @(
-        (Join-Path $root ".bin/Debug/net10.0/eling-backend.dll"),
-        (Join-Path $root ".bin/Debug/net10.0/eling-backend.exe"),
+(Join-Path $root ".bin/eling-backend.dll"),
+(Join-Path $root ".bin/eling-backend.exe"),
         (Join-Path $env:USERPROFILE ".local/bin/eling-backend.exe")
     )
     foreach ($c in $candidates) {

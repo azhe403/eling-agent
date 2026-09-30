@@ -28,12 +28,12 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Net.Http
 $root = Split-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) -Parent
 $elingOutputRoot = if ($env:ELING_OUTPUT_ROOT) { $env:ELING_OUTPUT_ROOT } else { ".bin-test" }
-$exe = Join-Path $root "$elingOutputRoot/Debug/net10.0/eling-backend.exe"
+$exe = Join-Path $root "$elingOutputRoot/eling-backend.exe"
 if (-not (Test-Path $exe)) {
-    $exe = Join-Path $root ".bin/Debug/net10.0/eling-backend.exe"
+    $exe = Join-Path $root ".bin-test/eling-backend.exe"
 }
 if (-not (Test-Path $exe)) {
-    $exe = Join-Path $root ".bin/Debug/net10.0/eling.exe"
+    $exe = Join-Path $root ".bin-test/eling.exe"
 }
 $results = @()
 $failed = 0

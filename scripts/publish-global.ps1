@@ -37,12 +37,35 @@ foreach ($expected in @("eling-backend.exe", "eling-dashboard-ui")) {
 Write-Host "== Installing into $binDir =="
 New-Item $binDir -ItemType Directory -Force | Out-Null
 
-# Stop only eling's own processes so file copies are not blocked.
-Get-Process -Name eling-backend, eling -ErrorAction SilentlyContinue |
-    Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 1
-
-Copy-Item (Join-Path $outDir "eling-backend.exe") $binDir -Force
+# Kill all global-bin holders (staging must be among them). Dev from source is untouched;
+# dev launched from the global exe will also restart. Retried to beat respawn races.
+$globalBackend = Join-Path $binDir "eling-backend.exe"
+$stagingPid = (Get-NetTCPConnection -LocalPort 4317 -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -First 1).OwningProcess
+$attempt = 0
+$installed = $false
+while (-not $installed -and $attempt -lt 5) {
+    $attempt++
+    $killed = @()
+    Get-Process -Name eling-backend, eling -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and ($_.Path -eq $globalBackend) } |
+        ForEach-Object { $killed += $_.Id; Write-Host "  [try $attempt] stopping $($_.Id) ($($_.Path))"; Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -in @('eling-backend.exe', 'eling.exe') } |
+        Where-Object { $_.ExecutablePath -eq $globalBackend -or $_.CommandLine -like "*$binDir*" } |
+        Where-Object { $_.ProcessId -notin $killed } |
+        ForEach-Object { $killed += $_.ProcessId; Write-Host "  [try $attempt] stopping $($_.ProcessId) ($($_.CommandLine))"; Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    if ($attempt -eq 1 -and $stagingPid -and ($stagingPid -notin $killed)) { Write-Warning "staging pid $stagingPid not among global-bin holders" }
+    Start-Sleep -Milliseconds 500
+    try {
+        Copy-Item (Join-Path $outDir "eling-backend.exe") $binDir -Force -ErrorAction Stop
+        $installed = $true
+    } catch {
+        if ($attempt -ge 5) { throw }
+        Write-Host "  [try $attempt] copy blocked, re-killing..."
+        Start-Sleep -Seconds 1
+    }
+}
 Remove-Item (Join-Path $binDir "eling-dashboard-ui") -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $outDir "eling-dashboard-ui") (Join-Path $binDir "eling-dashboard-ui") -Recurse -Force
 
@@ -67,9 +90,19 @@ $process = [System.Diagnostics.Process]::Start($psi)
 [void]$process.StandardError.ReadToEndAsync()
 
 function Stop-SmokeProcess {
-    if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
-    Get-CimInstance Win32_Process |
-        Where-Object { $_.CommandLine -match 'eling-backend' } |
+    # Collect the smoke tree before killing anything, so nothing is left holding the temp dir.
+    $smokeTree = @($process.Id) + @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ParentProcessId -eq $process.Id } |
+        Select-Object -ExpandProperty ProcessId)
+    foreach ($targetPid in $smokeTree) {
+        Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
+    }
+    # Scoped to global-bin holders, matching the install block above. A broad command-line
+    # match would also hit a dev launched from .bin-opencode\eling-backend.exe, which is the
+    # apphost dotnet watch starts for eling_dev (port 4417) and is not "dev from source".
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -in @('eling-backend.exe', 'eling.exe') } |
+        Where-Object { $_.ExecutablePath -eq $globalBackend } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Remove-Item $projectDir -Recurse -Force -ErrorAction SilentlyContinue
 }
