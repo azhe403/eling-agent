@@ -14,6 +14,7 @@ namespace Eling.Backend.Tests;
 /// random port. Each test class instance gets a fresh host + data dir so
 /// state doesn't leak between tests.
 /// </summary>
+[Collection(ElingDataDirCollection.Name)]
 public class MemoryApiTests : IAsyncLifetime, IDisposable
 {
     private readonly string _tempDir;

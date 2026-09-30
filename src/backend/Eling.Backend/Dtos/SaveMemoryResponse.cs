@@ -79,7 +79,7 @@ public sealed class SaveMemoryResponse
     };
 
 
-    public static SaveMemoryResponse From(SaveResult result, string? scope = null) => new()
+    public static SaveMemoryResponse From(MemorySaveResult result, string? scope = null) => new()
     {
         Action = result.Action == SaveAction.Created ? "created" : "updated",
         Id = result.Memory.Id,
@@ -98,7 +98,7 @@ public sealed class SaveMemoryResponse
         MatchScore = result.MatchScore
     };
 
-    public static SaveMemoryResponse From(ScopedSaveResult result, bool projectScopeDisabled = false, string? note = null) => new()
+    public static SaveMemoryResponse From(ScopedMemorySaveResult result, bool projectScopeDisabled = false, string? note = null) => new()
     {
         Action = result.Action == SaveAction.Created ? "created" : "updated",
         Id = result.Memory.Id,
@@ -139,7 +139,7 @@ public sealed class NearMatchDto
     [JsonPropertyName("tags")]
     public IReadOnlyCollection<string> Tags { get; set; } = [];
 
-    public static NearMatchDto From(NearMatch match) => new()
+    public static NearMatchDto From(MemoryNearMatch match) => new()
     {
         Id = match.Id,
         ContentPreview = match.ContentPreview,

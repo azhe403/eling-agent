@@ -49,7 +49,7 @@ public sealed class MemoryWriteTool
         _policyStore = policyStore;
     }
 
-    [McpServerTool(Name = "memory_save"), Description("Save a memory to the knowledge store. The content is the main text to remember, and optional tags help with categorization. Provide 'project' to target an existing ancestor scope; this requires the current workspace to already have its own .eling scope.")]
+    [McpServerTool(Name = "memory_save"), Description("Save a memory to the knowledge store. Call this proactively whenever the turn contains something meant to outlive this conversation — either something the user states as durable (a standing rule or preference, a correction, a decision and its rationale, an explicit 'remember this') or a project/environment fact you observed while working that the tree does not already record. Do not wait for the words 'remember' or 'ingat', and never substitute a plain-text acknowledgement ('okay', 'noted', 'siap', 'sure') for the call: acknowledging without saving is a failure, and the acknowledgement and the save are additive. Skip transient task state, speculation, unverified claims, and anything already recorded in AGENTS.md, code, specs, or git history. The content is the main text to remember, and optional tags help with categorization. Provide 'project' to target an existing ancestor scope; this requires the current workspace to already have its own .eling scope.")]
     public async Task<SaveMemoryResponse> SaveAsync(
         [Description("The content to remember")] string content,
         [Description("Type of memory: fact, preference, decision, lesson, note. Defaults to 'fact'.")] string type = "fact",

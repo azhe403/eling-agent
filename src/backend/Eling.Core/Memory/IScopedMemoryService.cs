@@ -2,7 +2,7 @@ namespace Eling.Core.Memory;
 
 public interface IScopedMemoryService
 {
-    Task<ScopedSaveResult> SaveAsync(Memory memory, string? scope = null);
+    Task<ScopedMemorySaveResult> SaveAsync(Memory memory, string? scope = null);
     Task<ScopedMemory?> GetByIdAsync(MemoryReference reference);
     Task<ScopedMemory?> GetByIdAsync(MemoryId id, string? scope);
     Task<bool> DeleteAsync(MemoryReference reference);
@@ -31,7 +31,7 @@ public interface IScopedMemoryService
     // Ancestor targeting (opt-in; requires this workspace to have its own scope)
     bool HasOwnScope { get; }
     string ResolveAncestorProjectRoot(string projectName);
-    Task<ScopedSaveResult> SaveToProjectAsync(Memory memory, string targetProjectRoot);
+    Task<ScopedMemorySaveResult> SaveToProjectAsync(Memory memory, string targetProjectRoot);
     Task RebuildProjectIndexAsync(string projectRoot);
 }
 

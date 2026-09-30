@@ -76,7 +76,7 @@ public sealed class MemoryWriteToolProjectScopeTests : IDisposable
         public bool Initialized { get; init; }
         public List<string?> SavedScopes { get; } = [];
 
-        public Task<ScopedSaveResult> SaveAsync(Memory memory, string? scope = null)
+        public Task<ScopedMemorySaveResult> SaveAsync(Memory memory, string? scope = null)
         {
             SavedScopes.Add(scope);
             var isGlobal = string.Equals(scope?.Trim(), "global", StringComparison.OrdinalIgnoreCase);
@@ -87,7 +87,7 @@ public sealed class MemoryWriteToolProjectScopeTests : IDisposable
 
             var kind = isGlobal ? MemoryScopeKind.Global : MemoryScopeKind.Project;
             var saved = new ScopedMemory(memory, kind, isGlobal ? null : Cwd);
-            return Task.FromResult(new ScopedSaveResult(saved, SaveAction.Created));
+            return Task.FromResult(new ScopedMemorySaveResult(saved, SaveAction.Created));
         }
 
         public IMemoryService ProjectService => null!;
@@ -101,7 +101,7 @@ public sealed class MemoryWriteToolProjectScopeTests : IDisposable
         public Task RebuildProjectIndexAsync(string projectRoot) => Task.CompletedTask;
 
         public string ResolveAncestorProjectRoot(string projectName) => throw new NotImplementedException();
-        public Task<ScopedSaveResult> SaveToProjectAsync(Memory memory, string targetProjectRoot) => throw new NotImplementedException();
+        public Task<ScopedMemorySaveResult> SaveToProjectAsync(Memory memory, string targetProjectRoot) => throw new NotImplementedException();
         public Task<ScopedMemory?> GetByIdAsync(MemoryReference reference) => throw new NotImplementedException();
         public Task<ScopedMemory?> GetByIdAsync(MemoryId id, string? scope) => throw new NotImplementedException();
         public Task<bool> DeleteAsync(MemoryReference reference) => throw new NotImplementedException();

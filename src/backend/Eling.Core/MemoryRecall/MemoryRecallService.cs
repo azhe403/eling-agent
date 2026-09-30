@@ -116,12 +116,20 @@ public sealed class MemoryRecallService : IMemoryRecallService
         // scope, keeping their scope provenance. The previous session_start
         // hard-coded Take(5) and ignored its recentLimit parameter; we honour
         // it here.
+        //
+        // Recency alone ranks unrelated work above local context: global
+        // memories written by any other project are always "recent" and will
+        // crowd out the current project's own conventions. Order so the
+        // current project root wins ties, and only fall back to other roots
+        // (ancestors, global) once the local ones run out.
         var recent = new List<ScopedMemory>(recentLimit);
         if (recentLimit > 0)
         {
             var active = await _scoped.ListAsync(scope, MemoryStatus.Active);
+            var currentRoot = _scoped.ProjectRoot;
             recent.AddRange(active
-                .OrderByDescending(s => s.Memory.UpdatedAt)
+                .OrderBy(s => IsCurrentProject(s, currentRoot) ? 0 : 1)
+                .ThenByDescending(s => s.Memory.UpdatedAt)
                 .Take(recentLimit));
         }
 
@@ -139,4 +147,22 @@ public sealed class MemoryRecallService : IMemoryRecallService
 
         return new MemoryRecallResult(recall, recent, intentionResults, stats);
     }
+
+    /// <summary>
+    /// True when the memory lives in the project the caller is currently
+    /// working in, either directly or at an ancestor root. Global memories
+    /// (null <see cref="ScopedMemory.ProjectRoot"/>) are not current-project:
+    /// they are cross-project knowledge and rank below anything local.
+    /// </summary>
+    private static bool IsCurrentProject(ScopedMemory memory, string? currentRoot)
+    {
+        if (memory.ProjectRoot is null || currentRoot is null) return false;
+        return PathsEqual(memory.ProjectRoot, currentRoot);
+    }
+
+    private static bool PathsEqual(string left, string right)
+        => string.Equals(
+            left.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            right.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
 }

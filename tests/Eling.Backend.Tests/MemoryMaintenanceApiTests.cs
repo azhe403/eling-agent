@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Eling.Backend.Tests;
 
+[Collection(ElingDataDirCollection.Name)]
 public class MemoryMaintenanceApiTests : IAsyncLifetime, IDisposable
 {
     private readonly string _tempDir;

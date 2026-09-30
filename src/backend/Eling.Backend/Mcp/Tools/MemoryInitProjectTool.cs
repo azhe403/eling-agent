@@ -19,7 +19,7 @@ public sealed class MemoryInitProjectTool
 {
     private static readonly string[] RuntimeGitignorePatterns =
     [
-        ".eling/index.db*",
+        ".eling/memory.db*",
         ".eling/*.db-journal",
         ".eling/*.db-wal",
         ".eling/runtime/"

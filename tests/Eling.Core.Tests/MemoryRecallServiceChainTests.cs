@@ -19,10 +19,10 @@ public sealed class MemoryRecallServiceChainTests
         private readonly Dictionary<MemoryId, Memory.Memory> _items = new();
         private readonly Dictionary<string, MemorySearchResult> _searchHits = new();
 
-        public Task<SaveResult> SaveAsync(Memory.Memory memory)
+        public Task<MemorySaveResult> SaveAsync(Memory.Memory memory)
         {
             _items[memory.Id] = memory;
-            return Task.FromResult(new SaveResult(memory, SaveAction.Created));
+            return Task.FromResult(new MemorySaveResult(memory, SaveAction.Created));
         }
 
         public Task<Memory.Memory?> GetByIdAsync(MemoryId id)

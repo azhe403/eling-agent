@@ -40,7 +40,7 @@ public sealed class MemoryRecallTool
         _policyStore = policyStore;
     }
 
-    [McpServerTool(Name = "memory_recall"), Description("Hydrate context on demand at any point in a conversation. Returns topic-relevant full memories (search-based recall), the most recently updated active memories (so writes from other agents are visible), outstanding intentions with their trigger-match state, the project-scope posture (posture, policy, adoptable) so the agent can offer onboarding only when adoptable, and lightweight stats. Replaces session_start.")]
+    [McpServerTool(Name = "memory_recall"), Description("Call this BEFORE answering, not after. On the first user turn of any session, and again whenever the topic shifts to something not yet discussed, call this first with topics derived from the user's message — it costs ~500ms and prevents wrong assumptions about project conventions and past decisions. Also triggers on 'eling <topic>'. Returns topic-relevant full memories (search-based recall), the most recently updated active memories (so writes from other agents are visible), outstanding intentions with their trigger-match state, the project-scope posture (posture, policy, adoptable) so the agent can offer onboarding only when adoptable, and lightweight stats.")]
     public async Task<MemoryRecallResponse> RecallAsync(
         [Description("Current task context (filePath, topics, project). Optional.")] MemoryRecallContextInput? context = null,
         [Description("Max recalled memories (default 10).")] int recallLimit = 10,

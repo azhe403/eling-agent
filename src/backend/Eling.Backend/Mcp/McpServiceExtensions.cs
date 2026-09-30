@@ -35,13 +35,13 @@ public static class McpServiceExtensions
 
         // Project-scoped storage (primary, backward compatible)
         services.AddSingleton<IMemoryStorage>(new FileSystemMemoryStorage(dataDirectory));
-        services.AddSingleton<IMemoryIndex>(new SqliteMemoryIndex(Path.Combine(dataDirectory, "index.db")));
+        services.AddSingleton<IMemoryIndex>(sp => CreateMemoryIndex(dataDirectory, sp.GetService<ILoggerFactory>()));
         services.AddSingleton<IIntentionStorage>(new FileSystemIntentionStorage(dataDirectory));
         services.AddScoped<IMemoryService, MemoryService>();
 
         // Global storage under UserScope (real global scope, no project runtime required)
         services.AddKeyedSingleton<IMemoryStorage>("global", (sp, key) => new FileSystemMemoryStorage(userScope.GlobalDataDirectory));
-        services.AddKeyedSingleton<IMemoryIndex>("global", (sp, key) => new SqliteMemoryIndex(Path.Combine(userScope.GlobalDataDirectory, "index.db")));
+        services.AddKeyedSingleton<IMemoryIndex>("global", (sp, key) => CreateMemoryIndex(userScope.GlobalDataDirectory, sp.GetService<ILoggerFactory>()));
 
         // Scope policy & merger — application layer owns scope decisions
         services.AddSingleton<IMemoryScopePolicy, MemoryScopePolicy>();
@@ -92,7 +92,7 @@ public static class McpServiceExtensions
 
         // Global storage under UserScope (real global scope, no project runtime required)
         services.AddKeyedSingleton<IMemoryStorage>("global", (sp, key) => new FileSystemMemoryStorage(userScope.GlobalDataDirectory));
-        services.AddKeyedSingleton<IMemoryIndex>("global", (sp, key) => new SqliteMemoryIndex(Path.Combine(userScope.GlobalDataDirectory, "index.db")));
+        services.AddKeyedSingleton<IMemoryIndex>("global", (sp, key) => CreateMemoryIndex(userScope.GlobalDataDirectory, sp.GetService<ILoggerFactory>()));
 
         // Scope policy & merger — application layer owns scope decisions
         services.AddSingleton<IMemoryScopePolicy, MemoryScopePolicy>();
@@ -104,7 +104,7 @@ public static class McpServiceExtensions
         var headDataDirectory = chain.Head?.DataDirectory
             ?? Path.Combine(chain.Cwd, ProjectScope.DataDirectoryName);
         services.AddSingleton<IMemoryStorage>(new FileSystemMemoryStorage(headDataDirectory));
-        services.AddSingleton<IMemoryIndex>(new SqliteMemoryIndex(Path.Combine(headDataDirectory, "index.db")));
+        services.AddSingleton<IMemoryIndex>(sp => CreateMemoryIndex(headDataDirectory, sp.GetService<ILoggerFactory>()));
         services.AddSingleton<IIntentionStorage>(new FileSystemIntentionStorage(headDataDirectory));
         services.AddScoped<IMemoryService, MemoryService>();
 
@@ -121,7 +121,7 @@ public static class McpServiceExtensions
             {
                 var service = new MemoryService(
                     new FileSystemMemoryStorage(level.DataDirectory),
-                    new SqliteMemoryIndex(Path.Combine(level.DataDirectory, "index.db")));
+                    CreateMemoryIndex(level.DataDirectory, sp.GetService<ILoggerFactory>()));
                 levels.Add(new ProjectLevel(level, service));
             }
             return new ScopedMemoryService(levels, globalService, policy, merger, chain.Cwd);
@@ -178,5 +178,56 @@ public static class McpServiceExtensions
         services.TryAddSingleton<CodebaseWatcherService>();
         services.TryAddSingleton<CodebaseRebuildBroadcaster>();
         services.TryAddSingleton<CodebaseRebuildJobRunner>();
+    }
+
+    /// <summary>
+    /// Creates the memory FTS index for a data directory, migrating a legacy
+    /// <c>index.db</c> (pre-rename) on first use so existing installs keep
+    /// their memory search index. Migration failures (locked -wal, permissions)
+    /// fall back to a fresh <c>memory.db</c> so boot never blocks.
+    /// </summary>
+    private static IMemoryIndex CreateMemoryIndex(string dataDirectory, ILoggerFactory? loggerFactory = null)
+    {
+        MigrateLegacyIndexDb(dataDirectory, loggerFactory);
+        return new SqliteMemoryIndex(Path.Combine(dataDirectory, "memory.db"));
+    }
+
+    private static void MigrateLegacyIndexDb(string dataDirectory, ILoggerFactory? loggerFactory)
+    {
+        var memory = Path.Combine(dataDirectory, "memory.db");
+        var legacy = Path.Combine(dataDirectory, "index.db");
+        if (File.Exists(memory) || !File.Exists(legacy))
+        {
+            return;
+        }
+
+        var logger = (loggerFactory ?? NullLoggerFactory.Instance)
+            .CreateLogger(nameof(MigrateLegacyIndexDb));
+        foreach (var suffix in new[] { "", "-wal", "-shm" })
+        {
+            var source = legacy + suffix;
+            if (!File.Exists(source))
+            {
+                continue;
+            }
+
+            try
+            {
+                File.Move(source, memory + suffix, overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // The install still works — memory.db is created fresh and the
+                // index is rebuilt on first use — but the user has to be told,
+                // because their existing memories stop being searchable until
+                // then, which looks exactly like data loss and is not.
+                logger.LogWarning(
+                    ex,
+                    "Could not migrate legacy memory index '{Source}' to '{Target}'. Memories are intact, "
+                    + "but the search index starts empty and is rebuilt on first use.",
+                    source,
+                    memory + suffix);
+            }
+        }
     }
 }

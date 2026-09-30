@@ -76,7 +76,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     /// explicit ancestor writes). The level must already be part of the chain, so
     /// no scope is ever created here.
     /// </summary>
-    public async Task<ScopedSaveResult> SaveToProjectAsync(Memory memory, string targetProjectRoot)
+    public async Task<ScopedMemorySaveResult> SaveToProjectAsync(Memory memory, string targetProjectRoot)
     {
         ArgumentNullException.ThrowIfNull(memory);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetProjectRoot);
@@ -118,7 +118,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         if (duplicateHints.Count > 0)
             combinedReason = $"{combinedReason}; similar active memory also exists in {string.Join(", ", duplicateHints)} — consider promote/move to consolidate";
 
-        return new ScopedSaveResult(targetScoped, targetResult.Action, targetPrevious, targetResult.NearMatches, combinedReason, targetResult.MatchScore);
+        return new ScopedMemorySaveResult(targetScoped, targetResult.Action, targetPrevious, targetResult.NearMatches, combinedReason, targetResult.MatchScore);
     }
 
     /// <summary>Rebuilds the search index of a single project level of the chain.</summary>
@@ -208,7 +208,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
                 StringComparison.OrdinalIgnoreCase))?.Service ?? _levels[0].Service;
     }
 
-    public async Task<ScopedSaveResult> SaveAsync(Memory memory, string? scope = null)
+    public async Task<ScopedMemorySaveResult> SaveAsync(Memory memory, string? scope = null)
     {
         ArgumentNullException.ThrowIfNull(memory);
         var kind = _policy.Resolve(scope);
@@ -226,7 +226,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
             var saveResult = await primaryService.SaveAsync(memory);
             var scoped = new ScopedMemory(saveResult.Memory, kind, primaryRoot);
             ScopedMemory? previous = saveResult.Previous is null ? null : new ScopedMemory(saveResult.Previous, kind, primaryRoot);
-            return new ScopedSaveResult(scoped, saveResult.Action, previous, saveResult.NearMatches, saveResult.Reason, saveResult.MatchScore);
+            return new ScopedMemorySaveResult(scoped, saveResult.Action, previous, saveResult.NearMatches, saveResult.Reason, saveResult.MatchScore);
         }
 
         if (kind == MemoryScopeKind.Project)
@@ -241,7 +241,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
                     var scoped = new ScopedMemory(saveResult.Memory, MemoryScopeKind.Project, ancestor.Scope.Root);
                     ScopedMemory? previous = saveResult.Previous is null ? null : new ScopedMemory(saveResult.Previous, MemoryScopeKind.Project, ancestor.Scope.Root);
                     var reason = $"cross-scope-match: updated existing active memory '{ancestorMatch.Id}' in ancestor project '{ProjectNameOf(ancestor.Scope.Root)}'";
-                    return new ScopedSaveResult(scoped, saveResult.Action, previous, saveResult.NearMatches, reason, saveResult.MatchScore);
+                    return new ScopedMemorySaveResult(scoped, saveResult.Action, previous, saveResult.NearMatches, reason, saveResult.MatchScore);
                 }
             }
 
@@ -252,7 +252,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
                 var scoped = new ScopedMemory(saveResult.Memory, MemoryScopeKind.Global, null);
                 ScopedMemory? previous = saveResult.Previous is null ? null : new ScopedMemory(saveResult.Previous, MemoryScopeKind.Global, null);
                 var reason = $"cross-scope-match: updated existing active memory '{globalMatch.Id}' in global scope";
-                return new ScopedSaveResult(scoped, saveResult.Action, previous, saveResult.NearMatches, reason, saveResult.MatchScore);
+                return new ScopedMemorySaveResult(scoped, saveResult.Action, previous, saveResult.NearMatches, reason, saveResult.MatchScore);
             }
         }
         else if (kind == MemoryScopeKind.Global)
@@ -267,7 +267,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
                     var scoped = new ScopedMemory(saveResult.Memory, MemoryScopeKind.Project, level.Scope.Root);
                     ScopedMemory? previous = saveResult.Previous is null ? null : new ScopedMemory(saveResult.Previous, MemoryScopeKind.Project, level.Scope.Root);
                     var reason = $"cross-scope-match: updated existing active memory '{projectMatch.Id}' in project scope '{ProjectNameOf(level.Scope.Root)}'";
-                    return new ScopedSaveResult(scoped, saveResult.Action, previous, saveResult.NearMatches, reason, saveResult.MatchScore);
+                    return new ScopedMemorySaveResult(scoped, saveResult.Action, previous, saveResult.NearMatches, reason, saveResult.MatchScore);
                 }
             }
         }
@@ -275,7 +275,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         var createdResult = await primaryService.SaveAsync(memory);
         var createdScoped = new ScopedMemory(createdResult.Memory, kind, primaryRoot);
         ScopedMemory? createdPrevious = createdResult.Previous is null ? null : new ScopedMemory(createdResult.Previous, kind, primaryRoot);
-        return new ScopedSaveResult(createdScoped, createdResult.Action, createdPrevious, createdResult.NearMatches, createdResult.Reason, createdResult.MatchScore);
+        return new ScopedMemorySaveResult(createdScoped, createdResult.Action, createdPrevious, createdResult.NearMatches, createdResult.Reason, createdResult.MatchScore);
     }
 
     public async Task<ScopedMemory?> GetByIdAsync(MemoryReference reference)
@@ -527,7 +527,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         }
         return (new MemoryService(
             new FileSystemMemoryStorage(dataDir),
-            new SqliteMemoryIndex(Path.Combine(dataDir, "index.db"))), false);
+            new SqliteMemoryIndex(Path.Combine(dataDir, "memory.db"))), false);
     }
 
     public async Task<ScopedMemory?> CopyToProjectAsync(MemoryReference source, string targetProjectRoot)

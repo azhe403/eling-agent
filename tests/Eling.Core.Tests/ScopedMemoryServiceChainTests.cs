@@ -24,7 +24,7 @@ public sealed class ScopedMemoryServiceChainTests
     {
         private readonly Dictionary<MemoryId, Memory.Memory> _items = new();
 
-        public Task<SaveResult> SaveAsync(Memory.Memory memory)
+        public Task<MemorySaveResult> SaveAsync(Memory.Memory memory)
         {
             var match = _items.Values.FirstOrDefault(m =>
                 m.Status == MemoryStatus.Active &&
@@ -44,11 +44,11 @@ public sealed class ScopedMemoryServiceChainTests
                     match.CreatedAt,
                     DateTimeOffset.UtcNow);
                 _items[match.Id] = merged;
-                return Task.FromResult(new SaveResult(merged, SaveAction.Updated, match));
+                return Task.FromResult(new MemorySaveResult(merged, SaveAction.Updated, match));
             }
 
             _items[memory.Id] = memory;
-            return Task.FromResult(new SaveResult(memory, SaveAction.Created));
+            return Task.FromResult(new MemorySaveResult(memory, SaveAction.Created));
         }
 
         public Task<Memory.Memory?> FindActiveSimilarAsync(Memory.Memory memory, double? threshold = null)

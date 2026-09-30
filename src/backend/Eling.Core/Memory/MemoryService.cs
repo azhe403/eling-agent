@@ -20,18 +20,18 @@ public class MemoryService : IMemoryService
         _smartSave = smartSave;
     }
 
-    public async Task<SaveResult> SaveAsync(Memory memory)
+    public async Task<MemorySaveResult> SaveAsync(Memory memory)
     {
         var (existing, nearMatches, reason, matchScore) = await FindActiveSimilarAndNearMatchesAsync(memory);
         if (existing is not null)
         {
             var merged = await MergeIntoAsync(existing, memory);
-            return new SaveResult(merged, SaveAction.Updated, existing, nearMatches, reason, matchScore);
+            return new MemorySaveResult(merged, SaveAction.Updated, existing, nearMatches, reason, matchScore);
         }
 
         await _storage.SaveAsync(memory);
         await _index.IndexAsync(memory);
-        return new SaveResult(memory, SaveAction.Created, null, nearMatches, reason, matchScore);
+        return new MemorySaveResult(memory, SaveAction.Created, null, nearMatches, reason, matchScore);
     }
 
     public async Task<Memory?> FindActiveSimilarAsync(Memory memory, double? threshold = null)
@@ -42,7 +42,7 @@ public class MemoryService : IMemoryService
 
     private static string NormalizeContent(string content) => content.Trim();
 
-    private async Task<(Memory? BestMatch, IReadOnlyCollection<NearMatch> NearMatches, string Reason, double? MatchScore)> FindActiveSimilarAndNearMatchesAsync(Memory incoming, double? duplicateThreshold = null)
+    private async Task<(Memory? BestMatch, IReadOnlyCollection<MemoryNearMatch> NearMatches, string Reason, double? MatchScore)> FindActiveSimilarAndNearMatchesAsync(Memory incoming, double? duplicateThreshold = null)
     {
         var activeThreshold = duplicateThreshold ?? _smartSave.DuplicateThreshold;
         var normalized = NormalizeContent(incoming.Content);
@@ -87,7 +87,7 @@ public class MemoryService : IMemoryService
             .Where(c => bestMatch == null || c.Memory.Id != bestMatch.Id)
             .OrderByDescending(c => c.Score)
             .Take(5)
-            .Select(c => new NearMatch(
+            .Select(c => new MemoryNearMatch(
                 c.Memory.Id,
                 c.Memory.Content.Length > 120 ? string.Concat(c.Memory.Content.AsSpan(0, 120), "...") : c.Memory.Content,
                 Math.Round(c.Score, 4),

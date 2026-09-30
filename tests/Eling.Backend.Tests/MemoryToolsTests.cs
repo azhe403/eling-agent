@@ -27,11 +27,11 @@ public class MemoryToolsTests
         public string? LastSearchQuery;
         public bool RebuildIndexCalled;
 
-        public Task<SaveResult> SaveAsync(Memory memory)
+        public Task<MemorySaveResult> SaveAsync(Memory memory)
         {
             var action = Items.ContainsKey(memory.Id) ? SaveAction.Updated : SaveAction.Created;
             Items[memory.Id] = memory;
-            return Task.FromResult(new SaveResult(memory, action));
+            return Task.FromResult(new MemorySaveResult(memory, action));
         }
 
         public Task<Memory?> GetByIdAsync(MemoryId id) => Task.FromResult(Items.GetValueOrDefault(id));
@@ -121,13 +121,13 @@ public class MemoryToolsTests
 
         public FakeNearMatchMemoryService(MemoryId matchId) => _matchId = matchId;
 
-        public Task<SaveResult> SaveAsync(Memory memory)
+        public Task<MemorySaveResult> SaveAsync(Memory memory)
         {
-            var matches = new List<NearMatch>
+            var matches = new List<MemoryNearMatch>
             {
                 new(_matchId, "Existing preview", 0.65, MemoryType.Decision, ["arch"])
             };
-            return Task.FromResult(new SaveResult(memory, SaveAction.Created, null, matches));
+            return Task.FromResult(new MemorySaveResult(memory, SaveAction.Created, null, matches));
         }
 
         public Task<Memory?> GetByIdAsync(MemoryId id) => Task.FromResult<Memory?>(null);
@@ -509,5 +509,9 @@ public class MemoryToolsTests
         Assert.Contains(".gitignore", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("prompt the user for confirmation", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Memory Recall Strategy", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Mandatory Session-Start Recall", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("first user turn", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Codebase Indexing (HARD RULE)", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ASK the user for approval to run `codebase_index`", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
     }
 }
