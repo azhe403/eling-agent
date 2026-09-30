@@ -208,41 +208,62 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
     public async Task<CodebaseStats> GetStatsAsync(CancellationToken ct = default)
     {
         if (!File.Exists(_dbPath)) return new CodebaseStats(0, 0, null, _dbPath);
-        await using var c = await OpenAsync(ct);
-        int fc = 0, cc = 0; string? last = null;
-        await using (var cmd = c.CreateCommand()) { cmd.CommandText = "SELECT COUNT(*) FROM codebase_files;"; fc = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)); }
-        await using (var cmd = c.CreateCommand()) { cmd.CommandText = "SELECT COUNT(*) FROM codebase_chunks;"; cc = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)); }
-        await using (var cmd = c.CreateCommand()) { cmd.CommandText = "SELECT MAX(last_indexed_at) FROM codebase_files;"; var v = await cmd.ExecuteScalarAsync(ct); last = v as string; }
-        return new CodebaseStats(fc, cc, last, _dbPath);
+        try
+        {
+            await using var c = await OpenAsync(ct);
+            int fc = 0, cc = 0; string? last = null;
+            await using (var cmd = c.CreateCommand()) { cmd.CommandText = "SELECT COUNT(*) FROM codebase_files;"; fc = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)); }
+            await using (var cmd = c.CreateCommand()) { cmd.CommandText = "SELECT COUNT(*) FROM codebase_chunks;"; cc = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)); }
+            await using (var cmd = c.CreateCommand()) { cmd.CommandText = "SELECT MAX(last_indexed_at) FROM codebase_files;"; var v = await cmd.ExecuteScalarAsync(ct); last = v as string; }
+            return new CodebaseStats(fc, cc, last, _dbPath);
+        }
+        catch (SqliteException ex) when (IsMissingSchema(ex))
+        {
+            return new CodebaseStats(0, 0, null, _dbPath);
+        }
     }
 
     public async Task<IReadOnlyList<string>> ListPathsAsync(CancellationToken ct = default)
     {
         if (!File.Exists(_dbPath)) return Array.Empty<string>();
-        await using var c = await OpenAsync(ct);
-        await using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT path FROM codebase_files;";
-        var paths = new List<string>();
-        await using var r = await cmd.ExecuteReaderAsync(ct);
-        while (await r.ReadAsync(ct)) paths.Add(r.GetString(0));
-        return paths;
+        try
+        {
+            await using var c = await OpenAsync(ct);
+            await using var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT path FROM codebase_files;";
+            var paths = new List<string>();
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct)) paths.Add(r.GetString(0));
+            return paths;
+        }
+        catch (SqliteException ex) when (IsMissingSchema(ex))
+        {
+            return Array.Empty<string>();
+        }
     }
 
     public async Task<IReadOnlyList<CodebaseFileEntry>> ListRecentFilesAsync(int limit, CancellationToken ct = default)
     {
         if (!File.Exists(_dbPath)) return Array.Empty<CodebaseFileEntry>();
-        await using var c = await OpenAsync(ct);
-        await using var cmd = c.CreateCommand();
-        cmd.CommandText = """
-            SELECT f.path, COUNT(c.id), f.last_indexed_at
-            FROM codebase_files f LEFT JOIN codebase_chunks c ON c.file_path = f.path
-            GROUP BY f.path ORDER BY f.last_indexed_at DESC LIMIT $lim;
-            """;
-        Add(cmd, "$lim", Math.Min(Math.Max(limit, 1), 100));
-        var rows = new List<CodebaseFileEntry>();
-        await using var r = await cmd.ExecuteReaderAsync(ct);
-        while (await r.ReadAsync(ct)) rows.Add(new CodebaseFileEntry(r.GetString(0), r.GetInt32(1), r.GetString(2)));
-        return rows;
+        try
+        {
+            await using var c = await OpenAsync(ct);
+            await using var cmd = c.CreateCommand();
+            cmd.CommandText = """
+                SELECT f.path, COUNT(c.id), f.last_indexed_at
+                FROM codebase_files f LEFT JOIN codebase_chunks c ON c.file_path = f.path
+                GROUP BY f.path ORDER BY f.last_indexed_at DESC LIMIT $lim;
+                """;
+            Add(cmd, "$lim", Math.Min(Math.Max(limit, 1), 100));
+            var rows = new List<CodebaseFileEntry>();
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct)) rows.Add(new CodebaseFileEntry(r.GetString(0), r.GetInt32(1), r.GetString(2)));
+            return rows;
+        }
+        catch (SqliteException ex) when (IsMissingSchema(ex))
+        {
+            return Array.Empty<CodebaseFileEntry>();
+        }
     }
 
     /// <summary>
@@ -311,6 +332,24 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
         .Replace("\\", "\\\\", StringComparison.Ordinal)
         .Replace("%", "\\%", StringComparison.Ordinal)
         .Replace("_", "\\_", StringComparison.Ordinal);
+
+    /// <summary>
+    /// True for "these tables do not exist yet" and nothing else.
+    ///
+    /// Opening creates the file (read-write-create) long before the tables do,
+    /// so a reader can meet a real file that is not an index: a pass killed
+    /// between the open and the CREATE, or one that only ever opened the file
+    /// to read. <c>File.Exists</c> cannot tell that apart from a populated
+    /// index, and the state is sticky until something indexes for real.
+    ///
+    /// The reads above therefore let their statement run and answer "empty"
+    /// when the table is missing, rather than probing the schema up front: a
+    /// probe costs a round trip on every read, and the reads are polled in
+    /// tight loops while the watcher is indexing the same database. Only
+    /// SQLITE_ERROR is absorbed — a locked (5) or corrupt database is a
+    /// different fault and still propagates.
+    /// </summary>
+    private static bool IsMissingSchema(SqliteException ex) => ex.SqliteErrorCode == 1;
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
     {

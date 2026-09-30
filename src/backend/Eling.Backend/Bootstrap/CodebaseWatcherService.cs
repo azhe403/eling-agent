@@ -79,6 +79,7 @@ public sealed class CodebaseWatcherService : BackgroundService
             _watcher.EnableRaisingEvents = true;
             _isActive = true;
             _logger?.LogInformation("Codebase watcher active on {Root}.", root);
+            await LogIndexStateAtStartupAsync(stoppingToken);
         }
         catch (Exception ex)
         {
@@ -105,6 +106,30 @@ public sealed class CodebaseWatcherService : BackgroundService
             _isActive = false;
             _watcher?.Dispose();
             _watcher = null;
+        }
+    }
+
+    /// <summary>
+    /// Reports what the local index already holds when the watcher comes up.
+    /// Nothing indexes until a file event arrives, so an index that is empty
+    /// or was left schema-less by an earlier run stays that way for as long as
+    /// the workspace is idle — this line is where that becomes visible instead
+    /// of surfacing much later as a failed status read. Never throws: a failure
+    /// here must not reach the start-up catch below and take the watcher down.
+    /// </summary>
+    private async Task LogIndexStateAtStartupAsync(CancellationToken ct)
+    {
+        try
+        {
+            var stats = await _svc.GetStatsAsync(ct);
+            _logger?.LogInformation(
+                "Codebase index state at watcher startup: files={Files} chunks={Chunks} lastIndexedAt={LastIndexedAt} dbPath={DbPath}.",
+                stats.FileCount, stats.ChunkCount, stats.LastIndexedAt ?? "never", stats.DbPath);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogWarning(ex,
+                "Codebase index state unreadable at watcher startup; the index needs a rebuild.");
         }
     }
 

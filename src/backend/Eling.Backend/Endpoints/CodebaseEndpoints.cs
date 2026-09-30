@@ -37,7 +37,6 @@ public static class CodebaseEndpoints
             // watcherActive/dbPath stay backend-local: this process's own
             // index, not the aggregate.
             var scoped = await svc.GetScopedStatsAsync(resolved.Roots);
-            var stats = await svc.GetStatsAsync();
             return TypedResults.Ok(new
             {
                 scope = resolved.EffectiveScope,
@@ -47,7 +46,7 @@ public static class CodebaseEndpoints
                 chunks = scoped.Chunks,
                 lastIndexedAt = scoped.LastIndexedAt,
                 watcherActive = watcher.IsActive,
-                dbPath = stats.DbPath
+                dbPath = svc.DbPath
             });
         }
         catch (ArgumentException ex)

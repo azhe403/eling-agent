@@ -36,6 +36,14 @@ public sealed class CodebaseIndexService
     public string ProjectRoot => _projectRoot;
 
     /// <summary>
+    /// Where this service's own index lives. Exposed so a caller that only
+    /// needs the path never opens the database to learn it: reading stats
+    /// purely to echo a path can still fail on an index that has no schema
+    /// yet, and no status response should go down for that.
+    /// </summary>
+    public string DbPath => _index.DbPath;
+
+    /// <summary>
     /// <see cref="CodebaseIndexResult.Status"/> value returned instead of
     /// waiting when a pass is already in flight.
     /// </summary>
