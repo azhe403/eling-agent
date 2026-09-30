@@ -15,13 +15,12 @@
           "ELING_OUTPUT_ROOT": ".bin-opencode",
           "ELING_DASHBOARD_PORT": "4417",
           "ELING_WATCH_DASHBOARD": "1",
-          "XDOTNET_WATCH_RESTART_ON_RUDE_EDIT": "1"
+          "XDOTNET_WATCH_RESTART_ON_RUDE_EDIT": "1",
+          "ASPNETCORE_ENVIRONMENT": "Development"
         },
         "disabled": false,
         "timeout": {
-          "startup": 60000,
-          "catalog": 30000,
-          "execution": 30000
+          "startup": 60000
         }
       },
       "eling": {
