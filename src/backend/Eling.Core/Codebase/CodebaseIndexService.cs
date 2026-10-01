@@ -371,6 +371,66 @@ public sealed class CodebaseIndexService
         return all.OrderByDescending(f => f.LastIndexedAt, StringComparer.Ordinal).Take(Math.Min(Math.Max(limit, 1), 100)).ToList();
     }
 
+    /// <summary>
+    /// One indexed file with all of its chunks, resolved across the given
+    /// project roots (or this project when null). Null when no root in scope
+    /// carries the path.
+    ///
+    /// The first root that has the file wins rather than merging: the same
+    /// relative path in two projects is two different files, and answering
+    /// with one keeps a click in the result list pointing at a single
+    /// document. Root order is the caller's, and "all" scope puts the local
+    /// project first — the same precedence <see cref="SearchAllAsync"/> gives
+    /// its locality bias.
+    ///
+    /// A file row with zero chunks is still a match: that is a file the indexer
+    /// has a record of but no chunked content for, and the caller can say so
+    /// instead of reporting the file as absent.
+    /// </summary>
+    public async Task<ScopedCodebaseFileDetail?> GetFileDetailAsync(
+        string path,
+        IEnumerable<string>? projectRoots = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        var rel = path.Replace('\\', '/');
+        var roots = NormalizeRoots(projectRoots);
+
+        foreach (var root in roots)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                CodebaseFileRecord? record;
+                IReadOnlyList<CodebaseChunk> chunks;
+                if (string.Equals(root, _projectRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    record = await _index.GetFileAsync(rel, ct);
+                    chunks = record is null ? [] : await _index.ListChunksAsync(rel, ct);
+                }
+                else
+                {
+                    var dbPath = Scope.ElingPaths.ResolveCodebaseDbPath(root);
+                    if (!File.Exists(dbPath)) continue;
+                    using var index = new SqliteCodebaseIndex(dbPath, readOnly: true);
+                    record = await index.GetFileAsync(rel, ct);
+                    chunks = record is null ? [] : await index.ListChunksAsync(rel, ct);
+                }
+
+                if (record is not null) return new ScopedCodebaseFileDetail(root, rel, record.Size, record.LastIndexedAt, chunks);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Same stance as the federated reads above: a stale or locked
+                // sibling index must not fail the whole lookup, but it must be
+                // visible. Cancellation is excluded on purpose — it would
+                // otherwise keep walking roots the caller already abandoned.
+                _logger.LogWarning(ex, "Skipped unreadable sibling index at {Root} while reading {Path}.", root, rel);
+            }
+        }
+        return null;
+    }
+
     private static IReadOnlyList<CodebaseHit> Merge(IReadOnlyList<CodebaseHit> a, IReadOnlyList<CodebaseHit> b)
     {
         var byKey = new Dictionary<string, CodebaseHit>();

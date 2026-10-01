@@ -84,4 +84,7 @@ internal sealed class RecordingCodebaseIndex : ICodebaseIndex
 
     public Task<IReadOnlyList<CodebaseFileEntry>> ListRecentFilesAsync(int limit, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<CodebaseFileEntry>>([]);
+
+    public Task<IReadOnlyList<CodebaseChunk>> ListChunksAsync(string path, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<CodebaseChunk>>([]);
 }

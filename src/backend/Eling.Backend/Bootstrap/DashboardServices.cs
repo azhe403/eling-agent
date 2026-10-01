@@ -63,6 +63,10 @@ public static class DashboardServices
             return new CodebaseIndexService(root, new SqliteCodebaseIndex(dbPath));
         });
 
+        // Stateless and root-agnostic: it takes the project root per call, so a
+        // single instance serves the file viewer's federated reads.
+        services.TryAddSingleton<Eling.Core.Codebase.CodebaseFileReader>();
+
         // Codebase watcher loop runs only on the dashboard owner of a real,
         // non-excluded project session, so exactly one process indexes in
         // the background. User-home (global-only) and excluded (temporal)

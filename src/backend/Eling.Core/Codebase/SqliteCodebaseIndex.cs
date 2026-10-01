@@ -267,6 +267,32 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
     }
 
     /// <summary>
+    /// Every chunk stored for one file, in line order. Chunks are written with
+    /// an overlap, so the returned ranges are NOT a partition of the file —
+    /// reading them back as one document duplicates the overlap lines. That is
+    /// deliberate: a chunk list is retrieval metadata, not a reconstruction.
+    /// </summary>
+    public async Task<IReadOnlyList<CodebaseChunk>> ListChunksAsync(string path, CancellationToken ct = default)
+    {
+        if (!File.Exists(_dbPath)) return Array.Empty<CodebaseChunk>();
+        try
+        {
+            await using var c = await OpenAsync(ct);
+            await using var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT file_path, start_line, end_line, content FROM codebase_chunks WHERE file_path=$p ORDER BY start_line;";
+            Add(cmd, "$p", path);
+            var rows = new List<CodebaseChunk>();
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct)) rows.Add(new CodebaseChunk(r.GetString(0), r.GetInt32(1), r.GetInt32(2), r.GetString(3)));
+            return rows;
+        }
+        catch (SqliteException ex) when (IsMissingSchema(ex))
+        {
+            return Array.Empty<CodebaseChunk>();
+        }
+    }
+
+    /// <summary>
     /// Runs one FTS pass. <paramref name="pathPrefix"/> and
     /// <paramref name="filePattern"/> are applied in SQL, inside the same
     /// statement as the rank sort, so the LIMIT is taken from the filtered set

@@ -35,6 +35,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { FileDetailDialog } from "./FileDetailDialog"
+import type { SelectedFile } from "./fileDetailApi"
 
 type CodebaseStatus = {
   scope: string
@@ -67,6 +69,26 @@ type CodebaseTopFile = {
   path: string
   chunkCount: number
   lastIndexedAt: string
+}
+
+/** A file name in either list, rendered as the button that opens the viewer. */
+function FileName({
+  file,
+  onOpen,
+}: {
+  file: { projectRoot: string; path: string }
+  onOpen: (file: SelectedFile) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(file)}
+      title={`Open ${file.path}`}
+      className="text-left font-medium break-all underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xs"
+    >
+      {file.path}
+    </button>
+  )
 }
 
 type RebuildMode = "incremental" | "full"
@@ -150,6 +172,10 @@ export function CodebaseList() {
   const [runtimes, setRuntimes] = useState<RuntimeEntry[]>([])
   const [topFiles, setTopFiles] = useState<CodebaseTopFile[]>([])
   const [topLoading, setTopLoading] = useState(true)
+  // Which file the viewer is showing, or null when it is closed. Both lists
+  // feed the same viewer, so the selection carries the owning project with it:
+  // the same relative path can exist in two indexed workspaces.
+  const [selectedFile, setSelectedFile] = useState<SelectedFile | null>(null)
   // Rebuild is an async job: the POST returns 202 with the first snapshot and
   // the rest arrives over SSE. `rebuildStarting` covers only the POST itself,
   // before any snapshot exists.
@@ -658,7 +684,7 @@ export function CodebaseList() {
               topFiles.map((f) => (
                 <div key={`${f.projectRoot}-${f.path}`} className="p-3 text-sm">
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="font-medium break-all">{f.path}</div>
+                    <FileName file={f} onOpen={setSelectedFile} />
                     {projectSel === "all" && (
                       <span
                         className="rounded-full border border-border/50 bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
@@ -688,7 +714,7 @@ export function CodebaseList() {
             results.map((r: CodebaseHit, i: number) => (
               <div key={`${r.projectRoot}-${r.path}-${r.startLine}-${i}`} className="p-3 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="font-medium break-all">{r.path}</div>
+                  <FileName file={r} onOpen={setSelectedFile} />
                   {projectSel === "all" && (
                     <span
                       className="rounded-full border border-border/50 bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
@@ -713,6 +739,11 @@ export function CodebaseList() {
           )}
         </div>
       </div>
+
+      <FileDetailDialog
+        file={selectedFile}
+        onClose={() => setSelectedFile(null)}
+      />
     </div>
   )
 }

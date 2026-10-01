@@ -69,7 +69,7 @@ public static class CodebaseEndpoints
     /// plus the concrete workspace roots a federated read should cover.
     /// Null roots means "this workspace only".
     /// </summary>
-    private sealed record ResolvedScope(
+    internal sealed record ResolvedScope(
         string EffectiveScope,
         List<string>? Roots);
 
@@ -77,7 +77,13 @@ public static class CodebaseEndpoints
     /// Maps the request's scope selector onto the concrete project roots a
     /// federated read should cover. Null roots means "this project only".
     /// </summary>
-    private static ResolvedScope ResolveScope(
+    /// <remarks>
+    /// Internal rather than private so <c>CodebaseFileController</c> resolves
+    /// scope exactly the way these endpoints do — two copies of this rule
+    /// would drift, and the viewer has to read the index the list was drawn
+    /// from.
+    /// </remarks>
+    internal static ResolvedScope ResolveScope(
         CodebaseIndexService svc,
         RuntimeRegistry registry,
         string? scope,
