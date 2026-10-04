@@ -25,7 +25,7 @@ public sealed class HttpLoopService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var isDevMode = await DevModeDetector.IsDevModeAsync(stoppingToken);
+        var isDevMode = DevModeDetector.IsDevMode();
         await HttpLoop.RunAsync(
             _shared,
             _context,

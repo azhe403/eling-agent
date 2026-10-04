@@ -4,10 +4,25 @@ namespace Eling.Backend.Bootstrap;
 
 internal static class DevModeDetector
 {
-    public static async Task<bool> IsDevModeAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Whether this repo has a frontend dev server worth supervising.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately independent of whether port 4427 is currently bound. The old
+    /// gate used <c>!IsPortListeningAsync(4427)</c>, meaning "if something is
+    /// already there, do not manage it" - which is precisely why the dashboard
+    /// stopped auto-starting. <c>dotnet watch</c> restarts the backend without
+    /// taking the <c>pnpm dev</c> process down, so the next generation saw 4427
+    /// still bound and switched its own loop off, even though that process might
+    /// have been dead or hung with nothing left to recover it. The decision
+    /// belongs to the reconcile loop, not here.
+    /// </remarks>
+    public static bool IsDevMode()
     {
-        var probe = FindRepoRootWithPnpm();
-        return probe is not null && !await IsPortListeningAsync(4427, cancellationToken: cancellationToken);
+        var watchEnabled = FrontendReconcile.IsWatchEnabled(
+            Environment.GetEnvironmentVariable("ELING_WATCH_DASHBOARD"));
+
+        return FindRepoRootWithPnpm() is not null && watchEnabled;
     }
 
     public static async Task<bool> IsPortListeningAsync(
