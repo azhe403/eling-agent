@@ -129,7 +129,12 @@ function FileDetailBody({
       // item defaults to min-width auto, so a long file path would widen the
       // column past the dialog and overflow-hidden would clip the controls off
       // the right edge. A zero minimum is what lets the column stay bounded.
-      className="h-[85svh] max-w-4xl grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden p-4 sm:max-w-4xl"
+      //
+      // Every width here carries its own variant. The base class in ui/dialog.tsx
+      // sets `sm:max-w-lg`, and a bare `max-w-*` does not override it — tailwind-merge
+      // only drops a class that shares the variant too, so dropping `sm:` silently
+      // hands the dialog back to 32rem for the whole sm..lg range.
+      className="h-[85svh] max-w-4xl grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden p-4 sm:max-w-4xl lg:max-w-7xl 2xl:max-w-[100rem]"
     >
       {/* Title above, controls below on a phone; side by side from `sm` up.
           Below that width a long path would leave the title ~180px of a
