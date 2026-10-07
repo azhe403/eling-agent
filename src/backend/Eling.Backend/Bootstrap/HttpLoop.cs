@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using Eling.Core;
 using Eling.Core.Logging;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 // Aliased: `ILogger` is ambiguous with Microsoft.Extensions.Logging.ILogger
 // once Serilog is imported unqualified, and this file logs through both.
@@ -118,12 +119,15 @@ public static class HttpLoop
         var ownerMode = !DashboardPort.IsLoopbackListening(dashboardPort);
         var options = new WebApplicationOptions
         {
+            ContentRootPath = AppContext.BaseDirectory,
             WebRootPath = ownerMode
                 ? Path.Combine(AppContext.BaseDirectory, "eling-dashboard-ui")
                 : AppContext.BaseDirectory
         };
 
         var builder = WebApplication.CreateBuilder(options);
+        builder.Configuration.Sources.Clear();
+        builder.Configuration.AddEnvironmentVariables();
 
         if (!ownerMode)
         {
