@@ -1,26 +1,42 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 export type SseStatus = "connected" | "connecting" | "error"
 
+/** Notification topics the backend broadcasts on `/api/events/memories`. */
+export type SseTopic = "dashboard" | "coordinator" | "codebase" | "runtimes"
+
 /**
- * Subscribe to the backend's memory and coordinator change SSE stream (`/api/events/memories`).
+ * Subscribe to the backend's change SSE stream (`/api/events/memories`).
  * Native `EventSource` handles reconnection — we surface `connecting` when the
  * browser is retrying and `error` when the stream is closed. Diagnostic
  * `console.log` calls mirror the originals so dev tools still show the
  * familiar 🔄🟢⚡🟡⚪ stream colors during debugging.
+ *
+ * `topics` is what this consumer cares about. The stream is shared by several
+ * pages, so the server relays every topic and each page ignores what it did not
+ * ask for — filtering server-side would silently starve a page whose topic
+ * somebody else dropped. Defaulting to memory topics keeps a caller that does not
+ * pass the argument from reacting to codebase rebuilds.
  */
 export function useMemoriesSse(
   onMutation: () => void,
-  onRuntimesChange?: () => void
+  onRuntimesChange?: () => void,
+  topics: SseTopic[] = ["dashboard", "coordinator", "runtimes"]
 ): { status: SseStatus } {
   const [status, setStatus] = useState<SseStatus>("connecting")
+  const wanted = useMemo(() => new Set<string>(topics), [topics])
 
   // Stash callbacks in refs so the long-lived EventSource handler
   // can call them without forcing the effect to re-subscribe on every render.
   const onMutationRef = useRef(onMutation)
   const onRuntimesChangeRef = useRef(onRuntimesChange)
+  const wantedRef = useRef(wanted)
+
+  useEffect(() => {
+    wantedRef.current = wanted
+  }, [wanted])
 
   useEffect(() => {
     onMutationRef.current = onMutation
@@ -55,6 +71,13 @@ export function useMemoriesSse(
         )
 
         if (!event.data || event.data === "connected") return
+
+        // Not our topic: another page's business. The stream is shared, so a
+        // rebuild in another process must not trigger a memory reload here.
+        if (!wantedRef.current.has(event.data)) {
+          console.log(`[SSE IGNORED] 🚫 Topic "${event.data}" is not watched by this page`)
+          return
+        }
 
         if (event.data === "runtimes") {
           console.log(

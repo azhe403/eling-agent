@@ -367,6 +367,56 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    /// <summary>
+    /// Every topic must reach this stream. More than one page consumes it —
+    /// memory, codebase and create — so a server-side topic filter silently
+    /// starves whichever page wanted the topic it dropped. Dropping
+    /// <c>codebase</c> here stopped the codebase page's tiles and result list
+    /// from refreshing at all. Each consumer now filters on the client, where it
+    /// knows what it wants.
+    /// </summary>
+    [Fact]
+    public async Task GetEventsStream_RelaysCodebaseTopic()
+    {
+        var client = EnsureClient();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events/memories");
+        using var sseResponse = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        Assert.Equal(HttpStatusCode.OK, sseResponse.StatusCode);
+
+        using var stream = await sseResponse.Content.ReadAsStreamAsync(cts.Token);
+        using var reader = new StreamReader(stream);
+
+        var initial = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("data: connected", initial);
+        await reader.ReadLineAsync(cts.Token);
+
+        // A memory event proves the stream is live before the codebase one is
+        // expected, so a pass cannot come from a silently dead stream.
+        await client.PostAsJsonAsync("/api/memories", new
+        {
+            content = "topic relay probe",
+            type = "Note"
+        }, cts.Token);
+        await ReadEventDataAsync(reader, "data: dashboard", cts.Token);
+        await reader.ReadLineAsync(cts.Token);
+
+        // Same broadcaster the codebase page listens on. Its tiles and result
+        // list depend on this frame arriving.
+        var notify = await client.PostAsync("/api/codebase/rebuild-index?full=false", null, cts.Token);
+        notify.EnsureSuccessStatusCode();
+
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(15));
+
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(deadline.Token);
+            Assert.NotNull(line);
+            if (line == "data: codebase") return;
+        }
+    }
+
     [Fact]
     public async Task GetEventsStream_Subscribed_ReceivesConnectedThenMutationEvents()
     {

@@ -70,6 +70,8 @@ public sealed class CodebaseExclusionTests : IDisposable
         Directory.CreateDirectory(Path.Combine(home, "work"));
 
         Assert.True(ElingPaths.IsCodebaseExcluded(session, excludeRoots: null, userHome: home));
+        Assert.True(ElingPaths.IsCodebaseExcluded(Path.Combine(home, ".config", "opencode"), excludeRoots: null, userHome: home));
+        Assert.True(ElingPaths.IsCodebaseExcluded(Path.Combine(home, ".config", "opencode", "skills"), excludeRoots: null, userHome: home));
         Assert.False(ElingPaths.IsCodebaseExcluded(Path.Combine(home, "work"), excludeRoots: null, userHome: home));
     }
 
@@ -89,7 +91,7 @@ public sealed class CodebaseExclusionTests : IDisposable
         var reg = RuntimeSelfRegistration.Build(context);
 
         Assert.False(reg.CodebaseEnabled);
-        Assert.Equal(Path.GetFullPath(chats), reg.ProjectRoot);
+        Assert.Equal(Path.GetFullPath(chats), reg.HeadScopeRoot);
     }
 
     [Fact]

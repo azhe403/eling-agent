@@ -10,6 +10,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path $PSScriptRoot -Parent
+
+# Publishing writes intermediate output to $(ElingOutputRoot), which defaults to
+# .bin/ — the same folder a dev `dotnet watch` uses. Two writers on one folder
+# means the publish fails with MSB3021/3027 as soon as a dev server is running,
+# which is the common case rather than the rare one. Give this script its own
+# root so publishing never waits on a running dev process to release a lock.
+$env:ELING_OUTPUT_ROOT = ".bin-publish"
+
 $outDir = Join-Path $env:TEMP "eling-publish-global"
 $artifactsDir = Join-Path $env:TEMP "eling-publish-artifacts"
 $binDir = Join-Path $env:USERPROFILE ".local\bin"

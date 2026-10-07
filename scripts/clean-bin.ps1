@@ -27,6 +27,7 @@
                     forces this for *.Tests when ELING_OUTPUT_ROOT is unset)
       .bin-opencode  opencode.json MCP host (ELING_OUTPUT_ROOT=.bin-opencode)
       .bin-vscode    .vscode/mcp.json MCP host (ELING_OUTPUT_ROOT=.bin-vscode)
+      .bin-publish   scripts/publish-global.ps1 (ELING_OUTPUT_ROOT=.bin-publish)
       .bin-push      scripts/ci-check.sh push verification build
 
     Anything else matching `.bin-*` is disposable by construction: it is MSBuild
@@ -68,7 +69,7 @@ if (-not (Test-Path -LiteralPath $root -PathType Container)) {
     exit 1
 }
 
-$canonical = @(".bin", ".bin-test", ".bin-opencode", ".bin-vscode", ".bin-push")
+$canonical = @(".bin", ".bin-test", ".bin-opencode", ".bin-vscode", ".bin-publish", ".bin-push")
 $protected = $canonical + $Keep
 
 # Root-level `.bin-*` directories only. `.bin` itself carries no dash and is

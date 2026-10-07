@@ -67,15 +67,9 @@ public static class DashboardServices
         // single instance serves the file viewer's federated reads.
         services.TryAddSingleton<Eling.Core.Codebase.CodebaseFileReader>();
 
-        // Codebase watcher loop runs only on the dashboard owner of a real,
-        // non-excluded project session, so exactly one process indexes in
-        // the background. User-home (global-only) and excluded (temporal)
-        // sessions never trail their working directory. This gate is the only
-        // control: the watcher is on by default, with no opt-out flag.
-        if (isOwnerMode && !context.IsUserHome && !Eling.Core.Scope.ElingPaths.IsCodebaseExcluded(context.Chain.Cwd))
-        {
-            services.AddHostedService(sp => sp.GetRequiredService<CodebaseWatcherService>());
-        }
+        // Memory scope listing for the dashboard picker. Read-only and cheap: it
+        // resolves the .eling chain per call, so it needs no state of its own.
+        services.TryAddSingleton<Services.ProjectScopeCatalog>();
 
         // NOTE: do NOT call AddElingMcpServerStdio() here. The MCP stdio transport
         // is owned exclusively by the GenericHost in Program.cs so that peer-mode

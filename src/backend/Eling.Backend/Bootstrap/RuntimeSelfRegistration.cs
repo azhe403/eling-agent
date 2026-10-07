@@ -17,7 +17,7 @@ public static class RuntimeSelfRegistration
     public static RuntimeRegistration Build(ProjectContext context) => new()
     {
         ProcessId = Environment.ProcessId,
-        ProjectRoot = context.IsUserHome ? "UserScope" : context.ProjectScope.Root,
+        HeadScopeRoot = context.IsUserHome ? "UserScope" : context.ProjectScope.Root,
         WorkspaceRoot = context.IsUserHome ? "UserScope" : context.Chain.Cwd,
         CodebaseEnabled = !context.IsUserHome && !Eling.Core.Scope.ElingPaths.IsCodebaseExcluded(context.Chain.Cwd),
         DataDirectory = context.EffectiveDataDir,

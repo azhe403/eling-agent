@@ -32,7 +32,10 @@ public static class CoordinatorEndpoints
             return Results.NotFound();
         });
 
-        group.MapGet("/runtimes", (RuntimeRegistry registry) => Results.Ok(registry.Alive()));
+        // GET /runtimes moved to CoordinatorController: it now serves two modes
+        // (live-only by default, live-or-registered on request), and adding a
+        // query parameter to a minimal-API route is group-wide here — one
+        // misinferred parameter takes down every route in the group.
 
         group.MapPost("/notify-change", (MemoryChangeBroadcaster broadcaster) =>
         {

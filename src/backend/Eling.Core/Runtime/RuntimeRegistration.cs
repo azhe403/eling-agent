@@ -10,15 +10,23 @@ public sealed class RuntimeRegistration
     [JsonPropertyName("processId")]
     public int ProcessId { get; set; }
 
-    [JsonPropertyName("projectRoot")]
-    public string ProjectRoot { get; set; } = "";
+    /// <summary>
+    /// The nearest <c>.eling</c> at or above the working directory — the head
+    /// of the scope chain, and where memories are written.
+    /// </summary>
+    /// <remarks>
+    /// Not a project root: it can sit above the repository, and for a user-home
+    /// session it is the <c>UserScope</c> sentinel rather than a path at all.
+    /// </remarks>
+    [JsonPropertyName("headScopeRoot")]
+    public string HeadScopeRoot { get; set; } = "";
 
     /// <summary>
-    /// Working directory the backend was launched in — the codebase index
-    /// root and the file-search workspace. Memory identity stays in
-    /// <see cref="ProjectRoot"/> (nearest <c>.eling</c> ancestor); the two
-    /// differ when a subfolder (or a folder without <c>.eling</c>) is opened
-    /// as the workspace. Empty for registrations written by older binaries.
+    /// Working directory the backend was launched in — the codebase index root
+    /// and the file-search workspace, and deliberately never a <c>.eling</c>
+    /// ancestor. Memory identity stays in <see cref="HeadScopeRoot"/>; the two
+    /// differ when a subfolder, or a folder without <c>.eling</c>, is opened as
+    /// the workspace. Empty for registrations written by older binaries.
     /// </summary>
     [JsonPropertyName("workspaceRoot")]
     public string WorkspaceRoot { get; set; } = "";

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Eling.Backend.Codebase;
 using Eling.Backend.Dtos;
@@ -61,6 +62,13 @@ public static class DashboardRoutes
 
     internal static void MapSseEvents(this WebApplication app)
     {
+        // One topic-name stream carries every notification, and more than one page
+        // consumes it: the memory page, the codebase page and the create page all
+        // subscribe here. Topics are therefore NOT filtered server-side. A filter
+        // here would silently kill the live updates of whichever page wanted the
+        // topic it drops — dropping "codebase" stopped the codebase page's tiles
+        // and result list from refreshing at all. Each consumer picks its own
+        // topics in use-memories-sse.ts instead.
         app.MapGet("/api/events/memories", (HttpContext context, MemoryChangeBroadcaster broadcaster) =>
         {
             var ct = context.RequestAborted;
@@ -87,6 +95,29 @@ public static class DashboardRoutes
 
     private static string SerializeRebuildProgress(CodebaseRebuildProgress snapshot) =>
         JsonSerializer.Serialize(snapshot, SseJsonOptions);
+
+    /// <summary>
+    /// Forwards only the topics in <paramref name="topics"/>.
+    /// </summary>
+    /// <remarks>
+    /// Used by the typed rebuild-progress channel, where the payload is a
+    /// serialized object rather than a topic name. Not used on
+    /// <c>/api/events/memories</c>: that stream has several consumers with
+    /// different interests, so filtering there takes away another page's updates.
+    /// </remarks>
+    private static async IAsyncEnumerable<string> FilterTopics(
+        IAsyncEnumerable<string> source,
+        HashSet<string> topics,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var topic in source.WithCancellation(ct))
+        {
+            if (topics.Contains(topic))
+            {
+                yield return topic;
+            }
+        }
+    }
 
     /// <summary>
     /// Writes one <c>text/event-stream</c> response: an initial

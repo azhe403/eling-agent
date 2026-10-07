@@ -10,13 +10,25 @@ public sealed class RuntimeInfo
     [JsonPropertyName("processId")]
     public int ProcessId { get; set; }
 
-    [JsonPropertyName("projectRoot")]
-    public string ProjectRoot { get; set; } = "";
+    /// <summary>
+    /// The nearest <c>.eling</c> at or above the working directory — the head
+    /// of the scope chain, and where memories are written.
+    /// </summary>
+    /// <remarks>
+    /// Not a project root: it can sit above the repository (a workspace without
+    /// its own <c>.eling</c> inherits the nearest ancestor's), and for a
+    /// user-home session it is the <c>UserScope</c> sentinel rather than a path
+    /// at all. Stored rather than re-resolved so a closed workspace stays
+    /// findable after its folder moves.
+    /// </remarks>
+    [JsonPropertyName("headScopeRoot")]
+    public string HeadScopeRoot { get; set; } = "";
 
     /// <summary>
     /// Working directory the backend was launched in — the codebase index
-    /// root. Falls back to <see cref="ProjectRoot"/> for registrations
-    /// written by older binaries that predate the field.
+    /// root, and deliberately never a <c>.eling</c> ancestor. Falls back to
+    /// <see cref="HeadScopeRoot"/> for registrations written by older binaries
+    /// that predate the field.
     /// </summary>
     [JsonPropertyName("workspaceRoot")]
     public string WorkspaceRoot { get; set; } = "";
@@ -31,11 +43,11 @@ public sealed class RuntimeInfo
 
     /// <summary>
     /// The root codebase reads (search, top files, tiles) federate over:
-    /// the workspace when known, otherwise the memory project root.
-    /// Single home so REST and MCP resolve "all" scope identically.
+    /// the workspace when known, otherwise the scope chain head. Single home
+    /// so REST and MCP resolve "all" scope identically.
     /// </summary>
     public string CodebaseRoot() =>
-        string.IsNullOrWhiteSpace(WorkspaceRoot) ? ProjectRoot : WorkspaceRoot;
+        string.IsNullOrWhiteSpace(WorkspaceRoot) ? HeadScopeRoot : WorkspaceRoot;
 
     [JsonPropertyName("dataDirectory")]
     public string DataDirectory { get; set; } = "";

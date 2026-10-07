@@ -26,17 +26,17 @@ public static class CodebaseEndpoints
         return group;
     }
 
-    private static async Task<IResult> GetStatusAsync(CodebaseIndexService svc, Bootstrap.CodebaseWatcherService watcher, RuntimeRegistry registry, ILoggerFactory loggerFactory, string? scope = null, string[]? project = null)
+    private static async Task<IResult> GetStatusAsync(CodebaseIndexService svc, Bootstrap.CodebaseWatcherService watcher, RuntimeRegistry registry, ILoggerFactory loggerFactory, string? scope = null, string[]? project = null, CancellationToken cancellationToken = default)
     {
         var logger = loggerFactory.CreateLogger("Eling.Backend.Endpoints.CodebaseEndpoints");
         try
         {
-            var resolved = ResolveScope(svc, registry, scope, project);
+            var resolved = await ResolveScopeAsync(svc, registry, scope, project, cancellationToken);
             // files/chunks/lastIndexedAt describe the selected scope and
             // roots lists the workspaces those numbers belong to.
             // watcherActive/dbPath stay backend-local: this process's own
             // index, not the aggregate.
-            var scoped = await svc.GetScopedStatsAsync(resolved.Roots);
+            var scoped = await svc.GetScopedStatsAsync(resolved.Roots, cancellationToken);
             return TypedResults.Ok(new
             {
                 scope = resolved.EffectiveScope,
@@ -83,11 +83,12 @@ public static class CodebaseEndpoints
     /// would drift, and the viewer has to read the index the list was drawn
     /// from.
     /// </remarks>
-    internal static ResolvedScope ResolveScope(
+    internal static async Task<ResolvedScope> ResolveScopeAsync(
         CodebaseIndexService svc,
         RuntimeRegistry registry,
         string? scope,
-        string[]? project)
+        string[]? project,
+        CancellationToken cancellationToken = default)
     {
         // Explicit roots come straight from the query string, so they are the
         // one place a caller can name an arbitrary directory. Validate before
@@ -102,11 +103,18 @@ public static class CodebaseEndpoints
 
         if (string.Equals(scope, "all", StringComparison.OrdinalIgnoreCase))
         {
+            // Every workspace that has an index, not only the ones with a live
+            // process. A codebase index is a read-only file in the global store
+            // and stays fully readable after its process exits, so "all" that
+            // skipped closed projects undercounted by exactly the projects a
+            // user is most likely to want back — and made the total read lower
+            // than a single project's own tiles, which is incoherent.
+            //
             // CodebaseEnabled is the registry's own exclusion decision
             // (RuntimeSelfRegistration applies IsCodebaseExcluded at
             // registration). Federating without the filter would resurrect
             // every excluded runtime the gate exists to keep out.
-            var roots = registry.Alive()
+            var roots = (await registry.AliveOrRegisteredAsync(cancellationToken))
                 .Where(r => r.CodebaseEnabled)
                 .Select(r => r.CodebaseRoot())
                 .ToList();
@@ -126,14 +134,15 @@ public static class CodebaseEndpoints
     /// indexed", and the DB filename is a one-way hash so an unindexed root
     /// cannot even be discovered from the store.
     /// </summary>
-    internal static CodebaseRebuildRequest ResolveRebuildRequest(
+    internal static async Task<CodebaseRebuildRequest> ResolveRebuildRequestAsync(
         CodebaseIndexService svc,
         RuntimeRegistry registry,
         string? scope,
         string[]? project,
-        bool full)
+        bool full,
+        CancellationToken cancellationToken = default)
     {
-        var resolved = ResolveScope(svc, registry, scope, project);
+        var resolved = await ResolveScopeAsync(svc, registry, scope, project, cancellationToken);
         var candidates = resolved.Roots ?? [svc.ProjectRoot];
 
         var targets = new List<string>();
@@ -150,14 +159,14 @@ public static class CodebaseEndpoints
         return new CodebaseRebuildRequest(resolved.EffectiveScope, targets, skipped, full);
     }
 
-    private static async Task<IResult> SearchAsync(CodebaseIndexService svc, RuntimeRegistry registry, ILoggerFactory loggerFactory, string? q, int? limit, string? pathPrefix = null, string? scope = null, string[]? project = null)
+    private static async Task<IResult> SearchAsync(CodebaseIndexService svc, RuntimeRegistry registry, ILoggerFactory loggerFactory, string? q, int? limit, string? pathPrefix = null, string? scope = null, string[]? project = null, CancellationToken cancellationToken = default)
     {
         var logger = loggerFactory.CreateLogger("Eling.Backend.Endpoints.CodebaseEndpoints");
         if (limit is < 1 or > 50)
             limit = 20;
         try
         {
-            var resolved = ResolveScope(svc, registry, scope, project);
+            var resolved = await ResolveScopeAsync(svc, registry, scope, project, cancellationToken);
             var roots = resolved.Roots;
             var effectiveScope = resolved.EffectiveScope;
 
@@ -199,19 +208,20 @@ public static class CodebaseEndpoints
     /// it without parameters keeps the original behaviour: this backend's own
     /// workspace, incremental.
     /// </summary>
-    private static IResult RebuildIndexAsync(
+    private static async Task<IResult> RebuildIndexAsync(
         CodebaseIndexService svc,
         CodebaseRebuildJobRunner runner,
         RuntimeRegistry registry,
         ILoggerFactory loggerFactory,
         [FromQuery] string? scope = null,
         [FromQuery] string[]? project = null,
-        [FromQuery] bool full = false)
+        [FromQuery] bool full = false,
+        CancellationToken cancellationToken = default)
     {
         var logger = loggerFactory.CreateLogger("Eling.Backend.Endpoints.CodebaseEndpoints");
         try
         {
-            var request = ResolveRebuildRequest(svc, registry, scope, project, full);
+            var request = await ResolveRebuildRequestAsync(svc, registry, scope, project, full, cancellationToken);
             var snapshot = runner.Start(request);
             if (request.Skipped.Count > 0)
             {

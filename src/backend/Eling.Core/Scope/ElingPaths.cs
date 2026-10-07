@@ -23,6 +23,7 @@ public static class ElingPaths
     public const string MemoryDbFileName = "memory.db";
     public const string LegacyMemoryDbFileName = "index.db";
     public const string CodebaseDbFileName = "codebase.db";
+    public const string ProjectsDbFileName = "projects.db";
 
     public static string ResolveConfigDir(
         string? xdgConfigHome = null,
@@ -101,6 +102,21 @@ public static class ElingPaths
     }
 
     /// <summary>
+    /// The project registry, one global store beside memory.db rather than a
+    /// file per project: it has to be enumerable without walking a directory,
+    /// because enumerating by directory is the problem it exists to solve.
+    /// Pure: computes the path only, never touches disk.
+    /// </summary>
+    public static string ResolveProjectsDbPath(
+        string? xdgDataHome = null,
+        string? userHome = null,
+        string? elingDataDir = null)
+    {
+        var dataRoot = ResolveDataDir(xdgDataHome, userHome, elingDataDir);
+        return Path.Combine(dataRoot, ProjectsDbFileName);
+    }
+
+    /// <summary>
     /// True when the workspace must not participate in codebase indexing:
     /// no DB, no watcher, no dropdown or federation entry. Excluded when at
     /// or under the built-in temporal root (<c>.config/openchamber/chats</c>
@@ -115,7 +131,10 @@ public static class ElingPaths
     {
         if (string.IsNullOrWhiteSpace(workspaceRoot)) return true;
         var cwd = Path.GetFullPath(workspaceRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (IsAtOrUnder(cwd, DefaultChatsRoot(userHome))) return true;
+        foreach (var defRoot in DefaultExcludedRoots(userHome))
+        {
+            if (IsAtOrUnder(cwd, defRoot)) return true;
+        }
         var raw = excludeRoots ?? Environment.GetEnvironmentVariable("ELING_CODEBASE_EXCLUDE");
         if (string.IsNullOrWhiteSpace(raw)) return false;
         foreach (var entry in raw.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
@@ -189,12 +208,14 @@ public static class ElingPaths
         return accepted;
     }
 
-    private static string DefaultChatsRoot(string? userHome)
+    private static IEnumerable<string> DefaultExcludedRoots(string? userHome)
     {
         var home = string.IsNullOrWhiteSpace(userHome)
             ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
             : userHome!;
-        return Path.Combine(home, ".config", "openchamber", "chats");
+        yield return Path.Combine(home, ".config", "openchamber", "chats");
+        yield return Path.Combine(home, ".config", "opencode");
+        yield return Path.Combine(home, ".config", "openchamber");
     }
 
     private static bool IsAtOrUnder(string cwd, string root)

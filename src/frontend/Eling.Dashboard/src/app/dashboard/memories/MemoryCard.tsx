@@ -5,12 +5,13 @@ import { Check, Copy, Pencil, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { utcToLocal } from "@/lib/date-utils"
 import { statusBadge, typeBadge } from "@/lib/types"
-import type { Memory, Runtime } from "@/lib/types"
+import type { Memory } from "@/lib/types"
 
 export type MemoryCardProps = {
   memory: Memory
   copiedId: string | null
-  runtimes: Runtime[]
+  /** Whether any scope can currently be written to, which is what "↓ Project" does. */
+  canCopyToProject: boolean
   onCopy: (text: string, id: string) => void
   onEdit: (id: string) => void
   onDelete: (m: Memory) => void
@@ -21,7 +22,7 @@ export type MemoryCardProps = {
 export function MemoryCard({
   memory: m,
   copiedId,
-  runtimes,
+  canCopyToProject,
   onCopy,
   onEdit,
   onDelete,
@@ -72,7 +73,7 @@ export function MemoryCard({
               ↑ Global
             </Button>
           )}
-          {m.scope === "global" && runtimes.length > 0 && (
+          {m.scope === "global" && canCopyToProject && (
             <Button
               variant="ghost"
               size="sm"

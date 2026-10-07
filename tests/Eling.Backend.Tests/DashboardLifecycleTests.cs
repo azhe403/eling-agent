@@ -161,7 +161,7 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
         var entry = Assert.Single(runtimes);
 
         Assert.Equal(runtime.Id, entry.GetProperty("processId").GetInt32());
-        Assert.Equal(Path.GetFullPath(_tempDirs[0]), entry.GetProperty("projectRoot").GetString());
+        Assert.Equal(Path.GetFullPath(_tempDirs[0]), entry.GetProperty("headScopeRoot").GetString());
         Assert.True(Directory.Exists(entry.GetProperty("dataDirectory").GetString()));
         // In the merged single-binary architecture, the backend process IS the
         // dashboard owner: /health returns Environment.ProcessId, which is also
@@ -188,7 +188,7 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
         Assert.Equal(dashboardPid, currentPid);
 
         var runtimes = await TestProcesses.GetRuntimesAsync(_client);
-        var roots = runtimes.Select(r => r.GetProperty("projectRoot").GetString()).ToHashSet();
+        var roots = runtimes.Select(r => r.GetProperty("headScopeRoot").GetString()).ToHashSet();
         Assert.Contains(Path.GetFullPath(_tempDirs[0]), roots);  // owner registered
         Assert.Contains(Path.GetFullPath(_tempDirs[1]), roots);  // peer registered
 

@@ -15,7 +15,26 @@ export type Memory = {
   project?: { id: string; root: string } | null
 }
 
-export type Runtime = { projectRoot: string; dataDirectory: string }
+// Mirrors GET /api/coordinator/runtimes. Hand-maintained, so it drifts silently
+// the moment the backend DTO changes - the field it used to declare,
+// `projectRoot`, was renamed to `headScopeRoot`/`workspaceRoot` and this type
+// kept claiming it existed. Because the shape is asserted rather than inferred,
+// reading a renamed field still type-checks and only throws at runtime.
+// `headScopeRoot` is the project's own scope root and is what the
+// copy-to-project endpoint expects as `targetProjectRoot`; `workspaceRoot` is
+// the broader tree containing it.
+export type Runtime = {
+  processId: number
+  headScopeRoot: string
+  workspaceRoot: string
+  dataDirectory: string
+  codebaseEnabled: boolean
+  isAlive: boolean
+  lastHeartbeat: string
+  startTime: string
+  mcpEnabled: boolean
+  mcpTransport: string
+}
 
 // `TYPES` includes "All" so the filter UI can render a no-filter option alongside
 // the editable types; `EDIT_TYPES` is the slice used inside the edit form where

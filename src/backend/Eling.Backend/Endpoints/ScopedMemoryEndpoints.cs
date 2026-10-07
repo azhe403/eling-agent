@@ -168,7 +168,7 @@ public static class ScopedMemoryEndpoints
         RuntimeRegistry registry, string projectRoot, string? status, string? type, int? limit, int? offset)
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
-        var service = registry.TryResolveMemoryServiceByProjectRoot(projectRoot);
+        var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found or not alive");
         var all = await service.ListAllAsync();
         all = all.OrderByDescending(m => m.UpdatedAt).ThenByDescending(m => m.CreatedAt).ToList();
@@ -193,7 +193,7 @@ public static class ScopedMemoryEndpoints
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
         if (string.IsNullOrWhiteSpace(q)) return TypedResults.BadRequest("q is required");
-        var service = registry.TryResolveMemoryServiceByProjectRoot(projectRoot);
+        var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found or not alive");
         var results = await service.SearchAsync(q);
         var list = results.Select(r => ScopedSearchResultDto.Project(r, projectRoot)).ToList();
@@ -205,7 +205,7 @@ public static class ScopedMemoryEndpoints
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
         if (!TryParseMemoryId(id, out var memoryId)) return TypedResults.NotFound();
-        var service = registry.TryResolveMemoryServiceByProjectRoot(projectRoot);
+        var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found");
         var memory = await service.GetByIdAsync(memoryId);
         return memory is null ? TypedResults.NotFound() : TypedResults.Ok(ScopedMemoryDto.From(memory, MemoryScopeKind.Project, projectRoot));
@@ -215,7 +215,7 @@ public static class ScopedMemoryEndpoints
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
         if (string.IsNullOrWhiteSpace(request.Content)) return TypedResults.BadRequest("Content is required.");
-        var service = registry.TryResolveMemoryServiceByProjectRoot(projectRoot);
+        var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found or not alive");
         MemoryType type = MemoryType.Note;
         if (!string.IsNullOrEmpty(request.Type) && !Enum.TryParse<MemoryType>(request.Type, true, out type))
@@ -231,7 +231,7 @@ public static class ScopedMemoryEndpoints
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
         if (!TryParseMemoryId(id, out var memoryId)) return TypedResults.NotFound();
-        var service = registry.TryResolveMemoryServiceByProjectRoot(projectRoot);
+        var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found");
         var deleted = await service.DeleteAsync(memoryId);
         if (deleted)
@@ -246,7 +246,7 @@ public static class ScopedMemoryEndpoints
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
         if (!TryParseMemoryId(id, out var memoryId)) return TypedResults.NotFound();
-        var service = registry.TryResolveMemoryServiceByProjectRoot(projectRoot);
+        var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found");
         MemoryType? type = null;
         if (!string.IsNullOrEmpty(request.Type))
@@ -282,13 +282,13 @@ public static class ScopedMemoryEndpoints
         else
         {
             if (string.IsNullOrWhiteSpace(request.SourceProjectRoot)) return TypedResults.BadRequest("SourceProjectRoot required for project source");
-            var srcService = registry.TryResolveMemoryServiceByProjectRoot(request.SourceProjectRoot);
+            var srcService = registry.TryResolveMemoryServiceByScopeRoot(request.SourceProjectRoot);
             if (srcService is null) return TypedResults.NotFound();
             sourceMemory = await srcService.GetByIdAsync(memoryId);
         }
         if (sourceMemory is null) return TypedResults.NotFound();
 
-        var targetService = registry.TryResolveMemoryServiceByProjectRoot(request.TargetProjectRoot);
+        var targetService = registry.TryResolveMemoryServiceByScopeRoot(request.TargetProjectRoot);
         if (targetService is null) return TypedResults.BadRequest($"Target project '{request.TargetProjectRoot}' not alive");
 
         var copy = new Memory(sourceMemory.Type, sourceMemory.Content, sourceMemory.Tags, sourceMemory.Source, sourceMemory.Status);
@@ -301,7 +301,7 @@ public static class ScopedMemoryEndpoints
             }
             else if (!string.IsNullOrWhiteSpace(request.SourceProjectRoot))
             {
-                var srcService = registry.TryResolveMemoryServiceByProjectRoot(request.SourceProjectRoot);
+                var srcService = registry.TryResolveMemoryServiceByScopeRoot(request.SourceProjectRoot);
                 if (srcService is not null) await srcService.DeleteAsync(memoryId);
             }
         }
@@ -320,7 +320,7 @@ public static class ScopedMemoryEndpoints
         if (string.IsNullOrWhiteSpace(request.Id)) return TypedResults.BadRequest("Id is required");
         if (string.IsNullOrWhiteSpace(request.SourceProjectRoot)) return TypedResults.BadRequest("SourceProjectRoot is required");
         if (!TryParseMemoryId(request.Id, out var memoryId)) return TypedResults.NotFound();
-        var srcService = registry.TryResolveMemoryServiceByProjectRoot(request.SourceProjectRoot);
+        var srcService = registry.TryResolveMemoryServiceByScopeRoot(request.SourceProjectRoot);
         if (srcService is null) return TypedResults.NotFound();
         var sourceMemory = await srcService.GetByIdAsync(memoryId);
         if (sourceMemory is null) return TypedResults.NotFound();

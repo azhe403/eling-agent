@@ -15,6 +15,14 @@ public sealed class UserScope
     public string RuntimeDirectory { get; }
 
     /// <summary>
+    /// The project registry DB, beside memory.db and outside every project's
+    /// .eling. Resolved through the same data root as the runtime directory so
+    /// one override (ELING_DATA_DIR, or a test's UserScope.Resolve) relocates
+    /// both together instead of leaving them pointing at different stores.
+    /// </summary>
+    public string ProjectsDatabasePath { get; }
+
+    /// <summary>
     /// Global memory storage root — physically separated from any project .eling.
     /// Points to data-root/eling/ itself; FileSystemMemoryStorage appends /memories.
     /// </summary>
@@ -37,6 +45,7 @@ public sealed class UserScope
             : Path.GetFullPath(dataRoot);
         ConfigDirectory = Path.Combine(ConfigRoot, "config");
         RuntimeDirectory = ElingPaths.ResolveRuntimeDir(null, null, dataRoot);
+        ProjectsDatabasePath = ElingPaths.ResolveProjectsDbPath(null, null, dataRoot);
     }
 
     public static UserScope Resolve(

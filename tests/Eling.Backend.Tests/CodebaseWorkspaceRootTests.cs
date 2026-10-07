@@ -99,16 +99,16 @@ public sealed class CodebaseWorkspaceRootTests : IDisposable
         var reg = RuntimeSelfRegistration.Build(context);
 
         Assert.Equal(Path.GetFullPath(_workspace), reg.WorkspaceRoot);
-        Assert.Equal(Path.GetFullPath(_parent), reg.ProjectRoot);
+        Assert.Equal(Path.GetFullPath(_parent), reg.HeadScopeRoot);
     }
 
     [Fact]
-    public void CodebaseRoot_FallsBackToProjectRoot_WhenWorkspaceMissing()
+    public void CodebaseRoot_FallsBackToHeadScopeRoot_WhenWorkspaceMissing()
     {
-        var legacy = new RuntimeInfo { ProjectRoot = _parent, WorkspaceRoot = "" };
+        var legacy = new RuntimeInfo { HeadScopeRoot = _parent, WorkspaceRoot = "" };
         Assert.Equal(_parent, legacy.CodebaseRoot());
 
-        var current = new RuntimeInfo { ProjectRoot = _parent, WorkspaceRoot = _workspace };
+        var current = new RuntimeInfo { HeadScopeRoot = _parent, WorkspaceRoot = _workspace };
         Assert.Equal(_workspace, current.CodebaseRoot());
     }
 

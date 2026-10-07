@@ -43,7 +43,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import { utcToLocal } from "@/lib/date-utils"
 import { TYPES } from "@/lib/types"
-import type { Memory, Runtime } from "@/lib/types"
+import type { Memory } from "@/lib/types"
 
 import { MemoryCard } from "./MemoryCard"
 import { MemoryEditor } from "./MemoryEditor"
@@ -61,18 +61,27 @@ function scopeLabel(value: string | undefined | null) {
   return "📁 " + projectName(value)
 }
 
-function distinctProjectRoots(runtimes: Runtime[]) {
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const r of runtimes) {
-    const root = r.projectRoot
-    if (!root) continue
-    const key = root.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(root)
-  }
-  return out
+type ProjectScope = {
+  root: string
+  name: string
+  writable: boolean
+  hasLiveRuntime: boolean
+}
+
+/**
+ * Memory scopes come from /api/project/scopes, not from the coordinator's
+ * runtime list. A scope is a `.eling` directory; a runtime row means a process
+ * is alive somewhere. They differ exactly where it matters — a scope nobody is
+ * running in is still readable, and reading runtimes hid it.
+ */
+async function loadProjectScopes(): Promise<ProjectScope[]> {
+  const res = await fetch("/api/project/scopes", {
+    cache: "no-store",
+    headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+  })
+  if (!res.ok) return []
+  const data = await res.json()
+  return Array.isArray(data?.scopes) ? (data.scopes as ProjectScope[]) : []
 }
 
 export function MemoriesList() {
@@ -112,8 +121,9 @@ export function MemoriesList() {
   const [copyAsMove, setCopyAsMove] = useState(false)
   const [copyProjectRoot, setCopyProjectRoot] = useState<string>("")
   const [deleteTarget, setDeleteTarget] = useState<Memory | null>(null)
-  const [runtimes, setRuntimes] = useState<Runtime[]>([])
-  const projectRoots = distinctProjectRoots(runtimes)
+  const [scopes, setScopes] = useState<ProjectScope[]>([])
+  // Copy targets are the scopes this workspace may actually write to.
+  const copyTargets = scopes.filter((s) => s.writable)
 
   const copyToClipboard = useCallback((text: string, id: string) => {
     navigator.clipboard.writeText(text).catch(() => {
@@ -130,15 +140,11 @@ export function MemoriesList() {
     }
   }, [])
 
-  const loadRuntimes = useCallback(async () => {
+  const loadScopes = useCallback(async () => {
     try {
-      const res = await fetch(`/api/coordinator/runtimes?_t=${Date.now()}`, {
-        cache: "no-store",
-        headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
-      })
-      if (res.ok) setRuntimes(await res.json())
+      setScopes(await loadProjectScopes())
     } catch {
-      // ignore
+      // ignore — the picker still offers All and Global
     }
   }, [])
 
@@ -202,12 +208,12 @@ export function MemoriesList() {
     [scope]
   )
 
-  // Fetch active runtimes and memories on mount / scope change
+  // Fetch scopes and memories on mount / scope change
   useEffect(() => {
     let isMounted = true
 
     const fetchAll = async () => {
-      await loadRuntimes()
+      await loadScopes()
       if (isMounted) {
         await load("mount_or_scope_change")
       }
@@ -218,17 +224,17 @@ export function MemoriesList() {
     return () => {
       isMounted = false
     }
-  }, [load, loadRuntimes])
+  }, [load, loadScopes])
 
-  // Real-time memory and runtimes refresh via Server-Sent Events (SSE).
+  // Real-time memory and scope refresh via Server-Sent Events (SSE).
   const { status: sseStatus } = useMemoriesSse(
     useCallback(() => {
       void load("sse_mutation")
     }, [load]),
     useCallback(() => {
-      void loadRuntimes()
+      void loadScopes()
       void load("sse_runtimes")
-    }, [load, loadRuntimes])
+    }, [load, loadScopes])
   )
 
   async function remove(m: Memory) {
@@ -436,8 +442,8 @@ export function MemoriesList() {
           )}
         </div>
 
-        <div className="truncate text-xs text-muted-foreground" title={projectRoots.join("\n")}>
-          {projectRoots.length} {projectRoots.length === 1 ? "project" : "projects"} available
+        <div className="truncate text-xs text-muted-foreground" title={scopes.map((s) => s.root).join("\n")}>
+          {scopes.length} {scopes.length === 1 ? "scope" : "scopes"} available
         </div>
 
         <div className="sticky top-0 z-10 flex flex-col gap-2 bg-background pb-2 pt-1">
@@ -470,12 +476,12 @@ export function MemoriesList() {
                 >
                   <SelectItem value="all">🌐 All projects</SelectItem>
                   <SelectItem value="global">🌐 Global Scope</SelectItem>
-                  {projectRoots.map((root) => (
-                    <SelectItem key={root} value={root} title={root}>
+                  {scopes.map((s) => (
+                    <SelectItem key={s.root.toLowerCase()} value={s.root} title={s.root}>
                       <span className="flex min-w-0 flex-col items-start">
-                        <span>📁 {projectName(root)}</span>
+                        <span>📁 {s.name}</span>
                         <span className="text-xs whitespace-normal break-all text-muted-foreground">
-                          {root}
+                          {s.root}
                         </span>
                       </span>
                     </SelectItem>
@@ -532,7 +538,7 @@ export function MemoriesList() {
                   key={m.id}
                   memory={m}
                   copiedId={copiedId}
-                  runtimes={runtimes}
+                  canCopyToProject={copyTargets.length > 0}
                   onCopy={copyToClipboard}
                   onEdit={(id) => setEditingId(id)}
                   onDelete={(target) => setDeleteTarget(target)}
@@ -682,9 +688,9 @@ export function MemoriesList() {
                 <SelectValue placeholder="Select a project..." />
               </SelectTrigger>
               <SelectContent>
-                {runtimes.map((r) => (
-                  <SelectItem key={r.projectRoot} value={r.projectRoot}>
-                    📁 {r.projectRoot.split("\\").pop() ?? r.projectRoot.split("/").pop()}
+                {copyTargets.map((s) => (
+                  <SelectItem key={s.root.toLowerCase()} value={s.root}>
+                    📁 {s.name}
                   </SelectItem>
                 ))}
               </SelectContent>

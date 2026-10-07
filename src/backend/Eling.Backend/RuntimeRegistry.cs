@@ -1,6 +1,7 @@
 using Eling.Core;
 using Eling.Core.Memory;
 using Eling.Core.Memory.Storage;
+using Eling.Core.Projects;
 using Eling.Core.Scope;
 using CoordinatorJsonContext = Eling.Core.Runtime.CoordinatorJsonContext;
 using RuntimeInfo = Eling.Core.Runtime.RuntimeInfo;
@@ -34,14 +35,17 @@ public sealed class RuntimeRegistry : IDisposable
 
     private readonly string _runtimeDir;
     private readonly MemoryChangeBroadcaster? _broadcaster;
+    private readonly IWorkspacesRegistry? _workspaces;
 
     public RuntimeRegistry(
         ILogger<RuntimeRegistry> logger,
         UserScope? userScope = null,
-        MemoryChangeBroadcaster? broadcaster = null)
+        MemoryChangeBroadcaster? broadcaster = null,
+        IWorkspacesRegistry? workspaces = null)
     {
         _logger = logger;
         _broadcaster = broadcaster;
+        _workspaces = workspaces;
         _userScope = userScope ?? UserScope.Resolve(Environment.GetEnvironmentVariable("ELING_USER_SCOPE"));
         _runtimeDir = _userScope.RuntimeDirectory;
         Directory.CreateDirectory(_runtimeDir);
@@ -57,91 +61,74 @@ public sealed class RuntimeRegistry : IDisposable
         SyncFromDisk();
     }
 
+    /// <summary>
+    /// Adopts live runtimes registered by peer processes.
+    /// </summary>
+    /// <remarks>
+    /// The <c>{pid}.json</c> files in the runtime directory are the only channel
+    /// through which processes learn about each other: a peer registers in its
+    /// own in-process registry and never calls the owner. The workspace catalogue
+    /// cannot replace this — it stores folders, not processes, and outlives them.
+    /// </remarks>
     private void SyncFromDisk()
     {
         lock (_lock)
         {
             if (!Directory.Exists(_runtimeDir)) return;
             var now = DateTimeOffset.UtcNow;
-
-            // Read active files from disk
-            var files = Directory.GetFiles(_runtimeDir, "*.json");
             var diskPids = new HashSet<int>();
 
-            foreach (var file in files)
+            foreach (var file in Directory.GetFiles(_runtimeDir, "*.json"))
             {
                 try
                 {
-                    var fileName = Path.GetFileNameWithoutExtension(file);
-                    if (!int.TryParse(fileName, out var pid)) continue;
+                    if (!int.TryParse(Path.GetFileNameWithoutExtension(file), out var pid)) continue;
 
                     var lastWrite = File.GetLastWriteTimeUtc(file);
                     if (now - lastWrite > _staleAfter)
                     {
-                        if (IsProcessAlive(pid))
-                        {
-                            // Process is still alive in OS; touch file to keep timestamp fresh
-                            try
-                            {
-                                File.SetLastWriteTimeUtc(file, DateTime.UtcNow);
-                                lastWrite = DateTime.UtcNow;
-                            }
-                            catch
-                            {
-                                // Ignore lock issues
-                            }
-                        }
-                        else
+                        if (!IsProcessAlive(pid))
                         {
                             File.Delete(file);
                             continue;
                         }
+
+                        lastWrite = DateTime.UtcNow;
+                        try { File.SetLastWriteTimeUtc(file, lastWrite); }
+                        catch { /* Locked by its owner, which is alive; the touch is only an optimisation. */ }
                     }
 
                     diskPids.Add(pid);
-                    var content = File.ReadAllText(file);
-                    var reg = System.Text.Json.JsonSerializer.Deserialize(content, CoordinatorJsonContext.Default.RuntimeRegistration);
+                    var reg = System.Text.Json.JsonSerializer.Deserialize(
+                        File.ReadAllText(file),
+                        CoordinatorJsonContext.Default.RuntimeRegistration);
                     if (reg is null) continue;
 
                     _everRegistered = true;
                     var existing = _runtimes.FirstOrDefault(r => r.ProcessId == reg.ProcessId);
-                    if (existing is not null)
+                    if (existing is null)
                     {
-                        existing.ProjectRoot = reg.ProjectRoot;
-                        existing.WorkspaceRoot = reg.WorkspaceRoot;
-                        existing.CodebaseEnabled = reg.CodebaseEnabled;
-                        existing.DataDirectory = reg.DataDirectory;
-                        existing.StartTime = reg.StartTime;
-                        existing.McpEnabled = reg.McpEnabled;
-                        existing.McpTransport = reg.McpTransport;
-                        existing.LastHeartbeat = lastWrite;
-                        existing.IsAlive = true;
+                        existing = new RuntimeInfo { ProcessId = reg.ProcessId };
+                        _runtimes.Add(existing);
                     }
-                    else
-                    {
-                        _runtimes.Add(new RuntimeInfo
-                        {
-                            ProcessId = reg.ProcessId,
-                            ProjectRoot = reg.ProjectRoot,
-                            WorkspaceRoot = reg.WorkspaceRoot,
-                            CodebaseEnabled = reg.CodebaseEnabled,
-                            DataDirectory = reg.DataDirectory,
-                            StartTime = reg.StartTime,
-                            McpEnabled = reg.McpEnabled,
-                            McpTransport = reg.McpTransport,
-                            LastHeartbeat = lastWrite,
-                            IsAlive = true
-                        });
-                    }
+
+                    existing.HeadScopeRoot = reg.HeadScopeRoot;
+                    existing.WorkspaceRoot = reg.WorkspaceRoot;
+                    existing.CodebaseEnabled = reg.CodebaseEnabled;
+                    existing.DataDirectory = reg.DataDirectory;
+                    existing.StartTime = reg.StartTime;
+                    existing.McpEnabled = reg.McpEnabled;
+                    existing.McpTransport = reg.McpTransport;
+                    existing.LastHeartbeat = lastWrite;
+                    existing.IsAlive = true;
                 }
                 catch
                 {
-                    // Ignore corrupted files
+                    // A file being written or deleted concurrently is retried on the next sync.
                 }
             }
 
-            // Clean up runtimes in memory that are no longer present on disk,
-            // but NEVER remove this backend's own process ID.
+            // Drop runtimes whose file is gone, but never this backend's own entry.
             _runtimes.RemoveAll(r => r.ProcessId != Environment.ProcessId && !diskPids.Contains(r.ProcessId));
         }
     }
@@ -151,12 +138,11 @@ public sealed class RuntimeRegistry : IDisposable
         try
         {
             var path = Path.Combine(_runtimeDir, $"{reg.ProcessId}.json");
-            var content = System.Text.Json.JsonSerializer.Serialize(reg, CoordinatorJsonContext.Default.RuntimeRegistration);
-            File.WriteAllText(path, content);
+            File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(reg, CoordinatorJsonContext.Default.RuntimeRegistration));
         }
         catch
         {
-            // Ignore file lock issues during concurrent writes
+            // A concurrent writer holds the file; the next heartbeat rewrites it.
         }
     }
 
@@ -169,10 +155,129 @@ public sealed class RuntimeRegistry : IDisposable
         }
         catch
         {
-            // Ignore
+            // Left behind files are swept once their process is gone.
         }
     }
 
+    /// <summary>
+    /// Touches the runtime's <c>{pid}.json</c> so peer dashboards, which judge
+    /// liveness by its last write time, keep seeing it. Recreates the file if a
+    /// sweep removed it.
+    /// </summary>
+    private void RefreshHeartbeatFile(RuntimeInfo runtime)
+    {
+        try
+        {
+            var path = Path.Combine(_runtimeDir, $"{runtime.ProcessId}.json");
+            if (File.Exists(path))
+            {
+                File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
+                return;
+            }
+
+            WriteToDisk(new Core.Runtime.RuntimeRegistration
+            {
+                ProcessId = runtime.ProcessId,
+                HeadScopeRoot = runtime.HeadScopeRoot,
+                WorkspaceRoot = runtime.WorkspaceRoot,
+                CodebaseEnabled = runtime.CodebaseEnabled,
+                DataDirectory = runtime.DataDirectory,
+                StartTime = runtime.StartTime,
+                McpEnabled = runtime.McpEnabled,
+                McpTransport = runtime.McpTransport
+            });
+        }
+        catch
+        {
+            // A concurrent writer holds the file; the next heartbeat retries.
+        }
+    }
+
+    /// <summary>
+    /// Mirrors a registration into the durable workspace catalogue, keyed by the
+    /// workspace folder. The row outlives the process that wrote it, which is the
+    /// whole reason the store exists: a codebase index stays readable long after
+    /// its process exits, and without this a closed workspace could not be found.
+    /// </summary>
+    private void RecordProject(Core.Runtime.RuntimeRegistration registration)
+    {
+        if (_workspaces is null) return;
+
+        // Registrations written by older binaries have no workspaceRoot. Falling
+        // back to HeadScopeRoot mirrors RuntimeInfo.CodebaseRoot() and, more
+        // importantly, avoids resolving an empty string to this backend's own
+        // working directory — which would attribute the wrong workspace.
+        var workspace = registration.WorkspaceRoot;
+        if (string.IsNullOrWhiteSpace(workspace)) workspace = registration.HeadScopeRoot;
+        if (string.IsNullOrWhiteSpace(workspace)) return;
+        if (ElingPaths.IsCodebaseExcluded(workspace)) return;
+
+        var now = DateTimeOffset.UtcNow;
+        _workspaces.Record(new RegisteredWorkspace(
+            string.Empty,
+            workspace,
+            registration.HeadScopeRoot,
+            registration.CodebaseEnabled,
+            now,
+            now));
+    }
+
+    /// <summary>
+    /// Records every workspace in this runtime's scope chain, not just the head.
+    /// </summary>
+    /// <remarks>
+    /// A registration only names the chain head, so recording just that would
+    /// leave ancestors out of the catalogue — and an ancestor is a scope the
+    /// runtime can genuinely write to. The chain is the same walk
+    /// <see cref="ScopeChain"/> performs elsewhere, so nothing here is a second
+    /// opinion about where a scope lives.
+    /// </remarks>
+    private void RecordChainWorkspaces(Core.Runtime.RuntimeRegistration registration)
+    {
+        if (_workspaces is null) return;
+        if (string.IsNullOrWhiteSpace(registration.HeadScopeRoot)) return;
+
+        List<ProjectScope> chain;
+        try
+        {
+            chain = ScopeChain.Discover(registration.HeadScopeRoot).Levels.ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not discover the scope chain for {Root}.", registration.HeadScopeRoot);
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var level in chain)
+        {
+            if (ElingPaths.IsCodebaseExcluded(level.Root)) continue;
+
+            _workspaces.Record(new RegisteredWorkspace(
+                string.Empty,
+                level.Root,
+                level.Root,
+                registration.CodebaseEnabled,
+                now,
+                now));
+        }
+    }
+
+    /// <summary>
+    /// Every workspace in the catalogue, live or not. Empty when no store is
+    /// attached, which is the same shape as an empty store rather than an error —
+    /// the dashboard can render without it.
+    /// </summary>
+    public async Task<IReadOnlyList<RegisteredWorkspace>> ListWorkspacesAsync(CancellationToken cancellationToken = default)
+    {
+        if (_workspaces is null) return Array.Empty<RegisteredWorkspace>();
+        return await _workspaces.ListAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Registers a process: adds it to the live list and mirrors it, plus every
+    /// <c>.eling</c> in its chain, into the durable workspace catalogue.
+    /// </summary>
     public void Register(Core.Runtime.RuntimeRegistration registration)
     {
         lock (_lock)
@@ -180,11 +285,13 @@ public sealed class RuntimeRegistry : IDisposable
             _everRegistered = true;
             ResetShutdownTimer();
             WriteToDisk(registration);
+            RecordProject(registration);
+            RecordChainWorkspaces(registration);
 
             var existing = _runtimes.FirstOrDefault(r => r.ProcessId == registration.ProcessId);
             if (existing is not null)
             {
-                existing.ProjectRoot = registration.ProjectRoot;
+                existing.HeadScopeRoot = registration.HeadScopeRoot;
                 existing.WorkspaceRoot = registration.WorkspaceRoot;
                 existing.CodebaseEnabled = registration.CodebaseEnabled;
                 existing.DataDirectory = registration.DataDirectory;
@@ -199,7 +306,7 @@ public sealed class RuntimeRegistry : IDisposable
             _runtimes.Add(new RuntimeInfo
             {
                 ProcessId = registration.ProcessId,
-                ProjectRoot = registration.ProjectRoot,
+                HeadScopeRoot = registration.HeadScopeRoot,
                 WorkspaceRoot = registration.WorkspaceRoot,
                 CodebaseEnabled = registration.CodebaseEnabled,
                 DataDirectory = registration.DataDirectory,
@@ -212,7 +319,7 @@ public sealed class RuntimeRegistry : IDisposable
 
             _logger.LogInformation(
                 "Runtime registered: pid={Pid} root={Root}",
-                registration.ProcessId, registration.ProjectRoot);
+                registration.ProcessId, registration.HeadScopeRoot);
         }
     }
 
@@ -226,49 +333,35 @@ public sealed class RuntimeRegistry : IDisposable
             runtime.LastHeartbeat = DateTimeOffset.UtcNow;
             runtime.IsAlive = true;
 
-            // Touch the file to update its LastWriteTime for other dashboards
             RefreshHeartbeatFile(runtime);
+            RefreshWorkspaceRow(runtime);
 
             return true;
         }
     }
 
     /// <summary>
-    /// Refreshes the runtime's shared registry file so peer dashboards
-    /// (whose liveness is keyed off the file's LastWriteTime via
-    /// <see cref="SyncFromDisk"/>) keep seeing this runtime as alive.
+    /// Touches the catalogue row so peer dashboards reading the same store see a
+    /// workspace as recently active. Re-records rather than just bumping a
+    /// timestamp: the upsert is idempotent and also repairs a row whose stored
+    /// fields drifted from what the live registration says.
     /// </summary>
-    private void RefreshHeartbeatFile(RuntimeInfo runtime)
+    private void RefreshWorkspaceRow(RuntimeInfo runtime)
     {
-        try
-        {
-            var path = Path.Combine(_runtimeDir, $"{runtime.ProcessId}.json");
-            if (File.Exists(path))
-            {
-                File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
-            }
-            else
-            {
-                var reg = new Core.Runtime.RuntimeRegistration
-                {
-                    ProcessId = runtime.ProcessId,
-                    ProjectRoot = runtime.ProjectRoot,
-                    WorkspaceRoot = runtime.WorkspaceRoot,
-                    CodebaseEnabled = runtime.CodebaseEnabled,
-                    DataDirectory = runtime.DataDirectory,
-                    StartTime = runtime.StartTime,
-                    McpEnabled = runtime.McpEnabled,
-                    McpTransport = runtime.McpTransport
-                };
-                WriteToDisk(reg);
-            }
-        }
-        catch
-        {
-            // Ignore file lock issues during concurrent writes
-        }
+        _workspaces?.Record(new RegisteredWorkspace(
+            string.Empty,
+            string.IsNullOrWhiteSpace(runtime.WorkspaceRoot) ? runtime.HeadScopeRoot : runtime.WorkspaceRoot,
+            runtime.HeadScopeRoot,
+            runtime.CodebaseEnabled,
+            runtime.StartTime,
+            DateTimeOffset.UtcNow));
     }
 
+    /// <summary>
+    /// Removes a process from the live list. Nothing is deleted from the
+    /// catalogue: the workspace may still be indexed and searchable, which is the
+    /// reason this store exists at all.
+    /// </summary>
     public bool Unregister(int processId)
     {
         lock (_lock)
@@ -284,6 +377,22 @@ public sealed class RuntimeRegistry : IDisposable
         }
     }
 
+    /// <summary>
+    /// Test seam: writes rows into the catalogue only. The federated read path
+    /// (<see cref="AliveOrRegisteredAsync"/>) reads that store directly, so
+    /// recording is enough to exercise a closed workspace — and deliberately does
+    /// not touch the in-memory list, which stays the live-process view.
+    /// </summary>
+    internal void RecordWorkspacesForTest(IReadOnlyList<RegisteredWorkspace> rows)
+    {
+        if (_workspaces is null) return;
+
+        foreach (var row in rows)
+        {
+            _workspaces.Record(row);
+        }
+    }
+
     public IReadOnlyList<RuntimeInfo> Alive()
     {
         SyncFromDisk();
@@ -296,19 +405,9 @@ public sealed class RuntimeRegistry : IDisposable
             // Prioritize most recent runtime per project root first
             foreach (var runtime in _runtimes.Where(r => r.IsAlive).OrderByDescending(r => r.LastHeartbeat))
             {
-                var normalizedRoot = Path.GetFullPath(runtime.ProjectRoot);
+                var normalizedRoot = Path.GetFullPath(runtime.HeadScopeRoot);
 
-                // Exclude User Profile Home and Global Data Directory from project-level runtime list
-                // (they are represented by the dedicated "🌐 Global" button)
-                var isUserHome = !string.IsNullOrWhiteSpace(userHome) &&
-                                 string.Equals(normalizedRoot.TrimEnd(Path.DirectorySeparatorChar), userHome.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
-                var isGlobalScope = string.Equals(normalizedRoot.TrimEnd(Path.DirectorySeparatorChar), _userScope.GlobalDataDirectory.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
-
-                if (isUserHome || isGlobalScope) continue;
-
-                // Exclude the sentinel "UserScope" runtime — it represents
-                // a global-only session and should not appear in the project runtime list.
-                if (string.Equals(runtime.ProjectRoot, "UserScope", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!IsProjectScopedRoot(normalizedRoot)) continue;
 
                 if (seenRoots.Add(normalizedRoot))
                 {
@@ -318,9 +417,127 @@ public sealed class RuntimeRegistry : IDisposable
 
             // Sort alphabetically by Project Folder Name for stable & clean UI order
             return result
-                .OrderBy(r => Path.GetFileName(Path.TrimEndingDirectorySeparator(r.ProjectRoot)), StringComparer.OrdinalIgnoreCase)
+                .OrderBy(r => Path.GetFileName(Path.TrimEndingDirectorySeparator(r.HeadScopeRoot)), StringComparer.OrdinalIgnoreCase)
                 .ToList()
                 .AsReadOnly();
+        }
+    }
+
+    /// <summary>
+    /// The union of <see cref="Alive"/> and every workspace in the durable
+    /// project registry, so a project that is closed but still indexed appears
+    /// in the codebase page's project list.
+    /// </summary>
+    /// <remarks>
+    /// The shape is deliberately identical to <see cref="Alive"/> — same
+    /// <see cref="RuntimeInfo"/> fields, same filters, same ordering — so the
+    /// frontend needs no special case to consume it. A registered-but-dead
+    /// project is reported with <c>ProcessId = 0</c> and <c>IsAlive = false</c>;
+    /// live processes always win the dedupe, so a running project's row carries
+    /// its real pid and heartbeat.
+    /// <para>
+    /// Memory deliberately does NOT use this. A memory service is a live
+    /// resource: the workspace may not even exist on disk any more, and its
+    /// <c>.eling</c> is only meaningful while something owns it. Codebase
+    /// indexes are read-only files in a global store, so a closed project's
+    /// index is still fully readable — which is exactly the difference between
+    /// the two subdomains.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<RuntimeInfo>> AliveOrRegisteredAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var live = Alive();
+        if (_workspaces is null) return live;
+
+        var remembered = await _workspaces.ListAsync(cancellationToken).ConfigureAwait(false);
+        var result = new List<RuntimeInfo>(live);
+
+        // Same identity Alive() uses: the workspace folder, case-insensitively.
+        var seenRoots = new HashSet<string>(
+            live.Select(r => NormalizeRoot(r.WorkspaceRoot)),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var row in remembered)
+        {
+            if (string.IsNullOrWhiteSpace(row.WorkspaceRoot)) continue;
+            if (!IsProjectScopedRoot(row.WorkspaceRoot)) continue;
+            // A workspace already covered by a live runtime keeps that entry: it
+            // carries the current pid and heartbeat. Add returns false when the
+            // root was already present.
+            if (!seenRoots.Add(NormalizeRoot(row.WorkspaceRoot))) continue;
+            result.Add(ToRuntimeInfo(row));
+        }
+
+        return result
+            .OrderBy(r => Path.GetFileName(Path.TrimEndingDirectorySeparator(r.WorkspaceRoot)), StringComparer.OrdinalIgnoreCase)
+            .ToList()
+            .AsReadOnly();
+    }
+
+    /// <summary>
+    /// A catalogue row shaped like a runtime entry, with the fields the codebase
+    /// page reads already filled in. A remembered workspace has no live process,
+    /// so <see cref="RuntimeInfo.ProcessId"/> is 0 — the marker the dashboard
+    /// uses to tell "remembered" from "running".
+    /// </summary>
+    private static RuntimeInfo ToRuntimeInfo(RegisteredWorkspace row)
+    {
+        var workspace = Path.GetFullPath(row.WorkspaceRoot);
+        return new RuntimeInfo
+        {
+            ProcessId = 0,
+            HeadScopeRoot = workspace,
+            WorkspaceRoot = workspace,
+            CodebaseEnabled = row.CodebaseEnabled,
+            DataDirectory = Path.Combine(workspace, ProjectScope.DataDirectoryName),
+            McpEnabled = false,
+            McpTransport = "none",
+            StartTime = row.FirstSeenAt,
+            LastHeartbeat = row.LastSeenAt,
+            IsAlive = false,
+        };
+    }
+
+    /// <summary>
+    /// The three exclusions <see cref="Alive"/> applies, factored out so both
+    /// paths agree: user home, the global data directory, and the
+    /// <c>UserScope</c> sentinel. A registry row bypassed none of them —
+    /// the workspace could have been user home when it registered.
+    /// </summary>
+    private bool IsProjectScopedRoot(string root)
+    {
+        if (ElingPaths.IsCodebaseExcluded(root))
+        {
+            return false;
+        }
+
+        var userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(userHome) &&
+            string.Equals(NormalizeRoot(root), NormalizeRoot(userHome), StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.Equals(NormalizeRoot(root), NormalizeRoot(_userScope.GlobalDataDirectory), StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !string.Equals(root, "UserScope", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeRoot(string root)
+    {
+        try
+        {
+            return Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            // A malformed row must not break the whole listing; it just cannot
+            // be matched against a live root either.
+            return root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
     }
 
@@ -363,25 +580,6 @@ public sealed class RuntimeRegistry : IDisposable
         }
     }
 
-    public IMemoryService? TryResolveMemoryServiceByProjectRoot(string projectRoot)
-    {
-        lock (_lock)
-        {
-            var runtime = _runtimes.FirstOrDefault(r =>
-                r.IsAlive && string.Equals(Path.GetFullPath(r.ProjectRoot), Path.GetFullPath(projectRoot), StringComparison.OrdinalIgnoreCase));
-            if (runtime is null) return null;
-            if (!_memoryByDataDirectory.TryGetValue(runtime.DataDirectory, out var service))
-            {
-                service = new MemoryService(
-                    new FileSystemMemoryStorage(runtime.DataDirectory),
-                    new SqliteMemoryIndex(Path.Combine(runtime.DataDirectory, "memory.db")));
-                _memoryByDataDirectory[runtime.DataDirectory] = service;
-            }
-
-            return service;
-        }
-    }
-
     public IMemoryService? TryResolveMemoryServiceByDataDirectory(string dataDirectory)
     {
         lock (_lock)
@@ -399,6 +597,49 @@ public sealed class RuntimeRegistry : IDisposable
 
             return service;
         }
+    }
+
+    /// <summary>
+    /// A memory service for a project root, whether or not a process is alive.
+    /// </summary>
+    /// <remarks>
+    /// Falls back to reading the root's <c>.eling</c> directly. A memory service
+    /// is just storage plus an index over a directory, so nothing about reading
+    /// needs a live process — the registry was needed to manage that lifetime,
+    /// not to perform IO. Without this, a scope whose last session has closed
+    /// could be written to through MCP and then be invisible to the dashboard,
+    /// which is the reverse of what "a closed project stays findable" means.
+    /// </remarks>
+    public IMemoryService? TryResolveMemoryServiceByScopeRoot(string scopeRoot)
+    {
+        lock (_lock)
+        {
+            var runtime = _runtimes.FirstOrDefault(r =>
+                r.IsAlive && string.Equals(Path.GetFullPath(r.HeadScopeRoot), Path.GetFullPath(scopeRoot), StringComparison.OrdinalIgnoreCase));
+            if (runtime is not null && TryGetMemoryService(runtime.DataDirectory, out var live))
+            {
+                return live;
+            }
+
+            var dataDirectory = Path.Combine(Path.GetFullPath(scopeRoot), ProjectScope.DataDirectoryName);
+            if (!Directory.Exists(dataDirectory)) return null;
+            return TryGetMemoryService(dataDirectory, out var onDisk) ? onDisk : null;
+        }
+    }
+
+    private bool TryGetMemoryService(string dataDirectory, out IMemoryService service)
+    {
+        if (_memoryByDataDirectory.TryGetValue(dataDirectory, out var existing))
+        {
+            service = existing;
+            return true;
+        }
+
+        service = new MemoryService(
+            new FileSystemMemoryStorage(dataDirectory),
+            new SqliteMemoryIndex(Path.Combine(dataDirectory, "memory.db")));
+        _memoryByDataDirectory[dataDirectory] = service;
+        return true;
     }
 
     public IReadOnlyList<(RuntimeInfo Runtime, IMemoryService Service)> GetAliveProjectServices()
@@ -444,7 +685,7 @@ public sealed class RuntimeRegistry : IDisposable
                     var syntheticRuntime = new RuntimeInfo
                     {
                         ProcessId = Environment.ProcessId,
-                        ProjectRoot = Directory.GetCurrentDirectory(),
+                        HeadScopeRoot = Directory.GetCurrentDirectory(),
                         WorkspaceRoot = Directory.GetCurrentDirectory(),
                         CodebaseEnabled = true,
                         DataDirectory = localDataDir,
@@ -475,7 +716,7 @@ public sealed class RuntimeRegistry : IDisposable
             if (status.HasValue) list = list.Where(m => m.Status == status.Value).ToList();
             foreach (var m in list)
             {
-                allProjectMemories.Add(new ScopedMemory(m, MemoryScopeKind.Project, runtime.ProjectRoot));
+                allProjectMemories.Add(new ScopedMemory(m, MemoryScopeKind.Project, runtime.HeadScopeRoot));
             }
         }
 
@@ -522,7 +763,7 @@ public sealed class RuntimeRegistry : IDisposable
             {
                 // Project priority boost
                 var boosted = r.Rank - 1000.0;
-                all.Add(new ScopedSearchResult(r.Id, boosted, MemoryScopeKind.Project, runtime.ProjectRoot));
+                all.Add(new ScopedSearchResult(r.Id, boosted, MemoryScopeKind.Project, runtime.HeadScopeRoot));
             }
         }
 
@@ -565,6 +806,7 @@ public sealed class RuntimeRegistry : IDisposable
                 self.LastHeartbeat = now;
                 self.IsAlive = true;
                 RefreshHeartbeatFile(self);
+                RefreshWorkspaceRow(self);
             }
 
             // Clean up disk files first
@@ -605,6 +847,9 @@ public sealed class RuntimeRegistry : IDisposable
                 }
             }
 
+            // Prune the in-memory list of runtimes whose heartbeat went stale. Nothing is
+            // written to the catalogue here: its rows describe folders, and a
+            // folder outlives the process by design.
             var prunedAny = false;
             foreach (var runtime in _runtimes.Where(r => r.IsAlive && now - r.LastHeartbeat > _staleAfter))
             {
@@ -613,12 +858,12 @@ public sealed class RuntimeRegistry : IDisposable
                     runtime.LastHeartbeat = now;
                     runtime.IsAlive = true;
                     RefreshHeartbeatFile(runtime);
+                    RefreshWorkspaceRow(runtime);
                 }
                 else
                 {
                     runtime.IsAlive = false;
-                    _logger.LogWarning("Runtime stale: pid={Pid} root={Root}", runtime.ProcessId, runtime.ProjectRoot);
-                    RemoveFromDisk(runtime.ProcessId);
+                    _logger.LogWarning("Runtime stale: pid={Pid} root={Root}", runtime.ProcessId, runtime.HeadScopeRoot);
                     prunedAny = true;
                 }
             }

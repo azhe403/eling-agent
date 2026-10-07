@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
+import type { SseTopic } from "@/hooks/use-memories-sse"
 import {
   useCodebaseRebuildSse,
   type RebuildProgress,
@@ -59,7 +60,10 @@ type CodebaseHit = {
 }
 
 type RuntimeEntry = {
-  projectRoot: string
+  // The nearest .eling at or above the workspace, where memories are written —
+  // not a project root. Renamed from projectRoot, which read as "root of the
+  // project" and is wrong: it can sit above the repository.
+  headScopeRoot: string
   workspaceRoot?: string | null
   codebaseEnabled?: boolean | null
 }
@@ -135,12 +139,12 @@ function distinctRoots(runtimes: RuntimeEntry[]) {
     seen.add(key)
     out.push(root)
   }
-  // Codebase identity is the workspace (cwd), not the memory project root —
-  // fall back to projectRoot for runtimes registered by older binaries.
-  // Runtimes that opted out of indexing never appear as options.
+  // Codebase identity is the workspace (cwd), never a .eling ancestor — fall
+  // back to headScopeRoot for runtimes registered by older binaries that omit
+  // workspaceRoot. Runtimes that opted out of indexing never appear as options.
   for (const r of runtimes) {
     if (r.codebaseEnabled === false) continue
-    add(r.workspaceRoot || r.projectRoot)
+    add(r.workspaceRoot || r.headScopeRoot)
   }
   return out
 }
@@ -223,6 +227,12 @@ export function CodebaseList() {
     }
   }, [projectSel])
 
+  // includeRegistered: a codebase index is a read-only file in a global store and
+  // stays readable after its process exits, so a closed project must stay in the
+  // picker. The default live-only mode undercounts the index store by roughly the
+  // number of dead-but-still-indexed workspaces.
+  const runtimesUrl = "/api/coordinator/runtimes?includeRegistered=true";
+
   // Fetch status + known projects on mount so the page is alive immediately.
   useEffect(() => {
     let isMounted = true
@@ -232,7 +242,7 @@ export function CodebaseList() {
       try {
         const [statusRes, runtimesRes] = await Promise.all([
           fetch(statusUrl(""), { cache: "no-store" }),
-          fetch("/api/coordinator/runtimes", { cache: "no-store" }),
+          fetch(runtimesUrl, { cache: "no-store" }),
         ])
         if (!statusRes.ok) throw new Error(`API returned ${statusRes.status}`)
         const s = (await statusRes.json()) as CodebaseStatus
@@ -392,7 +402,7 @@ export function CodebaseList() {
 
   const handleRuntimesEvent = useCallback(async () => {
     try {
-      const runtimesRes = await fetch("/api/coordinator/runtimes", { cache: "no-store" })
+      const runtimesRes = await fetch(runtimesUrl, { cache: "no-store" })
       if (runtimesRes.ok) {
         const r = (await runtimesRes.json()) as RuntimeEntry[]
         if (Array.isArray(r)) setRuntimes(r)
@@ -404,9 +414,16 @@ export function CodebaseList() {
     await handleCodebaseEvent()
   }, [handleCodebaseEvent])
 
+  // This page lives on codebase traffic: "codebase" for index changes anywhere
+  // (rebuild button, MCP call, background watcher) and "runtimes" for membership
+  // changes that alter both the picker and the "all" aggregate. It deliberately
+  // does not watch the memory topics — those would reload the index on every
+  // memory write.
+  const CODEBASE_TOPICS: SseTopic[] = ["codebase", "runtimes"]
   useMemoriesSse(
     useCallback(() => void handleCodebaseEvent(), [handleCodebaseEvent]),
-    useCallback(() => void handleRuntimesEvent(), [handleRuntimesEvent])
+    useCallback(() => void handleRuntimesEvent(), [handleRuntimesEvent]),
+    CODEBASE_TOPICS
   )
 
   const failedProjects = (rebuildProgress?.results ?? []).filter((r) => !r.ok)

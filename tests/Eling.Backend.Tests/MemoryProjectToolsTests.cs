@@ -135,6 +135,9 @@ public sealed class MemoryProjectToolsTests : IDisposable
         Assert.Contains(".eling/*.db-wal", gitignore);
         Assert.Contains(".eling/runtime/", gitignore);
         Assert.DoesNotContain(".eling/memories/", gitignore);
+        // Nothing else of Eling's belongs in the user's ignore file: machine-local
+        // state lives in the global data root, and a scope writes no identity file.
+        Assert.DoesNotContain(".eling/scope.json", gitignore);
     }
 
     [Fact]

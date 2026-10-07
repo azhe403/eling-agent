@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useState } from "react"
 
-/** One project's index pass. A failing project is reported, not thrown. */
+/**
+ * One workspace's index pass. A failing one is reported, not thrown.
+ *
+ * `projectRoot` here is the index root — the workspace the pass ran over, which
+ * is the codebase's identity. It is not the runtime's `headScopeRoot`; those two
+ * only coincide when the workspace happens to hold its own `.eling`.
+ */
 export type RebuildProjectResult = {
   projectRoot: string
   ok: boolean

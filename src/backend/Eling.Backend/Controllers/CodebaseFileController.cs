@@ -47,7 +47,7 @@ public sealed class CodebaseFileController(
 
         try
         {
-            var resolved = CodebaseEndpoints.ResolveScope(index, registry, scope, project);
+            var resolved = await CodebaseEndpoints.ResolveScopeAsync(index, registry, scope, project);
             var detail = await index.GetFileDetailAsync(path, resolved.Roots, cancellationToken);
             if (detail is null)
             {

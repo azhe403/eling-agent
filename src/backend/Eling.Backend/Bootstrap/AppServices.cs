@@ -1,4 +1,5 @@
 using Eling.Core;
+using Eling.Core.Projects;
 using Eling.Core.Scope;
 using Microsoft.Extensions.Logging;
 
@@ -37,10 +38,14 @@ public sealed class AppServices : IDisposable
         {
         });
         var broadcaster = new MemoryChangeBroadcaster();
+        var workspaces = new SqliteWorkspacesRegistry(
+            context.UserScope.ProjectsDatabasePath,
+            minimalLoggerFactory.CreateLogger<SqliteWorkspacesRegistry>());
         var registry = new RuntimeRegistry(
             minimalLoggerFactory.CreateLogger<RuntimeRegistry>(),
             context.UserScope,
-            broadcaster);
+            broadcaster,
+            workspaces);
 
         return new AppServices(
             registry,
