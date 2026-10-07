@@ -87,23 +87,80 @@ public sealed class CodebaseWatcherServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task StartAsync_WithUninitializedIndex_DoesNotRunStartupCatchUp()
+    {
+        // A file exists before the watcher starts, but the index is uninitialized (0 files).
+        File.WriteAllText(Path.Combine(_workspace, "existing.cs"), "class Existing { }");
+
+        await WithActiveWatcherAsync(async () =>
+        {
+            // Give any potential startup task a moment to attempt indexing if it were running
+            await Task.Delay(200);
+            Assert.Equal(0, await IndexedFileCountAsync());
+        });
+    }
+
+    [Fact]
+    public async Task StartAsync_WithExistingIndex_RunsStartupCatchUp()
+    {
+        // Existing file is indexed first so the index is initialized (FileCount > 0).
+        File.WriteAllText(Path.Combine(_workspace, "initial.cs"), "class Initial { }");
+        await _index.IndexAsync();
+        Assert.Equal(1, await IndexedFileCountAsync());
+
+        // A second file is added while the watcher is stopped.
+        File.WriteAllText(Path.Combine(_workspace, "catchup.cs"), "class CatchUp { }");
+
+        await WithActiveWatcherAsync(async () =>
+        {
+            await PollUntilAsync(
+                async () => await IndexedFileCountAsync() == 2,
+                "the startup catch-up pass to index the new file (FileCount == 2)");
+
+            Assert.Equal(2, await IndexedFileCountAsync());
+        });
+    }
+
+    [Fact]
     public async Task Drain_IndexesAFileCreatedAfterTheWatcherStarted()
     {
+        // Seed the index so it is initialized (FileCount > 0)
+        File.WriteAllText(Path.Combine(_workspace, "seed.cs"), "class Seed { }");
+        await _index.IndexAsync();
+
         await WithActiveWatcherAsync(async () =>
         {
             File.WriteAllText(Path.Combine(_workspace, "watched.cs"), "class Watched { }");
 
             await PollUntilAsync(
-                async () => await IndexedFileCountAsync() >= 1,
-                "the created file to reach the index (FileCount >= 1)");
+                async () => await IndexedFileCountAsync() >= 2,
+                "the created file to reach the index (FileCount >= 2)");
 
-            Assert.Equal(1, await IndexedFileCountAsync());
+            Assert.Equal(2, await IndexedFileCountAsync());
+        });
+    }
+
+    [Fact]
+    public async Task Drain_WhenIndexUninitialized_DropsEventsWithoutIndexing()
+    {
+        // Index is uninitialized (0 files).
+        await WithActiveWatcherAsync(async () =>
+        {
+            File.WriteAllText(Path.Combine(_workspace, "unwatched.cs"), "class Unwatched { }");
+
+            // Give debounce and drain loop time to run if it were active
+            await Task.Delay(1200);
+
+            Assert.Equal(0, await IndexedFileCountAsync());
         });
     }
 
     [Fact]
     public async Task Drain_IndexesTheOrdinaryFileButNotTheExcludedOne()
     {
+        File.WriteAllText(Path.Combine(_workspace, "seed.cs"), "class Seed { }");
+        await _index.IndexAsync();
+
         await WithActiveWatcherAsync(async () =>
         {
             var vendored = Path.Combine(_workspace, "node_modules", "dep");
@@ -112,13 +169,13 @@ public sealed class CodebaseWatcherServiceTests : IDisposable
             File.WriteAllText(Path.Combine(_workspace, "app.cs"), "class App { }");
 
             // The ordinary file is the positive signal that a batch really
-            // drained, so the count of exactly one proves the enqueue filter
+            // drained, so the count of exactly 2 (seed + app) proves the enqueue filter
             // rather than a watcher that silently never fired.
             await PollUntilAsync(
-                async () => await IndexedFileCountAsync() >= 1,
-                "the ordinary file to reach the index (FileCount >= 1)");
+                async () => await IndexedFileCountAsync() >= 2,
+                "the ordinary file to reach the index (FileCount >= 2)");
 
-            Assert.Equal(1, await IndexedFileCountAsync());
+            Assert.Equal(2, await IndexedFileCountAsync());
         });
     }
 

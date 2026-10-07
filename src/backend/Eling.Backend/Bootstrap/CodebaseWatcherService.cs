@@ -80,8 +80,17 @@ public sealed class CodebaseWatcherService : BackgroundService
             _watcher.EnableRaisingEvents = true;
             _isActive = true;
             _logger?.LogInformation("Codebase watcher active on {Root}.", root);
-            await LogIndexStateAtStartupAsync(stoppingToken);
-            await RunFullIncrementalPassAsync("startup catch-up", stoppingToken);
+            var stats = await LogIndexStateAtStartupAsync(stoppingToken);
+            if (stats is not null && stats.FileCount > 0)
+            {
+                await RunFullIncrementalPassAsync("startup catch-up", stoppingToken);
+            }
+            else
+            {
+                _logger?.LogInformation(
+                    "Codebase index on {Root} is empty or uninitialized; skipping startup catch-up pass pending user consent.",
+                    root);
+            }
         }
         catch (Exception ex)
         {
@@ -114,13 +123,12 @@ public sealed class CodebaseWatcherService : BackgroundService
 
     /// <summary>
     /// Reports what the local index already holds when the watcher comes up.
-    /// Nothing indexes until a file event arrives, so an index that is empty
-    /// or was left schema-less by an earlier run stays that way for as long as
-    /// the workspace is idle — this line is where that becomes visible instead
-    /// of surfacing much later as a failed status read. Never throws: a failure
-    /// here must not reach the start-up catch below and take the watcher down.
+    /// Returns the stats so the watcher can decide whether to run a catch-up
+    /// pass (only when an index already exists) or stay idle until user consent.
+    /// Never throws: a failure here must not reach the start-up catch below and
+    /// take the watcher down.
     /// </summary>
-    private async Task LogIndexStateAtStartupAsync(CancellationToken ct)
+    private async Task<CodebaseStats?> LogIndexStateAtStartupAsync(CancellationToken ct)
     {
         try
         {
@@ -128,11 +136,13 @@ public sealed class CodebaseWatcherService : BackgroundService
             _logger?.LogInformation(
                 "Codebase index state at watcher startup: files={Files} chunks={Chunks} lastIndexedAt={LastIndexedAt} dbPath={DbPath}.",
                 stats.FileCount, stats.ChunkCount, stats.LastIndexedAt ?? "never", stats.DbPath);
+            return stats;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger?.LogWarning(ex,
                 "Codebase index state unreadable at watcher startup; the index needs a rebuild.");
+            return null;
         }
     }
 
@@ -161,6 +171,16 @@ public sealed class CodebaseWatcherService : BackgroundService
             _logger?.LogDebug("Codebase watcher dropped {ChangeType} event for skipped path {Path}.", changeType, rel);
             return;
         }
+
+        // Ignore directory modification timestamp changes. Directory timestamps change
+        // whenever any child file is touched/created, but files already emit their own events.
+        // Treating a directory path as changed causes the indexer to re-index all files under it!
+        if (changeType == "changed" && Directory.Exists(fullPath))
+        {
+            _logger?.LogDebug("Codebase watcher ignored directory timestamp change: {Path}.", rel);
+            return;
+        }
+
         _logger?.LogDebug("Codebase watcher saw {ChangeType}: {Path}.", changeType, rel);
         _queue.Enqueue(rel);
     }
@@ -169,6 +189,23 @@ public sealed class CodebaseWatcherService : BackgroundService
     {
         try
         {
+            // If the index has never been created or approved, drop file changes.
+            // The watcher only tracks changes for workspaces whose index already exists.
+            if (!await _svc.IsIndexInitializedAsync(ct))
+            {
+                if (Interlocked.Exchange(ref _fullRescanRequested, 0) == 1)
+                {
+                    while (_queue.TryDequeue(out _)) { }
+                }
+                if (_queue.Count > 0)
+                {
+                    _logger?.LogDebug(
+                        "Codebase watcher skipped drain: index is uninitialized and awaiting user consent.");
+                    while (_queue.TryDequeue(out _)) { }
+                }
+                return;
+            }
+
             if (Interlocked.Exchange(ref _fullRescanRequested, 0) == 1)
             {
                 while (_queue.TryDequeue(out _)) { }

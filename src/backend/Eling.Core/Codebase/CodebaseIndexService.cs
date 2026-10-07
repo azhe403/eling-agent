@@ -7,7 +7,7 @@ namespace Eling.Core.Codebase;
 
 public sealed class CodebaseIndexService
 {
-    private static readonly string[] SkipDirs = [".git", ".eling", "bin", "obj", "node_modules", ".next", "dist", "build", "out", ".turbo", ".vercel", ".artifacts"];
+    private static readonly string[] SkipDirs = [".git", ".eling", "bin", "obj", "node_modules", ".next", "dist", "build", "out", ".turbo", ".vercel", ".artifacts", ".bin-opencode", ".opencode", ".openchamber"];
     private const long MaxBytes = 512 * 1024;
 
     private readonly string _projectRoot;
@@ -81,6 +81,24 @@ public sealed class CodebaseIndexService
     public async Task<CodebaseStats> GetStatsAsync(CancellationToken ct = default)
     {
         return await _index.GetStatsAsync(ct);
+    }
+
+    /// <summary>
+    /// True when the index exists on disk and holds at least one file.
+    /// Indicates that the user has previously initialized/approved codebase indexing.
+    /// </summary>
+    public async Task<bool> IsIndexInitializedAsync(CancellationToken ct = default)
+    {
+        if (!File.Exists(DbPath)) return false;
+        try
+        {
+            var stats = await GetStatsAsync(ct);
+            return stats.FileCount > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
