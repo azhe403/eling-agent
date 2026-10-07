@@ -1,7 +1,14 @@
 # Codebase Indexing via MCP — Design (mixed manual + watcher, rename index.db → memory.db)
 
 - Date: 2026-09-22
-- Status: draft — awaiting review
+- Status: Implemented — shipped 2026-09-29 (commits 58fb737…d5bffff, all dated 2026-09-29)
+- Implementation note: the codebase DB did **not** land at `.eling/codebase.db` as
+  §Goals specifies. It ships in a global per-workspace store
+  (`%LOCALAPPDATA%/eling/codebase/eling-<hash>.db`, resolved by
+  `ElingPaths.ResolveCodebaseDbPath`). The memory-side `index.db` → `memory.db`
+  rename **did** happen as designed. Treat the §Goals line
+  "Clean naming: `memory.db` for memories, `codebase.db` for the codebase" as
+  superseded on the codebase half; the rest of this design is what shipped.
 - Scope: Eling backend + MCP tools + storage
 - Deciders: eling backend (4417), frontend proxy (4427)
 - Related: `docs/recall-architecture.md`, `src/backend/Eling.Core/Memory/Storage/SqliteMemoryIndex.cs`, `src/backend/Eling.Backend/Mcp/McpServiceExtensions.cs`

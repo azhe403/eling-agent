@@ -153,12 +153,14 @@ public sealed class CodebaseIndexService
         // away so the caller can report "already indexing" immediately.
         if (!await _gate.WaitAsync(0, ct))
         {
+            _logger.LogWarning("Codebase index pass skipped: another pass is already running on {Root}.", _projectRoot);
             return new CodebaseIndexResult(
                 0, 0, 0, 0,
                 Scope.ElingPaths.ResolveCodebaseDbPath(_projectRoot),
                 AlreadyRunningStatus);
         }
 
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             await _index.EnsureCreatedAsync(ct);
@@ -174,7 +176,18 @@ public sealed class CodebaseIndexService
                 var rel = Path.GetRelativePath(_projectRoot, fullPath).Replace('\\', '/');
                 seen.Add(rel);
                 var info = new FileInfo(fullPath);
-                if (info.Length > MaxBytes || IsBinary(fullPath)) { skipped++; continue; }
+                if (info.Length > MaxBytes)
+                {
+                    _logger.LogDebug("Skipping file {Path}: size ({Bytes} bytes) exceeds limit ({MaxBytes} bytes).", rel, info.Length, MaxBytes);
+                    skipped++;
+                    continue;
+                }
+                if (IsBinary(fullPath))
+                {
+                    _logger.LogDebug("Skipping file {Path}: detected as binary content.", rel);
+                    skipped++;
+                    continue;
+                }
                 var content = await File.ReadAllTextAsync(fullPath, ct);
                 var hash = Hash(content);
                 var mtime = new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeSeconds();
@@ -185,6 +198,7 @@ public sealed class CodebaseIndexService
                 }
                 var chunks = CodebaseChunker.Chunk(rel, content);
                 await _index.ReplaceChunksAsync(rel, hash, mtime, info.Length, chunks, ct);
+                _logger.LogDebug("Indexed file {Path}: {ChunkCount} chunk(s).", rel, chunks.Count);
                 fc++; cc += chunks.Count;
             }
 
@@ -196,6 +210,7 @@ public sealed class CodebaseIndexService
                 if (seen.Contains(dbPath)) continue;
                 if (ignores.IsIgnored(dbPath))
                 {
+                    _logger.LogDebug("Purging ignored file {Path} from codebase index.", dbPath);
                     await _index.DeleteFileAsync(dbPath, ct);
                     deleted++;
                     continue;
@@ -211,9 +226,15 @@ public sealed class CodebaseIndexService
                 // deleted one only comes back by re-indexing from scratch.
                 if (File.Exists(absolute)) continue;
                 if (_enumerationIncomplete) continue;
+                _logger.LogDebug("Purging deleted file {Path} from codebase index.", dbPath);
                 await _index.DeleteFileAsync(dbPath, ct);
                 deleted++;
             }
+
+            sw.Stop();
+            _logger.LogInformation(
+                "Codebase index pass completed on {Root}: files={Files} chunks={Chunks} skipped={Skipped} deleted={Deleted} full={Full} tookMs={TookMs}.",
+                _projectRoot, fc, cc, skipped, deleted, full, sw.ElapsedMilliseconds);
 
             return new CodebaseIndexResult(fc, cc, skipped, deleted, _index.DbPath);
         }
@@ -255,16 +276,30 @@ public sealed class CodebaseIndexService
         var minHits = Math.Min(MinHits, Math.Max(limit, 1));
 
         var porterAnd = await _index.SearchPorterAsync(And(tokens), limit, pathPrefix, filePattern, ct);
-        if (porterAnd.Count >= minHits) return porterAnd;
+        if (porterAnd.Count >= minHits)
+        {
+            _logger.LogDebug("Codebase search '{Query}': ladder step Porter AND satisfied with {Count} hit(s).", query, porterAnd.Count);
+            return porterAnd;
+        }
 
         var porter = Merge(porterAnd, await _index.SearchPorterAsync(Or(tokens), limit, pathPrefix, filePattern, ct));
-        if (porter.Count >= minHits) return porter.Take(limit).ToList();
+        if (porter.Count >= minHits)
+        {
+            _logger.LogDebug("Codebase search '{Query}': ladder step Porter OR satisfied with {Count} hit(s).", query, porter.Count);
+            return porter.Take(limit).ToList();
+        }
 
         var withTrigram = Merge(porter, await _index.SearchTrigramAsync(And(tokens), limit, pathPrefix, filePattern, ct));
-        if (withTrigram.Count >= minHits) return withTrigram.Take(limit).ToList();
+        if (withTrigram.Count >= minHits)
+        {
+            _logger.LogDebug("Codebase search '{Query}': ladder step Trigram AND satisfied with {Count} hit(s).", query, withTrigram.Count);
+            return withTrigram.Take(limit).ToList();
+        }
 
         var trigramOr = await _index.SearchTrigramAsync(Or(tokens), limit, pathPrefix, filePattern, ct);
-        return Merge(withTrigram, trigramOr).Take(limit).ToList();
+        var finalHits = Merge(withTrigram, trigramOr).Take(limit).ToList();
+        _logger.LogDebug("Codebase search '{Query}': ladder step Trigram OR completed with {Count} hit(s).", query, finalHits.Count);
+        return finalHits;
     }
 
     /// <summary>
@@ -287,6 +322,7 @@ public sealed class CodebaseIndexService
         // hits from the current project. Callers that want "everything"
         // ("all" scope) must include the current root themselves.
         var roots = NormalizeRoots(projectRoots);
+        _logger.LogDebug("Starting federated search for query '{Query}' across {Count} workspace roots.", query, roots.Count);
 
         var all = new List<ScopedCodebaseHit>();
         foreach (var root in roots)
@@ -303,12 +339,17 @@ public sealed class CodebaseIndexService
                 else
                 {
                     var dbPath = Scope.ElingPaths.ResolveCodebaseDbPath(root);
-                    if (!File.Exists(dbPath)) continue;
+                    if (!File.Exists(dbPath))
+                    {
+                        _logger.LogDebug("Skipping workspace {Root} in federated search: index file not found at {DbPath}.", root, dbPath);
+                        continue;
+                    }
                     using var index = new SqliteCodebaseIndex(dbPath, readOnly: true);
                     var svc = new CodebaseIndexService(root, index, _logger);
                     hits = await svc.SearchAsync(query, limit, pathPrefix, filePattern, ct);
                 }
                 var bias = local ? 1.1 : 1.0;
+                _logger.LogDebug("Searched workspace {Root} (local={IsLocal}): got {HitCount} hits.", root, local, hits.Count);
                 all.AddRange(hits.Select(h => new ScopedCodebaseHit(root, h.Path, h.StartLine, h.EndLine, h.Content, h.Score * bias)));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -322,7 +363,9 @@ public sealed class CodebaseIndexService
                 continue;
             }
         }
-        return all.OrderByDescending(h => h.Score).Take(Math.Min(Math.Max(limit, 1), 50)).ToList();
+        var merged = all.OrderByDescending(h => h.Score).Take(Math.Min(Math.Max(limit, 1), 50)).ToList();
+        _logger.LogDebug("Federated search for '{Query}' completed across {RootCount} roots: {TotalHits} total hits returned.", query, roots.Count, merged.Count);
+        return merged;
     }
 
     /// <summary>

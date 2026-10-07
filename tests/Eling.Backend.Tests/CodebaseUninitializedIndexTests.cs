@@ -61,4 +61,56 @@ public sealed class CodebaseUninitializedIndexTests : IDisposable
 
         Assert.Empty(await index.ListRecentFilesAsync(10));
     }
+
+    [Fact]
+    public async Task SearchPorter_OnAnIndexWithNoSchema_IsEmptyRatherThanThrowing()
+    {
+        using var index = new SqliteCodebaseIndex(SchemaLessDbPath());
+
+        var hits = await index.SearchPorterAsync("alpha", 10);
+
+        Assert.Empty(hits);
+    }
+
+    [Fact]
+    public async Task SearchTrigram_OnAnIndexWithNoSchema_IsEmptyRatherThanThrowing()
+    {
+        using var index = new SqliteCodebaseIndex(SchemaLessDbPath());
+
+        var hits = await index.SearchTrigramAsync("alpha", 10);
+
+        Assert.Empty(hits);
+    }
+
+    [Fact]
+    public async Task GetFile_OnAnIndexWithNoSchema_ReturnsNullRatherThanThrowing()
+    {
+        using var index = new SqliteCodebaseIndex(SchemaLessDbPath());
+
+        var file = await index.GetFileAsync("src/App.cs");
+
+        Assert.Null(file);
+    }
+
+    [Fact]
+    public async Task DeleteFile_OnAnIndexWithNoSchema_DoesNotThrow()
+    {
+        using var index = new SqliteCodebaseIndex(SchemaLessDbPath());
+
+        var exception = await Record.ExceptionAsync(() => index.DeleteFileAsync("src/App.cs"));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public async Task SearchPorter_WhenDatabaseFileDoesNotExist_ReturnsEmptyWithoutCreatingFile()
+    {
+        var nonExistentPath = Path.Combine(_root, "nonexistent.db");
+        using var index = new SqliteCodebaseIndex(nonExistentPath);
+
+        var hits = await index.SearchPorterAsync("alpha", 10);
+
+        Assert.Empty(hits);
+        Assert.False(File.Exists(nonExistentPath));
+    }
 }

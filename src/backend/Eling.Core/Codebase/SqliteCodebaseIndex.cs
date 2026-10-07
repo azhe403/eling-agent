@@ -1,5 +1,6 @@
 using System.Data.Common;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Core.Codebase;
 
@@ -43,6 +44,7 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
 
     private readonly string _dbPath;
     private readonly string _connectionString;
+    private readonly ILogger<SqliteCodebaseIndex>? _logger;
 
     public string DbPath => _dbPath;
 
@@ -56,10 +58,11 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
     /// also makes the "siblings are never written" guarantee enforceable by
     /// the driver rather than by convention.
     /// </summary>
-    public SqliteCodebaseIndex(string dbPath, bool readOnly = false)
+    public SqliteCodebaseIndex(string dbPath, bool readOnly = false, ILogger<SqliteCodebaseIndex>? logger = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dbPath);
         _dbPath = Path.GetFullPath(dbPath);
+        _logger = logger;
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = _dbPath,
@@ -85,13 +88,22 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
 
     public async Task<CodebaseFileRecord?> GetFileAsync(string path, CancellationToken ct = default)
     {
-        await using var c = await OpenAsync(ct);
-        await using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT path, hash, mtime, size, last_indexed_at FROM codebase_files WHERE path=$p LIMIT 1;";
-        Add(cmd, "$p", path);
-        await using var r = await cmd.ExecuteReaderAsync(ct);
-        if (!await r.ReadAsync(ct)) return null;
-        return new CodebaseFileRecord(r.GetString(0), r.GetString(1), r.GetInt64(2), r.GetInt64(3), r.GetString(4));
+        if (!File.Exists(_dbPath)) return null;
+        try
+        {
+            await using var c = await OpenAsync(ct);
+            await using var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT path, hash, mtime, size, last_indexed_at FROM codebase_files WHERE path=$p LIMIT 1;";
+            Add(cmd, "$p", path);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (!await r.ReadAsync(ct)) return null;
+            return new CodebaseFileRecord(r.GetString(0), r.GetString(1), r.GetInt64(2), r.GetInt64(3), r.GetString(4));
+        }
+        catch (SqliteException ex) when (IsMissingSchema(ex))
+        {
+            _logger?.LogDebug(ex, "GetFileAsync skipped for {Path}: index at {DbPath} has no schema.", path, _dbPath);
+            return null;
+        }
     }
 
     public async Task ReplaceChunksAsync(string path, string hash, long mtime, long size, IReadOnlyList<CodebaseChunk> chunks, CancellationToken ct = default)
@@ -168,35 +180,44 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
 
     public async Task DeleteFileAsync(string path, CancellationToken ct = default)
     {
-        await using var c = await OpenAsync(ct);
-        await using var tx = (SqliteTransaction)await c.BeginTransactionAsync(ct);
-        var ids = new List<string>();
-        await using (var cmd = c.CreateCommand())
+        if (!File.Exists(_dbPath)) return;
+        try
         {
-            cmd.Transaction = tx;
-            cmd.CommandText = "SELECT id FROM codebase_chunks WHERE file_path=$p;";
-            Add(cmd, "$p", path);
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct)) ids.Add(r.GetString(0));
-        }
-        foreach (var id in ids)
-            foreach (var tbl in new[] { "codebase_fts_porter", "codebase_fts_trigram" })
+            await using var c = await OpenAsync(ct);
+            await using var tx = (SqliteTransaction)await c.BeginTransactionAsync(ct);
+            var ids = new List<string>();
+            await using (var cmd = c.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = "SELECT id FROM codebase_chunks WHERE file_path=$p;";
+                Add(cmd, "$p", path);
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct)) ids.Add(r.GetString(0));
+            }
+            foreach (var id in ids)
+                foreach (var tbl in new[] { "codebase_fts_porter", "codebase_fts_trigram" })
+                {
+                    await using var cmd = c.CreateCommand();
+                    cmd.Transaction = tx;
+                    cmd.CommandText = $"DELETE FROM {tbl} WHERE id=$id;";
+                    Add(cmd, "$id", id);
+                    await cmd.ExecuteNonQueryAsync(ct);
+                }
+            foreach (var sql in new[] { "DELETE FROM codebase_chunks WHERE file_path=$p;", "DELETE FROM codebase_files WHERE path=$p;" })
             {
                 await using var cmd = c.CreateCommand();
                 cmd.Transaction = tx;
-                cmd.CommandText = $"DELETE FROM {tbl} WHERE id=$id;";
-                Add(cmd, "$id", id);
+                cmd.CommandText = sql;
+                Add(cmd, "$p", path);
                 await cmd.ExecuteNonQueryAsync(ct);
             }
-        foreach (var sql in new[] { "DELETE FROM codebase_chunks WHERE file_path=$p;", "DELETE FROM codebase_files WHERE path=$p;" })
-        {
-            await using var cmd = c.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = sql;
-            Add(cmd, "$p", path);
-            await cmd.ExecuteNonQueryAsync(ct);
+            await tx.CommitAsync(ct);
         }
-        await tx.CommitAsync(ct);
+        catch (SqliteException ex) when (IsMissingSchema(ex))
+        {
+            _logger?.LogDebug(ex, "DeleteFileAsync skipped for {Path}: index at {DbPath} has no schema.", path, _dbPath);
+            // Table doesn't exist yet, nothing to delete.
+        }
     }
 
     public async Task<IReadOnlyList<CodebaseHit>> SearchPorterAsync(string ftsQuery, int limit, string? pathPrefix = null, string? filePattern = null, CancellationToken ct = default)
@@ -219,6 +240,7 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
         }
         catch (SqliteException ex) when (IsMissingSchema(ex))
         {
+            _logger?.LogDebug(ex, "GetStatsAsync reported empty: index at {DbPath} has no schema.", _dbPath);
             return new CodebaseStats(0, 0, null, _dbPath);
         }
     }
@@ -238,6 +260,7 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
         }
         catch (SqliteException ex) when (IsMissingSchema(ex))
         {
+            _logger?.LogDebug(ex, "ListPathsAsync reported empty: index at {DbPath} has no schema.", _dbPath);
             return Array.Empty<string>();
         }
     }
@@ -262,6 +285,7 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
         }
         catch (SqliteException ex) when (IsMissingSchema(ex))
         {
+            _logger?.LogDebug(ex, "ListRecentFilesAsync reported empty: index at {DbPath} has no schema.", _dbPath);
             return Array.Empty<CodebaseFileEntry>();
         }
     }
@@ -288,6 +312,7 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
         }
         catch (SqliteException ex) when (IsMissingSchema(ex))
         {
+            _logger?.LogDebug(ex, "ListChunksAsync reported empty for {Path}: index at {DbPath} has no schema.", path, _dbPath);
             return Array.Empty<CodebaseChunk>();
         }
     }
@@ -301,40 +326,49 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
     private async Task<IReadOnlyList<CodebaseHit>> SearchFtsAsync(string table, string ftsQuery, int limit, string? pathPrefix, string? filePattern, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(ftsQuery)) return Array.Empty<CodebaseHit>();
-        await using var c = await OpenAsync(ct);
-        await using var cmd = c.CreateCommand();
-
-        var filters = new List<string>(2);
-        if (!string.IsNullOrWhiteSpace(pathPrefix))
+        if (!File.Exists(_dbPath)) return Array.Empty<CodebaseHit>();
+        try
         {
-            filters.Add("c.file_path LIKE $pf ESCAPE '\\'");
-            Add(cmd, "$pf", EscapeLike(pathPrefix.Trim()) + "%");
-        }
+            await using var c = await OpenAsync(ct);
+            await using var cmd = c.CreateCommand();
 
-        var fileSql = BuildFilePatternSql(filePattern);
-        if (fileSql is not null)
-        {
-            filters.Add("c.file_path LIKE $fp ESCAPE '\\'");
-            Add(cmd, "$fp", fileSql);
-        }
+            var filters = new List<string>(2);
+            if (!string.IsNullOrWhiteSpace(pathPrefix))
+            {
+                filters.Add("c.file_path LIKE $pf ESCAPE '\\'");
+                Add(cmd, "$pf", EscapeLike(pathPrefix.Trim()) + "%");
+            }
 
-        var where = filters.Count == 0 ? "" : " AND " + string.Join(" AND ", filters);
-        cmd.CommandText = $"""
-            SELECT c.file_path, c.start_line, c.end_line, c.content, bm25({table}) AS rank
-            FROM {table} f JOIN codebase_chunks c ON c.id=f.id
-            WHERE {table} MATCH $q{where}
-            ORDER BY rank LIMIT $lim;
-            """;
-        Add(cmd, "$q", ftsQuery);
-        Add(cmd, "$lim", limit);
-        var hits = new List<CodebaseHit>();
-        await using var r = await cmd.ExecuteReaderAsync(ct);
-        while (await r.ReadAsync(ct))
-        {
-            var score = r.IsDBNull(4) ? 0 : -r.GetDouble(4);
-            hits.Add(new CodebaseHit(r.GetString(0), r.GetInt32(1), r.GetInt32(2), r.GetString(3), score));
+            var fileSql = BuildFilePatternSql(filePattern);
+            if (fileSql is not null)
+            {
+                filters.Add("c.file_path LIKE $fp ESCAPE '\\'");
+                Add(cmd, "$fp", fileSql);
+            }
+
+            var where = filters.Count == 0 ? "" : " AND " + string.Join(" AND ", filters);
+            cmd.CommandText = $"""
+                SELECT c.file_path, c.start_line, c.end_line, c.content, bm25({table}) AS rank
+                FROM {table} f JOIN codebase_chunks c ON c.id=f.id
+                WHERE {table} MATCH $q{where}
+                ORDER BY rank LIMIT $lim;
+                """;
+            Add(cmd, "$q", ftsQuery);
+            Add(cmd, "$lim", limit);
+            var hits = new List<CodebaseHit>();
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                var score = r.IsDBNull(4) ? 0 : -r.GetDouble(4);
+                hits.Add(new CodebaseHit(r.GetString(0), r.GetInt32(1), r.GetInt32(2), r.GetString(3), score));
+            }
+            return hits;
         }
-        return hits;
+        catch (SqliteException ex) when (IsMissingSchema(ex))
+        {
+            _logger?.LogDebug(ex, "SearchFtsAsync ({Table}) reported empty for query '{Query}': index at {DbPath} has no schema.", table, ftsQuery, _dbPath);
+            return Array.Empty<CodebaseHit>();
+        }
     }
 
     /// <summary>

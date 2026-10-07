@@ -37,6 +37,10 @@ public static class McpHostBuilder
 
             services.AddHostedService<RuntimeRegistrationService>();
             services.AddHostedService<HttpLoopService>();
+            if (!effectiveContext.IsUserHome && !ElingPaths.IsCodebaseExcluded(effectiveContext.Chain.Cwd))
+            {
+                services.AddHostedService(sp => sp.GetRequiredService<CodebaseWatcherService>());
+            }
         });
 
         Log.Information(

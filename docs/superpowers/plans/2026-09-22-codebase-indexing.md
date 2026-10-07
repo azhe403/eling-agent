@@ -1,6 +1,9 @@
 # Codebase Indexing via MCP + index.db → memory.db Rename
 
-> **Status**: DRAFT — 2026-09-22 (hold commit until plan approved)
+> **Status**: IMPLEMENTED — shipped 2026-09-29. The unchecked boxes below are stale:
+> this plan was executed, but its steps were never ticked. See the
+> "Implementation note" under the spec's status header for the one design
+> divergence (codebase DB moved to a global per-workspace store).
 > **Spec**: `docs/superpowers/specs/2026-09-22-codebase-indexing-design.md`
 > **Context**: Eling memory FTS (Porter+trigram+BM25) exists for memories; codebase files have no index. This plan adds codebase indexing as MCP tools (mixed manual + debounced watcher) and renames `index.db` → `memory.db` while introducing a separate `codebase.db`.
 

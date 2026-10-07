@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Eling.Core.Codebase;
 using Eling.Core.Memory;
 using Microsoft.Extensions.Hosting;
@@ -62,13 +63,13 @@ public sealed class CodebaseWatcherService : BackgroundService
                 IncludeSubdirectories = true,
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName,
             };
-            _watcher.Created += (_, e) => Enqueue(e.FullPath);
-            _watcher.Changed += (_, e) => Enqueue(e.FullPath);
-            _watcher.Deleted += (_, e) => Enqueue(e.FullPath);
+            _watcher.Created += (_, e) => Enqueue(e.FullPath, "created");
+            _watcher.Changed += (_, e) => Enqueue(e.FullPath, "changed");
+            _watcher.Deleted += (_, e) => Enqueue(e.FullPath, "deleted");
             _watcher.Renamed += (_, e) =>
             {
-                Enqueue(e.OldFullPath);
-                Enqueue(e.FullPath);
+                Enqueue(e.OldFullPath, "renamed-from");
+                Enqueue(e.FullPath, "renamed-to");
             };
             _watcher.Error += (_, e) =>
             {
@@ -80,6 +81,7 @@ public sealed class CodebaseWatcherService : BackgroundService
             _isActive = true;
             _logger?.LogInformation("Codebase watcher active on {Root}.", root);
             await LogIndexStateAtStartupAsync(stoppingToken);
+            await RunFullIncrementalPassAsync("startup catch-up", stoppingToken);
         }
         catch (Exception ex)
         {
@@ -106,6 +108,7 @@ public sealed class CodebaseWatcherService : BackgroundService
             _isActive = false;
             _watcher?.Dispose();
             _watcher = null;
+            _logger?.LogInformation("Codebase watcher stopped on {Root}.", root);
         }
     }
 
@@ -136,7 +139,7 @@ public sealed class CodebaseWatcherService : BackgroundService
     private static bool IsGitignoreName(string rel) =>
         Path.GetFileName(rel.Replace('\\', '/')).Equals(".gitignore", StringComparison.Ordinal);
 
-    private void Enqueue(string fullPath)
+    private void Enqueue(string fullPath, string changeType = "changed")
     {
         if (string.IsNullOrWhiteSpace(fullPath)) return;
         string rel;
@@ -153,7 +156,12 @@ public sealed class CodebaseWatcherService : BackgroundService
         }
         // Dropped when outside the root or under an excluded dir, so the
         // watcher batch can never index what a full pass would skip.
-        if (CodebaseIndexService.IsSkippedPath(rel)) return;
+        if (CodebaseIndexService.IsSkippedPath(rel))
+        {
+            _logger?.LogDebug("Codebase watcher dropped {ChangeType} event for skipped path {Path}.", changeType, rel);
+            return;
+        }
+        _logger?.LogDebug("Codebase watcher saw {ChangeType}: {Path}.", changeType, rel);
         _queue.Enqueue(rel);
     }
 
@@ -164,11 +172,7 @@ public sealed class CodebaseWatcherService : BackgroundService
             if (Interlocked.Exchange(ref _fullRescanRequested, 0) == 1)
             {
                 while (_queue.TryDequeue(out _)) { }
-                var rescan = await _svc.IndexAsync(ct: ct);
-                _logger?.LogInformation(
-                    "Codebase watcher full incremental rescan completed files={Files} chunks={Chunks}.",
-                    rescan.Files, rescan.Chunks);
-                await _notifier.NotifyAsync("codebase", ct);
+                await RunFullIncrementalPassAsync("buffer overflow rescan", ct);
                 return;
             }
 
@@ -176,33 +180,48 @@ public sealed class CodebaseWatcherService : BackgroundService
             while (_queue.TryDequeue(out var rel)) batch.Add(rel);
             if (batch.Count == 0) return;
 
+            _logger?.LogDebug(
+                "Codebase watcher drain: {Count} pending change(s): {Paths}.",
+                batch.Count, string.Join(", ", batch));
+
             // Refresh ignore rules when a .gitignore itself changed, then
             // drop ignored paths: the batch must never index what a full
             // pass would skip.
             var gitignoreChanged = batch.Any(IsGitignoreName);
             if (_ignores is null || gitignoreChanged)
                 _ignores = GitignoreFilter.Load(_svc.ProjectRoot, _logger);
+            var beforeIgnoreCount = batch.Count;
             batch.RemoveWhere(rel => _ignores.IsIgnored(rel));
+            if (beforeIgnoreCount != batch.Count)
+            {
+                _logger?.LogDebug(
+                    "Codebase watcher .gitignore filtered out {Ignored} path(s).",
+                    beforeIgnoreCount - batch.Count);
+            }
 
             if (gitignoreChanged)
             {
                 // Newly ignored rows live outside any scoped batch, so only
                 // a full incremental pass can purge them. Hash-skipping keeps
                 // it cheap: unchanged files are re-enumerated, not rewritten.
-                var fullResult = await _svc.IndexAsync(ct: ct);
-                _logger?.LogInformation(
-                    "Codebase watcher .gitignore change: full incremental pass files={Files} chunks={Chunks}.",
-                    fullResult.Files, fullResult.Chunks);
-                await _notifier.NotifyAsync("codebase", ct);
+                await RunFullIncrementalPassAsync(".gitignore change", ct);
                 return;
             }
 
-            if (batch.Count == 0) return;
+            if (batch.Count == 0)
+            {
+                _logger?.LogInformation(
+                    "Codebase watcher batch: all {Count} path(s) ignored by .gitignore.",
+                    beforeIgnoreCount);
+                return;
+            }
 
+            var swBatch = Stopwatch.StartNew();
             var batchResult = await _svc.IndexAsync(full: false, pathPrefixes: batch.ToList(), ct: ct);
-            _logger?.LogDebug(
-                "Codebase watcher batch indexed files={Files} chunks={Chunks} paths={Paths}.",
-                batchResult.Files, batchResult.Chunks, batch.Count);
+            swBatch.Stop();
+            _logger?.LogInformation(
+                "Codebase watcher batch indexed files={Files} chunks={Chunks} paths={Paths} tookMs={TookMs}.",
+                batchResult.Files, batchResult.Chunks, batch.Count, swBatch.ElapsedMilliseconds);
             await _notifier.NotifyAsync("codebase", ct);
         }
         catch (OperationCanceledException)
@@ -212,6 +231,31 @@ public sealed class CodebaseWatcherService : BackgroundService
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Codebase watcher batch index failed.");
+        }
+    }
+
+    private async Task RunFullIncrementalPassAsync(string reason, CancellationToken ct)
+    {
+        try
+        {
+            _logger?.LogInformation("Codebase watcher {Reason}: starting full incremental pass on {Root}...", reason, _svc.ProjectRoot);
+            var sw = Stopwatch.StartNew();
+            var result = await _svc.IndexAsync(full: false, ct: ct);
+            sw.Stop();
+
+            _logger?.LogInformation(
+                "Codebase watcher {Reason}: completed files={Files} chunks={Chunks} skipped={Skipped} deleted={Deleted} tookMs={TookMs}.",
+                reason, result.Files, result.Chunks, result.Skipped, result.Deleted, sw.ElapsedMilliseconds);
+
+            await _notifier.NotifyAsync("codebase", ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Host shutting down.
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Codebase watcher {Reason} failed.", reason);
         }
     }
 }
