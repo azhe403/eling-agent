@@ -1,6 +1,7 @@
 using Eling.Backend.Bootstrap;
 using Eling.Backend.Codebase;
 using Eling.Backend.FileSystem;
+using Eling.Backend.Judging;
 using Eling.Backend.Mcp.Telemetry;
 using Eling.Backend.Scope;
 using Eling.Core;
@@ -108,20 +109,46 @@ public static class McpServiceExtensions
         services.AddSingleton<IIntentionStorage>(new FileSystemIntentionStorage(headDataDirectory));
         services.AddScoped<IMemoryService, MemoryService>();
 
+        // Semantic judge: a separate, per-user setting from the Desktop agent provider,
+        // resolved from <user-scope>/config so both the MCP host and the dashboard read
+        // the same file. Registered unconditionally so toggling it at runtime takes
+        // effect without a restart; while it is unconfigured the judge throws cheaply on
+        // the first call and MemoryService falls back to creating, which restores the
+        // historical heuristic behaviour.
+        services.AddSingleton(sp => new SemanticJudgeStore(
+            userScope,
+            sp.GetService<ILoggerFactory>()?.CreateLogger<SemanticJudgeStore>()
+                ?? NullLogger<SemanticJudgeStore>.Instance));
+        services.TryAddSingleton<ISemanticJudge>(sp => new ProviderSemanticJudge(
+            sp.GetRequiredService<SemanticJudgeStore>(),
+            sp.GetService<ILoggerFactory>()?.CreateLogger<ProviderSemanticJudge>()
+                ?? NullLogger<ProviderSemanticJudge>.Instance));
+
+        // Logging falls back to a null logger so the judge stays constructible in tests
+        // and in hosts with no logging configured; a real host always supplies one.
+        ILogger<MemoryService> MemoryLogger(IServiceProvider sp) =>
+            sp.GetService<ILoggerFactory>()?.CreateLogger<MemoryService>()
+            ?? NullLogger<MemoryService>.Instance;
+
         // Scoped service: chain levels + Global, with level-grouped merge
         services.AddScoped<IScopedMemoryService>(sp =>
         {
             var policy = sp.GetRequiredService<IMemoryScopePolicy>();
             var merger = sp.GetRequiredService<IMemoryMerger>();
+            var judge = sp.GetService<ISemanticJudge>();
+            var logger = MemoryLogger(sp);
             var globalStorage = sp.GetRequiredKeyedService<IMemoryStorage>("global");
             var globalIndex = sp.GetRequiredKeyedService<IMemoryIndex>("global");
-            var globalService = new MemoryService(globalStorage, globalIndex);
+            var globalService = new MemoryService(globalStorage, globalIndex, new SmartSaveOptions(), judge, logger);
             var levels = new List<ProjectLevel>();
             foreach (var level in chain.Levels)
             {
                 var service = new MemoryService(
                     new FileSystemMemoryStorage(level.DataDirectory),
-                    CreateMemoryIndex(level.DataDirectory, sp.GetService<ILoggerFactory>()));
+                    CreateMemoryIndex(level.DataDirectory, sp.GetService<ILoggerFactory>()),
+                    new SmartSaveOptions(),
+                    judge,
+                    logger);
                 levels.Add(new ProjectLevel(level, service));
             }
             return new ScopedMemoryService(levels, globalService, policy, merger, chain.Cwd);
@@ -173,7 +200,9 @@ public static class McpServiceExtensions
     {
         services.TryAddSingleton(sp => new CodebaseIndexService(
             projectRoot,
-            new SqliteCodebaseIndex(Eling.Core.Scope.ElingPaths.ResolveCodebaseDbPath(projectRoot)),
+            new SqliteCodebaseIndex(
+                Eling.Core.Scope.ElingPaths.ResolveCodebaseDbPath(projectRoot),
+                logger: sp.GetService<ILogger<SqliteCodebaseIndex>>()),
             sp.GetService<ILogger<CodebaseIndexService>>()));
         services.TryAddSingleton<CodebaseWatcherService>();
         services.TryAddSingleton<CodebaseRebuildBroadcaster>();
