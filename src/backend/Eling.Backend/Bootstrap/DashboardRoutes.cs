@@ -51,6 +51,7 @@ public static class DashboardRoutes
         app.MapMemoryRoutes();
         app.MapScopedMemoryRoutes();
         app.MapMemoryMaintenanceEndpoints();
+        app.MapJudgeEndpoints();
         app.MapAgentEndpoints();
         app.MapAgentWorkspaceEndpoints();
         app.MapAgentHostEndpoints();

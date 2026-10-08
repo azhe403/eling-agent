@@ -7,6 +7,8 @@ import {
   LayoutDashboard,
   Database,
   BookOpen,
+  Scale,
+  FolderGit2,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -32,6 +34,12 @@ const navMain = [
     isActive: true,
   },
   {
+    title: "Projects",
+    url: "/dashboard/projects",
+    icon: <FolderGit2 className="size-4" />,
+    isActive: true,
+  },
+  {
     title: "Codebase",
     url: "/dashboard/codebase",
     icon: <BookOpen className="size-4" />,
@@ -41,6 +49,12 @@ const navMain = [
     title: "Memories",
     url: "/dashboard/memories",
     icon: <Database className="size-4" />,
+    isActive: true,
+  },
+  {
+    title: "Judge",
+    url: "/dashboard/judge",
+    icon: <Scale className="size-4" />,
     isActive: true,
   },
 ]
