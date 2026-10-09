@@ -9,6 +9,7 @@ import {
   BookOpen,
   Scale,
   FolderGit2,
+  Wrench,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -55,6 +56,12 @@ const navMain = [
     title: "Judge",
     url: "/dashboard/judge",
     icon: <Scale className="size-4" />,
+    isActive: true,
+  },
+  {
+    title: "Tools",
+    url: "/dashboard/tools",
+    icon: <Wrench className="size-4" />,
     isActive: true,
   },
 ]

@@ -4,6 +4,7 @@ using Eling.Backend.FileSystem;
 using Eling.Backend.Judging;
 using Eling.Backend.Mcp.Telemetry;
 using Eling.Backend.Scope;
+using Eling.Backend.Tools;
 using Eling.Core;
 using Eling.Core.Codebase;
 using Eling.Core.FileSystem;
@@ -71,6 +72,11 @@ public static class McpServiceExtensions
 
         services.TryAddSingleton<IProjectScopePolicyStore>(sp =>
             new JsonProjectScopePolicyStore(userScope, logger: sp.GetService<ILogger<JsonProjectScopePolicyStore>>()));
+
+        services.AddSingleton(sp => new ToolPolicyStore(
+            userScope,
+            sp.GetService<ILoggerFactory>()?.CreateLogger<ToolPolicyStore>()
+                ?? NullLogger<ToolPolicyStore>.Instance));
 
         return services;
     }
@@ -169,6 +175,11 @@ public static class McpServiceExtensions
 
         services.TryAddSingleton<IProjectScopePolicyStore>(sp =>
             new JsonProjectScopePolicyStore(userScope, logger: sp.GetService<ILogger<JsonProjectScopePolicyStore>>()));
+
+        services.AddSingleton(sp => new ToolPolicyStore(
+            userScope,
+            sp.GetService<ILoggerFactory>()?.CreateLogger<ToolPolicyStore>()
+                ?? NullLogger<ToolPolicyStore>.Instance));
 
         return services;
     }
