@@ -225,8 +225,8 @@ export default function ToolsPage() {
         <div
           className={
             message.type === "error"
-              ? "fixed right-4 bottom-4 z-50 flex max-w-sm items-center gap-2 rounded-md border border-destructive/40 bg-background px-3 py-2 text-sm shadow-lg"
-              : "fixed right-4 bottom-4 z-50 flex max-w-sm items-center gap-2 rounded-md border border-emerald-500/40 bg-background px-3 py-2 text-sm shadow-lg"
+              ? "fixed top-4 right-4 z-50 flex max-w-sm items-center gap-2 rounded-md border border-destructive/40 bg-background px-3 py-2 text-sm shadow-lg"
+              : "fixed top-4 right-4 z-50 flex max-w-sm items-center gap-2 rounded-md border border-emerald-500/40 bg-background px-3 py-2 text-sm shadow-lg"
           }
         >
           {message.type === "error" ? (
