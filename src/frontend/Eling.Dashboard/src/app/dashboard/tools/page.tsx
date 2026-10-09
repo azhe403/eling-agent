@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Wrench } from "lucide-react"
 
 import {
@@ -47,6 +47,21 @@ export default function ToolsPage() {
   const [query, setQuery] = useState("")
   const [pending, setPending] = useState<Record<string, boolean>>({})
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (message === null) return
+    if (toastTimer.current !== null) {
+      clearTimeout(toastTimer.current)
+    }
+    toastTimer.current = setTimeout(() => setMessage(null), 4000)
+    return () => {
+      if (toastTimer.current !== null) {
+        clearTimeout(toastTimer.current)
+        toastTimer.current = null
+      }
+    }
+  }, [message])
 
   const reload = useCallback(async () => {
     setLoading(true)
