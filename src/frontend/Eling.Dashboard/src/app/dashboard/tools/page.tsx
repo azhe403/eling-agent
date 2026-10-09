@@ -278,9 +278,9 @@ export default function ToolsPage() {
                   {group === "filesystem" && "Sandboxed file and directory operations."}
                 </CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-col divide-y">
+              <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {members.map((tool) => (
-                  <div key={tool.name} className="flex items-start gap-3 py-3">
+                  <div key={tool.name} className="flex items-start gap-3 rounded-lg border p-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <code className="text-sm font-medium">{tool.name}</code>
