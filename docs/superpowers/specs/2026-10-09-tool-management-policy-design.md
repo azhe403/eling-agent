@@ -59,7 +59,7 @@ This specification introduces **Dynamic Tool Management**, allowing users to:
 - Location: `<user-scope>/config/tools-policy.json` (machine-local / global user level, matching `semantic-judge.json` pattern).
 - Serialization: CamelCase JSON, indented, resilient against missing or corrupted files.
 
-### 3.2 Schema Definition
+### 3.2 Schema Definition & Atomic Mutation Semantics
 ```json
 {
   "disabledTools": [
@@ -69,6 +69,11 @@ This specification introduces **Dynamic Tool Management**, allowing users to:
   "updatedAt": "2026-10-09T08:00:00.0000000Z"
 }
 ```
+
+*Atomic Mutation Flow:*
+- `updatedAt` di-generate dan ditetapkan di akhir mutasi (setelah pembaruan set data dan validasi berhasil).
+- Serialisasi ke disk menggunakan pola penulisan atomic write (tulis ke file temporary `.tmp` terlebih dahulu, lalu `File.Move` dengan overwrite atau atomic replace).
+- Cache in-memory hanya di-swap/update setelah file fisik berhasil ditulis ke storage. Hal ini mencegah state parsial atau drift jika terjadi kegagalan I/O.
 
 ### 3.3 Immunity & Protected Tools
 Certain tools are mission-critical for system integrity and self-recovery. They are protected and cannot be disabled:
