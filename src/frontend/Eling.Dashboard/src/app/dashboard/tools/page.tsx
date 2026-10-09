@@ -225,8 +225,8 @@ export default function ToolsPage() {
         <div
           className={
             message.type === "error"
-              ? "flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
-              : "flex items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm"
+              ? "fixed right-4 bottom-4 z-50 flex max-w-sm items-center gap-2 rounded-md border border-destructive/40 bg-background px-3 py-2 text-sm shadow-lg"
+              : "fixed right-4 bottom-4 z-50 flex max-w-sm items-center gap-2 rounded-md border border-emerald-500/40 bg-background px-3 py-2 text-sm shadow-lg"
           }
         >
           {message.type === "error" ? (
@@ -259,7 +259,9 @@ export default function ToolsPage() {
                 <div className="flex items-center gap-2">
                   <CardTitle className="text-base">{GROUP_TITLES[group] ?? group}</CardTitle>
                   <Badge variant="secondary">{members.length}</Badge>
-                  {isMixed && <Badge variant="outline">mixed</Badge>}
+                  <Badge variant="outline" className={isMixed ? undefined : "invisible"}>
+                    mixed
+                  </Badge>
                   <div className="ml-auto flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">
                       {enabledCount}/{toggleable.length} on
@@ -282,7 +284,7 @@ export default function ToolsPage() {
                 {members.map((tool) => (
                   <div key={tool.name} className="flex items-start gap-3 rounded-lg border p-3">
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex min-h-6 flex-wrap items-center gap-2">
                         <code className="text-sm font-medium">{tool.name}</code>
                         {tool.isProtected && <Badge variant="outline">protected</Badge>}
                         {!tool.enabled && <Badge variant="secondary">disabled</Badge>}
