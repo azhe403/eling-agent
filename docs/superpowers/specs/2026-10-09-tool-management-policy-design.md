@@ -56,24 +56,24 @@ This specification introduces **Dynamic Tool Management**, allowing users to:
 ## 3. Storage & Domain Model (`ToolPolicyStore`)
 
 ### 3.1 File Location & Persistence
-- Location: `<user-scope>/config/tools-policy.json` (machine-local / global user level, matching `semantic-judge.json` pattern).
-- Serialization: CamelCase JSON, indented, resilient against missing or corrupted files.
+- Location: `<user-scope>/config/tools-policy.json` (machine-local / global user level, matching `<user-scope>/config` pattern).
+- Serialization: `snake_case` JSON fields (per repository config standard: `JsonNamingPolicy.SnakeCaseLower`), indented, resilient against missing or corrupted files.
 
-### 3.2 Schema Definition & Atomic Mutation Semantics
+### 3.2 Schema Definition & Mutation Semantics
 ```json
 {
-  "disabledTools": [
+  "disabled_tools": [
     "file_delete",
     "directory_delete"
   ],
-  "updatedAt": "2026-10-09T08:00:00.0000000Z"
+  "updated_at": "2026-10-09T08:00:00.0000000Z"
 }
 ```
 
-*Atomic Mutation Flow:*
-- `updatedAt` di-generate dan ditetapkan di akhir mutasi (setelah pembaruan set data dan validasi berhasil).
-- Serialisasi ke disk menggunakan pola penulisan atomic write (tulis ke file temporary `.tmp` terlebih dahulu, lalu `File.Move` dengan overwrite atau atomic replace).
-- Cache in-memory hanya di-swap/update setelah file fisik berhasil ditulis ke storage. Hal ini mencegah state parsial atau drift jika terjadi kegagalan I/O.
+*Mutation Flow:*
+- `updatedAt` is generated and assigned in backend code (`DateTimeOffset.UtcNow`) at the end of the mutation, after validation succeeds.
+- Serialization writes to a temporary file (`.tmp`) first, followed by `File.Move` with overwrite/replace.
+- In-memory cache is swapped only after the physical file write succeeds, avoiding partial state drift on I/O failures.
 
 ### 3.3 Immunity & Protected Tools
 Certain tools are mission-critical for system integrity and self-recovery. They are protected and cannot be disabled:

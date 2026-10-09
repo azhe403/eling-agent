@@ -4,7 +4,7 @@
 
 **Goal:** Implement dynamic MCP tool enablement/disablement in Eling, allowing users to toggle individual tools or groups via the Dashboard web UI and via Chat (`tools_policy`), applying changes in real time without restarting the MCP server.
 
-**Architecture:** A thread-safe `ToolPolicyStore` persists policies to `<user-scope>/config/tools-policy.json` with atomic disk writes and trailing `updatedAt` timestamps generated in code. Middleware filters (`AddListToolsFilter` and `AddCallToolFilter`) enforce policies on MCP stdio in real time and emit `notifications/tools/list_changed`. A dedicated `ToolsPolicyTool` MCP tool provides natural-language chat control, while `/api/tools` endpoints power a new `/dashboard/tools` page in the Next.js frontend with shadcn/ui Switches.
+**Architecture:** A thread-safe `ToolPolicyStore` persists policies to `<user-scope>/config/tools-policy.json` with safe disk writes and trailing `updatedAt` timestamps generated in code. Middleware filters (`AddListToolsFilter` and `AddCallToolFilter`) enforce policies on MCP stdio in real time and emit `notifications/tools/list_changed`. A dedicated `ToolsPolicyTool` MCP tool provides natural-language chat control, while `/api/tools` endpoints power a new `/dashboard/tools` page in the Next.js frontend with shadcn/ui Switches.
 
 **Tech Stack:** .NET 10, C# 14, `ModelContextProtocol` v2.1.0, ASP.NET Core Minimal APIs, Next.js 15 / React 19, Tailwind CSS, shadcn/ui components, xUnit.
 
@@ -12,9 +12,10 @@
 
 ## Global Constraints
 
+- Naming rule: All JSON configuration fields must use `snake_case` (e.g. `disabled_tools`, `updated_at`).
 - Anti-tuple rule: Never use `ValueTuple` anywhere; use explicit named records or classes.
-- Atomic mutation timestamps: Always generate and set `updatedAt` in backend code (`DateTimeOffset.UtcNow`) at the end of domain mutations; never trust client-supplied timestamps.
-- Atomic file writes: Configuration files must be written to `.tmp` first then moved/replaced to prevent partial writes.
+- Timestamps: Always generate and set `updatedAt` in backend code (`DateTimeOffset.UtcNow`) at the end of domain mutations; never trust client-supplied timestamps.
+- File writes: Configuration files must be written to `.tmp` first then moved/replaced to prevent partial writes.
 - Immunity rule: Core tools `tools_policy` and `memory_recall` are protected and can never be disabled.
 - Real-time enforcement: Policy changes must apply immediately to in-memory filter evaluations without restarting the backend process.
 
@@ -54,7 +55,7 @@ Cover:
 - Disabling tools updates `disabledTools` and sets `updatedAt` generated from backend code.
 - Trying to disable `memory_recall` or `tools_policy` does not add them to `disabledTools`.
 - Reset clears disabled tools.
-- Atomic file write persistence round-trip.
+- File write persistence round-trip.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -66,7 +67,7 @@ Expected: FAIL (types not found).
 Implement `ToolPolicyConfig` in `Eling.Core.Tools`.
 Implement `ToolPolicyStore` in `Eling.Backend.Tools`:
 - Thread-safe `_gate` lock.
-- Atomic file write: write to `.tmp` file, then `File.Move(tmp, path, overwrite: true)`.
+- Safe file write: write to `.tmp` file, then `File.Move(tmp, path, overwrite: true)`.
 - Trailing `DateTimeOffset.UtcNow` set from code.
 - Protected tools list: `{"tools_policy", "memory_recall"}`.
 
@@ -79,7 +80,7 @@ Expected: PASS.
 
 ```bash
 git add src/backend/Eling.Core/Tools/ src/backend/Eling.Backend/Tools/ tests/Eling.Backend.Tests/Tools/
-git commit -m "feat: implement ToolPolicyStore with atomic writes and protected tools"
+git commit -m "feat: implement ToolPolicyStore with safe file writes and protected tools"
 ```
 
 ---
