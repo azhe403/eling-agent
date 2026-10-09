@@ -250,30 +250,26 @@ export default function ToolsPage() {
           const members = filtered.filter((tool) => tool.group === group)
           if (members.length === 0) return null
           const toggleable = members.filter((tool) => !tool.isProtected)
-          const allEnabled = toggleable.length > 0 && toggleable.every((tool) => tool.enabled)
+          const enabledCount = toggleable.filter((tool) => tool.enabled).length
+          const allEnabled = toggleable.length > 0 && enabledCount === toggleable.length
+          const isMixed = enabledCount > 0 && enabledCount < toggleable.length
           return (
             <Card key={group}>
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <CardTitle className="text-base">{GROUP_TITLES[group] ?? group}</CardTitle>
                   <Badge variant="secondary">{members.length}</Badge>
-                  <div className="ml-auto flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void toggleGroup(group, true)}
-                      disabled={allEnabled}
-                    >
-                      Enable all
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void toggleGroup(group, false)}
-                      disabled={toggleable.length === 0 || toggleable.every((tool) => !tool.enabled)}
-                    >
-                      Disable all
-                    </Button>
+                  {isMixed && <Badge variant="outline">mixed</Badge>}
+                  <div className="ml-auto flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {enabledCount}/{toggleable.length} on
+                    </span>
+                    <Switch
+                      checked={allEnabled}
+                      disabled={toggleable.length === 0}
+                      onCheckedChange={(checked) => void toggleGroup(group, checked)}
+                      aria-label={`Toggle ${group} tools`}
+                    />
                   </div>
                 </div>
                 <CardDescription>
