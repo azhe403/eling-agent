@@ -210,6 +210,11 @@ public sealed class RuntimeRegistry : IDisposable
         var workspace = registration.WorkspaceRoot;
         if (string.IsNullOrWhiteSpace(workspace)) workspace = registration.HeadScopeRoot;
         if (string.IsNullOrWhiteSpace(workspace)) return;
+        if (string.Equals(workspace, "UserScope", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(registration.HeadScopeRoot, "UserScope", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
         if (ElingPaths.IsCodebaseExcluded(workspace)) return;
 
         var now = DateTimeOffset.UtcNow;
@@ -236,6 +241,7 @@ public sealed class RuntimeRegistry : IDisposable
     {
         if (_workspaces is null) return;
         if (string.IsNullOrWhiteSpace(registration.HeadScopeRoot)) return;
+        if (string.Equals(registration.HeadScopeRoot, "UserScope", StringComparison.OrdinalIgnoreCase)) return;
 
         List<ProjectScope> chain;
         try
@@ -375,6 +381,28 @@ public sealed class RuntimeRegistry : IDisposable
 
             return removed;
         }
+    }
+
+    /// <summary>
+    /// Removes a workspace from the durable catalogue, and if a live instance
+    /// is active for that workspace, unregisters it.
+    /// </summary>
+    public async Task<bool> DeleteWorkspaceAsync(string workspaceRoot, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceRoot)) return false;
+        var normalized = NormalizeRoot(workspaceRoot);
+
+        lock (_lock)
+        {
+            var matching = _runtimes.Where(r => string.Equals(NormalizeRoot(r.WorkspaceRoot), normalized, StringComparison.OrdinalIgnoreCase)).ToList();
+            foreach (var r in matching)
+            {
+                Unregister(r.ProcessId);
+            }
+        }
+
+        if (_workspaces is null) return false;
+        return await _workspaces.DeleteByRootAsync(normalized, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -524,7 +552,13 @@ public sealed class RuntimeRegistry : IDisposable
             return false;
         }
 
-        return !string.Equals(root, "UserScope", StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(root, "UserScope", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFileName(NormalizeRoot(root)), "UserScope", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static string NormalizeRoot(string root)

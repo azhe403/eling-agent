@@ -216,6 +216,7 @@ public static class ElingPaths
         yield return Path.Combine(home, ".config", "openchamber", "chats");
         yield return Path.Combine(home, ".config", "opencode");
         yield return Path.Combine(home, ".config", "openchamber");
+        yield return Path.Combine(Path.GetTempPath(), "eling-smoke-");
     }
 
     private static bool IsAtOrUnder(string cwd, string root)
@@ -223,7 +224,8 @@ public static class ElingPaths
         var full = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         if (full.Length == 0) return false;
         return cwd.Equals(full, StringComparison.OrdinalIgnoreCase)
-            || cwd.StartsWith(full + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            || cwd.StartsWith(full + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || cwd.StartsWith(root, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

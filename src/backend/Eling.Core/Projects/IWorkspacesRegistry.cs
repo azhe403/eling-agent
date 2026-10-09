@@ -28,4 +28,9 @@ public interface IWorkspacesRegistry
     /// The workspace whose root matches, or null.
     /// </summary>
     Task<RegisteredWorkspace?> FindByRootAsync(string root, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes a workspace entry from the registry by its workspace root.
+    /// </summary>
+    Task<bool> DeleteByRootAsync(string root, CancellationToken cancellationToken = default);
 }

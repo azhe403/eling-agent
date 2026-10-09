@@ -103,6 +103,16 @@ public sealed class SqliteWorkspacesRegistry : IWorkspacesRegistry, IDisposable
     private async Task RecordAsync(RegisteredWorkspace workspace, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workspace.WorkspaceRoot)) return;
+        if (string.Equals(workspace.WorkspaceRoot, "UserScope", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(workspace.HeadScopeRoot, "UserScope", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (!Path.IsPathFullyQualified(workspace.WorkspaceRoot))
+        {
+            return;
+        }
 
         await EnsureCreatedAsync(cancellationToken);
         await using var connection = await OpenAsync(cancellationToken);
@@ -193,6 +203,26 @@ public sealed class SqliteWorkspacesRegistry : IWorkspacesRegistry, IDisposable
         catch (SqliteException ex) when (IsMissingSchema(ex))
         {
             return null;
+        }
+    }
+
+    public async Task<bool> DeleteByRootAsync(string root, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(root)) return false;
+        if (!File.Exists(_dbPath)) return false;
+
+        try
+        {
+            await using var connection = await OpenAsync(cancellationToken);
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = "DELETE FROM workspaces WHERE workspace_root=$root;";
+            Add(cmd, "$root", Trimmed(root));
+            var affected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+            return affected > 0;
+        }
+        catch (SqliteException ex) when (IsMissingSchema(ex))
+        {
+            return false;
         }
     }
 

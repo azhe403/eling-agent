@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Eling.Backend.Controllers;
+using Eling.Backend.Dtos;
 using Eling.Core.Projects;
 using Eling.Core.Runtime;
 using Eling.Core.Scope;
@@ -50,6 +51,7 @@ public sealed class CoordinatorControllerTests : IAsyncLifetime
         builder.WebHost.UseTestServer();
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton(_registry);
+        builder.Services.AddSingleton(new MemoryChangeBroadcaster());
         // Controllers are discovered from the entry assembly, which under a test
         // host is the test runner; the backend assembly must be added or the
         // route 404s.
@@ -218,6 +220,42 @@ public sealed class CoordinatorControllerTests : IAsyncLifetime
         var entries = await GetAsync("/api/coordinator/runtimes?includeRegistered=true");
 
         Assert.DoesNotContain(entries, e => RootOf(e) == "UserScope");
+        Assert.DoesNotContain(entries, e => RootOf(e).EndsWith("UserScope", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task SqliteWorkspacesRegistry_DoesNotRecord_UserScopeOrRelativePaths()
+    {
+        _workspaces.Record(new RegisteredWorkspace(
+            string.Empty,
+            "UserScope",
+            "UserScope",
+            true,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow));
+
+        _workspaces.Record(new RegisteredWorkspace(
+            string.Empty,
+            "relative/path",
+            "relative/path",
+            true,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow));
+
+        var list = await _workspaces.ListAsync();
+        Assert.DoesNotContain(list, w => w.WorkspaceRoot.EndsWith("UserScope", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(list, w => w.WorkspaceRoot.Contains("relative", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task SqliteWorkspacesRegistry_ExcludesSmokeTestDirectories()
+    {
+        var smokeDir = Path.Combine(Path.GetTempPath(), "eling-smoke-" + Guid.NewGuid().ToString("N")[..8]);
+        var registration = Registration(smokeDir, 508);
+        _registry.Register(registration);
+
+        var list = await _workspaces.ListAsync();
+        Assert.DoesNotContain(list, w => w.WorkspaceRoot.StartsWith(smokeDir, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -240,5 +278,22 @@ public sealed class CoordinatorControllerTests : IAsyncLifetime
         var res = await _client.GetAsync("/api/coordinator/runtimes");
 
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteProject_RemovesWorkspaceAndDeletesAssociatedItems()
+    {
+        var workspace = Workspace("to-delete");
+        var dotEling = Path.Combine(workspace, ".eling");
+        Directory.CreateDirectory(dotEling);
+        _registry.Register(Registration(workspace, 601));
+
+        var deletePayload = new DeleteProjectRequest(workspace, DeleteCodebaseIndex: true, DeleteDotEling: true);
+        var postRes = await _client.PostAsJsonAsync("/api/coordinator/project/delete", deletePayload);
+
+        Assert.Equal(HttpStatusCode.OK, postRes.StatusCode);
+        var entries = await GetAsync("/api/coordinator/runtimes?includeRegistered=true");
+        Assert.DoesNotContain(entries, e => RootOf(e) == workspace);
+        Assert.False(Directory.Exists(dotEling));
     }
 }
