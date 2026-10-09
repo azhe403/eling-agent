@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Wrench } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Wrench, X } from "lucide-react"
 
 import {
   Breadcrumb,
@@ -33,6 +33,62 @@ interface ToolItem {
   isProtected: boolean
 }
 
+interface Notification {
+  id: number
+  type: "success" | "error"
+  title: string
+  text: string
+}
+
+const MAX_NOTIFICATIONS = 4
+const NOTIFICATION_TTL_MS = 4000
+
+let nextNotificationId = 0
+
+function ToastItem({
+  notification,
+  onDismiss,
+}: {
+  notification: Notification
+  onDismiss: (id: number) => void
+}) {
+  useEffect(() => {
+    const timer = setTimeout(() => onDismiss(notification.id), NOTIFICATION_TTL_MS)
+    return () => clearTimeout(timer)
+  }, [notification.id, onDismiss])
+
+  return (
+    <div className="pointer-events-auto flex w-80 max-w-[calc(100vw-2rem)] items-start gap-2.5 rounded-lg border bg-background p-3 shadow-lg animate-in fade-in-0 slide-in-from-right-8 duration-300">
+      <span
+        className={
+          notification.type === "error"
+            ? "flex size-7 shrink-0 items-center justify-center rounded-full bg-destructive/15 text-destructive"
+            : "flex size-7 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+        }
+      >
+        {notification.type === "error" ? (
+          <AlertCircle className="size-4" />
+        ) : (
+          <CheckCircle2 className="size-4" />
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">{notification.title}</p>
+        <p className="mt-0.5 text-xs break-words text-muted-foreground">{notification.text}</p>
+      </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-6 shrink-0"
+        onClick={() => onDismiss(notification.id)}
+        aria-label="Dismiss notification"
+      >
+        <X className="size-3.5" />
+      </Button>
+    </div>
+  )
+}
+
 const GROUP_ORDER = ["memory", "codebase", "filesystem"] as const
 
 const GROUP_TITLES: Record<string, string> = {
@@ -46,26 +102,20 @@ export default function ToolsPage() {
   const [tools, setTools] = useState<ToolItem[]>([])
   const [query, setQuery] = useState("")
   const [pending, setPending] = useState<Record<string, boolean>>({})
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [notifications, setNotifications] = useState<Notification[]>([])
 
-  useEffect(() => {
-    if (message === null) return
-    if (toastTimer.current !== null) {
-      clearTimeout(toastTimer.current)
-    }
-    toastTimer.current = setTimeout(() => setMessage(null), 4000)
-    return () => {
-      if (toastTimer.current !== null) {
-        clearTimeout(toastTimer.current)
-        toastTimer.current = null
-      }
-    }
-  }, [message])
+  const dismissNotification = useCallback((id: number) => {
+    setNotifications((current) => current.filter((item) => item.id !== id))
+  }, [])
+
+  const notify = useCallback((type: Notification["type"], title: string, text: string) => {
+    nextNotificationId += 1
+    const id = nextNotificationId
+    setNotifications((current) => [...current.slice(-(MAX_NOTIFICATIONS - 1)), { id, type, title, text }])
+  }, [])
 
   const reload = useCallback(async () => {
     setLoading(true)
-    setMessage(null)
     try {
       const res = await fetch("/api/tools", { cache: "no-store" })
       if (!res.ok) {
@@ -74,14 +124,11 @@ export default function ToolsPage() {
       const data: ToolItem[] = await res.json()
       setTools(data)
     } catch (err) {
-      setMessage({
-        type: "error",
-        text: err instanceof Error ? err.message : "Failed to load tools.",
-      })
+      notify("error", "Failed to load tools", err instanceof Error ? err.message : "Unknown error.")
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [notify])
 
   useEffect(() => {
     let isMounted = true
@@ -98,10 +145,7 @@ export default function ToolsPage() {
       })
       .catch((err: unknown) => {
         if (!isMounted) return
-        setMessage({
-          type: "error",
-          text: err instanceof Error ? err.message : "Failed to load tools.",
-        })
+        notify("error", "Failed to load tools", err instanceof Error ? err.message : "Unknown error.")
       })
       .finally(() => {
         if (isMounted) setLoading(false)
@@ -109,7 +153,7 @@ export default function ToolsPage() {
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [notify])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -129,7 +173,6 @@ export default function ToolsPage() {
   }, [filtered])
 
   async function applyUpdate(payload: { toolName?: string; group?: string; enabled: boolean }) {
-    setMessage(null)
     try {
       const res = await fetch("/api/tools", {
         method: "PUT",
@@ -143,10 +186,8 @@ export default function ToolsPage() {
       const data: ToolItem[] = await res.json()
       setTools(data)
     } catch (err) {
-      setMessage({
-        type: "error",
-        text: err instanceof Error ? err.message : "Failed to update tool policy.",
-      })
+      notify("error", "Update failed", err instanceof Error ? err.message : "Unknown error.")
+      throw err
     }
   }
 
@@ -157,10 +198,11 @@ export default function ToolsPage() {
     setPending((current) => ({ ...current, [tool.name]: true }))
     try {
       await applyUpdate({ toolName: tool.name, enabled })
-      setMessage({
-        type: "success",
-        text: `${tool.name} ${enabled ? "enabled" : "disabled"}. Applies immediately, no restart needed.`,
-      })
+      notify(
+        "success",
+        `${tool.name} ${enabled ? "enabled" : "disabled"}`,
+        "Applies immediately, no restart needed."
+      )
     } catch {
       setTools(previous)
     } finally {
@@ -179,10 +221,11 @@ export default function ToolsPage() {
     )
     try {
       await applyUpdate({ group, enabled })
-      setMessage({
-        type: "success",
-        text: `${GROUP_TITLES[group] ?? group} ${enabled ? "enabled" : "disabled"}.`,
-      })
+      notify(
+        "success",
+        `${GROUP_TITLES[group] ?? group} ${enabled ? "enabled" : "disabled"}`,
+        "Applies immediately, no restart needed."
+      )
     } catch {
       setTools(previous)
     }
@@ -236,22 +279,11 @@ export default function ToolsPage() {
         </CardContent>
       </Card>
 
-      {message && (
-        <div
-          className={
-            message.type === "error"
-              ? "fixed top-4 right-4 z-50 flex max-w-sm items-center gap-2 rounded-md border border-destructive/40 bg-background px-3 py-2 text-sm shadow-lg"
-              : "fixed top-4 right-4 z-50 flex max-w-sm items-center gap-2 rounded-md border border-emerald-500/40 bg-background px-3 py-2 text-sm shadow-lg"
-          }
-        >
-          {message.type === "error" ? (
-            <AlertCircle className="size-4 shrink-0" />
-          ) : (
-            <CheckCircle2 className="size-4 shrink-0" />
-          )}
-          <span>{message.text}</span>
-        </div>
-      )}
+      <div className="pointer-events-none fixed top-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+        {notifications.map((notification) => (
+          <ToastItem key={notification.id} notification={notification} onDismiss={dismissNotification} />
+        ))}
+      </div>
 
       {loading ? (
         <Card>
