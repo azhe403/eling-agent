@@ -70,6 +70,7 @@ public static class DashboardServices
         // Memory scope listing for the dashboard picker. Read-only and cheap: it
         // resolves the .eling chain per call, so it needs no state of its own.
         services.TryAddSingleton<Services.ProjectScopeCatalog>();
+        services.TryAddSingleton<Services.ProcessMetricsTracker>();
 
         // NOTE: do NOT call AddElingMcpServerStdio() here. The MCP stdio transport
         // is owned exclusively by the GenericHost in Program.cs so that peer-mode

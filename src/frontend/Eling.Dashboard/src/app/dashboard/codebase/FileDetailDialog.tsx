@@ -121,6 +121,7 @@ function FileDetailBody({
   return (
     <DialogContent
       showCloseButton={false}
+      onOverlayClick={onClose}
       // No `flex` here: the base class is `grid`, and this element's layout
       // is a header row plus a body row that takes the leftover height.
       // Overriding the display would silently void the grid-rows template.

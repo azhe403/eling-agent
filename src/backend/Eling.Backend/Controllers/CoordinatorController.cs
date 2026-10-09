@@ -1,4 +1,6 @@
 using Eling.Backend.Dtos;
+using Eling.Backend.Services;
+using Eling.Core.Scope;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Eling.Backend.Controllers;
@@ -32,7 +34,10 @@ namespace Eling.Backend.Controllers;
 /// </remarks>
 [ApiController]
 [Route("api/coordinator")]
-public sealed class CoordinatorController(RuntimeRegistry registry) : ControllerBase
+public sealed class CoordinatorController(
+    RuntimeRegistry registry,
+    MemoryChangeBroadcaster broadcaster,
+    ProcessMetricsTracker? metricsTracker = null) : ControllerBase
 {
     /// <summary>
     /// Registered runtimes. With <paramref name="includeRegistered"/> the result
@@ -50,6 +55,140 @@ public sealed class CoordinatorController(RuntimeRegistry registry) : Controller
             ? await registry.AliveOrRegisteredAsync(cancellationToken)
             : registry.Alive();
 
-        return Ok(runtimes.Select(RuntimeInfoDto.From).ToList());
+        var dtos = runtimes.Select(r =>
+        {
+            var dto = RuntimeInfoDto.From(r);
+            if (r.IsAlive && r.ProcessId > 0 && metricsTracker is not null)
+            {
+                var metrics = metricsTracker.Sample(r.ProcessId);
+                if (metrics is not null)
+                {
+                    return dto with
+                    {
+                        MemoryBytes = metrics.MemoryBytes,
+                        CpuPercent = metrics.CpuPercent
+                    };
+                }
+            }
+            return dto;
+        }).ToList();
+
+        return Ok(dtos);
+    }
+
+    /// <summary>
+    /// Batch read of codebase status for all known projects. Read on-the-fly from disk
+    /// in a single request without modifying or writing any database.
+    /// </summary>
+    [HttpGet("projects/codebase-statuses")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyCollection<ProjectCodebaseStatusDto>>> GetProjectCodebaseStatusesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var runtimes = await registry.AliveOrRegisteredAsync(cancellationToken);
+        var result = new List<ProjectCodebaseStatusDto>();
+
+        foreach (var r in runtimes)
+        {
+            var root = r.WorkspaceRoot;
+            if (string.IsNullOrWhiteSpace(root) || root == "UserScope") continue;
+            var normalized = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var dbPath = ElingPaths.ResolveCodebaseDbPath(normalized);
+
+            if (!System.IO.File.Exists(dbPath))
+            {
+                result.Add(new ProjectCodebaseStatusDto(normalized, 0, 0, null, dbPath));
+                continue;
+            }
+
+            try
+            {
+                using var index = new Core.Codebase.SqliteCodebaseIndex(dbPath, readOnly: true);
+                var stats = await index.GetStatsAsync(cancellationToken);
+                result.Add(new ProjectCodebaseStatusDto(normalized, stats.FileCount, stats.ChunkCount, stats.LastIndexedAt, dbPath));
+            }
+            catch
+            {
+                result.Add(new ProjectCodebaseStatusDto(normalized, 0, 0, null, dbPath));
+            }
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Deletes a project from the registry, with options to delete its codebase index
+    /// and/or its local .eling data folder.
+    /// </summary>
+    [HttpPost("project/delete")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DeleteProjectAsync(
+        [FromBody] DeleteProjectRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request?.WorkspaceRoot))
+        {
+            return BadRequest("WorkspaceRoot is required.");
+        }
+
+        var normalized = Path.GetFullPath(request.WorkspaceRoot)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        // 1. Delete from workspaces database and unregister if active
+        await registry.DeleteWorkspaceAsync(normalized, cancellationToken);
+
+        // 2. Optionally delete codebase index db and sidecars (-wal, -shm)
+        if (request.DeleteCodebaseIndex)
+        {
+            try
+            {
+                var dbPath = ElingPaths.ResolveCodebaseDbPath(normalized);
+                DeleteDatabaseAndSidecars(dbPath);
+            }
+            catch
+            {
+                // Best-effort index deletion
+            }
+        }
+
+        // 3. Optionally delete .eling directory in workspace
+        if (request.DeleteDotEling)
+        {
+            try
+            {
+                var dotEling = Path.Combine(normalized, ElingPaths.DotElingDirName);
+                if (Directory.Exists(dotEling))
+                {
+                    Directory.Delete(dotEling, recursive: true);
+                }
+            }
+            catch
+            {
+                // Best-effort dotEling deletion
+            }
+        }
+
+        broadcaster.Notify("runtimes");
+        broadcaster.Notify("codebase");
+
+        return Ok(new { success = true, workspaceRoot = normalized });
+    }
+
+    /// <summary>
+    /// Deletes a SQLite database and its WAL sidecar files (-wal, -shm, -journal).
+    /// Leaving sidecars behind causes SQLite to open a stale or corrupt DB on next access.
+    /// </summary>
+    private static void DeleteDatabaseAndSidecars(string dbPath)
+    {
+        if (System.IO.File.Exists(dbPath))
+            System.IO.File.Delete(dbPath);
+
+        foreach (var suffix in new[] { "-wal", "-shm", "-journal" })
+        {
+            var sidecarPath = dbPath + suffix;
+            if (System.IO.File.Exists(sidecarPath))
+                System.IO.File.Delete(sidecarPath);
+        }
     }
 }

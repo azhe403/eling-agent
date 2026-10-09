@@ -25,6 +25,8 @@ namespace Eling.Backend.Dtos;
 /// <param name="McpTransport">The MCP transport it used.</param>
 /// <param name="LastHeartbeat">Last seen live, or last registered when not running.</param>
 /// <param name="IsAlive">False for a workspace that is only remembered.</param>
+/// <param name="MemoryBytes">Working set memory in bytes for live process.</param>
+/// <param name="CpuPercent">CPU usage percent for live process.</param>
 public sealed record RuntimeInfoDto(
     int ProcessId,
     string HeadScopeRoot,
@@ -35,7 +37,9 @@ public sealed record RuntimeInfoDto(
     bool McpEnabled,
     string McpTransport,
     DateTimeOffset LastHeartbeat,
-    bool IsAlive)
+    bool IsAlive,
+    long? MemoryBytes = null,
+    double? CpuPercent = null)
 {
     public static RuntimeInfoDto From(RuntimeInfo runtime) => new(
         runtime.ProcessId,

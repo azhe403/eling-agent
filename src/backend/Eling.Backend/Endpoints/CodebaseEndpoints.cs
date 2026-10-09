@@ -32,11 +32,18 @@ public static class CodebaseEndpoints
         try
         {
             var resolved = await ResolveScopeAsync(svc, registry, scope, project, cancellationToken);
+            var scoped = await svc.GetScopedStatsAsync(resolved.Roots, cancellationToken);
+
             // files/chunks/lastIndexedAt describe the selected scope and
             // roots lists the workspaces those numbers belong to.
-            // watcherActive/dbPath stay backend-local: this process's own
-            // index, not the aggregate.
-            var scoped = await svc.GetScopedStatsAsync(resolved.Roots, cancellationToken);
+            // When a single project root is targeted, dbPath points directly to its index DB.
+            var targetRoot = resolved.Roots?.Count == 1 ? resolved.Roots[0] : (resolved.Roots is null ? svc.ProjectRoot : null);
+            var resolvedDbPath = targetRoot is not null
+                ? (string.Equals(targetRoot, svc.ProjectRoot, StringComparison.OrdinalIgnoreCase)
+                    ? svc.DbPath
+                    : ElingPaths.ResolveCodebaseDbPath(targetRoot))
+                : svc.DbPath;
+
             return TypedResults.Ok(new
             {
                 scope = resolved.EffectiveScope,
@@ -46,7 +53,7 @@ public static class CodebaseEndpoints
                 chunks = scoped.Chunks,
                 lastIndexedAt = scoped.LastIndexedAt,
                 watcherActive = watcher.IsActive,
-                dbPath = svc.DbPath
+                dbPath = resolvedDbPath
             });
         }
         catch (ArgumentException ex)
