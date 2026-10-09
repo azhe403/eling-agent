@@ -37,7 +37,7 @@ interface Notification {
   id: number
   type: "success" | "error"
   title: string
-  text: string
+  text?: string
 }
 
 const MAX_NOTIFICATIONS = 4
@@ -74,7 +74,9 @@ function ToastItem({
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{notification.title}</p>
-        <p className="mt-0.5 text-xs break-words text-muted-foreground">{notification.text}</p>
+        {notification.text ? (
+          <p className="mt-0.5 text-xs break-words text-muted-foreground">{notification.text}</p>
+        ) : null}
       </div>
       <Button
         variant="ghost"
@@ -108,7 +110,7 @@ export default function ToolsPage() {
     setNotifications((current) => current.filter((item) => item.id !== id))
   }, [])
 
-  const notify = useCallback((type: Notification["type"], title: string, text: string) => {
+  const notify = useCallback((type: Notification["type"], title: string, text?: string) => {
     nextNotificationId += 1
     const id = nextNotificationId
     setNotifications((current) => [...current.slice(-(MAX_NOTIFICATIONS - 1)), { id, type, title, text }])
@@ -198,11 +200,7 @@ export default function ToolsPage() {
     setPending((current) => ({ ...current, [tool.name]: true }))
     try {
       await applyUpdate({ toolName: tool.name, enabled })
-      notify(
-        "success",
-        `${tool.name} ${enabled ? "enabled" : "disabled"}`,
-        "Applies immediately, no restart needed."
-      )
+      notify("success", `${tool.name} ${enabled ? "enabled" : "disabled"}`)
     } catch {
       setTools(previous)
     } finally {
@@ -221,11 +219,7 @@ export default function ToolsPage() {
     )
     try {
       await applyUpdate({ group, enabled })
-      notify(
-        "success",
-        `${GROUP_TITLES[group] ?? group} ${enabled ? "enabled" : "disabled"}`,
-        "Applies immediately, no restart needed."
-      )
+      notify("success", `${GROUP_TITLES[group] ?? group} ${enabled ? "enabled" : "disabled"}`)
     } catch {
       setTools(previous)
     }
