@@ -21,7 +21,7 @@ A previous design covered 4 candidate strategies (Multi-Phase, OR+filter, AND→
 ## Goals
 
 - Default precision behavior preserved (AND) — most queries unchanged.
-- Fallback to OR when AND returns ≤ 2 memories — graceful expansi tanpa user retry.
+- Fallback to OR when AND returns ≤ 2 memories — graceful expansion without a user retry.
 - Result is **differentiated** in the MCP response: agent can see which strategy produced the final hit set via a new `queryMode` field.
 - Zero breaking change to existing `MemorySearchResult` contract — additive only.
 - Tests cover both branches (AND-hit-enough, AND-too-few → OR fallback).

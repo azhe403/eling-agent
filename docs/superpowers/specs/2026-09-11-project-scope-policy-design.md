@@ -295,7 +295,7 @@ Interplay rules that make re-enabling precise:
   workspace and `init-required` returns for a blocked project write (§6.3).
 - A value change (§4.4) moves the entry's `updatedAt` (and the document's), so the date a
   project was re-enabled is recorded while its original decision date stays in `createdAt`.
-  This is the audit trail: "disabled sejak X, diaktifkan kembali tanggal Y".
+  This is the audit trail: "disabled since X, re-enabled on date Y".
 
 One caveat, stated so it is not a surprise: while a workspace was disabled, its
 project-targeted writes were rerouted to **global** (§6.2). Re-enabling does not migrate
