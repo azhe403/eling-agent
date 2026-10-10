@@ -3,6 +3,7 @@ using Eling.Backend.Dtos;
 using Eling.Backend.Judging;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using System.Net;
 
 namespace Eling.Backend.Endpoints;
 
@@ -20,8 +21,9 @@ public static class JudgeEndpoints
             return TypedResults.Ok(updated);
         });
 
-        group.MapPost("/models", async (SemanticJudgeStore store, IProviderClient client, UpdateJudgeConfigRequest? req, CancellationToken ct) =>
+        group.MapPost("/models", async (SemanticJudgeStore store, IProviderClient client, ILoggerFactory loggerFactory, UpdateJudgeConfigRequest? req, CancellationToken ct) =>
         {
+            var logger = loggerFactory.CreateLogger("Agent.Judge");
             var baseUrl = req?.BaseUrl;
             var apiKey = req?.ApiKey;
 
@@ -46,9 +48,13 @@ public static class JudgeEndpoints
                 var models = await client.ListModelsAsync(baseUrl, apiKey, ct);
                 return Results.Ok(new ModelListResponse([.. models]));
             }
-            catch (Exception ex)
+            catch (HttpRequestException ex)
             {
-                return Results.Problem(statusCode: 502, title: "Judge provider models fetch failed", detail: ex.Message);
+                logger.LogWarning(ex, "Judge provider models fetch failed");
+                return Results.Problem(
+                    statusCode: 502,
+                    title: "Judge provider models fetch failed",
+                    detail: "The judge provider could not be reached. See server logs for details.");
             }
         });
 

@@ -1,6 +1,7 @@
 using Eling.Backend.Agent.Ports;
 using Eling.Backend.Agent.Services;
 using Eling.Backend.Dtos;
+using System.Net;
 
 namespace Eling.Backend.Endpoints;
 
@@ -15,8 +16,9 @@ public static class AgentEndpoints
             store.Update(req.BaseUrl, req.Model, req.ApiKey);
             return TypedResults.Ok(store.GetView());
         });
-        group.MapPost("/models", async (ProviderStore store, IProviderClient client, CancellationToken ct) =>
+        group.MapPost("/models", async (ProviderStore store, IProviderClient client, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
+            var logger = loggerFactory.CreateLogger("Agent.Providers");
             if (!store.TryGetConfig(out var baseUrl, out _, out var apiKey))
             {
                 return Results.BadRequest("Provider is not configured.");
@@ -28,9 +30,13 @@ public static class AgentEndpoints
                 store.SetModelsCached(models);
                 return Results.Ok(new ModelListResponse([.. models]));
             }
-            catch (Exception ex)
+            catch (HttpRequestException ex)
             {
-                return Results.Problem(statusCode: 502, title: "Provider models fetch failed", detail: ex.Message);
+                logger.LogWarning(ex, "Provider models fetch failed");
+                return Results.Problem(
+                    statusCode: 502,
+                    title: "Provider models fetch failed",
+                    detail: "The provider could not be reached. See server logs for details.");
             }
         });
         group.MapPost("/test", async (ProviderStore store, IProviderClient client, UpdateProviderRequest? req, CancellationToken ct) =>
