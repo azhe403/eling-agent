@@ -38,15 +38,17 @@ public sealed class FileUpdateCache
         }
     }
 
-    /// <summary>Persists the status to memory and to disk.</summary>
+    /// <summary>Persists the status to disk and, only on success, to memory.</summary>
     public void SaveStatus(UpdateStatus status)
     {
         ArgumentNullException.ThrowIfNull(status);
 
         lock (_gate)
         {
-            _status = status;
-            Write();
+            if (Write(status))
+            {
+                _status = status;
+            }
         }
     }
 
@@ -75,7 +77,7 @@ public sealed class FileUpdateCache
         }
     }
 
-    private void Write()
+    private bool Write(UpdateStatus status)
     {
         try
         {
@@ -88,12 +90,14 @@ public sealed class FileUpdateCache
             var tempPath = _filePath + ".tmp";
             File.WriteAllText(
                 tempPath,
-                JsonSerializer.Serialize(_status, FileUpdateJsonContext.Default.UpdateStatus));
+                JsonSerializer.Serialize(status, FileUpdateJsonContext.Default.UpdateStatus));
             File.Move(tempPath, _filePath, overwrite: true);
+            return true;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to write update cache to {Path}", _filePath);
+            return false;
         }
     }
 }
