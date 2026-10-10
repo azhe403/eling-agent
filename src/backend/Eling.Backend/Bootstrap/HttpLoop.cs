@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using Eling.Core;
 using Eling.Core.Logging;
+using Eling.Backend.Updates;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -49,7 +50,7 @@ public static class HttpLoop
                     continue;
                 }
 
-                app = BuildWebApplication(shared, context, dashboardPort, isDevMode, loggerFactory);
+                app = BuildWebApplication(shared, context, dashboardPort, isDevMode, loggerFactory, enableUpdateCheck: true);
 
                 if (isDevMode)
                 {
@@ -113,7 +114,8 @@ public static class HttpLoop
         ProjectContext context,
         int dashboardPort,
         bool isDevMode,
-        ILoggerFactory loggerFactory
+        ILoggerFactory loggerFactory,
+        bool enableUpdateCheck = false
     )
     {
         var ownerMode = !DashboardPort.IsLoopbackListening(dashboardPort);
@@ -145,6 +147,13 @@ public static class HttpLoop
         }
 
         DashboardServices.Register(builder.Services, context, shared, ownerMode);
+
+        // The periodic pump runs only on the production owner: test hosts build
+        // through this same path and must never start network background work.
+        if (ownerMode && enableUpdateCheck)
+        {
+            builder.Services.AddHostedService<UpdateCheckerService>();
+        }
 
         var app = builder.Build();
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-09
 **Status:** Draft (Awaiting User Review)
-**Scope:** `Eling.Backend`, `Eling.Dashboard`, install scripts, test suites
+**Scope:** `Eling.Backend`, `Eling.Core` (version stamping), `docs/release.md` (documentation), and test suites
 
 ---
 
@@ -14,13 +14,13 @@ This specification adds an **occasional update check**: while Eling is in use, t
 
 Goals:
 1. Check for new releases periodically without blocking startup and without telemetry.
-2. Phase 1: the dashboard snackbar notifies, the chat agent executes. The toast informs
-   and links the release; the actual update runs only in chat after explicit user approval,
-   where the agent runs the OS installer and verifies.
+2. Backend only this round: the notice rides on the `memory_recall` response and a
+   `GET api/update/status` endpoint. On user approval the agent executes the update
+   (runs the OS installer, then verifies). The dashboard snackbar is deferred to a
+   later round; the backend surface it will consume ships now.
 3. Respect anonymous GitHub rate limits, offline mode, and an explicit opt-out.
-4. No silent auto-update and no one-click dashboard apply in phase 1 — execution stays
-   in chat where approval and failure handling are conversational.
-   Phase 2 adds a one-click apply button to the toast.
+4. No silent auto-update: the update runs only after explicit user approval in chat.
+   The dashboard snackbar and a one-click apply button are deferred to phase 2.
 
 ---
 
@@ -61,15 +61,13 @@ Goals:
 │  └─────────┬───────────┘      │ an update exists);  │    │
 │            │                 │ agent appends a     │    │
 └────────────┼──────────────────┴──────────┬───────────────┘
-             │              (phase 1:       │ stdio
-             │               notify only,  │
-             │               no apply btn) │
+             │                            │ stdio
              ▼                            ▼
 ┌─────────────────────────┐    ┌────────────────────────┐
 │ Dashboard snackbar      │    │ Agent / MCP Client     │
-│ toast: informs + links  │    │ ends its reply with a│
-│ release, points user    │    │ short update note;   │
-│ to chat for update      │    │ runs update on yes   │
+│ (PHASE 2 — deferred)   │    │ ends its reply with a│
+│                         │    │ short update note;   │
+│                         │    │ runs update on yes   │
 └─────────────────────────┘    └────────────────────────┘
 ```
 
@@ -107,6 +105,7 @@ Only the dashboard owner performs network fetches. MCP-only instances read the c
   into `InformationalVersion`; metadata never affects precedence).
 - Split the semver core from the pre-release suffix (`-pre.N`).
 - Compare the core numerically per segment. A stable tag outranks a pre-release tag on the same core. Numeric `-pre.N` suffixes compare numerically when possible.
+- No fallback for unknown versions: when the running version cannot be resolved, or a pre-release cannot be proven newer than it, the check stays silent. An install that predates version stamping reports the bare base and therefore gets no offer until a stamped release is installed. That is deliberate — a false "update available" is worse than a missed one, because the first has the user re-install what they already run.
 - Examples: `v0.2.0` > `v0.1.0`; `v0.1.0` > `v0.1.0-pre.5`; `v0.1.0-pre.12` > `v0.1.0-pre.9`.
 
 ```csharp
@@ -202,19 +201,23 @@ The agent reports completion with the same shape as the install report in `agent
 
 ---
 
-## 6. Dashboard Snackbar (Phase 1: notify only)
+## 6. Dashboard Snackbar (deferred to phase 2)
 
-The dashboard surfaces the update as a snackbar toast, not a persistent banner. It reuses
-the established `ToastItem` pattern from the tools page (`src/frontend/Eling.Dashboard/src/app/dashboard/tools/page.tsx`):
-a fixed top-right stack, at most a few items, auto-dismiss after a few seconds, success/error
-styling with a manual dismiss button.
+Not in this round's scope. Retained here so the backend surface it will consume is
+already in place: `GET api/update/status` and the notice fields it needs.
+
+Intended design when picked up: a snackbar toast, not a persistent banner, reusing
+the established `ToastItem` pattern from the tools page
+(`src/frontend/Eling.Dashboard/src/app/dashboard/tools/page.tsx`): a fixed top-right
+stack, at most a few items, auto-dismiss after a few seconds, success/error styling
+with a manual dismiss button.
 
 - A shared update-toast hook polls `GET api/update/status` once per hour and on mount.
 - When `updateAvailable` is true and the version was not dismissed, it pushes one toast:
   title with the new version, body with the "View release" link (`releaseUrl`) and a
   line pointing the user to chat ("reply 'update eling' to the agent to install it").
-  There is deliberately no apply button in phase 1 — execution stays in chat where
-  approval and failure recovery are conversational. The one-click apply arrives in phase 2.
+  No apply button — execution stays in chat where approval and failure recovery are
+  conversational.
 - Dismissal is per version through `localStorage` (`eling-dismissed-update=v0.2.0`). A newer
   version pushes again; the same version never re-pushes within its TTL window.
 - The toast never blocks page content and never steals focus.
@@ -223,16 +226,15 @@ styling with a manual dismiss button.
 
 ## 7. Verification & Testing Plan
 
-Run only the tests a change touches. The backend suite is large and slow, so filtered runs are the norm here. Whenever a new C# file is added, include the code-organization convention tests. The dashboard frontend has no test runner, so validate it with lint and typecheck instead of proposing a new runner.
+Run only the tests a change touches. The backend suite is large and slow, so filtered runs are the norm here. Whenever a new C# file is added, include the code-organization convention tests. Frontend validation is out of scope this round; when the dashboard snackbar is picked up, use `pnpm lint` and `tsc --noEmit` since the dashboard has no test runner.
 
-1. **Unit tests** (`tests/Eling.Backend.Tests/Updates/UpdateCheckTests.cs`):
+1. **Unit tests** (`tests/Eling.Backend.Tests/Updates/`):
    - Version-compare theory: stable versus pre-release, `v` prefix handling, numeric pre-release ordering, equality, `+sha` metadata ignored.
    - Channel selection: mixed draft/stable/pre-release input on the `prerelease` channel yields the newest non-draft release; drafts never win.
    - Throttling: two rapid `CheckNow` calls produce one HTTP request.
    - Corrupt or missing cache falls back to unknown without throwing.
 2. **Controller tests**: `GET api/update/status` returns 200 with the expected DTO shape, following the existing controller test pattern.
 3. **Recall block tests**: `memory_recall` omits the `update` block when no update is available and carries the notice fields when one is.
-4. **Dashboard manual check**: with a mocked update status, the toast appears once, auto-dismisses, and respects the per-version `localStorage` dismissal.
+4. **Backend manual check**: with a mocked update status, `GET api/update/status` returns 200 with the expected DTO shape and `memory_recall` carries the notice fields; the recall payload omits `update` when nothing is available.
 5. **Validation commands** (filtered, single project, isolated artifacts):
-   - `dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --artifacts-path .bin-test --filter "FullyQualifiedName~UpdateCheck|FullyQualifiedName~UpdateController|FullyQualifiedName~CodeOrganizationConventionTests"`
-   - `pnpm --prefix src/frontend/Eling.Dashboard lint` and `pnpm --prefix src/frontend/Eling.Dashboard exec tsc --noEmit`
+   - `dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --artifacts-path .bin-test --filter "FullyQualifiedName~Updates|FullyQualifiedName~MemoryRecallToolProjectScopeTests|FullyQualifiedName~CodeOrganizationConventionTests"`

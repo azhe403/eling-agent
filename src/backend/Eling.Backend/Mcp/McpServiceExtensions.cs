@@ -206,20 +206,7 @@ public static class McpServiceExtensions
 
         // Update-check graph (cache readers only — no background pump here, so MCP
         // peers never fetch; the dashboard owner writes the shared cache file).
-        services.TryAddSingleton(sp => new FileUpdateCache(
-            userScope,
-            sp.GetService<ILoggerFactory>()?.CreateLogger<FileUpdateCache>()
-                ?? NullLogger<FileUpdateCache>.Instance));
-        services.AddHttpClient<GitHubReleaseClient>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(10);
-        });
-        services.TryAddSingleton<IUpdateChecker>(sp => new UpdateChecker(
-            sp.GetRequiredService<GitHubReleaseClient>(),
-            sp.GetRequiredService<FileUpdateCache>(),
-            sp.GetService<ILoggerFactory>()?.CreateLogger<UpdateChecker>()
-                ?? NullLogger<UpdateChecker>.Instance,
-            UpdateChecker.ResolveCurrentVersion()));
+        UpdateServices.Add(services, userScope);
 
         return services;
     }

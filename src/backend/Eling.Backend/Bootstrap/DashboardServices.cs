@@ -8,6 +8,7 @@ using Eling.Backend.Agent.Services.Tools;
 using Eling.Backend.Converters;
 using Eling.Backend.Identity;
 using Eling.Backend.Mcp;
+using Eling.Backend.Updates;
 using Eling.Core;
 using Eling.Core.Codebase;
 using Eling.Core.Memory;
@@ -152,6 +153,11 @@ public static class DashboardServices
                 Eling.Core.Scope.ElingPaths.ResolveCodebaseDir(),
                 sp.GetRequiredService<MemoryChangeBroadcaster>(),
                 sp.GetRequiredService<ILogger<CodebaseDirWatcher>>()));
+
+            // Update-check graph: file cache plus the checker itself. The periodic
+            // pump (UpdateCheckerService) is added by the production host builder so
+            // test hosts never start network-capable background work.
+            UpdateServices.Add(services, context.UserScope);
         }
         services.ConfigureHttpJsonOptions(options =>
         {

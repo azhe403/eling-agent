@@ -21,4 +21,12 @@ public sealed class MemoryRecallResponse
 
     [JsonPropertyName("projectScope")]
     public MemoryRecallProjectScopeDto ProjectScope { get; set; } = new();
+
+    /// <summary>
+    /// Update notice, serialized only when an update is available so quiet
+    /// payloads stay lean.
+    /// </summary>
+    [JsonPropertyName("update")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UpdateNoticeDto? Update { get; set; }
 }
