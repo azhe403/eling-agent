@@ -2,8 +2,7 @@
 bin/
 obj/
 .artifacts/
-.bin/
-.bin-*/
+.bin*
 .mybin/
 .vs/
 .idea/
