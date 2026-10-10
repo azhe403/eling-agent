@@ -460,13 +460,14 @@ export function ProjectsList() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+                  <div className="flex flex-col items-stretch gap-2 self-stretch shrink-0 sm:w-40 sm:self-center">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => void triggerReindex(root)}
                       disabled={reindexingRoot === root}
                       title="Trigger incremental re-indexing for this project"
+                      className="justify-start"
                     >
                       <RefreshCw
                         className={`size-3.5 mr-1 ${
@@ -476,23 +477,24 @@ export function ProjectsList() {
                       Re-index
                     </Button>
 
-                    <Button variant="ghost" size="sm" render={<Link href="/dashboard/codebase" />}>
+                    <Button variant="outline" size="sm" className="justify-start" render={<Link href="/dashboard/codebase" />}>
                       <BookOpen className="size-3.5 mr-1" />
                       View Codebase
                     </Button>
 
                     <Button
-                      variant="ghost"
-                      size="icon"
+                      variant="outline"
+                      size="sm"
                       onClick={() => {
                         setDeleteTarget(r)
                         setDeleteCodebaseIndex(true)
                         setDeleteDotEling(false)
                       }}
-                      className="text-muted-foreground hover:text-destructive size-8"
+                      className="justify-start border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
                       title="Delete project"
                     >
-                      <Trash2 className="size-4" />
+                      <Trash2 className="size-3.5 mr-1" />
+                      Delete
                     </Button>
                   </div>
                 </div>
