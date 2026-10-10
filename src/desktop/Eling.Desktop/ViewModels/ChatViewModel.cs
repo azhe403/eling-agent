@@ -9,6 +9,7 @@ using Eling.Desktop.Models;
 using Eling.Desktop.Services;
 using Microsoft.Extensions.Logging;
 using ReactiveUI;
+using ReactiveUI.Reactive;
 
 namespace Eling.Desktop.ViewModels;
 

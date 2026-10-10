@@ -8,7 +8,7 @@ using Eling.Desktop.ViewModels;
 using Eling.Desktop.Views;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using ReactiveUI.Avalonia;
+using ReactiveUI.Avalonia.Reactive;
 using Serilog;
 using Serilog.Debugging;
 

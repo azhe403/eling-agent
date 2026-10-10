@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Eling.Desktop.Formatting;
 using ReactiveUI;
+using ReactiveUI.Reactive;
 
 namespace Eling.Desktop.Models;
 

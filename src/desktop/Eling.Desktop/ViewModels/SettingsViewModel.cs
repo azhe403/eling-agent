@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Eling.Desktop.Services;
 using Microsoft.Extensions.Logging;
 using ReactiveUI;
+using ReactiveUI.Reactive;
 
 namespace Eling.Desktop.ViewModels;
 
