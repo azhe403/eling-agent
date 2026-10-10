@@ -40,7 +40,7 @@ public sealed class MemoryIndexTool
 
     [McpServerTool(Name = "memory_rebuild_index"), Description("Rebuild the search index from all stored memories.")]
     public async Task RebuildIndexAsync(
-        [Description("Scope: project, global, or merged. Defaults to 'merged'.")] string scope = "merged")
+        [Description("Scope: project, project-local, global, or merged. Defaults to 'merged'.")] string scope = "merged")
     {
         try
         {

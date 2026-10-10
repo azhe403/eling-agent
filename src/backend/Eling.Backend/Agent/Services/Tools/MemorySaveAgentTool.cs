@@ -26,7 +26,7 @@ public sealed class MemorySaveAgentTool(MemoryWriteTool tool) : IAgentTool
         "tags": { "type": "array", "items": { "type": "string" }, "description": "Optional tags for categorization" },
         "type": { "type": "string", "description": "Type of memory: fact, preference, decision, lesson, note. Defaults to fact." },
         "source": { "type": "string", "description": "Optional source reference" },
-        "scope": { "type": "string", "description": "Scope: project, global, or auto. Defaults to project." },
+        "scope": { "type": "string", "description": "Scope: project, project-local, global, or auto. Defaults to project." },
         "project": { "type": "string", "description": "Optional logical name of an ancestor project." }
       }
     }

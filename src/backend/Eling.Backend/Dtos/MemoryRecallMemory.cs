@@ -81,7 +81,7 @@ public sealed class MemoryRecallMemory
     public static MemoryRecallMemory From(MemoryRecallHit hit)
     {
         var dto = From(hit.Memory);
-        dto.Scope = hit.Scope == MemoryScopeKind.Global ? "global" : "project";
+        dto.Scope = MemoryScopeLabels.ToWireString(hit.Scope);
         dto.ProjectName = NameOf(hit.ProjectRoot);
         dto.ProjectRoot = hit.ProjectRoot;
         dto.MatchedVia = hit.MatchedVia;
@@ -101,7 +101,7 @@ public sealed class MemoryRecallMemory
         CreatedAt = scoped.Memory.CreatedAt,
         UpdatedAt = scoped.Memory.UpdatedAt,
         Source = scoped.Memory.Source,
-        Scope = scoped.Scope == MemoryScopeKind.Global ? "global" : "project",
+        Scope = MemoryScopeLabels.ToWireString(scoped.Scope),
         ProjectName = NameOf(scoped.ProjectRoot),
         ProjectRoot = scoped.ProjectRoot
     };

@@ -338,6 +338,12 @@ public sealed class SqliteMemoryIndex : IMemoryIndex
 
     private async Task<SqliteConnection> OpenConnectionAsync()
     {
+        // The parent directory may not exist yet (e.g. a fresh central shard
+        // with no writes). Create it lazily on first use so reads before the
+        // first save open an empty index instead of failing with Error 14.
+        var dataSource = new SqliteConnectionStringBuilder(_connectionString).DataSource;
+        var directory = Path.GetDirectoryName(Path.GetFullPath(dataSource));
+        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
         var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
         await EnsureInitializedAsync(connection);

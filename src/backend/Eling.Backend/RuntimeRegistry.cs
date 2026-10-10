@@ -737,12 +737,38 @@ public sealed class RuntimeRegistry : IDisposable
         }
     }
 
+    /// <summary>
+    /// A memory service for a canonical project's central local shard
+    /// (<c>DATA/eling/projects/&lt;name&gt;-&lt;hash&gt;/</c>), or null when the
+    /// shard directory does not exist yet (lazy: no shard until first write).
+    /// Worktrees of one repo share one shard via the canonical root.
+    /// </summary>
+    public IMemoryService? TryResolveLocalServiceByScopeRoot(string scopeRoot, out string? canonicalRoot, bool createIfMissing = false)
+    {
+        canonicalRoot = CanonicalProjectRoot.Resolve(scopeRoot);
+        var localDir = ElingPaths.ResolveProjectLocalDir(canonicalRoot);
+        lock (_lock)
+        {
+            if (!createIfMissing && !Directory.Exists(localDir)) return null;
+            if (!_memoryByDataDirectory.TryGetValue(localDir, out var service))
+            {
+                service = new MemoryService(
+                    new FileSystemMemoryStorage(localDir),
+                    new SqliteMemoryIndex(Path.Combine(localDir, "memory.db")));
+                _memoryByDataDirectory[localDir] = service;
+            }
+
+            return service;
+        }
+    }
+
     public async Task<IReadOnlyCollection<ScopedMemory>> ListAggregatedAsync(MemoryStatus? status = null)
     {
         var globalService = GetGlobalMemoryService();
         var globalMemories = await globalService.ListAllAsync();
         if (status.HasValue) globalMemories = globalMemories.Where(m => m.Status == status.Value).ToList();
 
+        var allLocalMemories = new List<ScopedMemory>();
         var allProjectMemories = new List<ScopedMemory>();
         foreach (var (runtime, service) in GetAliveProjectServices())
         {
@@ -752,6 +778,17 @@ public sealed class RuntimeRegistry : IDisposable
             {
                 allProjectMemories.Add(new ScopedMemory(m, MemoryScopeKind.Project, runtime.HeadScopeRoot));
             }
+
+            var localService = TryResolveLocalServiceByScopeRoot(runtime.HeadScopeRoot, out var canonicalRoot);
+            if (localService is not null)
+            {
+                var locals = await localService.ListAllAsync();
+                if (status.HasValue) locals = locals.Where(m => m.Status == status.Value).ToList();
+                foreach (var m in locals)
+                {
+                    allLocalMemories.Add(new ScopedMemory(m, MemoryScopeKind.ProjectLocal, canonicalRoot));
+                }
+            }
         }
 
         var globalScoped = globalMemories.Select(m => new ScopedMemory(m, MemoryScopeKind.Global, null)).ToList();
@@ -759,8 +796,14 @@ public sealed class RuntimeRegistry : IDisposable
         // Build distinct list by Id.Value (ULID is globally-unique per design).
         // Two entries with the same Id are the same memory even if they originate
         // from different runtime paths (e.g. global + project fallback).
+        // Project-local wins ties (merge order local > project > global).
         var seenKeys = new HashSet<string>();
         var result = new List<ScopedMemory>();
+
+        foreach (var item in allLocalMemories)
+        {
+            if (seenKeys.Add(item.Id.Value)) result.Add(item);
+        }
 
         foreach (var item in globalScoped)
         {
@@ -798,6 +841,18 @@ public sealed class RuntimeRegistry : IDisposable
                 // Project priority boost
                 var boosted = r.Rank - 1000.0;
                 all.Add(new ScopedSearchResult(r.Id, boosted, MemoryScopeKind.Project, runtime.HeadScopeRoot));
+            }
+
+            var localService = TryResolveLocalServiceByScopeRoot(runtime.HeadScopeRoot, out var canonicalRoot);
+            if (localService is not null)
+            {
+                // Project-local outranks project (merge order local > project > global)
+                var localResults = await localService.SearchAsync(query);
+                foreach (var r in localResults)
+                {
+                    var boostedLocal = r.Rank - 2000.0;
+                    all.Add(new ScopedSearchResult(r.Id, boostedLocal, MemoryScopeKind.ProjectLocal, canonicalRoot));
+                }
             }
         }
 

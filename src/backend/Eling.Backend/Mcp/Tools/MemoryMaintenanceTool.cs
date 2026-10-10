@@ -24,7 +24,7 @@ public sealed class MemoryMaintenanceTool
 
     [McpServerTool(Name = "memory_maintenance"), Description("Run on-demand memory maintenance (dedup, fuzzy merge, and cleanup of stale or corrupted memories). Default is dry-run mode.")]
     public async Task<string> RunMaintenanceAsync(
-        [Description("Scope: project, global, or merged. Defaults to 'merged'.")] string scope = "merged",
+        [Description("Scope: project, project-local, global, or merged. Defaults to 'merged'.")] string scope = "merged",
         [Description("Detect only without applying changes. Defaults to true.")] bool dryRun = true,
         [Description("Array of operations to execute: 'dedup', 'merge', 'cleanup', 'reconcile'. Defaults to all.")] string[]? operations = null,
         [Description("Array of finding keys approved for risky operations (merge, cleanup). Ignored when dryRun=true.")] string[]? approveFindingIds = null,

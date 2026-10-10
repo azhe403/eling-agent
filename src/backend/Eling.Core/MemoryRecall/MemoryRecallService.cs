@@ -86,9 +86,13 @@ public sealed class MemoryRecallService : IMemoryRecallService
                 foreach (var hit in hits)
                 {
                     if (!seen.Add(hit.Id)) continue;
-                    var reference = hit.Scope == MemoryScopeKind.Global
-                        ? MemoryReference.ForGlobal(hit.Id)
-                        : MemoryReference.ForProject(hit.Id, hit.ProjectRoot ?? _scoped.ProjectRoot ?? ".");
+                    var reference = hit.Scope switch
+                    {
+                        MemoryScopeKind.Global => MemoryReference.ForGlobal(hit.Id),
+                        MemoryScopeKind.ProjectLocal => MemoryReference.ForProjectLocal(
+                            hit.Id, hit.ProjectRoot ?? _scoped.CanonicalRoot ?? _scoped.ProjectRoot ?? "."),
+                        _ => MemoryReference.ForProject(hit.Id, hit.ProjectRoot ?? _scoped.ProjectRoot ?? "."),
+                    };
                     var scoped = await _scoped.GetByIdAsync(reference);
                     if (hit.QueryMode == "or-fallback")
                     {

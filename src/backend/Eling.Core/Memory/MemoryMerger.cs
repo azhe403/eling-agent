@@ -21,9 +21,28 @@ public sealed class MemoryMerger : IMemoryMerger
     public IReadOnlyCollection<ScopedMemory> MergeLists(
         IReadOnlyList<MemoryLevel> levels,
         IReadOnlyCollection<Memory> globalMemories)
+        => MergeLists(levels, [], null, globalMemories);
+
+    public IReadOnlyCollection<ScopedSearchResult> MergeSearchResults(
+        IReadOnlyList<SearchResultLevel> levels,
+        IReadOnlyCollection<MemorySearchResult> globalResults)
+        => MergeSearchResults(levels, [], null, globalResults);
+
+    public IReadOnlyCollection<ScopedMemory> MergeLists(
+        IReadOnlyList<MemoryLevel> levels,
+        IReadOnlyCollection<Memory> localMemories,
+        string? localRoot,
+        IReadOnlyCollection<Memory> globalMemories)
     {
         var result = new List<ScopedMemory>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in localMemories)
+        {
+            if (seen.Add(m.Id.Value))
+            {
+                result.Add(new ScopedMemory(m, MemoryScopeKind.ProjectLocal, localRoot));
+            }
+        }
         foreach (var level in levels)
         {
             foreach (var m in level.Memories)
@@ -48,14 +67,23 @@ public sealed class MemoryMerger : IMemoryMerger
 
     public IReadOnlyCollection<ScopedSearchResult> MergeSearchResults(
         IReadOnlyList<SearchResultLevel> levels,
+        IReadOnlyCollection<MemorySearchResult> localResults,
+        string? localRoot,
         IReadOnlyCollection<MemorySearchResult> globalResults)
     {
-        // Level-grouped contract: each scope-chain block precedes the next
-        // (nearest first) and global is always last. No cross-level re-sort —
-        // results arrive rank-ascending from FTS5 within a level. Nearest-wins
-        // dedup by ULID keeps the higher-priority (nearer) copy.
+        // Level-grouped contract: project-local block first, then each
+        // scope-chain block (nearest first), global always last. No cross-level
+        // re-sort — results arrive rank-ascending from FTS5 within a level.
+        // Nearest-wins dedup by ULID keeps the higher-priority copy.
         var result = new List<ScopedSearchResult>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in localResults)
+        {
+            if (seen.Add(r.Id.Value))
+            {
+                result.Add(ToScoped(r, MemoryScopeKind.ProjectLocal, localRoot));
+            }
+        }
         foreach (var level in levels)
         {
             foreach (var r in level.Results)

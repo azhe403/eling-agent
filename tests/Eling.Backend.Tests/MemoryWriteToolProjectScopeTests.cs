@@ -92,7 +92,9 @@ public sealed class MemoryWriteToolProjectScopeTests : IDisposable
 
         public IMemoryService ProjectService => null!;
         public IMemoryService GlobalService => null!;
+        public IMemoryService? LocalService => null;
         public string? ProjectRoot => Cwd;
+        public string? CanonicalRoot => null;
         public IReadOnlyList<string> ChainRoots => [];
         public bool IsInitialized => Initialized;
         public bool HasOwnScope => Initialized;

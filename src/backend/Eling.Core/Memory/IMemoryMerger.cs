@@ -19,5 +19,17 @@ public interface IMemoryMerger
     IReadOnlyCollection<ScopedSearchResult> MergeSearchResults(
         IReadOnlyList<SearchResultLevel> levels,
         IReadOnlyCollection<MemorySearchResult> globalResults);
+
+    IReadOnlyCollection<ScopedMemory> MergeLists(
+        IReadOnlyList<MemoryLevel> levels,
+        IReadOnlyCollection<Memory> localMemories,
+        string? localRoot,
+        IReadOnlyCollection<Memory> globalMemories);
+
+    IReadOnlyCollection<ScopedSearchResult> MergeSearchResults(
+        IReadOnlyList<SearchResultLevel> levels,
+        IReadOnlyCollection<MemorySearchResult> localResults,
+        string? localRoot,
+        IReadOnlyCollection<MemorySearchResult> globalResults);
 }
 

@@ -165,9 +165,13 @@ public static class ScopedMemoryEndpoints
     // ---- Project ----
 
     private static async Task<Results<Ok<IReadOnlyCollection<ScopedMemoryDto>>, BadRequest<string>, NotFound<string>>> ListProjectAsync(
-        RuntimeRegistry registry, string projectRoot, string? status, string? type, int? limit, int? offset)
+        RuntimeRegistry registry, string projectRoot, string? status, string? type, int? limit, int? offset, string? tier = null)
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
+        if (IsLocalTier(tier))
+        {
+            return await ListProjectLocalAsync(registry, projectRoot, status, type, limit, offset);
+        }
         var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found or not alive");
         var all = await service.ListAllAsync();
@@ -188,11 +192,46 @@ public static class ScopedMemoryEndpoints
         return TypedResults.Ok((IReadOnlyCollection<ScopedMemoryDto>)dtos);
     }
 
+    private static bool IsLocalTier(string? tier)
+        => string.Equals(tier?.Trim(), "project-local", StringComparison.OrdinalIgnoreCase);
+
+    private static async Task<Results<Ok<IReadOnlyCollection<ScopedMemoryDto>>, BadRequest<string>, NotFound<string>>> ListProjectLocalAsync(
+        RuntimeRegistry registry, string projectRoot, string? status, string? type, int? limit, int? offset)
+    {
+        var service = registry.TryResolveLocalServiceByScopeRoot(projectRoot, out var canonicalRoot);
+        if (service is null) return TypedResults.Ok((IReadOnlyCollection<ScopedMemoryDto>)Array.Empty<ScopedMemoryDto>());
+        var all = await service.ListAllAsync();
+        all = all.OrderByDescending(m => m.UpdatedAt).ThenByDescending(m => m.CreatedAt).ToList();
+        if (!string.IsNullOrEmpty(status))
+        {
+            if (!Enum.TryParse<MemoryStatus>(status, true, out var parsed)) return TypedResults.BadRequest($"Invalid status '{status}'");
+            all = all.Where(m => m.Status == parsed).ToList();
+        }
+        if (!string.IsNullOrEmpty(type))
+        {
+            if (!Enum.TryParse<MemoryType>(type, true, out var parsed)) return TypedResults.BadRequest($"Invalid type '{type}'");
+            all = all.Where(m => m.Type == parsed).ToList();
+        }
+        if (offset is > 0) all = all.Skip(offset.Value).ToList();
+        if (limit is not null) all = all.Take(limit.Value).ToList();
+        var dtos = all.Select(m => ScopedMemoryDto.From(m, MemoryScopeKind.ProjectLocal, canonicalRoot)).ToList().AsReadOnly();
+        return TypedResults.Ok((IReadOnlyCollection<ScopedMemoryDto>)dtos);
+    }
+
     private static async Task<Results<Ok<IReadOnlyCollection<ScopedSearchResultDto>>, BadRequest<string>, NotFound<string>>> SearchProjectAsync(
-        RuntimeRegistry registry, string projectRoot, string q, int? limit)
+        RuntimeRegistry registry, string projectRoot, string q, int? limit, string? tier = null)
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
         if (string.IsNullOrWhiteSpace(q)) return TypedResults.BadRequest("q is required");
+        if (IsLocalTier(tier))
+        {
+            var local = registry.TryResolveLocalServiceByScopeRoot(projectRoot, out var canonicalRoot);
+            if (local is null) return TypedResults.Ok((IReadOnlyCollection<ScopedSearchResultDto>)Array.Empty<ScopedSearchResultDto>());
+            var localResults = await local.SearchAsync(q);
+            var localList = localResults.Select(r => ScopedSearchResultDto.ProjectLocal(r, canonicalRoot)).ToList();
+            if (limit is not null) localList = localList.Take(limit.Value).ToList();
+            return TypedResults.Ok((IReadOnlyCollection<ScopedSearchResultDto>)localList.AsReadOnly());
+        }
         var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found or not alive");
         var results = await service.SearchAsync(q);
@@ -201,20 +240,40 @@ public static class ScopedMemoryEndpoints
         return TypedResults.Ok((IReadOnlyCollection<ScopedSearchResultDto>)list.AsReadOnly());
     }
 
-    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>, NotFound<string>>> GetProjectAsync(RuntimeRegistry registry, string id, string projectRoot)
+    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>, NotFound<string>>> GetProjectAsync(RuntimeRegistry registry, string id, string projectRoot, string? tier = null)
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
         if (!TryParseMemoryId(id, out var memoryId)) return TypedResults.NotFound();
+        if (IsLocalTier(tier))
+        {
+            var local = registry.TryResolveLocalServiceByScopeRoot(projectRoot, out var canonicalRoot);
+            if (local is null) return TypedResults.NotFound();
+            var localMemory = await local.GetByIdAsync(memoryId);
+            return localMemory is null ? TypedResults.NotFound() : TypedResults.Ok(ScopedMemoryDto.From(localMemory, MemoryScopeKind.ProjectLocal, canonicalRoot));
+        }
         var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found");
         var memory = await service.GetByIdAsync(memoryId);
         return memory is null ? TypedResults.NotFound() : TypedResults.Ok(ScopedMemoryDto.From(memory, MemoryScopeKind.Project, projectRoot));
     }
 
-    private static async Task<Results<Created<ScopedMemoryDto>, BadRequest<string>, NotFound<string>>> CreateProjectAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, string projectRoot, SaveMemoryRequest request)
+    private static async Task<Results<Created<ScopedMemoryDto>, BadRequest<string>, NotFound<string>>> CreateProjectAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, string projectRoot, SaveMemoryRequest request, string? tier = null)
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
         if (string.IsNullOrWhiteSpace(request.Content)) return TypedResults.BadRequest("Content is required.");
+        if (IsLocalTier(tier))
+        {
+            MemoryType localType = MemoryType.Note;
+            if (!string.IsNullOrEmpty(request.Type) && !Enum.TryParse<MemoryType>(request.Type, true, out localType))
+                return TypedResults.BadRequest($"Invalid type '{request.Type}'");
+            var local = registry.TryResolveLocalServiceByScopeRoot(projectRoot, out var canonicalRoot, createIfMissing: true);
+            if (local is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found or not alive");
+            var localMemory = new Memory(localType, request.Content, request.Tags, request.Source);
+            var localSaved = await local.SaveAsync(localMemory);
+            broadcaster.Notify("dashboard");
+            var localDto = ScopedMemoryDto.From(localSaved, MemoryScopeKind.ProjectLocal, canonicalRoot);
+            return TypedResults.Created($"/api/project/memories/{localSaved.Id}?projectRoot={Uri.EscapeDataString(projectRoot)}&tier=project-local", localDto);
+        }
         var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found or not alive");
         MemoryType type = MemoryType.Note;
@@ -227,10 +286,22 @@ public static class ScopedMemoryEndpoints
         return TypedResults.Created($"/api/project/memories/{saved.Id}?projectRoot={Uri.EscapeDataString(projectRoot)}", dto);
     }
 
-    private static async Task<Results<NoContent, NotFound, BadRequest<string>, NotFound<string>>> DeleteProjectAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, string id, string projectRoot)
+    private static async Task<Results<NoContent, NotFound, BadRequest<string>, NotFound<string>>> DeleteProjectAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, string id, string projectRoot, string? tier = null)
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
         if (!TryParseMemoryId(id, out var memoryId)) return TypedResults.NotFound();
+        if (IsLocalTier(tier))
+        {
+            var local = registry.TryResolveLocalServiceByScopeRoot(projectRoot, out _);
+            if (local is null) return TypedResults.NotFound();
+            var localDeleted = await local.DeleteAsync(memoryId);
+            if (localDeleted)
+            {
+                broadcaster.Notify("dashboard");
+                return TypedResults.NoContent();
+            }
+            return TypedResults.NotFound();
+        }
         var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
         if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found");
         var deleted = await service.DeleteAsync(memoryId);
@@ -242,12 +313,10 @@ public static class ScopedMemoryEndpoints
         return TypedResults.NotFound();
     }
 
-    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>, NotFound<string>>> UpdateProjectAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, string id, string projectRoot, UpdateMemoryRequest request)
+    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>, NotFound<string>>> UpdateProjectAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, string id, string projectRoot, UpdateMemoryRequest request, string? tier = null)
     {
         if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
         if (!TryParseMemoryId(id, out var memoryId)) return TypedResults.NotFound();
-        var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
-        if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found");
         MemoryType? type = null;
         if (!string.IsNullOrEmpty(request.Type))
         {
@@ -260,6 +329,17 @@ public static class ScopedMemoryEndpoints
             if (!Enum.TryParse<MemoryStatus>(request.Status, true, out var parsed)) return TypedResults.BadRequest($"Invalid status '{request.Status}'");
             status = parsed;
         }
+        if (IsLocalTier(tier))
+        {
+            var local = registry.TryResolveLocalServiceByScopeRoot(projectRoot, out var canonicalRoot);
+            if (local is null) return TypedResults.NotFound();
+            var localUpdated = await local.UpdateAsync(memoryId, request.Content, type, request.Tags?.ToArray(), request.Source, status);
+            if (localUpdated is null) return TypedResults.NotFound();
+            broadcaster.Notify("dashboard");
+            return TypedResults.Ok(ScopedMemoryDto.From(localUpdated, MemoryScopeKind.ProjectLocal, canonicalRoot));
+        }
+        var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
+        if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found");
         var updated = await service.UpdateAsync(memoryId, request.Content, type, request.Tags?.ToArray(), request.Source, status);
         if (updated is null) return TypedResults.NotFound();
         broadcaster.Notify("dashboard");

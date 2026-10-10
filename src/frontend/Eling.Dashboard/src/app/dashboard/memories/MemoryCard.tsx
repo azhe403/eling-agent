@@ -49,14 +49,18 @@ export function MemoryCard({
             className={
               m.scope === "global"
                 ? "rounded-md bg-blue-500/10 px-2 py-0.5 font-medium text-blue-600"
-                : "rounded-md bg-amber-500/10 px-2 py-0.5 font-medium text-amber-600"
+                : m.scope === "project-local"
+                  ? "rounded-md bg-violet-500/10 px-2 py-0.5 font-medium text-violet-600"
+                  : "rounded-md bg-amber-500/10 px-2 py-0.5 font-medium text-amber-600"
             }
           >
             {m.scope === "global"
               ? "🌐 Global"
-              : m.project
-              ? `📁 ${m.project.id}`
-              : "📁 Project"}
+              : m.scope === "project-local"
+                ? "💻 Local"
+                : m.project
+                ? `📁 ${m.project.id}`
+                : "📁 Project"}
           </span>
         </div>
 

@@ -5,6 +5,7 @@ using Eling.Backend.Judging;
 using Eling.Backend.Mcp.Telemetry;
 using Eling.Backend.Scope;
 using Eling.Backend.Tools;
+using Eling.Backend.Updates;
 using Eling.Core;
 using Eling.Core.Codebase;
 using Eling.Core.FileSystem;
@@ -50,7 +51,15 @@ public static class McpServiceExtensions
         services.AddSingleton<IMemoryMerger, MemoryMerger>();
         services.TryAddSingleton<IMemoryChangeNotifier>(NullMemoryChangeNotifier.Instance);
 
-        // Scoped service: Project + Global, with Project priority on merge
+        // Project-local storage under the central shard (machine-local,
+        // worktree-shared via the canonical root). Lazy: nothing touches
+        // disk until an actual read/write.
+        var localCanonicalRoot = CanonicalProjectRoot.Resolve(projectScope.Root);
+        var localDir = ElingPaths.ResolveProjectLocalDir(localCanonicalRoot);
+        services.AddKeyedSingleton<IMemoryStorage>("project-local", (sp, key) => new FileSystemMemoryStorage(localDir));
+        services.AddKeyedSingleton<IMemoryIndex>("project-local", (sp, key) => CreateMemoryIndex(localDir, sp.GetService<ILoggerFactory>()));
+
+        // Scoped service: Project + Global + ProjectLocal, with Project priority on merge
         services.AddScoped<IScopedMemoryService>(sp =>
         {
             var policy = sp.GetRequiredService<IMemoryScopePolicy>();
@@ -59,7 +68,10 @@ public static class McpServiceExtensions
             var globalStorage = sp.GetRequiredKeyedService<IMemoryStorage>("global");
             var globalIndex = sp.GetRequiredKeyedService<IMemoryIndex>("global");
             var globalService = new MemoryService(globalStorage, globalIndex);
-            return new ScopedMemoryService(projectService, globalService, policy, merger, projectScope.Root);
+            var localStorage = sp.GetRequiredKeyedService<IMemoryStorage>("project-local");
+            var localIndex = sp.GetRequiredKeyedService<IMemoryIndex>("project-local");
+            var localService = new MemoryService(localStorage, localIndex);
+            return new ScopedMemoryService(projectService, globalService, policy, merger, projectScope.Root, localService, localCanonicalRoot);
         });
 
         // Bounded filesystem tools sandboxed to the project root.
@@ -136,7 +148,15 @@ public static class McpServiceExtensions
             sp.GetService<ILoggerFactory>()?.CreateLogger<MemoryService>()
             ?? NullLogger<MemoryService>.Instance;
 
-        // Scoped service: chain levels + Global, with level-grouped merge
+        // Project-local storage under the central shard (machine-local,
+        // worktree-shared via the canonical root). Lazy: nothing touches
+        // disk until an actual read/write.
+        var localCanonicalRoot = CanonicalProjectRoot.Resolve(chain.Cwd);
+        var localDir = ElingPaths.ResolveProjectLocalDir(localCanonicalRoot);
+        services.AddKeyedSingleton<IMemoryStorage>("project-local", (sp, key) => new FileSystemMemoryStorage(localDir));
+        services.AddKeyedSingleton<IMemoryIndex>("project-local", (sp, key) => CreateMemoryIndex(localDir, sp.GetService<ILoggerFactory>()));
+
+        // Scoped service: chain levels + Global + ProjectLocal, with level-grouped merge
         services.AddScoped<IScopedMemoryService>(sp =>
         {
             var policy = sp.GetRequiredService<IMemoryScopePolicy>();
@@ -157,7 +177,10 @@ public static class McpServiceExtensions
                     logger);
                 levels.Add(new ProjectLevel(level, service));
             }
-            return new ScopedMemoryService(levels, globalService, policy, merger, chain.Cwd);
+            var localStorage = sp.GetRequiredKeyedService<IMemoryStorage>("project-local");
+            var localIndex = sp.GetRequiredKeyedService<IMemoryIndex>("project-local");
+            var localService = new MemoryService(localStorage, localIndex, new SmartSaveOptions(), judge, logger);
+            return new ScopedMemoryService(levels, globalService, policy, merger, chain.Cwd, localService: localService, canonicalRoot: localCanonicalRoot);
         });
 
         services.AddScoped<IMemoryRecallService, MemoryRecallService>();
@@ -180,6 +203,23 @@ public static class McpServiceExtensions
             userScope,
             sp.GetService<ILoggerFactory>()?.CreateLogger<ToolPolicyStore>()
                 ?? NullLogger<ToolPolicyStore>.Instance));
+
+        // Update-check graph (cache readers only — no background pump here, so MCP
+        // peers never fetch; the dashboard owner writes the shared cache file).
+        services.TryAddSingleton(sp => new FileUpdateCache(
+            userScope,
+            sp.GetService<ILoggerFactory>()?.CreateLogger<FileUpdateCache>()
+                ?? NullLogger<FileUpdateCache>.Instance));
+        services.AddHttpClient<GitHubReleaseClient>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
+        services.TryAddSingleton<IUpdateChecker>(sp => new UpdateChecker(
+            sp.GetRequiredService<GitHubReleaseClient>(),
+            sp.GetRequiredService<FileUpdateCache>(),
+            sp.GetService<ILoggerFactory>()?.CreateLogger<UpdateChecker>()
+                ?? NullLogger<UpdateChecker>.Instance,
+            UpdateChecker.ResolveCurrentVersion()));
 
         return services;
     }

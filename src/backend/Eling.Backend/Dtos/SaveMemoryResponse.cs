@@ -109,7 +109,7 @@ public sealed class SaveMemoryResponse
         CreatedAt = result.Memory.CreatedAt,
         UpdatedAt = result.Memory.UpdatedAt,
         Source = result.Memory.Source,
-        Scope = result.Scope == MemoryScopeKind.Global ? "global" : "project",
+        Scope = MemoryScopeLabels.ToWireString(result.Scope),
         PreviousContent = result.Previous?.Memory.Content,
         PreviousTags = result.Previous?.Memory.Tags.ToList(),
         NearMatches = result.NearMatches.Count > 0 ? result.NearMatches.Select(NearMatchDto.From).ToList() : null,

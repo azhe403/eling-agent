@@ -18,7 +18,7 @@ public record ScopedSearchResultDto(
         => new(
             result.Id.Value,
             result.Rank,
-            result.Scope == MemoryScopeKind.Global ? "global" : "project",
+            MemoryScopeLabels.ToWireString(result.Scope),
             NameOf(result.ProjectRoot),
             result.ProjectRoot);
 
@@ -27,4 +27,7 @@ public record ScopedSearchResultDto(
 
     public static ScopedSearchResultDto Project(MemorySearchResult result, string projectRoot)
         => new(result.Id.Value, result.Rank, "project", NameOf(projectRoot), projectRoot);
+
+    public static ScopedSearchResultDto ProjectLocal(MemorySearchResult result, string? canonicalRoot)
+        => new(result.Id.Value, result.Rank, "project-local", NameOf(canonicalRoot), canonicalRoot);
 }

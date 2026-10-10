@@ -8,6 +8,8 @@ public sealed class ScopedMemoryService : IScopedMemoryService
 {
     private readonly IReadOnlyList<ProjectLevel> _levels;
     private readonly IMemoryService _globalService;
+    private readonly IMemoryService? _localService;
+    private readonly string? _canonicalRoot;
     private readonly IMemoryScopePolicy _policy;
     private readonly IMemoryMerger _merger;
     private readonly string _cwd;
@@ -27,6 +29,10 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     public string Cwd => _cwd;
 
     public IMemoryService GlobalService => _globalService;
+
+    public IMemoryService? LocalService => _localService;
+
+    public string? CanonicalRoot => _canonicalRoot;
 
     public string? ProjectRoot => _levels.Count > 0 ? _levels[0].Scope.Root : null;
 
@@ -151,13 +157,17 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         IMemoryService globalService,
         IMemoryScopePolicy policy,
         IMemoryMerger merger,
-        string? projectRoot)
+        string? projectRoot,
+        IMemoryService? localService = null,
+        string? canonicalRoot = null)
         : this(
             [new ProjectLevel(new ProjectScope(projectRoot ?? Directory.GetCurrentDirectory()), projectService)],
             globalService,
             policy,
             merger,
-            projectRoot ?? Directory.GetCurrentDirectory())
+            projectRoot ?? Directory.GetCurrentDirectory(),
+            localService: localService,
+            canonicalRoot: canonicalRoot)
     {
     }
 
@@ -167,7 +177,9 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         IMemoryScopePolicy policy,
         IMemoryMerger merger,
         string cwd,
-        SmartSaveOptions? smartSave = null)
+        SmartSaveOptions? smartSave = null,
+        IMemoryService? localService = null,
+        string? canonicalRoot = null)
     {
         ArgumentNullException.ThrowIfNull(levels);
         ArgumentNullException.ThrowIfNull(globalService);
@@ -180,7 +192,13 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         _merger = merger;
         _cwd = Path.GetFullPath(cwd);
         _smartSave = smartSave ?? new SmartSaveOptions();
+        _localService = localService;
+        _canonicalRoot = string.IsNullOrWhiteSpace(canonicalRoot) ? null : Path.GetFullPath(canonicalRoot);
     }
+
+    private IMemoryService LocalOrThrow() =>
+        _localService ?? throw new InvalidOperationException(
+            "Project-local memory is not wired for this workspace. Wire an IMemoryService for the canonical shard.");
 
     private IMemoryService ResolveService(MemoryScopeKind kind) =>
         kind == MemoryScopeKind.Project ? HeadOrThrow() : _globalService;
@@ -212,6 +230,10 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     {
         ArgumentNullException.ThrowIfNull(memory);
         var kind = _policy.Resolve(scope);
+        if (kind == MemoryScopeKind.ProjectLocal)
+        {
+            return await SaveToLocalAsync(memory);
+        }
         if (kind == MemoryScopeKind.Project && !HasOwnScope)
         {
             throw new ProjectScopeNotInitializedException(_cwd);
@@ -278,9 +300,30 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         return new ScopedMemorySaveResult(createdScoped, createdResult.Action, createdPrevious, createdResult.NearMatches, createdResult.Reason, createdResult.MatchScore);
     }
 
+    /// <summary>
+    /// Explicit scope always wins: project-local saves go straight to the
+    /// canonical shard with no cross-tier reroute.
+    /// </summary>
+    private async Task<ScopedMemorySaveResult> SaveToLocalAsync(Memory memory)
+    {
+        var local = LocalOrThrow();
+        var saveResult = await local.SaveAsync(memory);
+        var scoped = new ScopedMemory(saveResult.Memory, MemoryScopeKind.ProjectLocal, _canonicalRoot);
+        ScopedMemory? previous = saveResult.Previous is null
+            ? null
+            : new ScopedMemory(saveResult.Previous, MemoryScopeKind.ProjectLocal, _canonicalRoot);
+        return new ScopedMemorySaveResult(scoped, saveResult.Action, previous, saveResult.NearMatches, saveResult.Reason, saveResult.MatchScore);
+    }
+
     public async Task<ScopedMemory?> GetByIdAsync(MemoryReference reference)
     {
         ArgumentNullException.ThrowIfNull(reference);
+        if (reference.Scope == MemoryScopeKind.ProjectLocal)
+        {
+            if (_localService is null) return null;
+            var local = await _localService.GetByIdAsync(reference.Id);
+            return local is null ? null : new ScopedMemory(local, MemoryScopeKind.ProjectLocal, reference.ProjectRoot ?? _canonicalRoot);
+        }
         if (reference.Scope == MemoryScopeKind.Project)
         {
             var service = ResolveProjectLevel(reference.ProjectRoot);
@@ -294,6 +337,12 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     public async Task<ScopedMemory?> GetByIdAsync(MemoryId id, string? scope)
     {
         var kind = _policy.Resolve(scope);
+        if (kind == MemoryScopeKind.ProjectLocal)
+        {
+            if (_localService is null) return null;
+            var local = await _localService.GetByIdAsync(id);
+            return local is null ? null : new ScopedMemory(local, kind, _canonicalRoot);
+        }
         if (kind == MemoryScopeKind.Project && _levels.Count == 0)
         {
             return null;
@@ -306,6 +355,10 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     public async Task<bool> DeleteAsync(MemoryReference reference)
     {
         ArgumentNullException.ThrowIfNull(reference);
+        if (reference.Scope == MemoryScopeKind.ProjectLocal)
+        {
+            return _localService is not null && await _localService.DeleteAsync(reference.Id);
+        }
         if (reference.Scope == MemoryScopeKind.Project)
         {
             var service = ResolveProjectLevel(reference.ProjectRoot);
@@ -342,11 +395,31 @@ public sealed class ScopedMemoryService : IScopedMemoryService
             return globals.Select(m => new ScopedMemory(m, MemoryScopeKind.Global, null)).ToList().AsReadOnly();
         }
 
-        if (normalized is not ("merged" or "all"))
+        if (normalized == "project-local")
         {
-            throw new ArgumentException($"Invalid scope '{scope}'. Valid: project, global, merged", nameof(scope));
+            if (_localService is null)
+            {
+                return Array.Empty<ScopedMemory>();
+            }
+            var locals = await _localService.ListAllAsync();
+            if (status.HasValue)
+            {
+                locals = locals.Where(m => m.Status == status.Value).ToList();
+            }
+            return locals.Select(m => new ScopedMemory(m, MemoryScopeKind.ProjectLocal, _canonicalRoot)).ToList().AsReadOnly();
         }
 
+        if (normalized is not ("merged" or "all"))
+        {
+            throw new ArgumentException($"Invalid scope '{scope}'. Valid: project, project-local, global, merged", nameof(scope));
+        }
+
+        var localMemories = new List<Memory>();
+        if (_localService is not null)
+        {
+            var list = await _localService.ListAllAsync();
+            localMemories.AddRange(status.HasValue ? list.Where(m => m.Status == status.Value) : list);
+        }
         var levels = new List<MemoryLevel>();
         foreach (var level in _levels)
         {
@@ -362,7 +435,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         {
             globalMemories = globalMemories.Where(m => m.Status == status.Value).ToList();
         }
-        return _merger.MergeLists(levels, globalMemories);
+        return _merger.MergeLists(levels, localMemories, _canonicalRoot, globalMemories);
     }
 
     public async Task<IReadOnlyCollection<ScopedSearchResult>> SearchAsync(string query, string? scope = null, int? limit = null)
@@ -388,19 +461,34 @@ public sealed class ScopedMemoryService : IScopedMemoryService
             var results = await _globalService.SearchAsync(query);
             merged = results.Select(r => new ScopedSearchResult(r.Id, r.Rank, MemoryScopeKind.Global, null, r.MatchedVia, r.PorterScore, r.TrigramScore, r.QueryMode)).ToList().AsReadOnly();
         }
+        else if (normalizedScope == "project-local")
+        {
+            if (_localService is null)
+            {
+                merged = Array.Empty<ScopedSearchResult>();
+            }
+            else
+            {
+                var results = await _localService.SearchAsync(query);
+                merged = results.Select(r => new ScopedSearchResult(r.Id, r.Rank, MemoryScopeKind.ProjectLocal, _canonicalRoot, r.MatchedVia, r.PorterScore, r.TrigramScore, r.QueryMode)).ToList().AsReadOnly();
+            }
+        }
         else if (normalizedScope is "merged" or "all")
         {
+            var localResults = _localService is null
+                ? new List<MemorySearchResult>()
+                : (await _localService.SearchAsync(query)).ToList();
             var levels = new List<SearchResultLevel>();
             foreach (var level in _levels)
             {
                 levels.Add(new SearchResultLevel(level.Scope.Root, await level.Service.SearchAsync(query)));
             }
             var globalResults = await _globalService.SearchAsync(query);
-            merged = _merger.MergeSearchResults(levels, globalResults);
+            merged = _merger.MergeSearchResults(levels, localResults, _canonicalRoot, globalResults);
         }
         else
         {
-            throw new ArgumentException($"Invalid scope '{scope}'. Valid: project, global, merged", nameof(scope));
+            throw new ArgumentException($"Invalid scope '{scope}'. Valid: project, project-local, global, merged", nameof(scope));
         }
 
         if (limit.HasValue && limit.Value > 0 && merged.Count > limit.Value)
@@ -459,6 +547,12 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     public async Task<ScopedMemory?> UpdateAsync(MemoryReference reference, string? content = null, MemoryType? type = null, string[]? tags = null, string? source = null, MemoryStatus? status = null)
     {
         ArgumentNullException.ThrowIfNull(reference);
+        if (reference.Scope == MemoryScopeKind.ProjectLocal)
+        {
+            if (_localService is null) return null;
+            var localUpdated = await _localService.UpdateAsync(reference.Id, content, type, tags, source, status);
+            return localUpdated is null ? null : new ScopedMemory(localUpdated, MemoryScopeKind.ProjectLocal, reference.ProjectRoot ?? _canonicalRoot);
+        }
         if (reference.Scope == MemoryScopeKind.Project)
         {
             var service = ResolveProjectLevel(reference.ProjectRoot);
@@ -480,11 +574,21 @@ public sealed class ScopedMemoryService : IScopedMemoryService
                     await _levels[0].Service.RebuildIndexAsync();
                 }
                 break;
+            case "project-local":
+                if (_localService is not null)
+                {
+                    await _localService.RebuildIndexAsync();
+                }
+                break;
             case "global":
                 await _globalService.RebuildIndexAsync();
                 break;
             case "merged":
             case "all":
+                if (_localService is not null)
+                {
+                    await _localService.RebuildIndexAsync();
+                }
                 foreach (var level in _levels)
                 {
                     await level.Service.RebuildIndexAsync();
@@ -492,7 +596,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
                 await _globalService.RebuildIndexAsync();
                 break;
             default:
-                throw new ArgumentException($"Invalid scope '{scope}'. Valid: project, global, merged", nameof(scope));
+                throw new ArgumentException($"Invalid scope '{scope}'. Valid: project, project-local, global, merged", nameof(scope));
         }
     }
 

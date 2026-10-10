@@ -13,9 +13,10 @@ public sealed class MemoryScopePolicy : IMemoryScopePolicy
         return normalized switch
         {
             "project" => MemoryScopeKind.Project,
+            "project-local" => MemoryScopeKind.ProjectLocal,
             "global" => MemoryScopeKind.Global,
             "auto" => MemoryScopeKind.Project,
-            _ => throw new ArgumentException($"Invalid scope '{scope}'. Valid: project, global, auto", nameof(scope))
+            _ => throw new ArgumentException($"Invalid scope '{scope}'. Valid: project, project-local, global, auto", nameof(scope))
         };
     }
 
@@ -32,6 +33,9 @@ public sealed class MemoryScopePolicy : IMemoryScopePolicy
         {
             case "project":
                 kind = MemoryScopeKind.Project;
+                return true;
+            case "project-local":
+                kind = MemoryScopeKind.ProjectLocal;
                 return true;
             case "global":
                 kind = MemoryScopeKind.Global;

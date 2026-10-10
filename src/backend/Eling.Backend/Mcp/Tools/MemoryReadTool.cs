@@ -45,7 +45,7 @@ public sealed class MemoryReadTool
     [McpServerTool(Name = "memory_get"), Description("Retrieve a memory by its ID. Provide 'project' to target an existing ancestor scope; this requires the current workspace to already have its own .eling scope.")]
     public async Task<ScopedMemoryDto?> GetByIdAsync(
         [Description("The ULID of the memory to retrieve")] string id,
-        [Description("Scope: project, global, or merged. Defaults to 'project'.")] string scope = "project",
+        [Description("Scope: project, project-local, global, or merged. Defaults to 'project'.")] string scope = "project",
         [Description("Optional logical name of an ancestor project to target (e.g. the parent .eling). Requires this workspace to already have its own .eling scope; never creates a scope.")] string? project = null)
     {
         try
@@ -72,6 +72,16 @@ public sealed class MemoryReadTool
             }
             if (HasScoped && scope.ToLowerInvariant() == "merged")
             {
+                var localRoot = _scoped!.CanonicalRoot ?? _scoped.ProjectRoot;
+                if (localRoot is not null)
+                {
+                    var localFound = await _scoped.GetByIdAsync(MemoryReference.ForProjectLocal(memoryId, localRoot));
+                    if (localFound is not null)
+                    {
+                        _logger?.LogInformation("Retrieved memory '{Id}' merged (found in project-local)", id);
+                        return ScopedMemoryDto.From(localFound.Memory, localFound.Scope, localFound.ProjectRoot);
+                    }
+                }
                 try
                 {
                     var projectRef = new MemoryReference(memoryId, MemoryScopeKind.Project, _scoped!.ProjectRoot);
@@ -92,8 +102,19 @@ public sealed class MemoryReadTool
             }
             if (HasScoped && _scoped is not null)
             {
-                var scopeKind = scope.ToLowerInvariant() == "global" ? MemoryScopeKind.Global : MemoryScopeKind.Project;
-                var reference = new MemoryReference(memoryId, scopeKind, scopeKind == MemoryScopeKind.Project ? _scoped.ProjectRoot : null);
+                var normalizedGetScope = scope.ToLowerInvariant();
+                var scopeKind = normalizedGetScope switch
+                {
+                    "global" => MemoryScopeKind.Global,
+                    "project-local" => MemoryScopeKind.ProjectLocal,
+                    _ => MemoryScopeKind.Project,
+                };
+                var reference = scopeKind switch
+                {
+                    MemoryScopeKind.Global => new MemoryReference(memoryId, scopeKind, null),
+                    MemoryScopeKind.ProjectLocal => MemoryReference.ForProjectLocal(memoryId, _scoped.CanonicalRoot ?? _scoped.ProjectRoot ?? _scoped.Cwd),
+                    _ => new MemoryReference(memoryId, scopeKind, _scoped.ProjectRoot),
+                };
                 var scopedResult = await _scoped.GetByIdAsync(reference);
                 _logger?.LogInformation("Retrieved memory '{Id}' scope '{Scope}' (found: {Found})", id, scopeKind, scopedResult is not null);
                 return scopedResult is null ? null : ScopedMemoryDto.From(scopedResult.Memory, scopedResult.Scope, scopedResult.ProjectRoot);
@@ -113,7 +134,7 @@ public sealed class MemoryReadTool
     [McpServerTool(Name = "memory_list"), Description("List memories, optionally filtered by status.")]
     public async Task<IReadOnlyCollection<ScopedMemoryDto>> ListAsync(
         [Description("Filter by status: active, superseded, archived, or 'all'. Defaults to 'active'.")] string status = "active",
-        [Description("Scope: project, global, or merged. Defaults to 'merged'.")] string scope = "merged")
+        [Description("Scope: project, project-local, global, or merged. Defaults to 'merged'.")] string scope = "merged")
     {
         try
         {
@@ -165,7 +186,7 @@ public sealed class MemoryReadTool
     public async Task<IReadOnlyCollection<ScopedSearchResultDto>> SearchAsync(
         [Description("The search query")] string query,
         [Description("Maximum number of results to return. Defaults to 10.")] int limit = 10,
-        [Description("Scope: project, global, or merged. Defaults to 'merged' (project + global with project priority).")] string scope = "merged")
+        [Description("Scope: project, project-local, global, or merged. Defaults to 'merged' (project-local + project + global).")] string scope = "merged")
     {
         try
         {

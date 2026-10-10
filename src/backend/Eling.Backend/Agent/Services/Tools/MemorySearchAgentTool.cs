@@ -23,7 +23,7 @@ public sealed class MemorySearchAgentTool(MemoryReadTool tool) : IAgentTool
       "properties": {
         "query": { "type": "string", "description": "The search query" },
         "limit": { "type": "integer", "description": "Maximum number of results to return. Defaults to 10." },
-        "scope": { "type": "string", "description": "Scope: project, global, or merged. Defaults to merged." }
+        "scope": { "type": "string", "description": "Scope: project, project-local, global, or merged. Defaults to merged." }
       }
     }
     """;

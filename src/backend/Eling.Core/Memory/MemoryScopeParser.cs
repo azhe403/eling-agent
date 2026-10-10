@@ -16,6 +16,9 @@ public static class MemoryScopeParser
             case "project":
                 kind = MemoryScopeKind.Project;
                 return true;
+            case "project-local":
+                kind = MemoryScopeKind.ProjectLocal;
+                return true;
             case "global":
                 kind = MemoryScopeKind.Global;
                 return true;
@@ -31,6 +34,6 @@ public static class MemoryScopeParser
     public static bool TryParseSearchScope(string? scope, out string normalized)
     {
         normalized = (scope ?? "merged").Trim().ToLowerInvariant();
-        return normalized is "project" or "global" or "merged";
+        return normalized is "project" or "project-local" or "global" or "merged";
     }
 }

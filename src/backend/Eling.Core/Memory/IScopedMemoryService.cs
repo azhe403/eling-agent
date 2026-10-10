@@ -21,7 +21,9 @@ public interface IScopedMemoryService
     // Raw services for isolation checks
     IMemoryService ProjectService { get; }
     IMemoryService GlobalService { get; }
+    IMemoryService? LocalService { get; }
     string? ProjectRoot { get; }
+    string? CanonicalRoot { get; }
 
     // Scope-chain surface
     IReadOnlyList<string> ChainRoots { get; }

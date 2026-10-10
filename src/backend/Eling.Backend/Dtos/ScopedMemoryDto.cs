@@ -27,8 +27,8 @@ public record ScopedMemoryDto(
             memory.Source,
             memory.CreatedAt,
             memory.UpdatedAt,
-            scope.ToString().ToLowerInvariant(),
-            scope == MemoryScopeKind.Project && projectRoot is not null
+            MemoryScopeLabels.ToWireString(scope),
+            scope != MemoryScopeKind.Global && projectRoot is not null
                 ? new ProjectInfoDto(Path.GetFileName(projectRoot.TrimEnd(Path.DirectorySeparatorChar)), projectRoot)
                 : null);
     }

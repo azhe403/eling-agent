@@ -12,4 +12,10 @@ public sealed record MemoryReference(
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         return new(id, MemoryScopeKind.Project, Path.GetFullPath(projectRoot));
     }
+
+    public static MemoryReference ForProjectLocal(MemoryId id, string canonicalRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(canonicalRoot);
+        return new(id, MemoryScopeKind.ProjectLocal, Path.GetFullPath(canonicalRoot));
+    }
 }

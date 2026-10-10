@@ -55,7 +55,7 @@ public sealed class MemoryWriteTool
         [Description("Type of memory: fact, preference, decision, lesson, note. Defaults to 'fact'.")] string type = "fact",
         [Description("Optional tags for categorization")] string[]? tags = null,
         [Description("Optional source reference")] string? source = null,
-        [Description("Scope: project, global, or auto. Defaults to 'project'.")] string scope = "project",
+        [Description("Scope: project, project-local, global, or auto. Defaults to 'project'. Use 'project-local' for machine-only memories of this project (never committed).")] string scope = "project",
         [Description("Optional logical name of an ancestor project to target (e.g. the parent .eling). Requires this workspace to already have its own .eling scope; never creates a scope.")] string? project = null)
     {
         try
@@ -85,6 +85,10 @@ public sealed class MemoryWriteTool
                     if (scope.Trim().Equals("global", StringComparison.OrdinalIgnoreCase))
                     {
                         throw new ArgumentException("Cannot target a project scope while scope is 'global'.", nameof(project));
+                    }
+                    if (scope.Trim().Equals("project-local", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new ArgumentException("Cannot target an ancestor project scope while scope is 'project-local'.", nameof(project));
                     }
                     var targetRoot = _scoped.ResolveAncestorProjectRoot(project);
                     var targetSaved = await _scoped.SaveToProjectAsync(memory, targetRoot);
@@ -127,6 +131,10 @@ public sealed class MemoryWriteTool
                     {
                         await _scoped.RebuildIndexAsync("global");
                     }
+                    else if (scoped.Scope == MemoryScopeKind.ProjectLocal)
+                    {
+                        await _scoped.RebuildIndexAsync("project-local");
+                    }
                     else if (!string.IsNullOrWhiteSpace(scoped.ProjectRoot) && !string.Equals(scoped.ProjectRoot.TrimEnd(Path.DirectorySeparatorChar), _scoped.Cwd.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
                     {
                         await _scoped.RebuildProjectIndexAsync(scoped.ProjectRoot);
@@ -164,7 +172,7 @@ public sealed class MemoryWriteTool
     [McpServerTool(Name = "memory_delete"), Description("Delete a memory by its ID. Returns true if the memory was deleted, false if it was not found. Provide 'project' to target an existing ancestor scope; this requires the current workspace to already have its own .eling scope.")]
     public async Task<bool> DeleteAsync(
         [Description("The ULID of the memory to delete")] string id,
-        [Description("Scope: project or global. Defaults to 'project'.")] string scope = "project",
+        [Description("Scope: project, project-local, or global. Defaults to 'project'.")] string scope = "project",
         [Description("Optional logical name of an ancestor project to target (e.g. the parent .eling). Requires this workspace to already have its own .eling scope; never creates a scope.")] string? project = null)
     {
         try
@@ -192,8 +200,19 @@ public sealed class MemoryWriteTool
                     return targetDeleted;
                 }
 
-                var scopeKind = scope.Trim().ToLowerInvariant() == "global" ? MemoryScopeKind.Global : MemoryScopeKind.Project;
-                var reference = new MemoryReference(memoryId, scopeKind, scopeKind == MemoryScopeKind.Project ? _scoped.ProjectRoot : null);
+                var normalizedDeleteScope = scope.Trim().ToLowerInvariant();
+                var scopeKind = normalizedDeleteScope switch
+                {
+                    "global" => MemoryScopeKind.Global,
+                    "project-local" => MemoryScopeKind.ProjectLocal,
+                    _ => MemoryScopeKind.Project,
+                };
+                var reference = scopeKind switch
+                {
+                    MemoryScopeKind.Global => new MemoryReference(memoryId, scopeKind, null),
+                    MemoryScopeKind.ProjectLocal => MemoryReference.ForProjectLocal(memoryId, _scoped.CanonicalRoot ?? _scoped.ProjectRoot ?? _scoped.Cwd),
+                    _ => new MemoryReference(memoryId, scopeKind, _scoped.ProjectRoot),
+                };
                 var deleted = await _scoped.DeleteAsync(reference);
                 _logger?.LogInformation("Deleted memory '{Id}' scope '{Scope}' (result: {Result})", id, scopeKind, deleted);
                 if (deleted)

@@ -24,6 +24,7 @@ public static class ElingPaths
     public const string LegacyMemoryDbFileName = "index.db";
     public const string CodebaseDbFileName = "codebase.db";
     public const string ProjectsDbFileName = "projects.db";
+    public const string ProjectsDirName = "projects";
 
     public static string ResolveConfigDir(
         string? xdgConfigHome = null,
@@ -114,6 +115,31 @@ public static class ElingPaths
     {
         var dataRoot = ResolveDataDir(xdgDataHome, userHome, elingDataDir);
         return Path.Combine(dataRoot, ProjectsDbFileName);
+    }
+
+    /// <summary>
+    /// Per-project local-memory shards. Path:
+    /// $DATA/eling/projects/&lt;project-name&gt;-&lt;hash&gt;/.
+    /// Same name+hash scheme as <see cref="ResolveCodebaseDbPath"/> so
+    /// worktree-shared canonical roots land on one shard. Caller passes the
+    /// canonical root (git main toplevel, fallback cwd root).
+    /// Pure: computes the path only, never touches disk.
+    /// </summary>
+    public static string ResolveProjectLocalDir(
+        string canonicalRoot,
+        string? xdgDataHome = null,
+        string? userHome = null,
+        string? elingDataDir = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(canonicalRoot);
+        var fullPath = Path.GetFullPath(canonicalRoot);
+        var normalized = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToLowerInvariant();
+        var projectName = Path.GetFileName(normalized);
+        if (string.IsNullOrWhiteSpace(projectName)) projectName = "project";
+        foreach (var invalid in Path.GetInvalidFileNameChars()) projectName = projectName.Replace(invalid, '-');
+        var hash = ComputeProjectHash(normalized);
+        var dir = Path.Combine(ResolveDataDir(xdgDataHome, userHome, elingDataDir), ProjectsDirName);
+        return Path.Combine(dir, $"{projectName}-{hash}");
     }
 
     /// <summary>

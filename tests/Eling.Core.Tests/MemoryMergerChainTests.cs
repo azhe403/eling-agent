@@ -117,4 +117,50 @@ public sealed class MemoryMergerChainTests
         Assert.Equal(MemoryScopeKind.Global, viaOld.Last().Scope);
         Assert.Null(viaOld.Last().ProjectRoot);
     }
+
+    [Fact]
+    public void MergeLists_LocalFirst_SameUlidKeepsLocal()
+    {
+        const string localRoot = @"C:\work\acme";
+        var id = MemoryId.NewId();
+        var localCopy = NewMemory("local copy", id);
+        var projectCopy = NewMemory("project copy", id);
+        var globalCopy = NewMemory("global copy", id);
+        var projectOnly = NewMemory("project only");
+
+        var merged = new MemoryMerger().MergeLists(
+            [new MemoryLevel(ParentRoot, [projectCopy, projectOnly])],
+            [localCopy],
+            localRoot,
+            [globalCopy]);
+
+        Assert.Equal(
+            [localCopy.Id.Value, projectOnly.Id.Value],
+            merged.Select(m => m.Id.Value).ToList());
+        var first = merged.First();
+        Assert.Equal(MemoryScopeKind.ProjectLocal, first.Scope);
+        Assert.Equal(localRoot, first.ProjectRoot);
+        Assert.Equal("local copy", first.Memory.Content);
+    }
+
+    [Fact]
+    public void MergeSearchResults_LocalBlockFirst()
+    {
+        const string localRoot = @"C:\work\acme";
+        var local = NewResult(MemoryId.NewId(), rank: -5);
+        var child = NewResult(MemoryId.NewId(), rank: -500);
+        var global = NewResult(MemoryId.NewId(), rank: -10);
+
+        var merged = new MemoryMerger().MergeSearchResults(
+            [new SearchResultLevel(ChildRoot, [child])],
+            [local],
+            localRoot,
+            [global]);
+
+        Assert.Equal(
+            [local.Id.Value, child.Id.Value, global.Id.Value],
+            merged.Select(r => r.Id.Value).ToList());
+        Assert.Equal(MemoryScopeKind.ProjectLocal, merged.First().Scope);
+        Assert.Equal(localRoot, merged.First().ProjectRoot);
+    }
 }

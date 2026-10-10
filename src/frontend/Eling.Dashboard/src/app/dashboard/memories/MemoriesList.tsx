@@ -108,6 +108,10 @@ export function MemoriesList() {
 
   const searchParams = useSearchParams()
   const scope = searchParams.get("scope") ?? "all"
+  // Tier only applies to a single-project view: shared (committed) vs local-only (machine-only).
+  const tier = scope !== "all" && scope !== "global"
+    ? (searchParams.get("tier") ?? "project")
+    : "project"
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
   const handleScopeChange = useCallback((value: string | null) => {
@@ -115,6 +119,12 @@ export function MemoriesList() {
     if (value === "all") router.push("/dashboard/memories")
     else router.push("/dashboard/memories?scope=" + encodeURIComponent(value))
   }, [router])
+  const handleTierChange = useCallback((value: string) => {
+    if (scope === "all" || scope === "global") return
+    if (value === "project-local")
+      router.push("/dashboard/memories?scope=" + encodeURIComponent(scope) + "&tier=project-local")
+    else router.push("/dashboard/memories?scope=" + encodeURIComponent(scope))
+  }, [router, scope])
   const [promoteTarget, setPromoteTarget] = useState<Memory | null>(null)
   const [promoteAsMove, setPromoteAsMove] = useState(false)
   const [copyTarget, setCopyTarget] = useState<Memory | null>(null)
@@ -156,7 +166,7 @@ export function MemoriesList() {
         if (scope === "global")
           url = `/api/global/memories?limit=100&_t=${t}`
         else if (scope !== "all")
-          url = `/api/project/memories?projectRoot=${encodeURIComponent(scope)}&limit=100&_t=${t}`
+          url = `/api/project/memories?projectRoot=${encodeURIComponent(scope)}&limit=100&_t=${t}` + (tier === "project-local" ? "&tier=project-local" : "")
 
         console.log(
           `%c[FETCH MEMORIES] 📡 Fetching fresh data${triggeredBy ? ` (Trigger: ${triggeredBy})` : ""} from ${url}`,
@@ -181,7 +191,7 @@ export function MemoriesList() {
                   ? "global"
                   : scope === "all"
                     ? (m.scope ?? "project")
-                    : "project"),
+                    : tier),
               project:
                 m.project ??
                 (scope !== "all" && scope !== "global"
@@ -205,7 +215,7 @@ export function MemoriesList() {
         setLoading(false)
       }
     },
-    [scope]
+    [scope, tier]
   )
 
   // Fetch scopes and memories on mount / scope change
@@ -242,8 +252,10 @@ export function MemoriesList() {
     if (m.scope === "global") url = `/api/global/memories/${m.id}`
     else if (m.scope === "project" && m.project?.root)
       url = `/api/project/memories/${m.id}?projectRoot=${encodeURIComponent(m.project.root)}`
+    else if (m.scope === "project-local" && m.project?.root)
+      url = `/api/project/memories/${m.id}?projectRoot=${encodeURIComponent(m.project.root)}&tier=project-local`
     else if (scope !== "all" && scope !== "global")
-      url = `/api/project/memories/${m.id}?projectRoot=${encodeURIComponent(scope)}`
+      url = `/api/project/memories/${m.id}?projectRoot=${encodeURIComponent(scope)}${tier === "project-local" ? "&tier=project-local" : ""}`
     const res = await fetch(url, { method: "DELETE" })
     if (res.ok || res.status === 404) {
       setMemories((x) => x.filter((y) => y.id !== m.id))
@@ -260,6 +272,8 @@ export function MemoriesList() {
       url = `/api/global/memories/${id}`
     else if (target?.scope === "project" && target.project?.root)
       url = `/api/project/memories/${id}?projectRoot=${encodeURIComponent(target.project.root)}`
+    else if (target?.scope === "project-local" && target.project?.root)
+      url = `/api/project/memories/${id}?projectRoot=${encodeURIComponent(target.project.root)}&tier=project-local`
     const res = await fetch(url, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -435,7 +449,7 @@ export function MemoriesList() {
               <div className="rounded-lg border p-3 text-sm">
                 <div className="text-muted-foreground">Scope</div>
                 <div className="truncate text-sm" title={scope}>
-                  {scopeLabel(scope)}
+                  {scopeLabel(scope)}{scope !== "all" && scope !== "global" && tier === "project-local" ? " · 💻 Local" : ""}
                 </div>
               </div>
             </>
@@ -488,6 +502,24 @@ export function MemoriesList() {
                   ))}
                 </SelectContent>
               </Select>
+              {scope !== "all" && scope !== "global" && (
+                <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Project tier">
+                  {(["project", "project-local"] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => handleTierChange(t)}
+                      className={
+                        tier === t
+                          ? "rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+                          : "rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                      }
+                      title={t === "project-local" ? "Machine-only, never committed" : "Shared, committed with the repo"}
+                    >
+                      {t === "project-local" ? "💻 Local" : "📁 Shared"}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="flex flex-wrap gap-1">
               {TYPES.map((t) => (
