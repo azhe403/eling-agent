@@ -58,7 +58,7 @@ public sealed class UserScope
     {
         if (!string.IsNullOrWhiteSpace(overridePath))
         {
-            // Isolasi test: satu temp dir untuk config + data.
+            // Test isolation: one temp dir for both config and data.
             var isolated = Path.GetFullPath(overridePath!);
             return new UserScope(isolated, isolated);
         }
@@ -70,7 +70,7 @@ public sealed class UserScope
 
     /// <summary>
     /// One-time migration from the legacy location (config-root) to the data root:
-    /// menyalin memories/*.md + index.db (legacy) ke memory.db bila tujuan masih kosong.
+    /// copying memories/*.md + index.db (legacy) to memory.db when the target is still empty.
     /// Idempotent, and never deletes the source.
     /// </summary>
     public void EnsureGlobalDataMigrated()
@@ -103,7 +103,7 @@ public sealed class UserScope
         }
         catch
         {
-            // Migrasi best-effort: kegagalan tidak boleh menggagalkan boot.
+            // Best-effort migration: a failure here must not fail boot.
         }
     }
 

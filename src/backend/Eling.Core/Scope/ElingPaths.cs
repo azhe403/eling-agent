@@ -284,7 +284,7 @@ public static class ElingPaths
         var sb = new StringBuilder(hash.Length * 2);
         foreach (var b in hash)
             sb.Append(b.ToString("x2"));
-        // 16 hex chars (64-bit) cukup untuk shard, tetap unik untuk jumlah proyek wajar.
+        // 16 hex chars (64-bit) is enough for sharding and stays unique for any realistic project count.
         return sb.ToString()[..16];
     }
 }

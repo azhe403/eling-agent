@@ -10,8 +10,8 @@ using Serilog.Context;
 namespace Eling.Backend.Mcp.Telemetry;
 
 /// <summary>
-/// Filter untuk mencatat metrik eksekusi tool ke log terstruktur.
-/// Mencatat: durasi (ms), tool name, payload request/response size, status, error.
+/// Filter that records tool execution metrics into the structured log.
+/// Records: duration (ms), tool name, request/response payload size, status, error.
 /// </summary>
 public static class ToolTelemetryFilter
 {
@@ -22,7 +22,7 @@ public static class ToolTelemetryFilter
     };
 
     /// <summary>
-    /// Membuat filter untuk pipeline CallTool yang mencatat telemetry eksekusi.
+    /// Creates a filter for the CallTool pipeline that records execution telemetry.
     /// </summary>
     public static McpRequestFilter<CallToolRequestParams, CallToolResult> Create(ILogger? logger = null)
     {
