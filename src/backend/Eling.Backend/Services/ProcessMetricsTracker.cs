@@ -1,11 +1,18 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Backend.Services;
 
 public sealed class ProcessMetricsTracker
 {
     private readonly ConcurrentDictionary<int, CpuSample> _samples = new();
+    private readonly ILogger<ProcessMetricsTracker> _logger;
+
+    public ProcessMetricsTracker(ILogger<ProcessMetricsTracker> logger)
+    {
+        _logger = logger;
+    }
 
     public RuntimeProcessMetrics? Sample(int pid)
     {
@@ -39,8 +46,18 @@ public sealed class ProcessMetricsTracker
 
             return new RuntimeProcessMetrics(mem, cpuPercent);
         }
-        catch
+        catch (ArgumentException)
         {
+            // The process exited between the check above and the probe: expected
+            // for short-lived pids, so not worth logging.
+            _samples.TryRemove(pid, out _);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            // Unexpected probe failure (e.g. OS access restrictions): degrade to
+            // null so metrics never break the dashboard, but keep it observable.
+            _logger.LogDebug(ex, "Failed to sample process metrics for pid {Pid}", pid);
             _samples.TryRemove(pid, out _);
             return null;
         }
