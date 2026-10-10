@@ -21,6 +21,18 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Resolve release version
+        id: version
+        # Tag pushes arrive as v0.2.0; strip the leading v because
+        # MSBuild/NuGet versions must be numeric-led.
+        shell: bash
+        run: |
+          full="${GITHUB_REF_NAME#v}"
+          echo "full=${full}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${full} from tag ${GITHUB_REF_NAME}"
 
       - uses: pnpm/action-setup@v4
         with:
@@ -42,6 +54,8 @@ jobs:
           --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:Version="${{ steps.version.outputs.full }}"
+          -p:InformationalVersion="${{ steps.version.outputs.full }}"
           -o publish
 
       # 2. Publish Backend (self-contained single-file — dashboard UI included, merged into Desktop folder)
@@ -52,6 +66,8 @@ jobs:
           --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:Version="${{ steps.version.outputs.full }}"
+          -p:InformationalVersion="${{ steps.version.outputs.full }}"
           -o publish-backend
 
       - name: Package backend-only

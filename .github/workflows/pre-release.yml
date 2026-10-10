@@ -13,10 +13,11 @@ on:
     branches: ["main"]
     paths: *build-paths
 
-# Base product version; kept in sync with <Version> in Directory.Build.props.
-# Each push to main produces a unique pre-release: v0.1.0-pre.{run_number}.
-env:
-  VERSION: 0.1.0
+# Version source of truth: <Version> in Directory.Build.props (single source).
+# Each push to main produces a unique pre-release: v{base}-pre.{run_number}.
+# The full version is resolved per job from the props file and injected into
+# dotnet publish via -p:Version / -p:InformationalVersion, so the assemblies
+# carry the exact release tag. Nothing is ever written back to source.
 
 permissions:
   contents: write
@@ -36,6 +37,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          base=$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' Directory.Build.props | head -n 1)
+          full="${base}-pre.${{ github.run_number }}+sha.${GITHUB_SHA::7}"
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
+          echo "full=${full}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${full} (base ${base})"
 
       - uses: pnpm/action-setup@v4
         with:
@@ -57,6 +68,8 @@ jobs:
           --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:Version="${{ steps.version.outputs.full }}"
+          -p:InformationalVersion="${{ steps.version.outputs.full }}"
           -o publish
 
       # 2. Publish Backend (self-contained single-file — dashboard UI included, merged into Desktop folder)
@@ -67,6 +80,8 @@ jobs:
           --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:Version="${{ steps.version.outputs.full }}"
+          -p:InformationalVersion="${{ steps.version.outputs.full }}"
           -o publish-backend
 
       - name: Package backend-only
@@ -133,6 +148,16 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          base=$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' Directory.Build.props | head -n 1)
+          full="${base}-pre.${{ github.run_number }}"
+          echo "full=${full}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
@@ -141,8 +166,8 @@ jobs:
       - name: Publish pre-release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.VERSION }}-pre.${{ github.run_number }}
-          name: Eling v${{ env.VERSION }}-pre.${{ github.run_number }}
+          tag_name: v${{ steps.version.outputs.full }}
+          name: Eling v${{ steps.version.outputs.full }}
           prerelease: true
           generate_release_notes: true
           files: dist/*

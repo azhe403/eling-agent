@@ -14,7 +14,11 @@ The pre-release workflow runs only when the changed files are build-relevant (se
 Pull requests only run the build matrix as validation (no release published).
 `[skip-ci]` in the commit message skips CI entirely.
 
-Base product version lives in `VERSION` (`pre-release.yml`), kept in sync with `<Version>` in `Directory.Build.props`.
+Base product version lives in `<Version>` in `Directory.Build.props` (single source of truth).
+Both workflows resolve it at build time and inject it into `dotnet publish` via
+`-p:Version` / `-p:InformationalVersion`, so every assembly carries its exact
+release tag (pre-releases append `+sha.{shortsha}` build metadata). Nothing is
+ever written back to source.
 
 ## When CI runs (path filter)
 
