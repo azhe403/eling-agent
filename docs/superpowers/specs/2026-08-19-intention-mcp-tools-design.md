@@ -1,5 +1,22 @@
 # Intention MCP Tools Design
 
+**Status: NOT IMPLEMENTED.** The five tools described below were never committed.
+Commit `fbc5c90` ("feat: add intention MCP tools with CRUD operations and storage")
+states in its message that it adds them, but `git show --name-status fbc5c90` adds
+only `Intention.cs`, `IIntentionStorage`, `FileSystemIntentionStorage`, and
+`IntentionFrontMatter` — no `IntentionTools.cs` exists anywhere in the history.
+
+What did ship is the storage layer, and it is currently read-only in practice:
+`IIntentionStorage` is registered in DI (`McpServiceExtensions.cs:40`, `:109`) and
+its only consumer is `MemoryRecallService.ListAllAsync()`. Nothing in `src/` calls
+`SaveAsync`, so `memory_recall` reports outstanding intentions that no tool can
+create. This is a capability regression from this spec, not merely unstarted work.
+
+**Also note:** the sibling spec `2026-08-19-session-context-mcp-tool-design.md`
+never landed either — its `session_context` tool was superseded by `memory_recall`,
+which absorbed the recent-memories + intentions + stats payload this spec assumed
+would live in `session_context`.
+
 ## Goal
 
 Add `intention_save`, `intention_get`, `intention_list`, `intention_update`, `intention_delete` MCP tools to `Eling.Mcp`, mirroring the existing `MemoryTools` pattern. These manage the ephemeral intentions used by `session_context`.

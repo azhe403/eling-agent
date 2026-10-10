@@ -1,7 +1,16 @@
 # Eling Desktop Agentic Transformation — Thin Spec
 
 Date: 2026-09-10
-Status: draft v3 — backend-owned, desktop is pure frontend, lib behind own ports (awaiting user review)
+Status: Implemented — shipped 2026-09-17 (commit a813a72). The "Thin means: no
+streaming" constraint below was **overturned at implementation time** and no longer
+describes the system: SSE was not added later, it shipped in the very same commit
+that introduced the agent (`AgentChatEndpoints.cs` and `AgentTurnService.cs` are both
+created by a813a72). Implementation note: (1) streaming is the default — the
+endpoint serves `text/event-stream` and the desktop client is `SseClient`; (2) the
+tool surface grew from the 4 tools named in "Decisions" to 7 (`file_read`,
+`file_write`, `file_search`, `glob`, `directory_list`, `memory_recall`,
+`memory_save`); (3) the thin-surface constraint still holds — the desktop is a pure
+HTTP frontend, backend owns provider config, workspaces, and chat history.
 Scope: `src/desktop/Eling.Desktop` (UI only) + new backend agent endpoints
 under `src/backend/Eling.Backend` (`Endpoints/AgentEndpoints.cs` + small services).
 No library types outside the adapter folder (see LLM seam).

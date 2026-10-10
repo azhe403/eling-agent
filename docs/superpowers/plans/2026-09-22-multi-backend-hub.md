@@ -14,7 +14,7 @@
 - No auto-retry on POST/PATCH/DELETE. 401 → stop retry, show state, wait manual fix.
 - Settings JSON backward-compatible: legacy `BackendUrl`-only doc must migrate to `Connections[]` with default local.
 - Remote = URL only (IP literal or DNS); `isLocal=false` never spawns.
-- Commit ONLY after full implementation completes (user instruction: "komit nanti kalau sudah implement").
+- Commit ONLY after full implementation completes (user instruction: "commit later after full implementation").
 
 ---
 
@@ -113,7 +113,7 @@ Rules: `Uri.TryCreate`, scheme http/https only, non-empty host (IP literal or DN
 - New methods: `GetConnections()` (migrate-on-read: legacy `BackendUrl` set / empty list → return `[{ "local", url ?? 4417 default, IsLocal=true }]`), `SaveConnections(list, activeId)`.
 - Legacy `GetBackendUrl()`/`SetBackendUrl()` keep working (map to first/active connection).
 
-- [ ] **Step 1: Failing tests**: legacy doc (only BackendUrl) → GetConnections returns 1 local entry with that URL; save roundtrip; corrupt JSON → default local (pola catch yang sudah ada).
+- [ ] **Step 1: Failing tests**: legacy doc (only BackendUrl) → GetConnections returns 1 local entry with that URL; save roundtrip; corrupt JSON → default local (matching existing catch pattern).
 - [ ] **Step 2: Implement** → green.
 
 ---
@@ -224,7 +224,7 @@ public sealed class ConnectionHealthMonitor
     public void RetryNow(); // reset backoff to 1s (manual button)
 }
 ```
-Color: <100ms 🟢, <300ms 🟡, else 🔴; state text `online`/`reconnecting (retry in Ns…)`/`offline`/`🔒 token salah`.
+Color: <100ms 🟢, <300ms 🟡, else 🔴; state text `online`/`reconnecting (retry in Ns…)`/`offline`/`🔒 invalid token`.
 
 - [ ] **Step 1: Failing tests** (fake clock or injectable delay): healthy → 5s cadence; failure → backoff sequence; RetryNow resets; AuthRequired terminal-ish (no retry when probe returns authRequired=true from /health... actually /health is 200 always — detection of wrong token comes from API 401: monitor exposes `MarkAuthFailed()` called by api client on 401).
 - [ ] **Step 2: Implement + XAML** → green + build.
@@ -250,7 +250,7 @@ Color: <100ms 🟢, <300ms 🟡, else 🔴; state text `online`/`reconnecting (r
 - [ ] `dotnet test tests/Eling.Backend.Tests` → all green
 - [ ] `dotnet test tests/Eling.Desktop.Tests` → all green
 - [ ] `dotnet build src/desktop/Eling.Desktop` + `dotnet build src/backend/Eling.Backend` → 0 errors
-- [ ] Manual: run backend on 4417 (no token) + second instance 4317 with `ELING_API_TOKEN=demo`; desktop: add both connections, switch dropdown (<1s, memories reload), wrong-token connection → 401 → `🔒 token salah`, kill second backend → status `reconnecting` → restart → auto `online`, Ctrl+N second window pin different backend, latency ms updates ≤5s.
+- [ ] Manual: run backend on 4417 (no token) + second instance 4317 with `ELING_API_TOKEN=demo`; desktop: add both connections, switch dropdown (<1s, memories reload), wrong-token connection → 401 → `🔒 invalid token`, kill second backend → status `reconnecting` → restart → auto `online`, Ctrl+N second window pin different backend, latency ms updates ≤5s.
 - [ ] Run `scripts/validate-eling.ps1` if applicable.
 
 ---

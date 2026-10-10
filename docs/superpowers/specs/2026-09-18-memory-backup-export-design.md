@@ -1,19 +1,19 @@
-# Spec: Fitur Export Backup Memori (Zip Archive)
+# Specification: Memory Backup Export Feature (Zip Archive)
 
-- **Tanggal**: 2026-09-18
-- **Status**: Draft (Menunggu Review)
-- **Topik**: Backup & Export Memori Eling
-
----
-
-## 1. Ringkasan & Tujuan
-Menyediakan fitur untuk mengekspor seluruh atau sebagian memori Eling ke dalam format arsip `.zip`. Arsip ini memuat file markdown mentah (`.md`) beserta manifest metadata JSON yang dapat digunakan untuk keperluan backup, migrasi, dan audit mandiri tanpa kehilangan metadata aslinya.
+- **Date**: 2026-09-18
+- **Status**: Proposed / Draft
+- **Topic**: Eling Memory Backup & Export
 
 ---
 
-## 2. Struktur Arsip Backup (.zip)
+## 1. Overview & Objectives
+Provide a feature to export all or scoped subsets of Eling memories into a compressed `.zip` archive. This archive contains raw Markdown files (`.md`) accompanied by a JSON metadata manifest, enabling offline backup, cross-machine migration, and independent audits without losing original ULIDs, timestamps, or tag metadata.
 
-Struktur file di dalam arsip `.zip`:
+---
+
+## 2. Backup Archive Structure (`.zip`)
+
+Directory layout inside the exported `.zip` archive:
 
 ```text
 eling-backup-{scope}-{timestamp}.zip
@@ -24,7 +24,7 @@ eling-backup-{scope}-{timestamp}.zip
     └── ...
 ```
 
-### Format `manifest.json`
+### `manifest.json` Format
 ```json
 {
   "version": "1.0",
@@ -46,50 +46,50 @@ eling-backup-{scope}-{timestamp}.zip
 
 ---
 
-## 3. Komponen & Arsitektur
+## 3. Components & Architecture
 
 ### 3.1. Core Layer (`Eling.Core`)
 - **`IMemoryBackupService`**:
-  - Metode: `Task<BackupExportResult> ExportZipAsync(BackupExportOptions options, Stream outputStream, CancellationToken ct = default)`
+  - Method: `Task<BackupExportResult> ExportZipAsync(BackupExportOptions options, Stream outputStream, CancellationToken ct = default)`
   - Parameter `BackupExportOptions`:
     - `Scope`: `project` | `global` | `merged`
-    - `Status`: filter status (`active` | `all`, default `all`)
-    - `IncludeIntentions`: `bool` (opsional jika ada file intentions)
-- Menggunakan `System.IO.Compression.ZipArchive` bawaan .NET (tanpa dependensi NuGet pihak ketiga).
-- Membaca memori langsung melalui `IMemoryStorage` yang sudah ada untuk setiap scope yang diminta.
+    - `Status`: status filter (`active` | `all`, default: `all`)
+    - `IncludeIntentions`: `bool` (optional if intentions exist)
+- Leverages built-in .NET `System.IO.Compression.ZipArchive` without introducing third-party NuGet dependencies.
+- Reads memories directly via existing `IMemoryStorage` implementations for each requested scope.
 
 ### 3.2. Backend & HTTP API (`Eling.Backend`)
 - **Endpoint**: `GET /api/memories/backup/export`
-  - Query parameter:
+  - Query parameters:
     - `scope` (default: `project`)
     - `status` (default: `all`)
   - Response:
     - `Content-Type: application/zip`
     - `Content-Disposition: attachment; filename="eling-backup-{scope}-{yyyyMMdd-HHmmss}.zip"`
 - **MCP Tool**: `eling_dev_memory_backup_export`
-  - Argument: `scope` (string, opsional), `destinationPath` (string, opsional).
-  - Jika `destinationPath` tidak diisi, simpan ke direktori backup default atau kembalikan info base64/path file.
+  - Arguments: `scope` (string, optional), `destinationPath` (string, optional).
+  - If `destinationPath` is omitted, writes to the default backup directory or returns base64 / path details.
 
 ### 3.3. Web Dashboard (`Eling.Dashboard`)
-- Tambahkan tombol **"Export Backup"** pada toolbar atau halaman `/dashboard/memories`.
-- Handler download browser menggunakan `fetch` ke `/api/memories/backup/export` dengan blob download.
+- Add an **"Export Backup"** action button to the toolbar or `/dashboard/memories` view.
+- Browser download handler uses `fetch` against `/api/memories/backup/export` triggering a blob download.
 
 ### 3.4. Desktop App (`Eling.Desktop`)
-- Tambahkan opsi **"Export Backup (.zip)"** pada toolbar `MemoriesView` / `SettingsView`.
-- Menggunakan `IStorageProvider.SaveFilePickerAsync` Avalonia untuk memilih lokasi simpan file `.zip`.
+- Add an **"Export Backup (.zip)"** option in the `MemoriesView` / `SettingsView` toolbar.
+- Uses Avalonia's `IStorageProvider.SaveFilePickerAsync` to let users pick the destination `.zip` file location.
 
 ---
 
-## 4. Penanganan Error & Validasi
-- **Scope kosong / tidak ada memori**: Tetap menghasilkan `.zip` valid dengan `manifest.json` berisi `totalMemories: 0`.
-- **Project scope belum diinisialisasi**: Mengembalikan error informatif (`ProjectScopeNotInitializedException` atau 400 Bad Request).
-- **Pembatalan / CancellationToken**: Memastikan file partial/stream dibersihkan jika operasi dibatalkan.
+## 4. Error Handling & Validation
+- **Empty scope / zero memories**: Produces a valid `.zip` containing a `manifest.json` with `totalMemories: 0`.
+- **Uninitialized project scope**: Returns an informative error (`ProjectScopeNotInitializedException` or 400 Bad Request).
+- **Cancellation / `CancellationToken`**: Ensures partial streams and temporary files are cleaned up immediately if the operation is aborted.
 
 ---
 
-## 5. Rencana Pengujian (Testing)
-- **Unit Test (`Eling.Core.Tests`)**:
-  - `ExportZipAsync_WritesValidZipArchiveWithManifestAndMemories`: Verifikasi isi zip dan file `.md`.
-  - `ExportZipAsync_RespectsScopeFiltering`: Pastikan pemisahan scope global vs project akurat.
-- **Integration Test (`Eling.Desktop.Tests` / API Tests)**:
-  - Verifikasi response HTTP header dan validitas stream `.zip`.
+## 5. Testing Strategy
+- **Unit Tests (`Eling.Core.Tests`)**:
+  - `ExportZipAsync_WritesValidZipArchiveWithManifestAndMemories`: Verifies ZIP contents and embedded `.md` files.
+  - `ExportZipAsync_RespectsScopeFiltering`: Confirms strict separation between global vs. project scope.
+- **Integration Tests (`Eling.Desktop.Tests` / Backend API Tests)**:
+  - Validates HTTP response headers and stream integrity of generated `.zip` payloads.

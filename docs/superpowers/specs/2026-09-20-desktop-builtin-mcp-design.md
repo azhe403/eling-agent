@@ -64,7 +64,7 @@ In `Eling.Backend.Bootstrap.DashboardServices.Register`:
    - Verify tool calls return expected results and handle failures gracefully.
 2. **End-to-End Desktop Verification**:
    - Start backend and desktop.
-   - Send chat prompt: *"Eling, simpan catatan bahwa proyek ini menggunakan .NET 10 dan Avalonia 12"*.
+   - Send chat prompt: *"Eling, save a note that this project uses .NET 10 and Avalonia 12"*.
    - Verify agent executes `memory_save` tool and reports success.
-   - Send follow-up prompt: *"File apa saja yang ada di root proyek ini?"*.
+   - Send follow-up prompt: *"What files are in the root of this project?"*.
    - Verify agent executes `directory_list` tool and lists repository files.

@@ -29,7 +29,7 @@ All notable changes to Eling are documented here. Follows [Keep a Changelog](htt
 - `ci`: pre-release workflow, installer repo name update.
 - `feat(pecut-10)`: verification tests, CI pipeline & cleanup; dashboard control plane API & scope selector UI; scope params through MCP; scope-aware memory application layer; scope-aware domain model & spec.
 - `refactor`: consolidate HTTP APIs into `Eling.Dashboard`; consolidate libraries into `Core/Application`.
-- `feat`: single-binary runtime (PECUT 9) with web dashboard; intention MCP tools (CRUD).
+- `feat`: single-binary runtime (PECUT 9) with web dashboard; intention domain model + filesystem storage. (The intention **MCP tools** named in commit `fbc5c90`'s message were never actually committed — see `docs/superpowers/specs/2026-08-19-intention-mcp-tools-design.md`.)
 
 ### Changed
 - `chore(build)`: isolate per-configuration `obj/` and `.bin/` output; keep runtime `.bin` separate from `.bin-test`.

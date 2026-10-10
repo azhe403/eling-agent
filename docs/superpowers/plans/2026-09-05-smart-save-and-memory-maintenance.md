@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Menambahkan kapabilitas Smart Save (local fuzzy match & surgical merge saat `SaveAsync`) dan on-demand Memory Maintenance (sweep & konsolidasi) di backend Eling.
+**Goal:** Add Smart Save capabilities (local fuzzy match & surgical merge on `SaveAsync`) and on-demand Memory Maintenance (sweep & consolidation) to the Eling backend.
 
-**Architecture:** Menggunakan pure C# deterministic tokenization + Jaccard similarity / n-gram token overlap (`MemorySimilarity`) untuk matching fuzzy tanpa AI/LLM berat. Mengintegrasikannya ke dalam `MemoryService.SaveAsync` (Smart Save) serta membangun `MemoryMaintenanceService` + MCP tool `memory_maintenance` + REST API untuk konsolidasi berkala.
+**Architecture:** Uses pure C# deterministic tokenization + Jaccard similarity / n-gram token overlap (`MemorySimilarity`) for fuzzy matching without heavy AI/LLM models. Integrates into `MemoryService.SaveAsync` (Smart Save) and builds `MemoryMaintenanceService` + `memory_maintenance` MCP tool + REST API for periodic consolidation.
 
 **Tech Stack:** C# .NET 9, SQLite FTS5 (`Eling.Core`), Minimal API & MCP SDK (`Eling.Backend`), xUnit (`Eling.Core.Tests`, `Eling.Backend.Tests`).
 
@@ -136,12 +136,12 @@ public async Task SaveAsync_FuzzySimilarActiveMemory_MergesAndUpdatesExisting()
     var index = new InMemoryIndex();
     var service = new MemoryService(storage, index);
 
-    var initial = new Memory(MemoryType.Preference, "Selalu pakai question tool untuk minta approval sebelum eksekusi", ["workflow"]);
+    var initial = new Memory(MemoryType.Preference, "Always use question tool to request approval before execution", ["workflow"]);
     var firstResult = await service.SaveAsync(initial);
     Assert.Equal(SaveAction.Created, firstResult.Action);
 
     // Save slightly extended version of the same thought
-    var incoming = new Memory(MemoryType.Preference, "Selalu gunakan question tool untuk meminta approval sebelum eksekusi bash/write", ["preference", "approval"]);
+    var incoming = new Memory(MemoryType.Preference, "Always use question tool to request approval before bash or write execution", ["preference", "approval"]);
     var secondResult = await service.SaveAsync(incoming);
 
     Assert.Equal(SaveAction.Updated, secondResult.Action);
