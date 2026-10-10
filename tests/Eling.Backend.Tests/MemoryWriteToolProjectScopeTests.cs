@@ -27,7 +27,7 @@ public sealed class MemoryWriteToolProjectScopeTests : IDisposable
         => new(new UserScope(_root), () => _now, Path.Combine(_root, "home"));
 
     [Fact]
-    public async Task Save_OnDisabledProject_RoutesToGlobalAndFlags()
+    public async Task Save_OnDisabledProject_RoutesToProjectLocalAndFlags()
     {
         var cwd = Path.Combine(_root, "acme");
         var store = NewStore();
@@ -36,24 +36,26 @@ public sealed class MemoryWriteToolProjectScopeTests : IDisposable
 
         var response = await new MemoryWriteTool(scoped, policyStore: store).SaveAsync("hello");
 
-        Assert.Equal("global", response.Scope);
+        Assert.Equal("project-local", response.Scope);
         Assert.True(response.ProjectScopeDisabled);
         Assert.False(response.InitRequired);
         Assert.Single(scoped.SavedScopes);
-        Assert.Equal("global", scoped.SavedScopes[0]);
+        Assert.Equal("project-local", scoped.SavedScopes[0]);
     }
 
     [Fact]
-    public async Task Save_OnAskUninitialized_ReturnsInitRequired()
+    public async Task Save_OnEmptyChain_SavesProjectLocalWithInitNote()
     {
         var cwd = Path.Combine(_root, "acme");
         var scoped = new FakeScopedMemoryService { Cwd = cwd, Initialized = false };
 
         var response = await new MemoryWriteTool(scoped, policyStore: NewStore()).SaveAsync("hello");
 
-        Assert.True(response.InitRequired);
-        Assert.Equal("init-required", response.Action);
-        Assert.False(response.ProjectScopeDisabled);
+        Assert.Equal("created", response.Action);
+        Assert.Equal("project-local", response.Scope);
+        Assert.False(response.InitRequired);
+        Assert.Contains("memory_init_project", response.Note);
+        Assert.Equal(["project", "project-local"], scoped.SavedScopes);
     }
 
     [Fact]
@@ -79,13 +81,17 @@ public sealed class MemoryWriteToolProjectScopeTests : IDisposable
         public Task<ScopedMemorySaveResult> SaveAsync(Memory memory, string? scope = null)
         {
             SavedScopes.Add(scope);
-            var isGlobal = string.Equals(scope?.Trim(), "global", StringComparison.OrdinalIgnoreCase);
-            if (!isGlobal && !Initialized)
+            var normalized = scope?.Trim().ToLowerInvariant();
+            var isGlobal = normalized == "global";
+            var isLocal = normalized == "project-local";
+            if (!isGlobal && !isLocal && !Initialized)
             {
                 throw new ProjectScopeNotInitializedException(Cwd);
             }
 
-            var kind = isGlobal ? MemoryScopeKind.Global : MemoryScopeKind.Project;
+            var kind = isGlobal ? MemoryScopeKind.Global
+                : isLocal ? MemoryScopeKind.ProjectLocal
+                : MemoryScopeKind.Project;
             var saved = new ScopedMemory(memory, kind, isGlobal ? null : Cwd);
             return Task.FromResult(new ScopedMemorySaveResult(saved, SaveAction.Created));
         }
@@ -115,5 +121,7 @@ public sealed class MemoryWriteToolProjectScopeTests : IDisposable
         public Task<ScopedMemory?> MoveToProjectAsync(MemoryReference source, string targetProjectRoot) => throw new NotImplementedException();
         public Task<ScopedMemory?> MoveToGlobalAsync(MemoryReference source) => throw new NotImplementedException();
         public Task<ScopedMemory?> PromoteToGlobalAsync(MemoryReference source) => throw new NotImplementedException();
+        public Task<ScopedMemory?> CopyToLocalAsync(MemoryReference source) => throw new NotImplementedException();
+        public Task<ScopedMemory?> MoveToLocalAsync(MemoryReference source) => throw new NotImplementedException();
     }
 }

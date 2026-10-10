@@ -98,6 +98,13 @@ export function MemoriesList() {
   const [memories, setMemories] = useState<Memory[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Error banner auto-dismisses so a stale failure (e.g. a transient 404)
+  // never sticks around after the next successful load.
+  useEffect(() => {
+    if (error === null) return
+    const t = setTimeout(() => setError(null), 5000)
+    return () => clearTimeout(t)
+  }, [error])
   const [type, setType] = useState("All")
   const [query, setQuery] = useState("")
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -108,7 +115,7 @@ export function MemoriesList() {
 
   const searchParams = useSearchParams()
   const scope = searchParams.get("scope") ?? "all"
-  // Tier only applies to a single-project view: shared (committed) vs local-only (machine-only).
+  // Tier only applies to a single-project view: shared (committed), local-only (machine-only), or both.
   const tier = scope !== "all" && scope !== "global"
     ? (searchParams.get("tier") ?? "project")
     : "project"
@@ -121,9 +128,9 @@ export function MemoriesList() {
   }, [router])
   const handleTierChange = useCallback((value: string) => {
     if (scope === "all" || scope === "global") return
-    if (value === "project-local")
-      router.push("/dashboard/memories?scope=" + encodeURIComponent(scope) + "&tier=project-local")
-    else router.push("/dashboard/memories?scope=" + encodeURIComponent(scope))
+    if (value === "project")
+      router.push("/dashboard/memories?scope=" + encodeURIComponent(scope))
+    else router.push("/dashboard/memories?scope=" + encodeURIComponent(scope) + "&tier=" + encodeURIComponent(value))
   }, [router, scope])
   const [promoteTarget, setPromoteTarget] = useState<Memory | null>(null)
   const [promoteAsMove, setPromoteAsMove] = useState(false)
@@ -162,28 +169,49 @@ export function MemoriesList() {
     async (triggeredBy?: string) => {
       try {
         const t = Date.now()
-        let url = `/api/aggregated/memories?limit=100&_t=${t}`
-        if (scope === "global")
-          url = `/api/global/memories?limit=100&_t=${t}`
-        else if (scope !== "all")
-          url = `/api/project/memories?projectRoot=${encodeURIComponent(scope)}&limit=100&_t=${t}` + (tier === "project-local" ? "&tier=project-local" : "")
+        const fetchJson = async (url: string) => {
+          console.log(
+            `%c[FETCH MEMORIES] 📡 Fetching fresh data${triggeredBy ? ` (Trigger: ${triggeredBy})` : ""} from ${url}`,
+            "color: #0284c7; font-weight: bold;"
+          )
+          const res = await fetch(url, {
+            cache: "no-store",
+            headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+          })
+          if (!res.ok) throw new Error(`API returned ${res.status}`)
+          const data = await res.json()
+          return Array.isArray(data) ? (data as Memory[]) : []
+        }
 
-        console.log(
-          `%c[FETCH MEMORIES] 📡 Fetching fresh data${triggeredBy ? ` (Trigger: ${triggeredBy})` : ""} from ${url}`,
-          "color: #0284c7; font-weight: bold;"
-        )
-
-        const res = await fetch(url, {
-          cache: "no-store",
-          headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
-        })
-        if (!res.ok) throw new Error(`API returned ${res.status}`)
-        const data = await res.json()
+        let raw: Memory[]
+        if (scope === "global") {
+          raw = await fetchJson(`/api/global/memories?limit=100&_t=${t}`)
+        } else if (scope !== "all" && tier === "all") {
+          const [shared, local] = await Promise.all([
+            fetchJson(`/api/project/memories?projectRoot=${encodeURIComponent(scope)}&limit=100&_t=${t}`),
+            fetchJson(`/api/project/memories?projectRoot=${encodeURIComponent(scope)}&limit=100&_t=${t}&tier=project-local`),
+          ])
+          // Local wins ties; newest first (same ordering as the aggregated view).
+          const seen = new Set<string>()
+          raw = [...local, ...shared].filter((m) => {
+            if (seen.has(m.id)) return false
+            seen.add(m.id)
+            return true
+          })
+          raw.sort((a, b) => +new Date(b.updatedAt || b.createdAt) - +new Date(a.updatedAt || a.createdAt))
+        } else if (scope !== "all") {
+          raw =
+            tier === "project-local"
+              ? await fetchJson(`/api/project/memories?projectRoot=${encodeURIComponent(scope)}&limit=100&_t=${t}&tier=project-local`)
+              : await fetchJson(`/api/project/memories?projectRoot=${encodeURIComponent(scope)}&limit=100&_t=${t}`)
+        } else {
+          raw = await fetchJson(`/api/aggregated/memories?limit=100&_t=${t}`)
+        }
 
         // Trust the backend: it is the single source of truth for memory data,
         // already deduped by MemoryMerger and RuntimeRegistry.
-        const normalized: Memory[] = Array.isArray(data)
-          ? data.map((m: Memory) => ({
+        const normalized: Memory[] = raw
+          .map((m: Memory) => ({
               ...m,
               scope:
                 (m.scope as string) ??
@@ -191,7 +219,7 @@ export function MemoriesList() {
                   ? "global"
                   : scope === "all"
                     ? (m.scope ?? "project")
-                    : tier),
+                    : tier === "all" ? "project" : tier),
               project:
                 m.project ??
                 (scope !== "all" && scope !== "global"
@@ -201,9 +229,9 @@ export function MemoriesList() {
                     }
                   : null),
             }))
-          : []
 
         setMemories(normalized)
+        setError(null)
         console.log(
           `%c[MEMORIES LOADED] ✅ ${normalized.length} memories loaded at ${new Date().toLocaleTimeString()}`,
           "color: #16a34a; font-weight: bold;"
@@ -290,6 +318,23 @@ export function MemoriesList() {
       )
       setEditingId(null)
       scrollToTop()
+    }
+  }
+
+  async function moveTier(m: Memory, target: "project" | "project-local") {
+    if (m.scope === target || !m.project?.root) return
+    const root = m.project.root
+    const url = target === "project-local" ? "/api/scoped/move-to-local" : "/api/scoped/move-to-project"
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: m.id, sourceScope: m.scope, sourceProjectRoot: root, targetProjectRoot: root }),
+    })
+    if (res.ok) {
+      await load()
+      scrollToTop()
+    } else {
+      setError(`Move failed: ${res.status}`)
     }
   }
 
@@ -449,7 +494,7 @@ export function MemoriesList() {
               <div className="rounded-lg border p-3 text-sm">
                 <div className="text-muted-foreground">Scope</div>
                 <div className="truncate text-sm" title={scope}>
-                  {scopeLabel(scope)}{scope !== "all" && scope !== "global" && tier === "project-local" ? " · 💻 Local" : ""}
+                  {scopeLabel(scope)}{scope !== "all" && scope !== "global" && tier !== "project" ? (tier === "all" ? " · 🗂 All tiers" : " · 💻 Local") : ""}
                 </div>
               </div>
             </>
@@ -461,82 +506,94 @@ export function MemoriesList() {
         </div>
 
         <div className="sticky top-0 z-10 flex flex-col gap-2 bg-background pb-2 pt-1">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <Input
-                placeholder="Search content or memory ID..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="max-w-xs"
-              />
-              <Select value={scope} onValueChange={handleScopeChange}>
-                <SelectTrigger
-                  aria-label="Memory scope"
-                  title={scope}
-                  className="w-full max-w-44 shrink-0 truncate sm:max-w-72"
-                >
-                  <SelectValue placeholder="Select scope...">
-                    {(v: string | null) => scopeLabel(v)}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent
-                  side="bottom"
-                  align="start"
-                  alignItemWithTrigger={false}
-                  style={{
-                    width: "auto",
-                    maxWidth: "min(36rem, calc(100vw - 2rem))",
-                  }}
-                >
-                  <SelectItem value="all">🌐 All projects</SelectItem>
-                  <SelectItem value="global">🌐 Global Scope</SelectItem>
-                  {scopes.map((s) => (
-                    <SelectItem key={s.root.toLowerCase()} value={s.root} title={s.root}>
-                      <span className="flex min-w-0 flex-col items-start">
-                        <span>📁 {s.name}</span>
-                        <span className="text-xs whitespace-normal break-all text-muted-foreground">
-                          {s.root}
-                        </span>
+          <div className="flex items-center gap-2">
+            <Input
+              placeholder="Search content or memory ID..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="min-w-0 flex-1"
+            />
+            <Select value={scope} onValueChange={handleScopeChange}>
+              <SelectTrigger
+                aria-label="Memory scope"
+                title={scope}
+                className="w-36 shrink-0 truncate sm:w-72"
+              >
+                <SelectValue placeholder="Select scope...">
+                  {(v: string | null) => scopeLabel(v)}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent
+                side="bottom"
+                align="start"
+                alignItemWithTrigger={false}
+                style={{
+                  width: "auto",
+                  maxWidth: "min(36rem, calc(100vw - 2rem))",
+                }}
+              >
+                <SelectItem value="global">🌐 Global Scope</SelectItem>
+                <SelectItem value="all">🌐 All projects</SelectItem>
+                {scopes.map((s) => (
+                  <SelectItem key={s.root.toLowerCase()} value={s.root} title={s.root}>
+                    <span className="flex min-w-0 flex-col items-start">
+                      <span>📁 {s.name}</span>
+                      <span className="text-xs whitespace-normal break-all text-muted-foreground">
+                        {s.root}
                       </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {scope !== "all" && scope !== "global" && (
-                <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Project tier">
-                  {(["project", "project-local"] as const).map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => handleTierChange(t)}
-                      className={
-                        tier === t
-                          ? "rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
-                          : "rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                      }
-                      title={t === "project-local" ? "Machine-only, never committed" : "Shared, committed with the repo"}
-                    >
-                      {t === "project-local" ? "💻 Local" : "📁 Shared"}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {TYPES.map((t) => (
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+
+          {scope !== "all" && scope !== "global" && (
+            <div
+              className="flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 p-1"
+              role="group"
+              aria-label="Project tier"
+            >
+              {(["all", "project-local", "project"] as const).map((t) => (
                 <button
                   key={t}
-                  onClick={() => setType(t)}
+                  onClick={() => handleTierChange(t)}
                   className={
-                    type === t
-                      ? "rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
-                      : "rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                    (tier === t
+                      ? "rounded-md bg-background px-3 py-1 text-xs font-medium text-foreground shadow-sm"
+                      : "rounded-md px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground") +
+                    " whitespace-nowrap"
                   }
                 >
-                  {t}
+                  {t === "project-local" ? "💻 Local" : t === "all" ? "🗂 All" : "📁 Shared"}
                 </button>
               ))}
             </div>
+          )}
+
+          <div
+            className="flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 p-1"
+            role="group"
+            aria-label="Memory type"
+          >
+            {TYPES.map((t) => (
+              <button
+                key={t}
+                onClick={() => setType(t)}
+                className={
+                  (type === t
+                    ? "rounded-md bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm"
+                    : "rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground") +
+                  " whitespace-nowrap"
+                }
+              >
+                {t}
+              </button>
+            ))}
           </div>
+        </div>
         </div>
 
         {error && (
@@ -575,6 +632,7 @@ export function MemoriesList() {
                   onEdit={(id) => setEditingId(id)}
                   onDelete={(target) => setDeleteTarget(target)}
                   onPromote={(target) => setPromoteTarget(target)}
+                  onMoveTier={(target, tier) => void moveTier(target, tier)}
                   onCopyToProject={(m, root) => {
                     setCopyTarget(m)
                     setCopyProjectRoot(root)

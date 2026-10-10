@@ -55,7 +55,7 @@ public sealed class MemoryWriteTool
         [Description("Type of memory: fact, preference, decision, lesson, note. Defaults to 'fact'.")] string type = "fact",
         [Description("Optional tags for categorization")] string[]? tags = null,
         [Description("Optional source reference")] string? source = null,
-        [Description("Scope: project, project-local, global, or auto. Defaults to 'project'. Use 'project-local' for machine-only memories of this project (never committed).")] string scope = "project",
+        [Description("Scope: project, project-local, global, or auto. Defaults to 'project'. Decide the scope yourself from the content and never ask the user: durable shareable knowledge (decisions, conventions, rules, lessons) goes to 'project'; in-progress or temporary state goes to 'project-local' (machine-only, never committed); cross-project personal preferences go to 'global'.")] string scope = "project",
         [Description("Optional logical name of an ancestor project to target (e.g. the parent .eling). Requires this workspace to already have its own .eling scope; never creates a scope.")] string? project = null)
     {
         try
@@ -106,24 +106,23 @@ public sealed class MemoryWriteTool
                     projectScopeDisabled = policy.Resolve(_scoped.Cwd) == ProjectScopeDecision.Disabled;
                 }
 
-                if (projectScopeDisabled && !_scoped.HasOwnScope && _scoped.ChainRoots.Count > 0 && !wantsGlobal)
+                if (projectScopeDisabled && !wantsGlobal)
                 {
-                    var nearestAncestorRoot = _scoped.ChainRoots[0];
-                    var ancestorSaved = await _scoped.SaveToProjectAsync(memory, nearestAncestorRoot);
-                    _logger?.LogInformation("Saved memory '{Id}' to ancestor project root '{Root}' because local project scope is disabled", ancestorSaved.Id, nearestAncestorRoot);
+                    // Declined init: project-bound saves land in the machine-only
+                    // project-local shard — never global, never a shared scope.
+                    var localSaved = await _scoped.SaveAsync(memory, "project-local");
+                    _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' to project-local (project scope disabled)", localSaved.Id, localSaved.Action);
                     await _notifier.NotifyAsync("mcp");
-                    await _scoped.RebuildProjectIndexAsync(nearestAncestorRoot);
+                    await _scoped.RebuildIndexAsync("project-local");
                     return SaveMemoryResponse.From(
-                        ancestorSaved,
+                        localSaved,
                         projectScopeDisabled: true,
-                        note: $"Local project scope is disabled for this workspace; saved to nearest ancestor scope '{Path.GetFileName(nearestAncestorRoot)}'.");
+                        note: "Project scope is disabled for this workspace; saved to project-local (machine-only, never committed).");
                 }
-
-                var effectiveScope = projectScopeDisabled ? "global" : scope;
 
                 try
                 {
-                    var scoped = await _scoped.SaveAsync(memory, effectiveScope);
+                    var scoped = await _scoped.SaveAsync(memory, scope);
                     _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' scope '{Scope}' type '{Type}' ({Reason})", scoped.Id, scoped.Action, scoped.Memory.Type, scoped.Scope, scoped.Reason);
                     await _notifier.NotifyAsync("mcp");
 
@@ -144,13 +143,33 @@ public sealed class MemoryWriteTool
                         await _scoped.RebuildIndexAsync("project");
                     }
 
-                    return SaveMemoryResponse.From(
-                        scoped,
-                        projectScopeDisabled,
-                        projectScopeDisabled ? "Project scope is disabled for this workspace; saved to global." : null);
+                    return SaveMemoryResponse.From(scoped);
                 }
                 catch (ProjectScopeNotInitializedException ex)
                 {
+                    // Empty chain (no .eling anywhere up): save straight to the
+                    // machine-only shard instead of blocking. Sharing via git
+                    // still needs init — the note tells the agent to offer
+                    // memory_init_project when the user wants that. Explicit
+                    // ancestor targeting keeps blocking, as does an unwired
+                    // local tier (InvalidOperationException below).
+                    if (string.IsNullOrWhiteSpace(project) && _scoped is not null && _scoped.ChainRoots.Count == 0)
+                    {
+                        try
+                        {
+                            var localSaved = await _scoped.SaveAsync(memory, "project-local");
+                            _logger?.LogInformation("Saved memory '{Id}' to project-local (no project scope initialized)", localSaved.Id);
+                            await _notifier.NotifyAsync("mcp");
+                            await _scoped.RebuildIndexAsync("project-local");
+                            return SaveMemoryResponse.From(
+                                localSaved,
+                                note: "No project scope initialized; saved to project-local (machine-only, never committed). Offer memory_init_project if the user wants this shared via git.");
+                        }
+                        catch (Exception localEx) when (localEx is ProjectScopeNotInitializedException or InvalidOperationException)
+                        {
+                            // No local tier to fall back to — fall through to init-required.
+                        }
+                    }
                     _logger?.LogWarning("memory_save blocked: {Message}", ex.Message);
                     return SaveMemoryResponse.FromInitRequired(ex.Cwd);
                 }

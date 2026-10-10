@@ -17,6 +17,7 @@ export type MemoryCardProps = {
   onDelete: (m: Memory) => void
   onPromote: (m: Memory) => void
   onCopyToProject: (m: Memory, projectRoot: string) => void
+  onMoveTier: (m: Memory, target: "project" | "project-local") => void
 }
 
 export function MemoryCard({
@@ -28,6 +29,7 @@ export function MemoryCard({
   onDelete,
   onPromote,
   onCopyToProject,
+  onMoveTier,
 }: MemoryCardProps) {
   return (
     <div className="group flex flex-col gap-2.5 rounded-xl border bg-card p-4">
@@ -57,7 +59,7 @@ export function MemoryCard({
             {m.scope === "global"
               ? "🌐 Global"
               : m.scope === "project-local"
-                ? "💻 Local"
+                ? (m.project ? `💻 ${m.project.id} - Local` : "💻 Local")
                 : m.project
                 ? `📁 ${m.project.id}`
                 : "📁 Project"}
@@ -75,6 +77,30 @@ export function MemoryCard({
               title="Promote to Global (copy, original stays)"
             >
               ↑ Global
+            </Button>
+          )}
+          {m.scope === "project" && m.project?.root && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground hover:text-foreground text-xs h-7 px-2"
+              onClick={() => onMoveTier(m, "project-local")}
+              aria-label="Move to local-only"
+              title="Move to Local (machine-only, leaves shared)"
+            >
+              💻 Local
+            </Button>
+          )}
+          {m.scope === "project-local" && m.project?.root && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground hover:text-foreground text-xs h-7 px-2"
+              onClick={() => onMoveTier(m, "project")}
+              aria-label="Move to shared"
+              title="Move to Shared (committed with the repo)"
+            >
+              📁 Shared
             </Button>
           )}
           {m.scope === "global" && canCopyToProject && (

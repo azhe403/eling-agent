@@ -17,6 +17,8 @@ public interface IScopedMemoryService
     Task<ScopedMemory?> MoveToProjectAsync(MemoryReference source, string targetProjectRoot);
     Task<ScopedMemory?> MoveToGlobalAsync(MemoryReference source);
     Task<ScopedMemory?> PromoteToGlobalAsync(MemoryReference source);
+    Task<ScopedMemory?> CopyToLocalAsync(MemoryReference source);
+    Task<ScopedMemory?> MoveToLocalAsync(MemoryReference source);
 
     // Raw services for isolation checks
     IMemoryService ProjectService { get; }

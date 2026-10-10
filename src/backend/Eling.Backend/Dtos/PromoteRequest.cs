@@ -3,4 +3,5 @@ namespace Eling.Backend.Dtos;
 public record PromoteRequest(
     string Id,
     string SourceProjectRoot,
-    bool Move = false);
+    bool Move = false,
+    string SourceScope = "project");

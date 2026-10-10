@@ -161,4 +161,81 @@ public sealed class ScopedMemoryServiceLocalTests
         Assert.Empty(localB.All);
         Assert.Empty(await serviceB.ListAsync("project-local"));
     }
+
+    [Fact]
+    public async Task MoveToLocal_MovesProjectMemory()
+    {
+        var (service, project, local, _) = Build();
+        var saved = await service.SaveAsync(NewMemory("movable"), "project");
+
+        var moved = await service.MoveToLocalAsync(MemoryReference.ForProject(saved.Scoped.Memory.Id, ProjectRoot));
+
+        Assert.NotNull(moved);
+        Assert.Equal(MemoryScopeKind.ProjectLocal, moved.Scope);
+        Assert.Empty(project.All);
+        Assert.Single(local.All);
+    }
+
+    [Fact]
+    public async Task MoveToProject_MovesLocalMemory()
+    {
+        var (service, project, local, _) = Build();
+        var saved = await service.SaveAsync(NewMemory("unhide"), "project-local");
+
+        var moved = await service.MoveToProjectAsync(
+            MemoryReference.ForProjectLocal(saved.Scoped.Memory.Id, CanonicalRoot), ProjectRoot);
+
+        Assert.NotNull(moved);
+        Assert.Equal(MemoryScopeKind.Project, moved.Scope);
+        Assert.Empty(local.All);
+        Assert.Single(project.All);
+    }
+
+    [Fact]
+    public async Task CopyToGlobal_FromLocalSource()
+    {
+        var (service, _, _, global) = Build();
+        var saved = await service.SaveAsync(NewMemory("promotable"), "project-local");
+
+        var copied = await service.CopyToGlobalAsync(
+            MemoryReference.ForProjectLocal(saved.Scoped.Memory.Id, CanonicalRoot));
+
+        Assert.NotNull(copied);
+        Assert.Equal(MemoryScopeKind.Global, copied.Scope);
+        Assert.Single(global.All);
+    }
+
+    [Fact]
+    public async Task MoveToLocal_UnwiredLocal_Throws()
+    {
+        var project = new FakeMemoryService();
+        var global = new FakeMemoryService();
+        var service = new ScopedMemoryService(
+            [new ProjectLevel(new ProjectScope(ProjectRoot), project)],
+            global,
+            new MemoryScopePolicy(),
+            new MemoryMerger(),
+            ProjectRoot);
+        var saved = await service.SaveAsync(NewMemory("stuck"), "project");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.MoveToLocalAsync(MemoryReference.ForProject(saved.Scoped.Memory.Id, ProjectRoot)));
+    }
+
+    [Fact]
+    public async Task Move_PreservesIdAndCreatedAt()
+    {
+        var (service, _, _, _) = Build();
+        var saved = await service.SaveAsync(NewMemory("identity"), "project");
+        var before = saved.Scoped.Memory.CreatedAt;
+        Assert.True(before <= DateTimeOffset.UtcNow);
+
+        var moved = await service.MoveToLocalAsync(
+            MemoryReference.ForProject(saved.Scoped.Memory.Id, ProjectRoot));
+
+        Assert.NotNull(moved);
+        Assert.Equal(saved.Scoped.Memory.Id, moved.Memory.Id);
+        Assert.Equal(before, moved.Memory.CreatedAt);
+        Assert.True(moved.Memory.UpdatedAt >= before);
+    }
 }

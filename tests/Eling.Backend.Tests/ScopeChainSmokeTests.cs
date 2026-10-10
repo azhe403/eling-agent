@@ -122,11 +122,13 @@ public sealed class ScopeChainSmokeTests : IDisposable
         var status = await new MemoryProjectStatusTool(fresh).GetStatusAsync();
         Assert.Equal("uninitialized", status.Posture);
 
-        // save without any .eling: init-required, nothing created
+        // save without any .eling lands in project-local; nothing created in the repo
         var (scoped, write) = await BuildFromFresh(fresh);
         Assert.False(scoped.IsInitialized);
-        var blocked = await write.SaveAsync("should be blocked");
-        Assert.Equal("init-required", blocked.Action);
+        var localSave = await write.SaveAsync("goes local");
+        Assert.Equal("created", localSave.Action);
+        Assert.Equal("project-local", localSave.Scope);
+        Assert.Contains("memory_init_project", localSave.Note);
         Assert.False(Directory.Exists(Path.Combine(fresh, ".eling")));
 
         // after consent + init, save works and dir exists

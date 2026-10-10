@@ -639,9 +639,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetProjectRoot);
 
-        IMemoryService sourceService = source.Scope == MemoryScopeKind.Project
-            ? ResolveProjectLevel(source.ProjectRoot)
-            : _globalService;
+        IMemoryService sourceService = ResolveSourceService(source);
         var memory = await sourceService.GetByIdAsync(source.Id);
         if (memory is null) return null;
 
@@ -651,6 +649,15 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         return new ScopedMemory(saved, MemoryScopeKind.Project, targetProjectRoot);
     }
 
+    /// <summary>Resolves the read service for any scope, including project-local.</summary>
+    private IMemoryService ResolveSourceService(MemoryReference source) => source.Scope switch
+    {
+        MemoryScopeKind.ProjectLocal => _localService ?? throw new InvalidOperationException(
+            "Project-local memory is not wired for this workspace."),
+        MemoryScopeKind.Project => ResolveProjectLevel(source.ProjectRoot),
+        _ => _globalService,
+    };
+
     public async Task<ScopedMemory?> CopyToGlobalAsync(MemoryReference source)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -659,7 +666,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
             throw new InvalidOperationException("Source is already Global");
         }
 
-        var sourceService = ResolveProjectLevel(source.ProjectRoot);
+        var sourceService = ResolveSourceService(source);
         var memory = await sourceService.GetByIdAsync(source.Id);
         if (memory is null) return null;
 
@@ -676,7 +683,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
             throw new InvalidOperationException("Source is already Global");
         }
 
-        var sourceService = ResolveProjectLevel(source.ProjectRoot);
+        var sourceService = ResolveSourceService(source);
         var memory = await sourceService.GetByIdAsync(source.Id);
         if (memory is null) return null;
 
@@ -684,6 +691,15 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         var saved = await _globalService.SaveAsync(copy);
         return new ScopedMemory(saved, MemoryScopeKind.Global, null);
     }
+
+    /// <summary>
+    /// Move identity: the moved item keeps its ULID and creation date so the
+    /// user's perspective (same item, new tier) survives the tier switch.
+    /// Copies intentionally stay fresh (new identity).
+    /// </summary>
+    private static Memory MoveCopy(Memory source)
+        => new(source.Type, source.Content, source.Tags, source.Source, source.Status,
+            source.Id, source.CreatedAt, DateTimeOffset.UtcNow);
 
     public async Task<ScopedMemory?> MoveToProjectAsync(MemoryReference source, string targetProjectRoot)
     {
@@ -694,15 +710,12 @@ public sealed class ScopedMemoryService : IScopedMemoryService
             throw new InvalidOperationException("Source and target project are the same");
         }
 
-        IMemoryService sourceService = source.Scope == MemoryScopeKind.Project
-            ? ResolveProjectLevel(source.ProjectRoot)
-            : _globalService;
+        IMemoryService sourceService = ResolveSourceService(source);
         var memory = await sourceService.GetByIdAsync(source.Id);
         if (memory is null) return null;
 
-        var copy = new Memory(memory.Type, memory.Content, memory.Tags, memory.Source, memory.Status);
         var (targetService, _) = ResolveTargetService(targetProjectRoot);
-        var saved = await targetService.SaveAsync(copy);
+        var saved = await targetService.SaveAsync(MoveCopy(memory));
         await sourceService.DeleteAsync(source.Id);
 
         return new ScopedMemory(saved, MemoryScopeKind.Project, targetProjectRoot);
@@ -716,14 +729,54 @@ public sealed class ScopedMemoryService : IScopedMemoryService
             throw new InvalidOperationException("Source is already Global");
         }
 
-        var sourceService = ResolveProjectLevel(source.ProjectRoot);
+        var sourceService = ResolveSourceService(source);
         var memory = await sourceService.GetByIdAsync(source.Id);
         if (memory is null) return null;
 
-        var copy = new Memory(memory.Type, memory.Content, memory.Tags, memory.Source, memory.Status);
-        var saved = await _globalService.SaveAsync(copy);
+        var saved = await _globalService.SaveAsync(MoveCopy(memory));
         await sourceService.DeleteAsync(source.Id);
 
         return new ScopedMemory(saved, MemoryScopeKind.Global, null);
+    }
+
+    /// <summary>
+    /// Copies into this workspace's own project-local shard. Move = copy +
+    /// delete source (delete runs only after the copy is confirmed saved, so
+    /// an item always survives in exactly one tier).
+    /// </summary>
+    public async Task<ScopedMemory?> CopyToLocalAsync(MemoryReference source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (source.Scope == MemoryScopeKind.ProjectLocal)
+        {
+            throw new InvalidOperationException("Source is already project-local");
+        }
+
+        var sourceService = ResolveSourceService(source);
+        var memory = await sourceService.GetByIdAsync(source.Id);
+        if (memory is null) return null;
+
+        var local = LocalOrThrow();
+        var copy = new Memory(memory.Type, memory.Content, memory.Tags, memory.Source, memory.Status);
+        var saved = await local.SaveAsync(copy);
+        return new ScopedMemory(saved, MemoryScopeKind.ProjectLocal, _canonicalRoot);
+    }
+
+    public async Task<ScopedMemory?> MoveToLocalAsync(MemoryReference source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (source.Scope == MemoryScopeKind.ProjectLocal)
+        {
+            throw new InvalidOperationException("Source is already project-local");
+        }
+
+        var sourceService = ResolveSourceService(source);
+        var memory = await sourceService.GetByIdAsync(source.Id);
+        if (memory is null) return null;
+
+        var local = LocalOrThrow();
+        var saved = await local.SaveAsync(MoveCopy(memory));
+        await sourceService.DeleteAsync(source.Id);
+        return new ScopedMemory(saved, MemoryScopeKind.ProjectLocal, _canonicalRoot);
     }
 }

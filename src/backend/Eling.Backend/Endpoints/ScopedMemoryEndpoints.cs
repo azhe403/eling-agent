@@ -35,6 +35,8 @@ public static class ScopedMemoryEndpoints
         copy.MapPost("/move-to-project", MoveToProjectAsync);
         copy.MapPost("/promote-to-global", PromoteToGlobalAsync);
         copy.MapPost("/move-to-global", MoveToGlobalAsync);
+        copy.MapPost("/copy-to-local", CopyToLocalAsync);
+        copy.MapPost("/move-to-local", MoveToLocalAsync);
 
         return app;
     }
@@ -348,42 +350,46 @@ public static class ScopedMemoryEndpoints
 
     // ---- Copy / Promote ----
 
+    private static bool IsLocalScope(string? scope)
+        => string.Equals(scope?.Trim(), "project-local", StringComparison.OrdinalIgnoreCase);
+
+    private static IMemoryService? ResolveCopySource(
+        RuntimeRegistry registry, string? sourceScope, string? sourceProjectRoot, out string? sourceCanonicalRoot)
+    {
+        sourceCanonicalRoot = null;
+        if (string.Equals(sourceScope?.Trim(), "global", StringComparison.OrdinalIgnoreCase))
+        {
+            return registry.GetGlobalMemoryService();
+        }
+        if (string.IsNullOrWhiteSpace(sourceProjectRoot)) return null;
+        if (IsLocalScope(sourceScope))
+        {
+            return registry.TryResolveLocalServiceByScopeRoot(sourceProjectRoot, out sourceCanonicalRoot);
+        }
+        return registry.TryResolveMemoryServiceByScopeRoot(sourceProjectRoot);
+    }
+
     private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>>> CopyToProjectAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, CopyRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Id)) return TypedResults.BadRequest("Id is required");
         if (string.IsNullOrWhiteSpace(request.TargetProjectRoot)) return TypedResults.BadRequest("TargetProjectRoot is required");
         if (!TryParseMemoryId(request.Id, out var memoryId)) return TypedResults.NotFound();
 
-        Memory? sourceMemory = null;
-        if (request.SourceScope == "global")
-        {
-            sourceMemory = await registry.GetGlobalMemoryService().GetByIdAsync(memoryId);
-        }
-        else
-        {
-            if (string.IsNullOrWhiteSpace(request.SourceProjectRoot)) return TypedResults.BadRequest("SourceProjectRoot required for project source");
-            var srcService = registry.TryResolveMemoryServiceByScopeRoot(request.SourceProjectRoot);
-            if (srcService is null) return TypedResults.NotFound();
-            sourceMemory = await srcService.GetByIdAsync(memoryId);
-        }
+        var srcService = ResolveCopySource(registry, request.SourceScope, request.SourceProjectRoot, out _);
+        if (srcService is null) return TypedResults.NotFound();
+        var sourceMemory = await srcService.GetByIdAsync(memoryId);
         if (sourceMemory is null) return TypedResults.NotFound();
 
         var targetService = registry.TryResolveMemoryServiceByScopeRoot(request.TargetProjectRoot);
         if (targetService is null) return TypedResults.BadRequest($"Target project '{request.TargetProjectRoot}' not alive");
 
-        var copy = new Memory(sourceMemory.Type, sourceMemory.Content, sourceMemory.Tags, sourceMemory.Source, sourceMemory.Status);
+        var copy = request.Move
+            ? new Memory(sourceMemory.Type, sourceMemory.Content, sourceMemory.Tags, sourceMemory.Source, sourceMemory.Status, sourceMemory.Id, sourceMemory.CreatedAt, DateTimeOffset.UtcNow)
+            : new Memory(sourceMemory.Type, sourceMemory.Content, sourceMemory.Tags, sourceMemory.Source, sourceMemory.Status);
         var saved = await targetService.SaveAsync(copy);
         if (request.Move)
         {
-            if (request.SourceScope == "global")
-            {
-                await registry.GetGlobalMemoryService().DeleteAsync(memoryId);
-            }
-            else if (!string.IsNullOrWhiteSpace(request.SourceProjectRoot))
-            {
-                var srcService = registry.TryResolveMemoryServiceByScopeRoot(request.SourceProjectRoot);
-                if (srcService is not null) await srcService.DeleteAsync(memoryId);
-            }
+            await srcService.DeleteAsync(memoryId);
         }
         broadcaster.Notify("dashboard");
         return TypedResults.Ok(ScopedMemoryDto.From(saved, MemoryScopeKind.Project, request.TargetProjectRoot));
@@ -400,12 +406,14 @@ public static class ScopedMemoryEndpoints
         if (string.IsNullOrWhiteSpace(request.Id)) return TypedResults.BadRequest("Id is required");
         if (string.IsNullOrWhiteSpace(request.SourceProjectRoot)) return TypedResults.BadRequest("SourceProjectRoot is required");
         if (!TryParseMemoryId(request.Id, out var memoryId)) return TypedResults.NotFound();
-        var srcService = registry.TryResolveMemoryServiceByScopeRoot(request.SourceProjectRoot);
+        var srcService = ResolveCopySource(registry, request.SourceScope, request.SourceProjectRoot, out _);
         if (srcService is null) return TypedResults.NotFound();
         var sourceMemory = await srcService.GetByIdAsync(memoryId);
         if (sourceMemory is null) return TypedResults.NotFound();
-        var copy = new Memory(sourceMemory.Type, sourceMemory.Content, sourceMemory.Tags, sourceMemory.Source, sourceMemory.Status);
-        var saved = await registry.GetGlobalMemoryService().SaveAsync(copy);
+        var promoteCopy = request.Move
+            ? new Memory(sourceMemory.Type, sourceMemory.Content, sourceMemory.Tags, sourceMemory.Source, sourceMemory.Status, sourceMemory.Id, sourceMemory.CreatedAt, DateTimeOffset.UtcNow)
+            : new Memory(sourceMemory.Type, sourceMemory.Content, sourceMemory.Tags, sourceMemory.Source, sourceMemory.Status);
+        var saved = await registry.GetGlobalMemoryService().SaveAsync(promoteCopy);
         if (request.Move)
         {
             // Move semantics: delete the source after the global copy is confirmed saved.
@@ -413,6 +421,36 @@ public static class ScopedMemoryEndpoints
         }
         broadcaster.Notify("dashboard");
         return TypedResults.Ok(ScopedMemoryDto.From(saved, MemoryScopeKind.Global, null));
+    }
+
+    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>>> CopyToLocalAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, CopyRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Id)) return TypedResults.BadRequest("Id is required");
+        if (string.IsNullOrWhiteSpace(request.TargetProjectRoot)) return TypedResults.BadRequest("TargetProjectRoot is required");
+        if (!TryParseMemoryId(request.Id, out var memoryId)) return TypedResults.NotFound();
+        var srcService = ResolveCopySource(registry, request.SourceScope, request.SourceProjectRoot, out _);
+        if (srcService is null) return TypedResults.NotFound();
+        var sourceMemory = await srcService.GetByIdAsync(memoryId);
+        if (sourceMemory is null) return TypedResults.NotFound();
+
+        var targetLocal = registry.TryResolveLocalServiceByScopeRoot(request.TargetProjectRoot, out var canonicalRoot, createIfMissing: true);
+        if (targetLocal is null) return TypedResults.BadRequest($"Target project '{request.TargetProjectRoot}' not alive");
+        var localCopy = request.Move
+            ? new Memory(sourceMemory.Type, sourceMemory.Content, sourceMemory.Tags, sourceMemory.Source, sourceMemory.Status, sourceMemory.Id, sourceMemory.CreatedAt, DateTimeOffset.UtcNow)
+            : new Memory(sourceMemory.Type, sourceMemory.Content, sourceMemory.Tags, sourceMemory.Source, sourceMemory.Status);
+        var saved = await targetLocal.SaveAsync(localCopy);
+        if (request.Move)
+        {
+            await srcService.DeleteAsync(memoryId);
+        }
+        broadcaster.Notify("dashboard");
+        return TypedResults.Ok(ScopedMemoryDto.From(saved, MemoryScopeKind.ProjectLocal, canonicalRoot));
+    }
+
+    private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>>> MoveToLocalAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, CopyRequest request)
+    {
+        var moveRequest = request with { Move = true };
+        return await CopyToLocalAsync(registry, broadcaster, moveRequest);
     }
 
     private static async Task<Results<Ok<ScopedMemoryDto>, NotFound, BadRequest<string>>> MoveToGlobalAsync(RuntimeRegistry registry, MemoryChangeBroadcaster broadcaster, PromoteRequest request)

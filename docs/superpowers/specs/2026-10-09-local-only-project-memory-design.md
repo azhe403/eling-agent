@@ -118,9 +118,16 @@ Merge order: `project-local > project > global`. Same normalized content across 
 
 ## 8. Dashboard (minimal)
 
-- Scope selector gains `Project-Local` alongside `Global` / `Project` / `All`.
+- Scope selector gains `Project-Local` alongside `Global` / `Project` / `All`. Inside a project view, a `Shared | Local | All` tier toggle switches tiers (All merges both, local wins ties).
 - Badges distinguish `project-local` from `project` (shared) and `global`.
 - Create from aggregate view requires explicit destination (never save to "All").
+
+## 8b. Move Between Tiers (no dialog)
+
+- Inline `Shared | Local` toggle on each project/project-local card. Click moves immediately (no confirmation dialog).
+- Backend move endpoints work both directions: shared→local, local→shared, local→global. Global items keep the existing copy dialog.
+- Move = copy + delete source (confirmed-saved first). A move preserves ULID and creation date (UpdatedAt refreshes); a copy mints fresh identity. An item lives in exactly one tier.
+- `disabled`-policy workspaces: move targets follow save routing (project-bound ends local).
 
 ---
 
@@ -153,4 +160,5 @@ Given repo R with worktrees W1 + W2, and unrelated repo S:
 - Save `project-local` in W1 → visible in W2 `merged`, not in S.
 - Save `project` in W1 → committed under `<repo>/.eling/memories/`, nothing new appears in repo working tree for `project-local` saves (`git status` clean).
 - `merged` order: local hit ranks above same-content project/global hit.
-- `disabled` policy reroutes `project-local` saves to `global`, same as `project` (a disabled workspace keeps no project state of either tier).
+- `disabled` policy reroutes project-bound saves to `project-local` (machine-only), never to `global` or a shared scope.
+- Empty chain (no `.eling` anywhere, no decision yet): default saves go straight to `project-local` with a note offering `memory_init_project` for git sharing. Ancestor-scope workspaces keep the consent-gated adoption flow.
