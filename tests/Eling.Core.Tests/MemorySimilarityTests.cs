@@ -51,8 +51,8 @@ public class MemorySimilarityTests
     public void CalculateSimilarity_Paraphrase_ReturnsAboveDefaultThreshold()
     {
         var score = MemorySimilarity.CalculateSimilarity(
-            "Selalu pakai question tool untuk minta approval sebelum eksekusi",
-            "Selalu gunakan question tool untuk meminta approval sebelum eksekusi bash/write"
+            "Always use the question tool to ask for approval before execution",
+            "Always use the question tool to request approval before bash/write execution"
         );
         Assert.True(score > 0.7);
     }

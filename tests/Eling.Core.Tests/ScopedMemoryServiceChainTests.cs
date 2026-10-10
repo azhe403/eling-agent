@@ -355,10 +355,10 @@ public sealed class ScopedMemoryServiceChainTests
     {
         var (service, child, parent, _) = Build();
 
-        var childMem = new Memory.Memory(MemoryType.Preference, "Selalu gunakan conventional commit di semua repo", ["git"]);
+        var childMem = new Memory.Memory(MemoryType.Preference, "Always use conventional commits in every repo", ["git"]);
         await child.SaveAsync(childMem);
 
-        var incoming = new Memory.Memory(MemoryType.Preference, "Selalu gunakan conventional commit di semua repo dengan delay", ["workflow"]);
+        var incoming = new Memory.Memory(MemoryType.Preference, "Always use conventional commits in every repo with a delay", ["workflow"]);
         var result = await service.SaveToProjectAsync(incoming, ParentRoot);
 
         Assert.Equal(ParentRoot, result.ProjectRoot);
@@ -372,15 +372,15 @@ public sealed class ScopedMemoryServiceChainTests
     {
         var (service, child, parent, global) = Build();
 
-        var globalRule = new Memory.Memory(MemoryType.Preference, "Selalu lakukan git hygiene check sebelum commit", ["hygiene", "git"]);
+        var globalRule = new Memory.Memory(MemoryType.Preference, "Always run a git hygiene check before commit", ["hygiene", "git"]);
         await global.SaveAsync(globalRule);
         _output?.WriteLine($"[Step 1] Initialized Global Memory: ID={globalRule.Id}, Content='{globalRule.Content}'");
 
-        var ancestorDecision = new Memory.Memory(MemoryType.Decision, "Gunakan REST JSON API untuk integrasi modul internal", ["api", "architecture"]);
+        var ancestorDecision = new Memory.Memory(MemoryType.Decision, "Use a REST JSON API for internal module integration", ["api", "architecture"]);
         await parent.SaveAsync(ancestorDecision);
         _output?.WriteLine($"[Step 2] Initialized Ancestor Memory: ID={ancestorDecision.Id}, Content='{ancestorDecision.Content}'");
 
-        var incomingHygiene = new Memory.Memory(MemoryType.Preference, "Selalu jalankan git hygiene check dan status sebelum commit", ["workflow"]);
+        var incomingHygiene = new Memory.Memory(MemoryType.Preference, "Always run git hygiene check and status before commit", ["workflow"]);
         var res1 = await service.SaveAsync(incomingHygiene, "project");
         _output?.WriteLine($"\n[Step 3] Child calls SaveAsync for Git Hygiene (target=project):");
         _output?.WriteLine($"         Action={res1.Action}, Scope={res1.Scope}, TargetRoot={res1.ProjectRoot ?? "(global)"}, Reason='{res1.Reason}'");
@@ -389,7 +389,7 @@ public sealed class ScopedMemoryServiceChainTests
         Assert.Equal(globalRule.Id, res1.Id);
         Assert.Empty(child.All);
 
-        var incomingApi = new Memory.Memory(MemoryType.Decision, "Gunakan REST JSON API untuk integrasi modul internal dan external gateway", ["gateway"]);
+        var incomingApi = new Memory.Memory(MemoryType.Decision, "Use a REST JSON API for internal module integration and external gateways", ["gateway"]);
         var res2 = await service.SaveAsync(incomingApi, "project");
         _output?.WriteLine($"\n[Step 4] Child calls SaveAsync for API Decision (target=project):");
         _output?.WriteLine($"         Action={res2.Action}, Scope={res2.Scope}, TargetRoot={res2.ProjectRoot}, Reason='{res2.Reason}'");
@@ -399,7 +399,7 @@ public sealed class ScopedMemoryServiceChainTests
         Assert.Equal(ancestorDecision.Id, res2.Id);
         Assert.Empty(child.All);
 
-        var childSpecific = new Memory.Memory(MemoryType.Fact, "Modul payments menggunakan Stripe SDK v3 untuk proses checkout", ["stripe", "payments"]);
+        var childSpecific = new Memory.Memory(MemoryType.Fact, "The payments module uses Stripe SDK v3 for the checkout process", ["stripe", "payments"]);
         var res3 = await service.SaveAsync(childSpecific, "project");
         _output?.WriteLine($"\n[Step 5] Child calls SaveAsync for Child-Specific Payment Rule (target=project):");
         _output?.WriteLine($"         Action={res3.Action}, Scope={res3.Scope}, TargetRoot={res3.ProjectRoot}, Reason='{res3.Reason}'");

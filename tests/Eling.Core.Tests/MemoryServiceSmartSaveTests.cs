@@ -16,14 +16,14 @@ public class MemoryServiceSmartSaveTests
 
         var initial = new Memory.Memory(
             MemoryType.Preference,
-            "Selalu pakai question tool untuk minta approval sebelum eksekusi",
+            "Always use the question tool to ask for approval before execution",
             new[] { "workflow" });
         var firstResult = await service.SaveAsync(initial);
         Assert.Equal(SaveAction.Created, firstResult.Action);
 
         var incoming = new Memory.Memory(
             MemoryType.Preference,
-            "Selalu gunakan question tool untuk meminta approval sebelum eksekusi bash/write",
+            "Always use the question tool to request approval before bash/write execution",
             new[] { "preference", "approval" });
         var secondResult = await service.SaveAsync(incoming);
 
@@ -31,7 +31,7 @@ public class MemoryServiceSmartSaveTests
         Assert.Equal(firstResult.Memory.Id, secondResult.Memory.Id);
         Assert.Contains("approval", secondResult.Memory.Tags);
         Assert.Contains("workflow", secondResult.Memory.Tags);
-        Assert.Equal("Selalu gunakan question tool untuk meminta approval sebelum eksekusi bash/write", secondResult.Memory.Content);
+        Assert.Equal("Always use the question tool to request approval before bash/write execution", secondResult.Memory.Content);
     }
 
     [Fact]
