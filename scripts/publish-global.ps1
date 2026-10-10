@@ -33,6 +33,7 @@ dotnet publish (Join-Path $repoRoot "src/backend/Eling.Backend") `
     --artifacts-path $artifactsDir `
     -p:PublishSingleFile=true `
     -p:IncludeNativeLibrariesForSelfExtract=true `
+    -p:EnableCompressionInSingleFile=true `
     -o $outDir --nologo -v q
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for Eling.Backend" }
 
@@ -112,69 +113,74 @@ function Stop-SmokeProcess {
         Where-Object { $_.Name -in @('eling-backend.exe', 'eling.exe') } |
         Where-Object { $_.ExecutablePath -eq $globalBackend } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    Remove-Item $projectDir -Recurse -Force -ErrorAction SilentlyContinue
+
+    # Robust directory cleanup with retry to allow OS handles to release
+    for ($i = 0; $i -lt 5; $i++) {
+        if (-not (Test-Path $projectDir)) { break }
+        Remove-Item $projectDir -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $projectDir) { Start-Sleep -Milliseconds 200 }
+    }
 }
 
-$health = $null
 try {
-    Start-Sleep -Seconds 15
-    $response = Invoke-WebRequest -Uri "http://127.0.0.1:4317/health" -UseBasicParsing -TimeoutSec 3
-    $health = $response.Content
-} catch {
     $health = $null
-}
+    try {
+        Start-Sleep -Seconds 15
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:4317/health" -UseBasicParsing -TimeoutSec 3
+        $health = $response.Content
+    } catch {
+        $health = $null
+    }
 
-if (-not $health) {
+    if (-not $health) {
+        throw "Smoke test FAILED: dashboard did not answer /health."
+    }
+    Write-Host "  health: $health"
+
+    Write-Host "== Smoke test: MCP memory read/write =="
+    function Send-Mcp($object) {
+        $line = $object | ConvertTo-Json -Depth 8 -Compress
+        $process.StandardInput.WriteLine($line)
+        $process.StandardInput.Flush()
+    }
+
+    function Read-McpResponse {
+        return $process.StandardOutput.ReadLine()
+    }
+
+    Send-Mcp @{ jsonrpc = '2.0'; id = 1; method = 'initialize'; params = @{
+        protocolVersion = '2024-11-05'; capabilities = @{};
+        clientInfo = @{ name = 'publish-smoke'; version = '1.0' } } }
+    $initLine = Read-McpResponse 30
+    if (-not $initLine -or $initLine -notmatch '"id":1') {
+        throw "Smoke test FAILED: MCP initialize got no response. Raw: $initLine"
+    }
+
+    Send-Mcp @{ jsonrpc = '2.0'; method = 'notifications/initialized' }
+
+    $stamp = [guid]::NewGuid().ToString("N").Substring(0, 8)
+    $content = "publish-global smoke test $stamp"
+
+    Send-Mcp @{ jsonrpc = '2.0'; id = 2; method = 'tools/call'; params = @{
+        name = 'memory_save'; arguments = @{
+            content = $content; type = 'note'; tags = @('smoke') } } }
+    $saveLine = Read-McpResponse 30
+
+    if (-not $saveLine -or $saveLine -notmatch '01[0-9a-hjkmnp-tv-z]{24}') {
+        $preview = if ($saveLine) { $saveLine.Substring(0, [Math]::Min(400, $saveLine.Length)) } else { "<null: no response within timeout>" }
+        throw "Smoke test FAILED: memory_save returned no usable response. Raw: $preview"
+    }
+    $savedId = $Matches[0]
+
+    Send-Mcp @{ jsonrpc = '2.0'; id = 3; method = 'tools/call'; params = @{
+        name = 'memory_get'; arguments = @{ id = $savedId; scope = 'project' } } }
+    $getLine = Read-McpResponse 30
+
+    if (-not $getLine -or $getLine -notmatch [regex]::Escape($savedId)) {
+        throw "Smoke test FAILED: memory_get did not return the saved memory (id=$savedId). Raw: $getLine"
+    }
+} finally {
     Stop-SmokeProcess
-    throw "Smoke test FAILED: dashboard did not answer /health."
-}
-Write-Host "  health: $health"
-
-Write-Host "== Smoke test: MCP memory read/write =="
-function Send-Mcp($object) {
-    $line = $object | ConvertTo-Json -Depth 8 -Compress
-    $process.StandardInput.WriteLine($line)
-    $process.StandardInput.Flush()
-}
-
-function Read-McpResponse {
-    return $process.StandardOutput.ReadLine()
-}
-
-Send-Mcp @{ jsonrpc = '2.0'; id = 1; method = 'initialize'; params = @{
-    protocolVersion = '2024-11-05'; capabilities = @{};
-    clientInfo = @{ name = 'publish-smoke'; version = '1.0' } } }
-$initLine = Read-McpResponse 30
-if (-not $initLine -or $initLine -notmatch '"id":1') {
-    Stop-SmokeProcess
-    throw "Smoke test FAILED: MCP initialize got no response. Raw: $initLine"
-}
-
-Send-Mcp @{ jsonrpc = '2.0'; method = 'notifications/initialized' }
-
-$stamp = [guid]::NewGuid().ToString("N").Substring(0, 8)
-$content = "publish-global smoke test $stamp"
-
-Send-Mcp @{ jsonrpc = '2.0'; id = 2; method = 'tools/call'; params = @{
-    name = 'memory_save'; arguments = @{
-        content = $content; type = 'note'; tags = @('smoke') } } }
-$saveLine = Read-McpResponse 30
-
-if (-not $saveLine -or $saveLine -notmatch '01[0-9a-hjkmnp-tv-z]{24}') {
-    Stop-SmokeProcess
-    $preview = if ($saveLine) { $saveLine.Substring(0, [Math]::Min(400, $saveLine.Length)) } else { "<null: no response within timeout>" }
-    throw "Smoke test FAILED: memory_save returned no usable response. Raw: $preview"
-}
-$savedId = $Matches[0]
-
-Send-Mcp @{ jsonrpc = '2.0'; id = 3; method = 'tools/call'; params = @{
-    name = 'memory_get'; arguments = @{ id = $savedId; scope = 'project' } } }
-$getLine = Read-McpResponse 30
-
-Stop-SmokeProcess
-
-if (-not $getLine -or $getLine -notmatch [regex]::Escape($savedId)) {
-    throw "Smoke test FAILED: memory_get did not return the saved memory (id=$savedId). Raw: $getLine"
 }
 
 Write-Host ""

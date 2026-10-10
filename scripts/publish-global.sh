@@ -89,6 +89,7 @@ dotnet publish "$REPO_ROOT/src/backend/Eling.Backend" \
   --artifacts-path "$ARTIFACTS_DIR" \
   -p:PublishSingleFile=true \
   -p:IncludeNativeLibrariesForSelfExtract=true \
+  -p:EnableCompressionInSingleFile=true \
   -o "$OUT_DIR" --nologo -v q
 
 for expected in "eling-backend$EXE_EXT" "eling-dashboard-ui"; do
@@ -148,7 +149,12 @@ stop_smoke_process() {
   else
     pkill -9 -x eling-backend >/dev/null 2>&1 || true
   fi
-  rm -rf "$PROJECT_DIR" "$FIFO_IN" "$FIFO_OUT" >/dev/null 2>&1 || true
+  rm -f "$FIFO_IN" "$FIFO_OUT" >/dev/null 2>&1 || true
+  for _ in {1..5}; do
+    if [ ! -d "$PROJECT_DIR" ]; then break; fi
+    rm -rf "$PROJECT_DIR" >/dev/null 2>&1 || true
+    [ -d "$PROJECT_DIR" ] && sleep 0.2 || true
+  done
 }
 
 trap stop_smoke_process EXIT INT TERM

@@ -3,6 +3,7 @@
 # - docs/memories/config only → skip all, instant push
 # - isolated build/test via ELING_OUTPUT_ROOT=.bin-test avoids .bin lock collisions
 # - backend and frontend checks run conditionally based on diff vs upstream
+# - after the checks pass, publish a Release build into ~/.local/bin
 # Bypass: SKIP_HOOK=1 git push --no-verify  or  FULL_CHECK=1 git push
 
 if [ "$SKIP_HOOK" = "1" ]; then
@@ -12,11 +13,35 @@ fi
 
 CHANGED=$(git diff --name-only "@{u}..HEAD" 2>/dev/null || git diff --name-only "origin/main...HEAD" 2>/dev/null || git diff --name-only HEAD~1 2>/dev/null)
 
+# Publishes a Release build and installs it into ~/.local/bin. This is not a
+# remote-side action: it overwrites the installed binary and stops any process
+# holding it, so pushing code nobody can run is exactly the case this catches.
+# Dispatch on the real OS -- each script hardcodes the other platform's default
+# and would fail rather than half-install.
+run_publish() {
+  case "$(uname -s 2>/dev/null || echo unknown)" in
+    MINGW*|MSYS*|CYGWIN*) SCRIPT="scripts/publish-global.ps1" ;;
+    *)                    SCRIPT="scripts/publish-global.sh" ;;
+  esac
+
+  if [ ! -f "$SCRIPT" ]; then
+    echo "→ publish script not found: $SCRIPT"
+    return 1
+  fi
+
+  echo "→ publishing + installing (~/.local/bin) via $SCRIPT"
+  case "$SCRIPT" in
+    *.ps1) pwsh -NoProfile -File "$SCRIPT" || return 1 ;;
+    *)     sh "$SCRIPT" || return 1 ;;
+  esac
+}
+
 if [ "$FULL_CHECK" = "1" ]; then
   echo "→ FULL_CHECK=1: running full build and tests"
   pnpm build:backend || exit 1
   pnpm test:backend || exit 1
   pnpm build:frontend || exit 1
+  run_publish || exit 1
   exit 0
 fi
 
@@ -50,3 +75,5 @@ if [ "$NEED_FRONTEND" = "1" ]; then
 else
   echo "→ skip frontend build (no src/frontend/ changes)"
 fi
+
+run_publish || exit 1
