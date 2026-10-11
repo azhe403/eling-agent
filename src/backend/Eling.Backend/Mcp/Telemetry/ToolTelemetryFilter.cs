@@ -45,6 +45,7 @@ public static class ToolTelemetryFilter
         var request = context.Params;
         var toolName = request?.Name ?? "unknown";
         var requestId = Activity.Current?.Id ?? Guid.NewGuid().ToString("N")[..12];
+        var rpcId = context.JsonRpcRequest?.Id.ToString() ?? "none";
         var stopwatch = Stopwatch.StartNew();
 
         var requestPayload = JsonSerializer.Serialize(request, JsonOptions);
@@ -53,8 +54,8 @@ public static class ToolTelemetryFilter
         var correlationId = $"mcp-{requestId}";
         using var _ = LogContext.PushProperty("CorrelationId", correlationId);
 
-        logger.LogDebug("ToolTelemetry: START tool={Tool} requestId={RequestId} requestSize={RequestSize} args={Args}",
-            toolName, requestId, requestSize, TruncateForLog(request?.Arguments?.ToString() ?? "{}", 200));
+        logger.LogDebug("ToolTelemetry: START tool={Tool} requestId={RequestId} rpcId={RpcId} requestSize={RequestSize} args={Args}",
+            toolName, requestId, rpcId, requestSize, TruncateForLog(request?.Arguments?.ToString() ?? "{}", 200));
 
         CallToolResult? result = null;
         string status = "success";
@@ -84,8 +85,8 @@ public static class ToolTelemetryFilter
             errorMessage = ex.Message;
             errorCode = ex.GetType().Name;
 
-            logger.LogError(ex, "ToolTelemetry: EXCEPTION tool={Tool} requestId={RequestId} durationMs={DurationMs}",
-                toolName, requestId, stopwatch.ElapsedMilliseconds);
+            logger.LogError(ex, "ToolTelemetry: EXCEPTION tool={Tool} requestId={RequestId} rpcId={RpcId} durationMs={DurationMs}",
+                toolName, requestId, rpcId, stopwatch.ElapsedMilliseconds);
 
             throw;
         }
@@ -99,9 +100,10 @@ public static class ToolTelemetryFilter
             var responseSize = responsePayload.Length;
 
             logger.LogInformation(
-                "ToolTelemetry: END tool={Tool} requestId={RequestId} status={Status} durationMs={DurationMs} requestSize={RequestSize} responseSize={ResponseSize} errorCode={ErrorCode} errorMessage={ErrorMessage}",
+                "ToolTelemetry: END tool={Tool} requestId={RequestId} rpcId={RpcId} status={Status} durationMs={DurationMs} requestSize={RequestSize} responseSize={ResponseSize} errorCode={ErrorCode} errorMessage={ErrorMessage}",
                 toolName,
                 requestId,
+                rpcId,
                 status,
                 stopwatch.ElapsedMilliseconds,
                 requestSize,
