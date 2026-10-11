@@ -40,8 +40,9 @@ public partial class FoldersView : UserControl
     {
         if (_switchingWorkspace || e.AddedItems.Count == 0) return;
         if (DataContext is not FoldersViewModel vm) return;
+        if (e.AddedItems[0] is not string picked || string.IsNullOrWhiteSpace(picked)) return;
         _switchingWorkspace = true;
-        try { await vm.LoadAsync(); }
+        try { await vm.SwitchWorkspaceAsync(picked); }
         finally { _switchingWorkspace = false; }
     }
 

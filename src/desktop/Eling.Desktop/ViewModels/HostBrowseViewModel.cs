@@ -20,15 +20,19 @@ public class HostBrowseViewModel : ViewModelBase
     private string _statusText = "";
     private HostEntry? _selectedEntry;
 
-    public string CurrentPath { get => _currentPath; set => this.RaiseAndSetIfChanged(ref _currentPath, value); }
+    public string CurrentPath { get => _currentPath; set { this.RaiseAndSetIfChanged(ref _currentPath, value); this.RaisePropertyChanged(nameof(UseThisPath)); } }
     public string StatusText { get => _statusText; set => this.RaiseAndSetIfChanged(ref _statusText, value); }
-    public HostEntry? SelectedEntry { get => _selectedEntry; set => this.RaiseAndSetIfChanged(ref _selectedEntry, value); }
+    public HostEntry? SelectedEntry { get => _selectedEntry; set { this.RaiseAndSetIfChanged(ref _selectedEntry, value); this.RaisePropertyChanged(nameof(UseThisPath)); } }
+
+    /// <summary>The folder that will be used when the user presses Use This Folder: the selected subfolder, or the current folder.</summary>
+    public string UseThisPath => SelectedEntry?.IsDirectory == true ? SelectedEntry.FullPath : CurrentPath;
 
     public ObservableCollection<HostEntry> Entries { get; } = [];
 
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> LoadCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> UpCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> OpenSelectedCommand { get; }
+    public ReactiveCommand<HostEntry?, System.Reactive.Unit> OpenEntryCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> GoCommand { get; }
 
     public HostBrowseViewModel(
@@ -41,6 +45,7 @@ public class HostBrowseViewModel : ViewModelBase
         LoadCommand = ReactiveCommand.CreateFromTask(() => LoadInitialAsync());
         UpCommand = ReactiveCommand.CreateFromTask(() => GoToAsync(_parentPath));
         OpenSelectedCommand = ReactiveCommand.CreateFromTask(() => OpenSelectedAsync());
+        OpenEntryCommand = ReactiveCommand.CreateFromTask<HostEntry?>(entry => OpenEntryAsync(entry));
         GoCommand = ReactiveCommand.CreateFromTask(() => GoToAsync(CurrentPath));
     }
 
@@ -69,9 +74,15 @@ public class HostBrowseViewModel : ViewModelBase
 
     private async Task OpenSelectedAsync()
     {
-        if (SelectedEntry == null || !SelectedEntry.IsDirectory) return;
-        _logger.LogInformation("HostBrowse open {Path}", SelectedEntry.FullPath);
-        await GoToAsync(SelectedEntry.FullPath);
+        await OpenEntryAsync(SelectedEntry);
+    }
+
+    public async Task OpenEntryAsync(HostEntry? entry)
+    {
+        var target = entry ?? SelectedEntry;
+        if (target == null || !target.IsDirectory) return;
+        _logger.LogInformation("HostBrowse open {Path}", target.FullPath);
+        await GoToAsync(target.FullPath);
     }
 
     private async Task GoToAsync(string? path)

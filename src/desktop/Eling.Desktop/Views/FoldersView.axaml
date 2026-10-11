@@ -16,15 +16,15 @@
             <Button Grid.Column="2" Content="Add" Click="OnAddRoot" Classes="primary" Padding="12,4" Margin="8,0,0,0" ToolTip.Tip="Browse a folder, then add it as a workspace"/>
         </Grid>
 
-        <!-- Workspace list + remove from list -->
-        <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="16,0,16,6">
-            <TextBlock Grid.Column="0" Text="Workspaces" FontSize="13" FontWeight="SemiBold" Foreground="#e5e7eb" VerticalAlignment="Center"/>
-            <Button Grid.Column="1" Content="✕ Remove from list" Command="{Binding RemoveRootCommand}" Classes="subtle" Padding="10,4" FontSize="11" ToolTip.Tip="Only removes from the workspace list — files on disk are safe"/>
-        </Grid>
-        <ListBox x:Name="RootsListBox" Grid.Row="2" ItemsSource="{Binding Roots}" SelectedItem="{Binding SelectedRoot}" Height="140" Margin="16,0,16,8" Padding="4" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+        <!-- Workspace list -->
+        <TextBlock Grid.Row="1" Text="Workspaces" FontSize="13" FontWeight="SemiBold" Foreground="#e5e7eb" VerticalAlignment="Center" Margin="16,0,16,6"/>
+        <ListBox x:Name="RootsListBox" Grid.Row="2" ItemsSource="{Binding Roots}" SelectedItem="{Binding SelectedRoot, Mode=TwoWay}" Height="140" Margin="16,0,16,8" Padding="4" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListBox.ItemTemplate>
                 <DataTemplate>
-                    <TextBlock Text="{Binding StringFormat='📁 {0}'}" FontSize="12" Foreground="#e5e7eb" TextTrimming="CharacterEllipsis"/>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding StringFormat='📁 {0}'}" FontSize="12" Foreground="#e5e7eb" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Content="✕" Command="{Binding $parent[UserControl].((vm:FoldersViewModel)DataContext).RemoveRootCommand}" CommandParameter="{Binding}" Classes="subtle" Padding="6,2" FontSize="11" Margin="8,0,0,0" ToolTip.Tip="Remove this workspace from the list — files on disk are safe"/>
+                    </Grid>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
@@ -39,14 +39,14 @@
                 <Button Grid.Column="2" Content="⟳" Command="{Binding RefreshCommand}" Classes="subtle" Padding="8,2"
                         ToolTip.Tip="Refresh"/>
             </Grid>
-            <ListBox x:Name="EntriesListBox" Grid.Row="1" ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}">
+            <ListBox x:Name="EntriesListBox" Grid.Row="1" ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry, Mode=TwoWay}">
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <Border Classes="memory-card" Padding="8,6" Margin="0,2">
                             <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto">
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Path}" FontSize="12" FontWeight="SemiBold" Foreground="#e5e7eb" TextTrimming="CharacterEllipsis"/>
                                 <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding IsDirectory, StringFormat='{}'}" FontSize="10" Foreground="#9ca3af"/>
-                                <Button Grid.Row="0" Grid.Column="1" Content="→" FontSize="10" Padding="4,2" Command="{Binding $parent[Window].((vm:FoldersViewModel)DataContext).OpenEntryCommand}" CommandParameter="{Binding}" Classes="subtle" Margin="4,0,0,0" ToolTip.Tip="Open"/>
+                                <Button Grid.Row="0" Grid.Column="1" Content="→" FontSize="10" Padding="4,2" Command="{Binding $parent[UserControl].((vm:FoldersViewModel)DataContext).OpenEntryCommand}" CommandParameter="{Binding}" Classes="subtle" Margin="4,0,0,0" ToolTip.Tip="Open"/>
                             </Grid>
                         </Border>
                     </DataTemplate>
@@ -63,7 +63,7 @@
 
         <!-- Folder browser modal overlay (inline, inside the window) -->
         <Border Grid.RowSpan="5" Background="#aa000000" IsVisible="{Binding ShowBrowser}">
-            <Border Width="660" Height="520" HorizontalAlignment="Center" VerticalAlignment="Center"
+            <Border Width="720" Height="620" HorizontalAlignment="Center" VerticalAlignment="Center"
                     Background="#1e1e1e" BorderBrush="#3b3b3b" BorderThickness="1" CornerRadius="12">
                 <Grid RowDefinitions="Auto,*,Auto" Margin="0">
                     <!-- Title bar -->

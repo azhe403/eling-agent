@@ -42,10 +42,11 @@ public class FoldersViewModel : ViewModelBase
 
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> LoadCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> AddRootCommand { get; }
-    public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> RemoveRootCommand { get; }
+    public ReactiveCommand<string?, System.Reactive.Unit> RemoveRootCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> RefreshCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> GoUpCommand { get; }
     public ReactiveCommand<FileListEntryDto, System.Reactive.Unit> OpenEntryCommand { get; }
+    public ReactiveCommand<string, System.Reactive.Unit> SwitchWorkspaceCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> StartEditCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> SaveEditCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> CancelEditCommand { get; }
@@ -59,10 +60,11 @@ public class FoldersViewModel : ViewModelBase
 
         LoadCommand = ReactiveCommand.CreateFromTask(() => LoadAsync());
         AddRootCommand = ReactiveCommand.CreateFromTask(() => AddRootAsync());
-        RemoveRootCommand = ReactiveCommand.CreateFromTask(() => RemoveRootAsync());
+        RemoveRootCommand = ReactiveCommand.CreateFromTask<string?>(target => RemoveRootAsync(target));
         RefreshCommand = ReactiveCommand.CreateFromTask(() => ListCurrentAsync());
         GoUpCommand = ReactiveCommand.CreateFromTask(() => GoUpAsync());
         OpenEntryCommand = ReactiveCommand.CreateFromTask<FileListEntryDto>(entry => OpenEntryAsync(entry));
+        SwitchWorkspaceCommand = ReactiveCommand.CreateFromTask<string>(root => SwitchWorkspaceAsync(root));
         StartEditCommand = ReactiveCommand.Create(() => { IsEditing = true; EditText = PreviewText; });
         SaveEditCommand = ReactiveCommand.CreateFromTask(() => SaveEditAsync());
         CancelEditCommand = ReactiveCommand.Create(() => { IsEditing = false; });
@@ -144,18 +146,23 @@ public class FoldersViewModel : ViewModelBase
         }
     }
 
-    private async Task RemoveRootAsync()
+    private async Task RemoveRootAsync(string? target)
     {
-        if (string.IsNullOrEmpty(SelectedRoot)) return;
-        _logger.LogInformation("Folders remove root {Path}", SelectedRoot);
+        var rootToRemove = string.IsNullOrWhiteSpace(target) ? SelectedRoot : target.Trim();
+        if (string.IsNullOrEmpty(rootToRemove)) return;
+        _logger.LogInformation("Folders remove root {Path}", rootToRemove);
         try
         {
-            if (await _apiClient.RemoveWorkspaceAsync(SelectedRoot))
+            if (await _apiClient.RemoveWorkspaceAsync(rootToRemove))
             {
-                SelectedRoot = "";
-                CurrentPath = "";
-                Entries.Clear();
-                PreviewText = "";
+                if (string.Equals(SelectedRoot, rootToRemove, StringComparison.OrdinalIgnoreCase))
+                {
+                    SelectedRoot = "";
+                    CurrentPath = "";
+                    Entries.Clear();
+                    PreviewText = "";
+                }
+
                 await LoadAsync();
             }
         }
@@ -164,6 +171,20 @@ public class FoldersViewModel : ViewModelBase
             _logger.LogError(ex, "Failed to remove root");
             StatusText = $"Remove failed: {ex.Message}";
         }
+    }
+
+    public async Task SwitchWorkspaceAsync(string root)
+    {
+        if (string.IsNullOrWhiteSpace(root) || string.Equals(SelectedRoot, root, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.IsNullOrEmpty(SelectedRoot)) await ListCurrentAsync();
+            return;
+        }
+
+        SelectedRoot = root;
+        CurrentPath = "";
+        SelectedEntry = null;
+        await ListCurrentAsync();
     }
 
     private async Task GoUpAsync()

@@ -30,10 +30,9 @@ public partial class HostBrowseView : UserControl
 
     private void OnEntryDoubleTapped(object? sender, TappedEventArgs e)
     {
-        if (DataContext is HostBrowseViewModel vm)
-        {
-            vm.OpenSelectedCommand.Execute();
-        }
+        if (DataContext is not HostBrowseViewModel vm) return;
+        var tapped = (e.Source as Control)?.DataContext as Models.HostEntry ?? vm.SelectedEntry;
+        vm.OpenEntryCommand.Execute(tapped).Subscribe();
     }
 
     private void OnCancel(object? sender, RoutedEventArgs e)
@@ -45,7 +44,7 @@ public partial class HostBrowseView : UserControl
     {
         if (DataContext is HostBrowseViewModel vm)
         {
-            var path = vm.SelectedEntry?.IsDirectory == true ? vm.SelectedEntry.FullPath : vm.CurrentPath;
+            var path = vm.UseThisPath;
             Closed?.Invoke(string.IsNullOrWhiteSpace(path) ? null : path);
         }
         else
