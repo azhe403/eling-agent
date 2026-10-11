@@ -1,33 +1,33 @@
-# File Claim Replacement — Design (Fase 1, dimenangkan dulu)
+# File Claim Replacement — Design (Phase 1, win this first)
 
 Date: 2026-10-11
-Status: draft aktif
-Goal: penanda milik antar chat di branch main yang sama biar tidak cakar-cakaran. Gantikan fungsi implisit `.tmp/checkpoints/*.txt` + cek manual git status.
+Status: active draft
+Goal: ownership markers across chats on the same main branch so work does not collide. Replaces the implicit role of `.tmp/checkpoints/*.txt` plus manual git-status checks.
 
 ## Scope
-- Sumber benar: project-local (tidak di-commit). Ground truth isi tetap filesystem + git.
-- Granularitas fase 1: level file. Level hunk/baris ditunda.
-- Sifat: lunak dulu (peringatan), mengeras jadi penolakan setelah stabil.
+- Source of truth: project-local (never committed). Ground truth for content stays filesystem + git.
+- Phase 1 granularity: file level. Hunk/line level is deferred.
+- Behavior: soft first (warnings), hardening into rejections once stable.
 
 ## Model
 - `claim_id`, `session_id`, `branch`, `paths[]`, `since`, `last_heartbeat`, `ttl_seconds` (default 300).
-- Klaim hidup kalau `now - last_heartbeat <= ttl`; selain itu dianggap basi dan hilang dari list aktif.
+- A claim is live while `now - last_heartbeat <= ttl`; otherwise it is stale and drops from the active list.
 
-## Tools (baru, minimal)
-- `file_claim(session_id, paths[])` → klaim lunak, gagal lunak kalau diklaim session hidup lain (kembalikan pemilik).
-- `file_release(session_id, paths[])` → lepas eksplisit; `session_close` melepas semua.
-- `file_list_active(branch)` → daftar klaim hidup per branch.
-- `file_check_conflict(session_id, paths[])` → gabungkan klaim aktif + git dirty + mtime untuk putusan tulis/jangan.
+## Tools (new, minimal)
+- `file_claim(session_id, paths[])` → soft claim, soft-fails when a live session owns it (returns the owner).
+- `file_release(session_id, paths[])` → explicit release; `session_close` releases everything.
+- `file_list_active(branch)` → live claims per branch.
+- `file_check_conflict(session_id, paths[])` → combines active claims + git dirty + mtime into a write/don't-write decision.
 
-## Panduan agent (server saja)
-- ServerInstructions: wajib `file_check_conflict` sebelum tulis file yang bukan diklaim sendiri; wajib heartbeat tiap ganti step; wajib `file_release` saat selesai.
-- Tidak ubah AGENTS.md di fase ini.
+## Agent guidance (server only)
+- ServerInstructions: must call `file_check_conflict` before writing files owned by another session; must heartbeat on every step change; must call `file_release` when done.
+- No AGENTS.md change in this phase.
 
 ## Error handling
-- Session mati mendadak → klaim basi otomatis, tidak perlu cleanup manual.
-- Dua klaim barengan → yang pertama menang, yang kedua dapat pesan pemilik + umur klaim.
-- Git kotor tanpa klaim → tampilkan sebagai peringatan, bukan error keras di fase lunak.
+- Chat dies suddenly → its claims go stale automatically, no manual cleanup.
+- Two concurrent claims → first wins, second gets owner + claim age.
+- Dirty git tree without a claim → warning in soft phase, not a hard error.
 
-## Validasi
-- Simulasi dua chat di main pegang file sama: chat kedua dapat peringatan pemilik yang benar.
-- Klaim basi (heartbeat berhenti) hilang dari list dalam satu TTL.
+## Validation
+- Two simulated chats on main touching the same file: the second chat sees the correct owner warning.
+- Stale claims (heartbeat stopped) disappear from the list within one TTL.
