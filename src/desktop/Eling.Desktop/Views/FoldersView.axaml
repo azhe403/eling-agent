@@ -73,7 +73,7 @@
                                    Foreground="#e5e7eb"/>
                     </Border>
                     <!-- Browser content -->
-                    <views:HostBrowseView x:Name="Browser" Grid.Row="1"/>
+                    <views:HostBrowseView x:Name="Browser" Grid.Row="1" DataContext="{x:Null}"/>
                     <!-- Bottom spacer -->
                     <Border Grid.Row="2" Height="8" Background="Transparent"/>
                 </Grid>

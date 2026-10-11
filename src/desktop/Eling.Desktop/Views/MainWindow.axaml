@@ -43,8 +43,8 @@
             <!-- Content -->
             <Grid Grid.Row="1" Grid.Column="0" Margin="6">
                 <Grid>
-                    <views:ChatView x:Name="ChatPanel" />
-                    <views:FoldersView x:Name="WorkspacesPanel" IsVisible="False" />
+                    <views:ChatView x:Name="ChatPanel" DataContext="{x:Null}" />
+                    <views:FoldersView x:Name="WorkspacesPanel" IsVisible="False" DataContext="{x:Null}" />
                     <Grid x:Name="MemoryPanel" IsVisible="False">
                         <Grid.RowDefinitions>Auto,Auto,*</Grid.RowDefinitions>
                         <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
@@ -204,7 +204,7 @@
                             </ListBox.ItemTemplate>
                         </ListBox>
                     </Grid>
-                    <views:SettingsView x:Name="SettingsPanel" IsVisible="False" />
+                    <views:SettingsView x:Name="SettingsPanel" IsVisible="False" DataContext="{x:Null}" />
                 </Grid>
             </Grid>
 
