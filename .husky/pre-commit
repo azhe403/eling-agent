@@ -24,16 +24,40 @@ fi
 
 NEED_FRONTEND=0
 NEED_BACKEND=0
+NEED_DESKTOP=0
 
 if echo "$CHANGED" | grep -q "^src/frontend/"; then
   NEED_FRONTEND=1
 fi
 
-if echo "$CHANGED" | grep -qE "^(src/backend/|src/desktop/|tests/|Directory\.Build|Eling\.slnx|package\.json)"; then
+if echo "$CHANGED" | grep -qE "^src/backend/"; then
   NEED_BACKEND=1
 fi
 
-if [ "$NEED_FRONTEND" = "0" ] && [ "$NEED_BACKEND" = "0" ]; then
+if echo "$CHANGED" | grep -qE "^src/desktop/"; then
+  NEED_DESKTOP=1
+fi
+
+if echo "$CHANGED" | grep -qE "^tests/Eling\.(Core|Backend)\.Tests/"; then
+  NEED_BACKEND=1
+fi
+
+if echo "$CHANGED" | grep -qE "^tests/Eling\.Desktop\.Tests/"; then
+  NEED_DESKTOP=1
+fi
+
+# Fallback for any other tests/ changes (e.g. new test project): run both
+if echo "$CHANGED" | grep -qE "^tests/" && [ "$NEED_BACKEND" = "0" ] && [ "$NEED_DESKTOP" = "0" ]; then
+  NEED_BACKEND=1
+  NEED_DESKTOP=1
+fi
+
+if echo "$CHANGED" | grep -qE "^(Directory\.Build|Eling\.slnx|package\.json|pnpm-lock\.yaml|mise\.toml)"; then
+  NEED_BACKEND=1
+  NEED_DESKTOP=1
+fi
+
+if [ "$NEED_FRONTEND" = "0" ] && [ "$NEED_BACKEND" = "0" ] && [ "$NEED_DESKTOP" = "0" ]; then
   echo "→ pre-commit: docs/config only, skipping lint/typecheck/test"
   exit 0
 fi
@@ -49,8 +73,16 @@ else
 fi
 
 if [ "$NEED_BACKEND" = "1" ]; then
-  echo "→ backend changed: test:backend"
-  pnpm test:backend || exit 1
+  echo "→ backend changed: test:backend:core + test:backend:api"
+  pnpm run test:backend:core || exit 1
+  pnpm run test:backend:api || exit 1
 else
-  echo "→ skip backend (no src/backend|tests|build files)"
+  echo "→ skip backend (no src/backend|core/api tests|build files)"
+fi
+
+if [ "$NEED_DESKTOP" = "1" ]; then
+  echo "→ desktop changed: test:backend:desktop"
+  pnpm run test:backend:desktop || exit 1
+else
+  echo "→ skip desktop (no src/desktop|desktop tests)"
 fi
