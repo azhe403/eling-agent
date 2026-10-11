@@ -36,7 +36,7 @@ public sealed class AgentBuiltinMcpToolTests : IDisposable
         using var scope = _provider.CreateScope();
         var tools = scope.ServiceProvider.GetServices<IAgentTool>().ToList();
 
-        Assert.Equal(8, tools.Count);
+        Assert.Equal(9, tools.Count);
         Assert.Contains(tools, t => t.Name == "memory_recall");
         Assert.Contains(tools, t => t.Name == "memory_save");
         Assert.Contains(tools, t => t.Name == "memory_search");
@@ -45,6 +45,7 @@ public sealed class AgentBuiltinMcpToolTests : IDisposable
         Assert.Contains(tools, t => t.Name == "directory_list");
         Assert.Contains(tools, t => t.Name == "glob");
         Assert.Contains(tools, t => t.Name == "file_search");
+        Assert.Contains(tools, t => t.Name == "shell");
     }
 
     [Fact]

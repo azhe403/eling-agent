@@ -1,4 +1,5 @@
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using Eling.Backend.Agent.Ports;
 using Eling.Backend.Agent.Services;
 using Microsoft.Extensions.Logging;
@@ -11,6 +12,100 @@ public sealed class MeaiChatGateway(ProviderStore store, ILogger<MeaiChatGateway
 {
     private static readonly TimeSpan StreamFirstByteTimeout = TimeSpan.FromSeconds(20);
 
+    /// <summary>
+    /// The opencode gateway routes a request by session and answers
+    /// <c>HTTP 400 (MissingSessionID:)</c> when this header is absent. It is
+    /// hardcoded rather than a provider setting: the value is the chat's own id,
+    /// which arrives on <see cref="SingleShotRequest.SessionId"/>, so there is
+    /// nothing for a user to configure and nothing to get wrong.
+    /// </summary>
+    private const string SessionHeaderName = "x-opencode-session";
+
+    /// <summary>
+    /// Builds a chat client that labels every request with the calling chat's
+    /// session id. The <see cref="HttpClient"/> is created per client, never
+    /// cached or shared: the session id is a default header on it, so one shared
+    /// instance would pin the first chat's id onto every later request.
+    /// </summary>
+    private static ChatClient CreateChatClient(SingleShotRequest request, string baseUrl, string? apiKey)
+    {
+        var httpClient = new HttpClient();
+        if (!string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            httpClient.DefaultRequestHeaders.Add(SessionHeaderName, request.SessionId);
+        }
+
+        return new ChatClient(
+            request.Model,
+            new ApiKeyCredential(string.IsNullOrEmpty(apiKey) ? "no-key" : apiKey),
+            new OpenAIClientOptions
+            {
+                Endpoint = new Uri(baseUrl.TrimEnd('/') + "/"),
+                Transport = new HttpClientPipelineTransport(httpClient)
+            });
+    }
+
+    /// <summary>
+    /// Maps the stored turn history onto the wire format. An assistant message
+    /// that called tools is replayed WITH those tool calls: the tool messages
+    /// that follow are only valid as the answer to a declared tool_call, and
+    /// opencode rejects an orphaned one with <c>invalid_request_error</c>.
+    /// </summary>
+    private static List<ChatMessage> BuildMessages(SingleShotRequest request)
+    {
+        var messages = new List<ChatMessage>();
+        foreach (var message in request.Messages)
+        {
+            messages.Add(message.Role switch
+            {
+                AgentRole.System => new SystemChatMessage(message.Text),
+                AgentRole.User => new UserChatMessage(message.Text),
+                AgentRole.Tool => new ToolChatMessage(message.ToolCallId ?? string.Empty, message.Text),
+                _ => BuildAssistantMessage(message)
+            });
+        }
+
+        return messages;
+    }
+
+    private static AssistantChatMessage BuildAssistantMessage(AgentMessage message)
+    {
+        var assistant = new AssistantChatMessage(message.Text);
+        foreach (var call in message.ToolCalls ?? [])
+        {
+            assistant.ToolCalls.Add(ChatToolCall.CreateFunctionToolCall(
+                call.Id,
+                call.Name,
+                BinaryData.FromString(call.ArgumentsJson)));
+        }
+
+        return assistant;
+    }
+
+    /// <summary>
+    /// Builds the tool block. Kept beside <see cref="BuildMessages"/> because a
+    /// tool definition and the assistant message that calls it must never drift
+    /// apart — the provider rejects a call to a tool it was not offered.
+    /// </summary>
+    private static ChatCompletionOptions BuildOptions(SingleShotRequest request)
+    {
+        var options = new ChatCompletionOptions();
+        foreach (var tool in request.Tools)
+        {
+            options.Tools.Add(ChatTool.CreateFunctionTool(
+                tool.Name,
+                tool.Description,
+                BinaryData.FromString(tool.ParametersJsonSchema)));
+        }
+
+        if (options.Tools.Count > 0)
+        {
+            options.ToolChoice = ChatToolChoice.CreateAutoChoice();
+        }
+
+        return options;
+    }
+
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> StreamingBrokenByEndpoint = new(StringComparer.OrdinalIgnoreCase);
     public async Task<SingleShotResult> CompleteAsync(SingleShotRequest request, CancellationToken ct)
     {
@@ -21,36 +116,9 @@ public sealed class MeaiChatGateway(ProviderStore store, ILogger<MeaiChatGateway
 
         try
         {
-            var client = new ChatClient(
-                request.Model,
-                new ApiKeyCredential(string.IsNullOrEmpty(apiKey) ? "no-key" : apiKey),
-                new OpenAIClientOptions { Endpoint = new Uri(baseUrl.TrimEnd('/') + "/") });
-
-            var messages = new List<ChatMessage>();
-            foreach (var message in request.Messages)
-            {
-                messages.Add(message.Role switch
-                {
-                    AgentRole.System => new SystemChatMessage(message.Text),
-                    AgentRole.User => new UserChatMessage(message.Text),
-                    AgentRole.Tool => new ToolChatMessage(message.ToolCallId ?? string.Empty, message.Text),
-                    _ => new AssistantChatMessage(message.Text)
-                });
-            }
-
-            var options = new ChatCompletionOptions();
-            foreach (var tool in request.Tools)
-            {
-                options.Tools.Add(ChatTool.CreateFunctionTool(
-                    tool.Name,
-                    tool.Description,
-                    BinaryData.FromString(tool.ParametersJsonSchema)));
-            }
-
-            if (options.Tools.Count > 0)
-            {
-                options.ToolChoice = ChatToolChoice.CreateAutoChoice();
-            }
+            var client = CreateChatClient(request, baseUrl, apiKey);
+            var messages = BuildMessages(request);
+            var options = BuildOptions(request);
 
             ClientResult<ChatCompletion> result = await client.CompleteChatAsync(messages, options, ct);
             var completion = result.Value;
@@ -89,36 +157,9 @@ public sealed class MeaiChatGateway(ProviderStore store, ILogger<MeaiChatGateway
             throw new IOException("Streaming is disabled for this endpoint after a previous timeout; using single-shot fallback.");
         }
 
-        var client = new ChatClient(
-            request.Model,
-            new ApiKeyCredential(string.IsNullOrEmpty(apiKey) ? "no-key" : apiKey),
-            new OpenAIClientOptions { Endpoint = new Uri(baseUrl.TrimEnd('/') + "/") });
-
-        var messages = new List<ChatMessage>();
-        foreach (var message in request.Messages)
-        {
-            messages.Add(message.Role switch
-            {
-                AgentRole.System => new SystemChatMessage(message.Text),
-                AgentRole.User => new UserChatMessage(message.Text),
-                AgentRole.Tool => new ToolChatMessage(message.ToolCallId ?? string.Empty, message.Text),
-                _ => new AssistantChatMessage(message.Text)
-            });
-        }
-
-        var options = new ChatCompletionOptions();
-        foreach (var tool in request.Tools)
-        {
-            options.Tools.Add(ChatTool.CreateFunctionTool(
-                tool.Name,
-                tool.Description,
-                BinaryData.FromString(tool.ParametersJsonSchema)));
-        }
-
-        if (options.Tools.Count > 0)
-        {
-            options.ToolChoice = ChatToolChoice.CreateAutoChoice();
-        }
+        var client = CreateChatClient(request, baseUrl, apiKey);
+        var messages = BuildMessages(request);
+        var options = BuildOptions(request);
 
 var pending = new Dictionary<string, (string Name, System.Text.StringBuilder Args)>(StringComparer.Ordinal);
 string? currentToolCallId = null;

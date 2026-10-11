@@ -60,7 +60,8 @@ public sealed class AgentTurnService(
             var request = new SingleShotRequest(
                 ResolveModel(),
                 [new AgentMessage(AgentRole.System, systemPrompt), .. history],
-                toolList.Select(t => new ToolDefinition(t.Name, t.Description, t.ParametersJsonSchema)).ToList());
+                toolList.Select(t => new ToolDefinition(t.Name, t.Description, t.ParametersJsonSchema)).ToList(),
+                chat.Id);
 
             SingleShotResult turn;
             try
@@ -86,7 +87,14 @@ public sealed class AgentTurnService(
                 turn.FinishReason ?? "(null)",
                 turn.AssistantText?.Length ?? 0);
 
-            chats.Append(chat, new AgentMessage(AgentRole.Assistant, turn.AssistantText ?? string.Empty));
+            // The tool calls must ride along with the assistant turn. A `tool` message is
+            // only valid as the answer to a declared tool_call, so persisting the text alone
+            // leaves the tool results that follow orphaned and the next hop is
+            // rejected outright with `invalid_request_error`.
+            chats.Append(chat, new AgentMessage(
+                AgentRole.Assistant,
+                turn.AssistantText ?? string.Empty,
+                ToolCalls: turn.ToolCalls.Count > 0 ? turn.ToolCalls : null));
 
             if (turn.ToolCalls.Count == 0)
             {

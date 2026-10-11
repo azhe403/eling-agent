@@ -30,6 +30,7 @@ public static class AgentToolServiceExtensions
         services.AddScoped<IAgentTool, DirectoryListAgentTool>();
         services.AddScoped<IAgentTool, GlobAgentTool>();
         services.AddScoped<IAgentTool, FileSearchAgentTool>();
+        services.AddScoped<IAgentTool, ShellAgentTool>();
 
         return services;
     }
