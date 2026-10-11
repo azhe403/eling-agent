@@ -17,6 +17,7 @@ public class ChatViewModel : ViewModelBase, IDisposable
 {
     private readonly ElingApiClient _apiClient;
     private readonly ILogger<ChatViewModel> _logger;
+    private readonly Func<Action, bool> _uiDispatcher;
     private readonly Dictionary<string, ChatSession> _sessions = [];
     private ChatSession _current;
 
@@ -87,11 +88,29 @@ public class ChatViewModel : ViewModelBase, IDisposable
 
     public ChatViewModel(
         ElingApiClient apiClient,
-        ILogger<ChatViewModel> logger)
+        ILogger<ChatViewModel> logger,
+        Func<Action, bool>? uiDispatcher = null)
     {
         _apiClient = apiClient;
         _logger = logger;
         _current = new ChatSession("", null);
+        // Streaming row updates must land on the UI thread in production, where
+        // the dispatcher runs a message loop. Tests have no loop, so a Post there
+        // is silently dropped; injecting the hook lets a test run the action
+        // inline and keeps this class free of timing luck. Default keeps the
+        // exact production behaviour (inline when already on the UI thread,
+        // otherwise Post).
+        _uiDispatcher = uiDispatcher ?? (action =>
+        {
+            if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+            {
+                action();
+                return true;
+            }
+
+            Avalonia.Threading.Dispatcher.UIThread.Post(action);
+            return false;
+        });
 
         LoadCommand = ReactiveCommand.CreateFromTask(() => LoadAsync());
         SendCommand = ReactiveCommand.CreateFromTask(() => SendAsync());
@@ -401,14 +420,7 @@ public class ChatViewModel : ViewModelBase, IDisposable
                     }
                 }
 
-                if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
-                {
-                    Apply();
-                }
-                else
-                {
-                    Avalonia.Threading.Dispatcher.UIThread.Post(Apply);
-                }
+                _uiDispatcher(Apply);
             }
 
             void HandleEvent(ChatStreamEvent ev)
@@ -433,8 +445,7 @@ public class ChatViewModel : ViewModelBase, IDisposable
                             session.Items.Add(row);
                             pendingTools.Enqueue(row);
                         }
-                        if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess()) AddTool();
-                        else Avalonia.Threading.Dispatcher.UIThread.Post(AddTool);
+                        _uiDispatcher(AddTool);
                         break;
                     case StreamToolResult result:
                         void ApplyResult()
@@ -452,8 +463,7 @@ public class ChatViewModel : ViewModelBase, IDisposable
                             if (index >= 0) session.Items[index] = updated;
                             else session.Items.Add(updated);
                         }
-                        if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess()) ApplyResult();
-                        else Avalonia.Threading.Dispatcher.UIThread.Post(ApplyResult);
+                        _uiDispatcher(ApplyResult);
                         break;
                     case StreamDone done:
                     {
@@ -478,8 +488,7 @@ public class ChatViewModel : ViewModelBase, IDisposable
                                 }
                             }
                         }
-                        if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess()) FinalizeAssistant();
-                        else Avalonia.Threading.Dispatcher.UIThread.Post(FinalizeAssistant);
+                        _uiDispatcher(FinalizeAssistant);
 
                         SetStatus(session, toolCount > 0 ? $"Completed with {toolCount} tool call(s)" : "");
                         break;

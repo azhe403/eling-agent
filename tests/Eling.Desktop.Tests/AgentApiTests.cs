@@ -219,8 +219,11 @@ public class AgentApiTests
                 Content = new StringContent("""{"roots":[]}""")
             };
         });
+        // Inject an inline UI dispatcher: no message loop pumps the real one in
+        // tests, so streaming rows were previously dropped whenever the await
+        // resumed off the UI thread (a scheduling-dependent flake).
         var client = CreateClient(handler);
-        var vm = new ChatViewModel(client, NullLogger<ChatViewModel>.Instance);
+        var vm = new ChatViewModel(client, NullLogger<ChatViewModel>.Instance, static a => { a(); return true; });
         vm.ActiveWorkspace = "ws";
         vm.Input = "hello";
 
