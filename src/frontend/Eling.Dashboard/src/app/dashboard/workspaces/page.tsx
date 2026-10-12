@@ -1,5 +1,5 @@
 import { Suspense } from "react"
-import { ProjectsList } from "./ProjectsList"
+import { WorkspacesList } from "./WorkspacesList"
 import { Skeleton } from "@/components/ui/skeleton"
 
 function Loading() {
@@ -12,10 +12,10 @@ function Loading() {
   )
 }
 
-export default function ProjectsPage() {
+export default function WorkspacesPage() {
   return (
     <Suspense fallback={<Loading />}>
-      <ProjectsList />
+      <WorkspacesList />
     </Suspense>
   )
 }

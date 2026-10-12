@@ -65,7 +65,7 @@ type CodebaseStatusDto = {
   dbPath?: string
 }
 
-type ProjectCodebaseStatusItem = {
+type WorkspaceCodebaseStatusItem = {
   workspaceRoot: string
   files: number
   chunks: number
@@ -73,9 +73,9 @@ type ProjectCodebaseStatusItem = {
   dbPath: string | null
 }
 
-function projectName(root: string | undefined | null) {
+function workspaceName(root: string | undefined | null) {
   if (!root) return "—"
-  const parts = root.split(/[/\\\\]+/).filter(Boolean)
+  const parts = root.split(/[/\\]+/).filter(Boolean)
   return parts.length ? parts[parts.length - 1] : root
 }
 
@@ -90,7 +90,7 @@ function formatMegabytes(bytes: number) {
 
 type FilterStatus = "all" | "active" | "offline"
 
-async function fetchProjectsAndStatuses() {
+async function fetchWorkspacesAndStatuses() {
   const [runtimesRes, statusesRes] = await Promise.all([
     fetch("/api/coordinator/runtimes?includeRegistered=true", { cache: "no-store" }),
     fetch("/api/coordinator/projects/codebase-statuses", { cache: "no-store" }),
@@ -100,7 +100,7 @@ async function fetchProjectsAndStatuses() {
 
   const statuses: Record<string, CodebaseStatusDto> = {}
   if (statusesRes.ok) {
-    const statusesList = (await statusesRes.json()) as ProjectCodebaseStatusItem[]
+    const statusesList = (await statusesRes.json()) as WorkspaceCodebaseStatusItem[]
     for (const item of statusesList) {
       statuses[item.workspaceRoot.toLowerCase()] = {
         files: item.files,
@@ -113,7 +113,7 @@ async function fetchProjectsAndStatuses() {
   return { runtimes, statuses }
 }
 
-export function ProjectsList() {
+export function WorkspacesList() {
   const [runtimes, setRuntimes] = useState<RuntimeDto[]>([])
   const [statusMap, setStatusMap] = useState<Record<string, CodebaseStatusDto>>({})
   const [loading, setLoading] = useState(true)
@@ -124,23 +124,24 @@ export function ProjectsList() {
 
   // Delete modal state
   const [deleteTarget, setDeleteTarget] = useState<RuntimeDto | null>(null)
+  const [deleteRegistry, setDeleteRegistry] = useState(true)
   const [deleteCodebaseIndex, setDeleteCodebaseIndex] = useState(true)
   const [deleteDotEling, setDeleteDotEling] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
   const loadData = useCallback(async () => {
     try {
-      const { runtimes: r, statuses: s } = await fetchProjectsAndStatuses()
+      const { runtimes: r, statuses: s } = await fetchWorkspacesAndStatuses()
       setRuntimes(r)
       setStatusMap(s)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load projects")
+      setError(err instanceof Error ? err.message : "Failed to load workspaces")
     }
   }, [])
 
   useEffect(() => {
     let isMounted = true
-    void fetchProjectsAndStatuses()
+    void fetchWorkspacesAndStatuses()
       .then(({ runtimes: r, statuses: s }) => {
         if (!isMounted) return
         setRuntimes(r)
@@ -148,7 +149,7 @@ export function ProjectsList() {
       })
       .catch((err: unknown) => {
         if (!isMounted) return
-        setError(err instanceof Error ? err.message : "Failed to load projects")
+        setError(err instanceof Error ? err.message : "Failed to load workspaces")
       })
       .finally(() => {
         if (isMounted) setLoading(false)
@@ -205,6 +206,7 @@ export function ProjectsList() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           workspaceRoot: root,
+          deleteRegistry,
           deleteCodebaseIndex,
           deleteDotEling,
         }),
@@ -213,7 +215,7 @@ export function ProjectsList() {
       setDeleteTarget(null)
       await loadData()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete project")
+      setError(err instanceof Error ? err.message : "Failed to delete workspace")
     } finally {
       setIsDeleting(false)
     }
@@ -223,7 +225,7 @@ export function ProjectsList() {
   const filtered = useMemo(() => {
     return runtimes.filter((r) => {
       const root = r.workspaceRoot || r.headScopeRoot || ""
-      const name = projectName(root).toLowerCase()
+      const name = workspaceName(root).toLowerCase()
       const matchesQuery =
         !normalizedQuery ||
         name.includes(normalizedQuery) ||
@@ -238,7 +240,7 @@ export function ProjectsList() {
     })
   }, [runtimes, normalizedQuery, filter])
 
-  const totalProjects = runtimes.length
+  const totalWorkspaces = runtimes.length
   const activeCount = runtimes.filter(isRunning).length
   const totalFiles = Object.values(statusMap).reduce((acc, s) => acc + (s.files || 0), 0)
 
@@ -258,7 +260,7 @@ export function ProjectsList() {
               </BreadcrumbItem>
               <BreadcrumbSeparator className="hidden md:block" />
               <BreadcrumbItem>
-                <BreadcrumbPage>Projects</BreadcrumbPage>
+                <BreadcrumbPage>Workspaces</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
@@ -318,7 +320,7 @@ export function ProjectsList() {
             <>
               <div className="rounded-lg border p-3 text-sm">
                 <div className="text-muted-foreground">Registered Workspaces</div>
-                <div className="text-xl font-medium">{totalProjects}</div>
+                <div className="text-xl font-medium">{totalWorkspaces}</div>
               </div>
               <div className="rounded-lg border p-3 text-sm">
                 <div className="text-muted-foreground">Active Instances</div>
@@ -345,7 +347,7 @@ export function ProjectsList() {
           <div className="relative flex-1 min-w-[240px] max-w-md">
             <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
             <Input
-              placeholder="Search project name, path, or PID..."
+              placeholder="Search workspace name, path, or PID..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="pl-8"
@@ -369,7 +371,7 @@ export function ProjectsList() {
           </div>
         </div>
 
-        {/* Projects List / Grid - Scrollable area */}
+        {/* Workspaces List / Grid - Scrollable area */}
         <div className="min-w-0 min-h-0 flex-1 overflow-y-auto pr-1 flex flex-col gap-3">
           {loading ? (
             Array.from({ length: 3 }).map((_, i) => (
@@ -378,12 +380,12 @@ export function ProjectsList() {
           ) : filtered.length === 0 ? (
             <div className="flex min-h-[200px] flex-col items-center justify-center rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
               <FolderGit2 className="mb-2 size-8 opacity-40" />
-              <span>No projects match the current filter.</span>
+              <span>No workspaces match the current filter.</span>
             </div>
           ) : (
             filtered.map((r) => {
               const root = r.workspaceRoot || r.headScopeRoot
-              const name = projectName(root)
+              const name = workspaceName(root)
               const status = statusMap[root.toLowerCase()]
               const isAlive = isRunning(r)
 
@@ -466,7 +468,7 @@ export function ProjectsList() {
                       size="sm"
                       onClick={() => void triggerReindex(root)}
                       disabled={reindexingRoot === root}
-                      title="Trigger incremental re-indexing for this project"
+                      title="Trigger incremental re-indexing for this workspace"
                       className="justify-start"
                     >
                       <RefreshCw
@@ -487,11 +489,12 @@ export function ProjectsList() {
                       size="sm"
                       onClick={() => {
                         setDeleteTarget(r)
+                        setDeleteRegistry(true)
                         setDeleteCodebaseIndex(true)
                         setDeleteDotEling(false)
                       }}
                       className="justify-start border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      title="Delete project"
+                      title="Delete workspace"
                     >
                       <Trash2 className="size-3.5 mr-1" />
                       Delete
@@ -520,10 +523,10 @@ export function ProjectsList() {
           <AlertDialogHeader>
             <div className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="size-5" />
-              <AlertDialogTitle>Delete Project Confirmation</AlertDialogTitle>
+              <AlertDialogTitle>Delete Workspace Confirmation</AlertDialogTitle>
             </div>
             <AlertDialogDescription>
-              Select the components you want to remove for this project:
+              Select the components you want to remove for this workspace:
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -531,7 +534,7 @@ export function ProjectsList() {
             <div className="flex flex-col gap-3 py-2 text-xs">
               <div className="rounded-lg border bg-muted/40 p-3">
                 <div className="font-semibold text-foreground text-sm">
-                  {projectName(deleteTarget.workspaceRoot || deleteTarget.headScopeRoot)}
+                  {workspaceName(deleteTarget.workspaceRoot || deleteTarget.headScopeRoot)}
                 </div>
                 <div className="text-muted-foreground break-all mt-0.5">
                   {deleteTarget.workspaceRoot || deleteTarget.headScopeRoot}
@@ -546,20 +549,21 @@ export function ProjectsList() {
               <div className="space-y-2 pt-1">
                 <div className="font-medium text-foreground text-xs">Components to remove:</div>
 
-                {/* Always deleted: Registry */}
-                <label className="flex items-start gap-2.5 rounded-lg border bg-card p-3 opacity-90 cursor-not-allowed">
+                {/* Always deleted before: now one optable component, because
+                    clearing only the index cache is a legitimate request. */}
+                <label className="flex items-start gap-2.5 rounded-lg border bg-card p-3 cursor-pointer hover:bg-accent/40 transition-colors">
                   <input
                     type="checkbox"
-                    checked={true}
-                    disabled={true}
+                    checked={deleteRegistry}
+                    onChange={(e) => setDeleteRegistry(e.target.checked)}
                     className="mt-0.5 accent-primary"
                   />
                   <div className="flex-1">
                     <div className="font-medium text-foreground">
-                      Workspace Registry Record (Required)
+                      Workspace Registry Record
                     </div>
                     <div className="text-muted-foreground text-[11px] mt-0.5">
-                      Removes the workspace row from the global projects.db database and unregisters the active instance if running.
+                      Removes the workspace row from the global workspace registry (agent-workspaces.json) and unregisters the active instance if running. Leave unchecked to keep the workspace listed.
                     </div>
                   </div>
                 </label>
@@ -610,7 +614,10 @@ export function ProjectsList() {
                 e.preventDefault()
                 void handleDelete()
               }}
-              disabled={isDeleting}
+              disabled={
+                isDeleting ||
+                (!deleteRegistry && !deleteCodebaseIndex && !deleteDotEling)
+              }
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {isDeleting ? (

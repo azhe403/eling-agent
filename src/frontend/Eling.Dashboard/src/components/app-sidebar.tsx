@@ -35,8 +35,8 @@ const navMain = [
     isActive: true,
   },
   {
-    title: "Projects",
-    url: "/dashboard/projects",
+    title: "Workspaces",
+    url: "/dashboard/workspaces",
     icon: <FolderGit2 className="size-4" />,
     isActive: true,
   },
