@@ -20,14 +20,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
+import { DashboardHeader } from "@/components/dashboard-header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -37,8 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import { utcToLocal } from "@/lib/date-utils"
@@ -398,27 +389,7 @@ export function MemoriesList() {
 
   return (
     <>
-      <header className="flex h-16 shrink-0 items-center justify-between gap-2 px-4 border-b border-border/40">
-        <div className="flex items-center gap-2">
-          <SidebarTrigger className="-ml-1" />
-          <Separator
-            orientation="vertical"
-            className="mr-2 data-vertical:h-4 data-vertical:self-auto"
-          />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem className="hidden md:block">
-                <BreadcrumbLink href="#">Eling</BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator className="hidden md:block" />
-              <BreadcrumbItem>
-                <BreadcrumbPage>Memories</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-        </div>
-
-        <div className="flex items-center gap-2">
+      <DashboardHeader label="Memories">
           <div
             className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium border border-border/50 bg-muted/30"
             title={
@@ -472,8 +443,7 @@ export function MemoriesList() {
             <Plus className="size-4" />
             <span>New Memory</span>
           </Button>
-        </div>
-      </header>
+      </DashboardHeader>
 
       <div className="flex flex-1 flex-col gap-4 p-4 pt-4">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -505,7 +475,7 @@ export function MemoriesList() {
           {scopes.length} {scopes.length === 1 ? "scope" : "scopes"} available
         </div>
 
-        <div className="sticky top-0 z-10 flex flex-col gap-2 bg-background pb-2 pt-1">
+        <div className="sticky top-16 z-10 flex flex-col gap-2 bg-background pb-2 pt-1">
           <div className="flex items-center gap-2">
             <Input
               placeholder="Search content or memory ID..."

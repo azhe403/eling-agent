@@ -5,8 +5,7 @@ import { useRouter } from "next/navigation"
 import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
+import { DashboardHeader } from "@/components/dashboard-header"
 import { useAutoHeight } from "@/hooks/use-auto-height"
 
 const TYPES = ["Fact", "Preference", "Decision", "Lesson", "Note"] as const
@@ -125,14 +124,7 @@ export default function CreateMemoryPage() {
 
   return (
     <>
-      <header className="flex h-16 shrink-0 items-center gap-2 px-4">
-        <SidebarTrigger className="-ml-1" />
-        <Separator
-          orientation="vertical"
-          className="mr-2 data-vertical:h-4 data-vertical:self-auto"
-        />
-        <h1 className="text-sm font-medium">Create Memory</h1>
-      </header>
+      <DashboardHeader label="Create Memory" />
 
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 p-4 pt-0">
         <form onSubmit={submit} className="flex flex-col gap-4">

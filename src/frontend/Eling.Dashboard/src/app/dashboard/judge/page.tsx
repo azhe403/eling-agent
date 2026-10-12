@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import Link from "next/link"
+import { DashboardHeader } from "@/components/dashboard-header"
 import {
   AlertCircle,
   CheckCircle2,
@@ -9,20 +9,9 @@ import {
   Loader2,
   PlugZap,
   RefreshCw,
-  Scale,
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react"
-
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -41,8 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Switch } from "@/components/ui/switch"
 
 interface JudgeView {
@@ -326,40 +313,18 @@ export default function JudgeConfigPage() {
 
   return (
     <>
-      <header className="flex h-16 shrink-0 items-center gap-2 px-4">
-        <SidebarTrigger className="-ml-1" />
-        <Separator
-          orientation="vertical"
-          className="mr-2 data-vertical:h-4 data-vertical:self-auto"
-        />
-        <Breadcrumb>
-          <BreadcrumbList>
-            <BreadcrumbItem>
-              <BreadcrumbLink render={<Link href="/dashboard" />}>Dashboard</BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>Semantic Judge</BreadcrumbPage>
-            </BreadcrumbItem>
-          </BreadcrumbList>
-        </Breadcrumb>
-      </header>
+      <DashboardHeader label="Judge" />
 
-      <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 p-4 pt-0">
+      <div className="flex w-full flex-1 flex-col gap-4 p-4 pt-4">
         {/* Top Status Card */}
         <Card>
-          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pb-3">
-            <div className="flex items-center gap-3">
-              <div className="flex aspect-square size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <Scale className="size-5" />
-              </div>
-              <div>
-                <CardTitle className="text-base font-semibold">Memory Semantic Judge</CardTitle>
-                <CardDescription className="text-xs">
-                  LLM-backed dedup & relationship evaluator for{" "}
-                  <code className="bg-muted px-1 py-0.5 rounded text-[11px]">memory_save</code>
-                </CardDescription>
-              </div>
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-1">
+              <CardTitle className="text-base">Memory Semantic Judge</CardTitle>
+              <CardDescription>
+                LLM-backed dedup & relationship evaluator for{" "}
+                <code className="bg-muted rounded px-1 py-0.5 text-xs">memory_save</code>
+              </CardDescription>
             </div>
 
             <div className="flex items-center gap-2">
@@ -369,25 +334,19 @@ export default function JudgeConfigPage() {
                   <span>Loading...</span>
                 </div>
               ) : enabled && isConfigured ? (
-                <Badge
-                  variant="outline"
-                  className="gap-1.5 border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium py-1 px-2.5"
-                >
+                <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
                   <ShieldCheck className="size-3.5" />
                   Active & Configured
-                </Badge>
+                </span>
               ) : enabled && !isConfigured ? (
-                <Badge
-                  variant="outline"
-                  className="gap-1.5 border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium py-1 px-2.5"
-                >
+                <span className="flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-600 dark:text-amber-400">
                   <ShieldAlert className="size-3.5" />
                   Enabled (Incomplete)
-                </Badge>
+                </span>
               ) : (
-                <Badge variant="secondary" className="gap-1.5 font-medium py-1 px-2.5">
+                <span className="flex items-center gap-1.5 rounded-full border border-border/50 bg-muted/30 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
                   Disabled (Heuristic Dedup)
-                </Badge>
+                </span>
               )}
 
               <Button
@@ -402,7 +361,7 @@ export default function JudgeConfigPage() {
             </div>
           </CardHeader>
 
-          <CardContent className="pt-0">
+          <CardContent>
             <div className="rounded-lg bg-muted/50 p-3 text-xs leading-relaxed text-muted-foreground">
               The semantic judge acts as an authoritative decider for incoming memories (determining if a memory is an exact revision, contradiction, superset, or unrelated). When disabled or unconfigured, Eling automatically and safely degrades to bag-of-words heuristic similarity.
             </div>
@@ -412,10 +371,10 @@ export default function JudgeConfigPage() {
         {/* Notification alerts */}
         {message && (
           <div
-            className={`flex items-start gap-2.5 rounded-lg border p-3.5 text-sm ${
+            className={`flex items-start gap-2.5 rounded-lg border p-3 text-sm ${
               message.type === "success"
                 ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                : "border-destructive/40 bg-destructive/10 text-destructive"
+                : "border-destructive/50 bg-destructive/10 text-destructive"
             }`}
           >
             {message.type === "success" ? (
@@ -430,7 +389,7 @@ export default function JudgeConfigPage() {
         {/* Configuration Form Card */}
         <form onSubmit={handleSave} autoComplete="off">
           <Card>
-            <CardHeader className="border-b pb-4">
+            <CardHeader className="border-b">
               <div className="flex items-center justify-between">
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="enabled" className="text-sm font-medium cursor-pointer">
@@ -448,7 +407,7 @@ export default function JudgeConfigPage() {
               </div>
             </CardHeader>
 
-            <CardContent className="flex flex-col gap-5 pt-5">
+            <CardContent className="flex flex-col gap-4">
               {/* Provider Endpoint */}
               <div className="flex flex-col gap-2">
                 <Label htmlFor="baseUrl" className="text-sm font-medium flex items-center gap-1.5">
@@ -465,7 +424,7 @@ export default function JudgeConfigPage() {
                   data-1p-ignore="true"
                   data-lpignore="true"
                 />
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   The root API endpoint where chat completions are accessible.
                 </span>
               </div>
@@ -514,7 +473,7 @@ export default function JudgeConfigPage() {
                   </Select>
                 </div>
 
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   {displayedModels.length === 0
                     ? "Click 'Fetch Models' to load available models from the provider endpoint."
                     : "LLM model to invoke for semantic deduplication decisions."}
@@ -528,9 +487,10 @@ export default function JudgeConfigPage() {
                     API Key
                   </Label>
                   {hasApiKey && (
-                    <Badge variant="outline" className="border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[11px] py-0">
-                      ✓ Key stored on server
-                    </Badge>
+                    <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 className="size-3.5" />
+                      Key stored on server
+                    </span>
                   )}
                 </div>
                 <Input
@@ -543,7 +503,7 @@ export default function JudgeConfigPage() {
                   data-1p-ignore="true"
                   data-lpignore="true"
                 />
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   Stored securely in <code className="bg-muted px-1 py-0.5 rounded text-[11px]">~/.config/eling/config/semantic-judge.json</code> and never returned to the browser.
                 </span>
               </div>
@@ -566,7 +526,7 @@ export default function JudgeConfigPage() {
                   className="max-w-[200px]"
                   autoComplete="off"
                 />
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   Attempt 1 timeout duration (default 10s). If it times out, Attempt 2 automatically scales to 1.5x before degrading safely to heuristic fallback.
                 </span>
               </div>
@@ -593,7 +553,7 @@ export default function JudgeConfigPage() {
               )}
             </CardContent>
 
-            <CardFooter className="flex flex-wrap items-center gap-3 pt-3 border-t">
+            <CardFooter className="flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={saving}>
                 {saving && <Loader2 className="size-4 animate-spin mr-1.5" />}
                 Save Configuration

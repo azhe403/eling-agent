@@ -3,14 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Wrench, X } from "lucide-react"
 
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
+import { DashboardHeader } from "@/components/dashboard-header"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -21,8 +14,6 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Switch } from "@/components/ui/switch"
 
 interface ToolItem {
@@ -228,123 +219,110 @@ export default function ToolsPage() {
   const enabledCount = tools.filter((tool) => tool.enabled).length
 
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <header className="flex items-center gap-2">
-        <SidebarTrigger />
-        <Separator orientation="vertical" className="mr-2 h-4" />
-        <Breadcrumb>
-          <BreadcrumbList>
-            <BreadcrumbItem>
-              <BreadcrumbLink href="/dashboard">Dashboard</BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>Tools</BreadcrumbPage>
-            </BreadcrumbItem>
-          </BreadcrumbList>
-        </Breadcrumb>
-      </header>
+    <>
+      <DashboardHeader label="Tools" />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Wrench className="size-4" />
-            Tool Management
-          </CardTitle>
-          <CardDescription>
-            {loading
-              ? "Loading tool policy…"
-              : `${enabledCount} of ${tools.length} tools enabled. Changes apply immediately without restarting.`}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-4 p-4">
+        <div className="sticky top-16 z-10 flex items-center gap-2 bg-background py-1">
           <Input
             placeholder="Search tools by name or description…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             className="sm:max-w-sm"
           />
-          <div className="flex gap-2 sm:ml-auto">
-            <Button variant="outline" size="sm" onClick={() => void reload()} disabled={loading}>
-              <RefreshCw className="size-4" />
-              Refresh
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+          <Button variant="outline" size="sm" onClick={() => void reload()} disabled={loading} className="sm:ml-auto">
+            <RefreshCw className="size-4" />
+            Refresh
+          </Button>
+        </div>
 
-      <div className="pointer-events-none fixed top-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
-        {notifications.map((notification) => (
-          <ToastItem key={notification.id} notification={notification} onDismiss={dismissNotification} />
-        ))}
-      </div>
-
-      {loading ? (
         <Card>
-          <CardContent className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            Loading tools…
-          </CardContent>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Wrench className="size-4" />
+              Tool Management
+            </CardTitle>
+            <CardDescription>
+              {loading
+                ? "Loading tool policy…"
+                : `${enabledCount} of ${tools.length} tools enabled. Changes apply immediately without restarting.`}
+            </CardDescription>
+          </CardHeader>
         </Card>
-      ) : (
-        groups.map((group) => {
-          const members = filtered.filter((tool) => tool.group === group)
-          if (members.length === 0) return null
-          const toggleable = members.filter((tool) => !tool.isProtected)
-          const enabledCount = toggleable.filter((tool) => tool.enabled).length
-          const allEnabled = toggleable.length > 0 && enabledCount === toggleable.length
-          const isMixed = enabledCount > 0 && enabledCount < toggleable.length
-          return (
-            <Card key={group}>
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <CardTitle className="text-base">{GROUP_TITLES[group] ?? group}</CardTitle>
-                  <Badge variant="secondary">{members.length}</Badge>
-                  <Badge variant="outline" className={isMixed ? undefined : "invisible"}>
-                    mixed
-                  </Badge>
-                  <div className="ml-auto flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {enabledCount}/{toggleable.length} on
-                    </span>
-                    <Switch
-                      checked={allEnabled}
-                      disabled={toggleable.length === 0}
-                      onCheckedChange={(checked) => void toggleGroup(group, checked)}
-                      aria-label={`Toggle ${group} tools`}
-                    />
-                  </div>
-                </div>
-                <CardDescription>
-                  {group === "memory" && "Recall, save, search, and maintenance operations."}
-                  {group === "codebase" && "Indexing and full-text search over the workspace."}
-                  {group === "filesystem" && "Sandboxed file and directory operations."}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {members.map((tool) => (
-                  <div key={tool.name} className="flex items-start gap-3 rounded-lg border p-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex min-h-6 flex-wrap items-center gap-2">
-                        <code className="text-sm font-medium">{tool.name}</code>
-                        {tool.isProtected && <Badge variant="outline">protected</Badge>}
-                        {!tool.enabled && <Badge variant="secondary">disabled</Badge>}
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">{tool.description}</p>
+
+        <div className="pointer-events-none fixed top-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+          {notifications.map((notification) => (
+            <ToastItem key={notification.id} notification={notification} onDismiss={dismissNotification} />
+          ))}
+        </div>
+
+        {loading ? (
+          <Card>
+            <CardContent className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Loading tools…
+            </CardContent>
+          </Card>
+        ) : (
+          groups.map((group) => {
+            const members = filtered.filter((tool) => tool.group === group)
+            if (members.length === 0) return null
+            const toggleable = members.filter((tool) => !tool.isProtected)
+            const enabledCount = toggleable.filter((tool) => tool.enabled).length
+            const allEnabled = toggleable.length > 0 && enabledCount === toggleable.length
+            const isMixed = enabledCount > 0 && enabledCount < toggleable.length
+            return (
+              <Card key={group}>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-base">{GROUP_TITLES[group] ?? group}</CardTitle>
+                    <Badge variant="secondary">{members.length}</Badge>
+                    <Badge variant="outline" className={isMixed ? undefined : "invisible"}>
+                      mixed
+                    </Badge>
+                    <div className="ml-auto flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {enabledCount}/{toggleable.length} on
+                      </span>
+                      <Switch
+                        checked={allEnabled}
+                        disabled={toggleable.length === 0}
+                        onCheckedChange={(checked) => void toggleGroup(group, checked)}
+                        aria-label={`Toggle ${group} tools`}
+                      />
                     </div>
-                    <Switch
-                      checked={tool.enabled}
-                      disabled={tool.isProtected || pending[tool.name] === true}
-                      onCheckedChange={(checked) => void toggleTool(tool, checked)}
-                      aria-label={`Toggle ${tool.name}`}
-                    />
                   </div>
-                ))}
-              </CardContent>
-            </Card>
-          )
-        })
-      )}
-    </div>
+                  <CardDescription>
+                    {group === "memory" && "Recall, save, search, and maintenance operations."}
+                    {group === "codebase" && "Indexing and full-text search over the workspace."}
+                    {group === "filesystem" && "Sandboxed file and directory operations."}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {members.map((tool) => (
+                    <div key={tool.name} className="flex items-start gap-3 rounded-lg border p-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-h-6 flex-wrap items-center gap-2">
+                          <code className="text-sm font-medium">{tool.name}</code>
+                          {tool.isProtected && <Badge variant="outline">protected</Badge>}
+                          {!tool.enabled && <Badge variant="secondary">disabled</Badge>}
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">{tool.description}</p>
+                      </div>
+                      <Switch
+                        checked={tool.enabled}
+                        disabled={tool.isProtected || pending[tool.name] === true}
+                        onCheckedChange={(checked) => void toggleTool(tool, checked)}
+                        aria-label={`Toggle ${tool.name}`}
+                      />
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )
+          })
+        )}
+      </div>
+    </>
   )
 }

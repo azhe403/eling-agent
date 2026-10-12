@@ -5,7 +5,6 @@ import Link from "next/link"
 import {
   FolderGit2,
   RefreshCw,
-  Search,
   BookOpen,
   Radio,
   Clock,
@@ -17,18 +16,9 @@ import {
   Cpu,
   MemoryStick,
 } from "lucide-react"
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
+import { DashboardHeader } from "@/components/dashboard-header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   AlertDialog,
@@ -42,6 +32,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useMemoriesSse, type SseTopic } from "@/hooks/use-memories-sse"
 import { utcToLocal } from "@/lib/date-utils"
+import { PathText } from "@/components/path-text"
 
 type RuntimeDto = {
   processId: number
@@ -246,27 +237,7 @@ export function WorkspacesList() {
 
   return (
     <>
-      <header className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-border/40 px-4">
-        <div className="flex items-center gap-2">
-          <SidebarTrigger className="-ml-1" />
-          <Separator
-            orientation="vertical"
-            className="mr-2 data-vertical:h-4 data-vertical:self-auto"
-          />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem className="hidden md:block">
-                <BreadcrumbLink href="/dashboard">Eling</BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator className="hidden md:block" />
-              <BreadcrumbItem>
-                <BreadcrumbPage>Workspaces</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-        </div>
-
-        <div className="flex items-center gap-2">
+      <DashboardHeader label="Workspaces">
           <div
             className="flex items-center gap-1.5 rounded-full border border-border/50 bg-muted/30 px-2.5 py-1 text-[11px] font-medium"
             title={
@@ -306,10 +277,9 @@ export function WorkspacesList() {
             <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
             <span className="hidden sm:inline-block">Refresh</span>
           </Button>
-        </div>
-      </header>
+      </DashboardHeader>
 
-      <div className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 pt-4">
+      <div className="flex min-w-0 flex-1 flex-col gap-4 p-4 pt-4">
         {/* Metric tiles */}
         <div className="grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-3">
           {loading ? (
@@ -342,43 +312,47 @@ export function WorkspacesList() {
           </div>
         )}
 
-        {/* Filter & Search Bar */}
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
-          <div className="relative flex-1 min-w-[240px] max-w-md">
-            <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-            <Input
-              placeholder="Search workspace name, path, or PID..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="pl-8"
-            />
-          </div>
+        {/* Filter & Search Bar — same two-row toolbar pattern as the memories page */}
+        <div className="sticky top-16 z-10 flex flex-col gap-2 bg-background pb-2 pt-1">
+          <Input
+            placeholder="Search workspace name, path, or PID..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="min-w-0 flex-1"
+          />
 
-          <div className="flex items-center gap-1">
-            {(["all", "active", "offline"] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setFilter(s)}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
-                  filter === s
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                }`}
-              >
-                {s}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              className="flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 p-1"
+              role="group"
+              aria-label="Workspace status"
+            >
+              {(["all", "active", "offline"] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setFilter(s)}
+                  className={
+                    (filter === s
+                      ? "rounded-md bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm"
+                      : "rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground") +
+                    " whitespace-nowrap"
+                  }
+                >
+                  {s === "all" ? "All" : s === "active" ? "Active" : "Offline"}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* Workspaces List / Grid - Scrollable area */}
-        <div className="min-w-0 min-h-0 flex-1 overflow-y-auto pr-1 flex flex-col gap-3">
+        {/* Workspaces List / Grid — 2 columns on wide screens (2xl, ≥1536px) */}
+        <div className="grid min-w-0 grid-cols-1 gap-3 2xl:grid-cols-2">
           {loading ? (
             Array.from({ length: 3 }).map((_, i) => (
               <Skeleton key={i} className="h-28 w-full rounded-xl" />
             ))
           ) : filtered.length === 0 ? (
-            <div className="flex min-h-[200px] flex-col items-center justify-center rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+            <div className="flex min-h-[200px] flex-col items-center justify-center rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground 2xl:col-span-2">
               <FolderGit2 className="mb-2 size-8 opacity-40" />
               <span>No workspaces match the current filter.</span>
             </div>
@@ -406,7 +380,7 @@ export function WorkspacesList() {
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-                          Offline (PID: 0)
+                          Offline
                         </span>
                       )}
 
@@ -417,14 +391,16 @@ export function WorkspacesList() {
                       )}
                     </div>
 
-                    <div className="text-xs text-muted-foreground truncate" title={root}>
-                      📁 {root}
-                    </div>
+                    <PathText prefix="📁" path={root} className="text-xs" />
 
-                    {status?.dbPath && (
-                      <div className="text-xs text-muted-foreground truncate" title={status.dbPath}>
-                        🗄️ <span className="font-mono text-[11px]">{status.dbPath}</span>
-                      </div>
+                    {/* The db file path only means something once an index exists —
+                        hiding it for never-indexed workspaces keeps the card scannable. */}
+                    {status?.dbPath && status.lastIndexedAt && (
+                      <PathText
+                        prefix="🗄️"
+                        path={status.dbPath}
+                        className="font-mono text-[11px]"
+                      />
                     )}
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground mt-1">
@@ -449,10 +425,14 @@ export function WorkspacesList() {
 
                       {status && (
                         <>
-                          <span className="inline-flex items-center gap-1">
-                            <FileCode2 className="size-3.5" />
-                            {status.files} files ({status.chunks} chunks)
-                          </span>
+                          {/* A zero count is noise until an index exists — the
+                              "Indexed: Never" chip below already says it all. */}
+                          {status.lastIndexedAt && (
+                            <span className="inline-flex items-center gap-1">
+                              <FileCode2 className="size-3.5" />
+                              {status.files} files ({status.chunks} chunks)
+                            </span>
+                          )}
                           <span className="inline-flex items-center gap-1">
                             <Layers className="size-3.5" />
                             Indexed: {utcToLocal(status.lastIndexedAt) || "Never"}

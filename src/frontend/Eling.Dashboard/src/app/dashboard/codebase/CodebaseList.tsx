@@ -1,13 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { RefreshCw, Search, BookOpen, ChevronDown } from "lucide-react"
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-} from "@/components/ui/breadcrumb"
+import { RefreshCw, Search, ChevronDown } from "lucide-react"
+import { DashboardHeader } from "@/components/dashboard-header"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -19,8 +14,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import type { SseTopic } from "@/hooks/use-memories-sse"
 import {
@@ -432,27 +425,8 @@ export function CodebaseList() {
     (rebuildProgress.total > 0 || rebuildProgress.skippedRoots.length > 0)
 
   return (
-    <div className="flex h-svh flex-col overflow-hidden">
-      <header className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-border/40 px-4">
-        <div className="flex items-center gap-2">
-          <SidebarTrigger className="-ml-1" />
-          <Separator
-            orientation="vertical"
-            className="mr-2 data-vertical:h-4 data-vertical:self-auto"
-          />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbPage className="flex items-center gap-2">
-                  <BookOpen className="size-4 text-muted-foreground" />
-                  Codebase Index
-                </BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-        </div>
-
-        <div className="flex items-center gap-2">
+    <div className="flex w-full flex-col">
+      <DashboardHeader label="Codebase">
           <Button
             variant="outline"
             size="sm"
@@ -508,10 +482,9 @@ export function CodebaseList() {
               </DropdownMenuContent>
             </DropdownMenu>
           </ButtonGroup>
-        </div>
-      </header>
+      </DashboardHeader>
 
-      <div className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 pt-4">
+      <div className="flex flex-col gap-4 p-4 pt-4">
         {statusError && (
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
             {statusError}
@@ -620,7 +593,7 @@ export function CodebaseList() {
         </div>
 
         <form
-          className="flex gap-2"
+          className="sticky top-16 z-10 flex gap-2 bg-background py-1"
           onSubmit={(e) => {
             e.preventDefault()
             // Enter searches immediately instead of waiting for the debounce.
@@ -689,7 +662,7 @@ export function CodebaseList() {
           </div>
         )}
 
-        <div className="min-w-0 min-h-0 flex-1 overflow-y-auto rounded-lg border divide-y">
+        <div className="min-w-0 rounded-lg border divide-y">
           {!query.trim() ? (
             topLoading && topFiles.length === 0 ? (
               <div className="flex flex-col gap-2 p-3">
