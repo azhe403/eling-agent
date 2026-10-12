@@ -13,6 +13,7 @@ public sealed class AppServices : IDisposable
     public UserScope UserScope { get; }
     public ProjectScope ProjectScope { get; }
     public string EffectiveDataDir { get; }
+    public IWorkspacesRegistry Workspaces { get; }
     public bool Disposed { get; private set; }
 
     private AppServices(
@@ -21,7 +22,8 @@ public sealed class AppServices : IDisposable
         ILoggerFactory loggerFactory,
         UserScope userScope,
         ProjectScope projectScope,
-        string effectiveDataDir
+        string effectiveDataDir,
+        IWorkspacesRegistry workspaces
     )
     {
         Registry = registry;
@@ -30,6 +32,7 @@ public sealed class AppServices : IDisposable
         UserScope = userScope;
         ProjectScope = projectScope;
         EffectiveDataDir = effectiveDataDir;
+        Workspaces = workspaces;
     }
 
     public static AppServices Create(ProjectContext context)
@@ -38,9 +41,9 @@ public sealed class AppServices : IDisposable
         {
         });
         var broadcaster = new MemoryChangeBroadcaster();
-        var workspaces = new SqliteWorkspacesRegistry(
-            context.UserScope.ProjectsDatabasePath,
-            minimalLoggerFactory.CreateLogger<SqliteWorkspacesRegistry>());
+        var workspaces = new JsonWorkspaceRegistry(
+            Path.Combine(CentralAgentDirectory.Resolve(), "agent-workspaces.json"),
+            minimalLoggerFactory.CreateLogger<JsonWorkspaceRegistry>());
         var registry = new RuntimeRegistry(
             minimalLoggerFactory.CreateLogger<RuntimeRegistry>(),
             context.UserScope,
@@ -53,7 +56,8 @@ public sealed class AppServices : IDisposable
             minimalLoggerFactory,
             context.UserScope,
             context.ProjectScope,
-            context.EffectiveDataDir);
+            context.EffectiveDataDir,
+            workspaces);
     }
 
     public void Dispose()

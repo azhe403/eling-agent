@@ -44,10 +44,10 @@ public sealed class ProjectScopeCatalogTests : IDisposable
         return path;
     }
 
-    private static SqliteWorkspacesRegistry NewStore(string name)
+    private static JsonWorkspaceRegistry NewStore(string name)
         => new(Path.Combine(Path.GetTempPath(), "eling-ws-" + Guid.NewGuid().ToString("N")[..8], name));
 
-    private static RuntimeRegistry RegistryFor(SqliteWorkspacesRegistry store)
+    private static RuntimeRegistry RegistryFor(JsonWorkspaceRegistry store)
         => new(
             NullLogger<RuntimeRegistry>.Instance,
             UserScope.Resolve(null),

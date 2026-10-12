@@ -8,6 +8,7 @@ using Eling.Core.FileSystem;
 using Eling.Core.Memory;
 using Eling.Core.Memory.Serialization;
 using Eling.Core.MemoryRecall;
+using Eling.Core.Projects;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -40,7 +41,7 @@ public class AgentChatTests : IAsyncLifetime, IDisposable
     {
         File.WriteAllText(Path.Combine(_workspace, "hello.txt"), "hello-agent");
         var harness = CreateHarness();
-        harness.Registry.Add(_workspace);
+        Attach(harness.Registry, _workspace);
 
         harness.Gateway.Enqueue(new SingleShotResult(null, [new ToolCallRequest("t1", "file_read", """{"path":"hello.txt"}""")]));
         harness.Gateway.Enqueue(new SingleShotResult("file says hello-agent", []));
@@ -58,7 +59,7 @@ public class AgentChatTests : IAsyncLifetime, IDisposable
     public async Task HopCap_StopsAfterTwentyFiveExecutions()
     {
         var harness = CreateHarness();
-        harness.Registry.Add(_workspace);
+        Attach(harness.Registry, _workspace);
         for (var i = 0; i < 30; i++)
         {
             harness.Gateway.Enqueue(new SingleShotResult(null, [new ToolCallRequest($"t{i}", "directory_list", """{"path":""}""")]));
@@ -115,7 +116,7 @@ public class AgentChatTests : IAsyncLifetime, IDisposable
         var dataDir = Path.Combine(_tempDir, "data-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dataDir);
 
-        var registry = new WorkspaceRegistry(Path.Combine(dataDir, "ws.json"), NullLogger<WorkspaceRegistry>.Instance);
+        var registry = new JsonWorkspaceRegistry(Path.Combine(dataDir, "ws.json"), NullLogger<JsonWorkspaceRegistry>.Instance);
         var files = new BackendFileTools(NullLogger<BackendFileTools>.Instance);
         var memory = new StubMemoryService();
         var provider = new ProviderStore(dataDir, NullLogger<ProviderStore>.Instance);
@@ -133,6 +134,18 @@ public class AgentChatTests : IAsyncLifetime, IDisposable
         var tools = Array.Empty<IAgentTool>();
         var turns = new AgentTurnService(gateway, tools, chats, provider, NullLogger<AgentTurnService>.Instance);
         return new Harness(registry, chats, gateway, turns);
+    }
+
+    private static void Attach(IWorkspacesRegistry registry, string root)
+    {
+        var now = DateTimeOffset.UtcNow;
+        registry.Record(new RegisteredWorkspace(
+            WorkspaceId: string.Empty,
+            WorkspaceRoot: root,
+            HeadScopeRoot: root,
+            CodebaseEnabled: false,
+            FirstSeenAt: now,
+            LastSeenAt: now));
     }
 
     private async Task<int> StartStubAsync(string responseJson)
@@ -179,7 +192,7 @@ public class AgentChatTests : IAsyncLifetime, IDisposable
     }
 
     private sealed record Harness(
-        WorkspaceRegistry Registry,
+        IWorkspacesRegistry Registry,
         BackendChatStore Chats,
         FakeGateway Gateway,
         AgentTurnService Turns);

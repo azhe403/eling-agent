@@ -32,23 +32,6 @@ public class AgentStoreMigrationTests : IDisposable
     }
 
     [Fact]
-    public void WorkspaceRegistry_MovesLegacyFileToGlobal()
-    {
-        var legacyDir = Path.Combine(_tempDir, "legacy");
-        var globalDir = Path.Combine(_tempDir, "global");
-        Directory.CreateDirectory(legacyDir);
-        File.WriteAllText(Path.Combine(legacyDir, "agent-workspaces.json"), """["C:\\work"]""");
-
-        var registry = new WorkspaceRegistry(
-            Path.Combine(globalDir, "agent-workspaces.json"),
-            NullLogger<WorkspaceRegistry>.Instance,
-            Path.Combine(legacyDir, "agent-workspaces.json"));
-
-        Assert.Contains("C:\\work", registry.List());
-        Assert.False(File.Exists(Path.Combine(legacyDir, "agent-workspaces.json")));
-    }
-
-    [Fact]
     public void ChatStore_MovesLegacyDirectoryToGlobal()
     {
         var legacyDir = Path.Combine(_tempDir, "legacy", "agent-chats");

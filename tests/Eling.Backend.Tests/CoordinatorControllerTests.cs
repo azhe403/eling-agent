@@ -31,7 +31,7 @@ public sealed class CoordinatorControllerTests : IAsyncLifetime
     private string _root = null!;
     private HttpClient _client = null!;
     private RuntimeRegistry _registry = null!;
-    private SqliteWorkspacesRegistry _workspaces = null!;
+    private JsonWorkspaceRegistry _workspaces = null!;
 
     public async Task InitializeAsync()
     {
@@ -40,8 +40,8 @@ public sealed class CoordinatorControllerTests : IAsyncLifetime
 
         var dataDir = Path.Combine(_root, "data");
         var userScope = UserScope.Resolve(Path.Combine(dataDir, "user-scope"));
-        _workspaces = new SqliteWorkspacesRegistry(
-            ElingPaths.ResolveProjectsDbPath(dataDir, elingDataDir: dataDir));
+        _workspaces = new JsonWorkspaceRegistry(
+            Path.Combine(dataDir, "agent-workspaces.json"));
         _registry = new RuntimeRegistry(
             NullLogger<RuntimeRegistry>.Instance,
             userScope,
@@ -294,6 +294,32 @@ public sealed class CoordinatorControllerTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, postRes.StatusCode);
         var entries = await GetAsync("/api/coordinator/runtimes?includeRegistered=true");
         Assert.DoesNotContain(entries, e => RootOf(e) == workspace);
+        Assert.False(Directory.Exists(dotEling));
+    }
+
+    /// <summary>
+    /// The registry row is one component among three, not the point of the
+    /// dialog: a user may want to clear only the index cache (or the .eling
+    /// data) and keep the workspace listed. Ask, and it stays.
+    /// </summary>
+    [Fact]
+    public async Task DeleteProject_WithRegistryKept_KeepsWorkspaceAndDeletesRest()
+    {
+        var workspace = Workspace("keep-registry");
+        var dotEling = Path.Combine(workspace, ".eling");
+        Directory.CreateDirectory(dotEling);
+        _registry.Register(Registration(workspace, 601));
+
+        var deletePayload = new DeleteProjectRequest(
+            workspace,
+            DeleteCodebaseIndex: true,
+            DeleteDotEling: true,
+            DeleteRegistry: false);
+        var postRes = await _client.PostAsJsonAsync("/api/coordinator/project/delete", deletePayload);
+
+        Assert.Equal(HttpStatusCode.OK, postRes.StatusCode);
+        var entries = await GetAsync("/api/coordinator/runtimes?includeRegistered=true");
+        Assert.Contains(entries, e => RootOf(e) == workspace);
         Assert.False(Directory.Exists(dotEling));
     }
 }

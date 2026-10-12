@@ -5,6 +5,7 @@ using Eling.Core.FileSystem;
 using Eling.Core.Memory;
 using Eling.Core.Memory.Serialization;
 using Eling.Core.MemoryRecall;
+using Eling.Core.Projects;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -27,7 +28,7 @@ public class AgentChatStreamTests : IDisposable
     {
         File.WriteAllText(Path.Combine(_workspace, "a.txt"), "abc");
         var harness = CreateHarness();
-        harness.Registry.Add(_workspace);
+        Attach(harness.Registry, _workspace);
         harness.Gateway.Enqueue(
             [new ChatTextDelta("he"), new ChatTextDelta("llo"), new ChatToolRequest(new ToolCallRequest("t1", "file_read", """{"path":"a.txt"}"""))]);
         harness.Gateway.Enqueue([new ChatTextDelta("says abc")]);
@@ -61,7 +62,7 @@ public class AgentChatStreamTests : IDisposable
     public async Task StreamedTurn_StopsAfterTwentyFiveHops()
     {
         var harness = CreateHarness();
-        harness.Registry.Add(_workspace);
+        Attach(harness.Registry, _workspace);
         for (var i = 0; i < 30; i++)
         {
             harness.Gateway.Enqueue([new ChatToolRequest(new ToolCallRequest($"t{i}", "directory_list", """{"path":""}"""))]);
@@ -84,7 +85,7 @@ public class AgentChatStreamTests : IDisposable
     public async Task StreamedTurn_FallsBackToSingleShot_WhenStreamingThrows()
     {
         var harness = CreateHarness();
-        harness.Registry.Add(_workspace);
+        Attach(harness.Registry, _workspace);
         harness.Gateway.ThrowOnStream = true;
         harness.Gateway.NonStreamResult = new SingleShotResult("fallback-hi", []);
 
@@ -105,7 +106,7 @@ public class AgentChatStreamTests : IDisposable
         var dataDir = Path.Combine(_tempDir, "data-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dataDir);
 
-        var registry = new WorkspaceRegistry(Path.Combine(dataDir, "ws.json"), NullLogger<WorkspaceRegistry>.Instance);
+        var registry = new JsonWorkspaceRegistry(Path.Combine(dataDir, "ws.json"), NullLogger<JsonWorkspaceRegistry>.Instance);
         var files = new BackendFileTools(NullLogger<BackendFileTools>.Instance);
         var memory = new StubMemoryService();
         var provider = new ProviderStore(dataDir, NullLogger<ProviderStore>.Instance);
@@ -140,9 +141,21 @@ public class AgentChatStreamTests : IDisposable
     }
 
     private sealed record Harness(
-        WorkspaceRegistry Registry,
+        IWorkspacesRegistry Registry,
         AgentTurnService Turns,
         FakeStreamingGateway Gateway);
+
+    private static void Attach(IWorkspacesRegistry registry, string root)
+    {
+        var now = DateTimeOffset.UtcNow;
+        registry.Record(new RegisteredWorkspace(
+            WorkspaceId: string.Empty,
+            WorkspaceRoot: root,
+            HeadScopeRoot: root,
+            CodebaseEnabled: false,
+            FirstSeenAt: now,
+            LastSeenAt: now));
+    }
 
     private sealed class FakeStreamingGateway : IChatGateway
     {

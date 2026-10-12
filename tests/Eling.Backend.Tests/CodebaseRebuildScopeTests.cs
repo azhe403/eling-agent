@@ -21,7 +21,7 @@ public sealed class CodebaseRebuildScopeTests : IDisposable
     private readonly string? _originalDataDir;
     private readonly CodebaseIndexService _local;
     private readonly RuntimeRegistry _registry;
-    private readonly SqliteWorkspacesRegistry _projects;
+    private readonly JsonWorkspaceRegistry _projects;
 
     public CodebaseRebuildScopeTests()
     {
@@ -41,8 +41,8 @@ public sealed class CodebaseRebuildScopeTests : IDisposable
             new SqliteCodebaseIndex(ElingPaths.ResolveCodebaseDbPath(_workspace)));
         // Attached so a federated "all" read can include workspaces whose process
         // has exited — that is the behaviour under test here.
-        _projects = new SqliteWorkspacesRegistry(
-            ElingPaths.ResolveProjectsDbPath(_dataDir, elingDataDir: _dataDir));
+        _projects = new JsonWorkspaceRegistry(
+            Path.Combine(_dataDir, "agent-workspaces.json"));
         _registry = new RuntimeRegistry(
             NullLogger<RuntimeRegistry>.Instance,
             UserScope.Resolve(Path.Combine(_dataDir, "user-scope")),

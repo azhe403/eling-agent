@@ -117,8 +117,10 @@ public sealed class CoordinatorController(
     }
 
     /// <summary>
-    /// Deletes a project from the registry, with options to delete its codebase index
-    /// and/or its local .eling data folder.
+    /// Deletes a workspace's components, each one opt-in-able: the registry row,
+    /// the codebase index, and the local .eling data folder. Keeping the registry row
+    /// while clearing the rest is valid — the workspace stays listed so it can
+    /// be re-indexed later.
     /// </summary>
     [HttpPost("project/delete")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -135,8 +137,12 @@ public sealed class CoordinatorController(
         var normalized = Path.GetFullPath(request.WorkspaceRoot)
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-        // 1. Delete from workspaces database and unregister if active
-        await registry.DeleteWorkspaceAsync(normalized, cancellationToken);
+        // 1. Delete from workspaces database and unregister if active —
+        //    one component of the delete, not its mandatory core.
+        if (request.DeleteRegistry)
+        {
+            await registry.DeleteWorkspaceAsync(normalized, cancellationToken);
+        }
 
         // 2. Optionally delete codebase index db and sidecars (-wal, -shm)
         if (request.DeleteCodebaseIndex)

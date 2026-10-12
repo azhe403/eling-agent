@@ -12,6 +12,7 @@ using Eling.Backend.Updates;
 using Eling.Core;
 using Eling.Core.Codebase;
 using Eling.Core.Memory;
+using Eling.Core.Projects;
 using Eling.Core.Scope;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
@@ -106,12 +107,22 @@ public static class DashboardServices
         var legacyConfigDir = context.UserScope.GlobalDataDirectory;
         var isTestIsolation = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ELING_AGENT_DATA_DIR"));
 
-        services.AddSingleton(sp => new WorkspaceRegistry(
-            Path.Combine(globalAgentDir, "agent-workspaces.json"),
-            sp.GetRequiredService<ILogger<WorkspaceRegistry>>(),
-            !isTestIsolation && File.Exists(Path.Combine(legacyProjectDir, "agent-workspaces.json"))
-                ? Path.Combine(legacyProjectDir, "agent-workspaces.json")
-                : (!isTestIsolation ? Path.Combine(legacyConfigDir, "agent-workspaces.json") : null)));
+        // One workspace catalogue for the whole system: MCP runtime registration,
+        // the coordinator, and the agent workspace endpoints all read this file.
+        // The shared AppServices instance already owns it, so reuse that object
+        // instead of opening a second handle on the same JSON store. The else branch
+        // is the standalone fallback: it stores without a logger, which only costs
+        // diagnostics on a path production never takes.
+        if (shared is not null)
+        {
+            services.AddSingleton(shared.Workspaces);
+        }
+        else
+        {
+            services.TryAddSingleton(sp => ActivatorUtilities.CreateInstance<Eling.Core.Projects.JsonWorkspaceRegistry>(
+                sp,
+                Path.Combine(globalAgentDir, "agent-workspaces.json")));
+        }
 
         services.AddSingleton(sp => new ProviderStore(
             globalAgentDir,
