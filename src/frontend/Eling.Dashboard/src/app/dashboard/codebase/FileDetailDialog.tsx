@@ -7,7 +7,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -60,7 +59,7 @@ export function FileDetailDialog({
         // fresh state. Resetting the tab and the cached content from an effect
         // instead would be a setState in the effect body, and would also let
         // the previous file's content stay on screen for a frame.
-        <FileDetailBody
+        <FileDetailDialogContent
           key={`${file.projectRoot}::${file.path}`}
           file={file}
           onClose={onClose}
@@ -70,7 +69,54 @@ export function FileDetailDialog({
   )
 }
 
-function FileDetailBody({
+/** The narrow-screen chrome: a centered modal around the shared contents. */
+function FileDetailDialogContent({
+  file,
+  onClose,
+}: {
+  file: SelectedFile
+  onClose: () => void
+}) {
+  return (
+    <DialogContent
+      showCloseButton={false}
+      onOverlayClick={onClose}
+      // No `flex` here: the base class is `grid`, and this element's layout
+      // is a header row plus a body row that takes the leftover height.
+      // Overriding the display would silently void the grid-rows template.
+      //
+      // `minmax(0,1fr)` on the column is load-bearing, not decoration: a grid
+      // item defaults to min-width auto, so a long file path would widen the
+      // column past the dialog and overflow-hidden would clip the controls off
+      // the right edge. A zero minimum is what lets the column stay bounded.
+      //
+      // Every width here carries its own variant. The base class in ui/dialog.tsx
+      // sets `sm:max-w-lg`, and a bare `max-w-*` does not override it — tailwind-merge
+      // only drops a class that shares the variant too, so dropping `sm:` silently
+      // hands the dialog back to 32rem for the whole sm..lg range.
+      className="h-[85svh] max-w-4xl grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden p-4 sm:max-w-4xl lg:max-w-7xl 2xl:max-w-[100rem]"
+    >
+      {/* Base UI reads the dialog's accessible name and description from these
+          parts. They are sr-only because the visible header below is plain
+          markup: the same contents also render in the docked panel, where no
+          Dialog context exists. */}
+      <DialogTitle className="sr-only">{file.path}</DialogTitle>
+      <DialogDescription className="sr-only">
+        {file.projectRoot}
+      </DialogDescription>
+      <FileDetailContents file={file} onClose={onClose} />
+    </DialogContent>
+  )
+}
+
+/**
+ * The viewer's contents, free of chrome: header row plus body row.
+ *
+ * Two containers render this — the centered modal on narrow screens and the
+ * docked right panel on wide ones — so every rule about loaded state (tab
+ * memory, lazy full-file fetch, per-file remount) lives here exactly once.
+ */
+export function FileDetailContents({
   file,
   onClose,
 }: {
@@ -119,24 +165,7 @@ function FileDetailBody({
   }, [tab, contentStatus, file])
 
   return (
-    <DialogContent
-      showCloseButton={false}
-      onOverlayClick={onClose}
-      // No `flex` here: the base class is `grid`, and this element's layout
-      // is a header row plus a body row that takes the leftover height.
-      // Overriding the display would silently void the grid-rows template.
-      //
-      // `minmax(0,1fr)` on the column is load-bearing, not decoration: a grid
-      // item defaults to min-width auto, so a long file path would widen the
-      // column past the dialog and overflow-hidden would clip the controls off
-      // the right edge. A zero minimum is what lets the column stay bounded.
-      //
-      // Every width here carries its own variant. The base class in ui/dialog.tsx
-      // sets `sm:max-w-lg`, and a bare `max-w-*` does not override it — tailwind-merge
-      // only drops a class that shares the variant too, so dropping `sm:` silently
-      // hands the dialog back to 32rem for the whole sm..lg range.
-      className="h-[85svh] max-w-4xl grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden p-4 sm:max-w-4xl lg:max-w-7xl 2xl:max-w-[100rem]"
-    >
+    <>
       {/* Title above, controls below on a phone; side by side from `sm` up.
           Below that width a long path would leave the title ~180px of a
           390px screen and wrap every few characters, so stacking gives the
@@ -145,23 +174,27 @@ function FileDetailBody({
         {/* flex-1, not just min-w-0: a flex item's default basis is its
             content width, so a long path would push the controls off the
             right edge rather than wrap inside its own column. */}
-        <DialogHeader className="min-w-0 gap-1 sm:flex-1">
-          <DialogTitle className="flex items-center gap-2 break-all text-sm">
-            <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
-            {file.path}
-          </DialogTitle>
-          <DialogDescription className="break-all text-xs">
-            {file.projectRoot}
-            {detail.status === "ready" && (
-              <>
-                {" · "}
-                {detail.value.chunks.length}{" "}
-                {detail.value.chunks.length === 1 ? "chunk" : "chunks"} ·{" "}
-                {formatBytes(detail.value.size)}
-              </>
-            )}
-          </DialogDescription>
-        </DialogHeader>
+      {/* The header is plain markup, not Dialog parts: the same contents also
+          render in the docked panel, where no Dialog.Root context exists.
+          The dialog's accessible name/description come from the sr-only
+          DialogTitle/DialogDescription in FileDetailDialogContent. */}
+      <div className="flex min-w-0 flex-col gap-1 sm:flex-1">
+        <h2 className="flex items-center gap-2 break-all text-sm font-medium">
+          <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
+          {file.path}
+        </h2>
+        <p className="break-all text-xs text-muted-foreground">
+          {file.projectRoot}
+          {detail.status === "ready" && (
+            <>
+              {" · "}
+              {detail.value.chunks.length}{" "}
+              {detail.value.chunks.length === 1 ? "chunk" : "chunks"} ·{" "}
+              {formatBytes(detail.value.size)}
+            </>
+          )}
+        </p>
+      </div>
 
         <div className="flex shrink-0 items-center gap-1">
           <TabButton
@@ -183,16 +216,21 @@ function FileDetailBody({
       </div>
 
       {/* The body is the row that can shrink, so min-h-0 plus an explicit
-          scroll container is what keeps a long file inside the dialog
-          instead of stretching it past the fixed height. */}
-      <div className="flex min-h-0 gap-2">
+          scroll container is what keeps a long file inside the viewer instead
+          of stretching it past the fixed height. The flex-1 is inert in the
+          dialog's grid (the 1fr row already stretches it) and is what fills
+          the docked panel's column. min-w-0 closes the chain: an unwrapped
+          code line has a huge min-content width, and without the zero floor
+          on every flex item in the chain it propagates up and widens the
+          docked panel far past its share of the row. */}
+      <div className="flex min-h-0 min-w-0 flex-1 gap-2">
         {tab === "chunks" ? (
           <ChunksPanel state={detail} file={file} />
         ) : (
           <FilePanel state={content} />
         )}
       </div>
-    </DialogContent>
+    </>
   )
 }
 
@@ -252,7 +290,7 @@ function ChunksPanel({
     [id]
   )
 
-  if (state.status === "loading") return <Loading />
+  if (state.status === "loading") return <Loading withRail />
   if (state.status === "error") return <Notice tone="error">{state.message}</Notice>
 
   const chunks = state.value.chunks
@@ -344,7 +382,12 @@ function ChunkRail({
   return (
     <nav
       aria-label="Chunks in this file"
-      className="hidden w-40 shrink-0 space-y-1 overflow-y-auto rounded-lg border p-2 sm:block"
+      // The xl:hidden / 2xl:block pair tracks the docked panel's width, not
+      // this rail's own needs: with the list column locked at 30rem, the panel
+      // is at its narrowest right at the xl floor (~473px), where a 10rem rail
+      // would leave the code column too narrow; from 2xl up the panel reliably
+      // fits the rail again. The prev/next arrows cover navigation either way.
+      className="hidden w-40 shrink-0 space-y-1 overflow-y-auto rounded-lg border p-2 sm:block xl:hidden 2xl:block"
     >
       {chunks.map((chunk, i) => (
         <button
@@ -385,12 +428,30 @@ function FilePanel({ state }: { state: State<ContentView> }) {
   )
 }
 
-function Loading() {
+function Loading({ withRail = false }: { withRail?: boolean }) {
   return (
-    <div className="flex flex-col gap-2 p-3">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <Skeleton key={i} className="h-3 w-full" />
-      ))}
+    // Fills the body instead of clumping six lines at the top, and mirrors the
+    // viewer's shell (rail plus bordered box) so the handover from skeleton to
+    // content does not jump the layout.
+    <div className="flex min-h-0 flex-1 gap-2">
+      {withRail && (
+        <div
+          aria-hidden="true"
+          className="hidden w-40 shrink-0 flex-col gap-2 rounded-lg border p-2 sm:flex xl:hidden 2xl:flex"
+        >
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} className="h-3 w-full rounded-md" />
+          ))}
+        </div>
+      )}
+      <div className="flex min-w-0 flex-1 flex-col justify-between gap-2 rounded-lg border p-3">
+        {Array.from({ length: 12 }).map((_, i) => (
+          <Skeleton
+            key={i}
+            className={i === 11 ? "h-3 w-1/2 rounded-md" : "h-3 w-full rounded-md"}
+          />
+        ))}
+      </div>
     </div>
   )
 }

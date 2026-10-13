@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { RefreshCw, Search, ChevronDown } from "lucide-react"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { Button } from "@/components/ui/button"
@@ -14,13 +15,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { useMemoriesSse } from "@/hooks/use-memories-sse"
-import type { SseTopic } from "@/hooks/use-memories-sse"
-import {
-  useCodebaseRebuildSse,
-  type RebuildProgress,
-} from "@/hooks/use-codebase-rebuild-sse"
-import { utcToLocal } from "@/lib/date-utils"
 import {
   Select,
   SelectContent,
@@ -29,8 +23,33 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useMemoriesSse } from "@/hooks/use-memories-sse"
+import type { SseTopic } from "@/hooks/use-memories-sse"
+import {
+  useCodebaseRebuildSse,
+  type RebuildProgress,
+} from "@/hooks/use-codebase-rebuild-sse"
+import { useMediaQuery } from "@/hooks/use-media-query"
+import { utcToLocal } from "@/lib/date-utils"
+import { XL_BREAKPOINT } from "@/lib/constants"
+import { cn } from "@/lib/utils"
 import { FileDetailDialog } from "./FileDetailDialog"
+import { FileDetailPanel } from "./FileDetailPanel"
 import type { SelectedFile } from "./fileDetailApi"
+import { CodebaseScopePanel, type ScopeRow } from "./CodebaseScopePanel"
+import {
+  projectName,
+  rebuildUrl,
+  searchUrl,
+  selectAll,
+  selectOnly,
+  selectionFromParams,
+  selectionQuery,
+  scopeSummary,
+  statusUrl,
+  toggleRoot,
+  type ScopeSelection,
+} from "./scope"
 
 type CodebaseStatus = {
   scope: string
@@ -59,6 +78,9 @@ type RuntimeEntry = {
   headScopeRoot: string
   workspaceRoot?: string | null
   codebaseEnabled?: boolean | null
+  // Present when the coordinator tracks heartbeats; absent on older payloads,
+  // where a registered runtime is treated as indexed-but-unknown.
+  isAlive?: boolean
 }
 
 type CodebaseTopFile = {
@@ -94,58 +116,41 @@ function rebuildModeLabel(mode: RebuildMode) {
   return mode === "full" ? "Full re-index" : "Incremental"
 }
 
-function searchUrl(q: string, sel: string) {
-  const base = `/api/codebase/search?limit=20`
-  const scopePart = sel === "all" ? "&scope=all" : `&project=${encodeURIComponent(sel)}`
-  return q.trim() ? `${base}&q=${encodeURIComponent(q.trim())}${scopePart}` : `${base}${scopePart}`
+// URL builders (search/status/rebuild) and the selection model they serve now
+// live in ./scope.ts, so the scope a request covers is decided in one pure
+// place shared by reads and the rebuild write.
+
+// Codebase identity is the workspace (cwd), never a .eling ancestor — fall
+// back to headScopeRoot for runtimes registered by older binaries that omit
+// workspaceRoot. Runtimes that opted out of indexing never appear as rows.
+// Dead-but-registered workspaces stay listed: a codebase index is a read-only
+// file in the global store and remains searchable after its process exits.
+// The open file's URL identity. Two params rather than one encoded pair: both
+// values are paths, and unmerged they stay readable in the address bar and in
+// a shared link.
+function fileQuery(file: SelectedFile) {
+  return `file=${encodeURIComponent(file.path)}&fileRoot=${encodeURIComponent(file.projectRoot)}`
 }
 
-// Same scope selector as search, so the tiles always describe the same set of
-// project indexes the result list is reading from. An empty selection means
-// "this backend's own project" — the endpoint default.
-function statusUrl(sel: string) {
-  if (!sel) return `/api/codebase/status`
-  return sel === "all"
-    ? `/api/codebase/status?scope=all`
-    : `/api/codebase/status?project=${encodeURIComponent(sel)}`
+function fileFromParams(params: URLSearchParams): SelectedFile | null {
+  const path = params.get("file")?.trim()
+  const root = params.get("fileRoot")?.trim()
+  return path && root ? { projectRoot: root, path } : null
 }
 
-// Rebuild honours the same scope selector as search, so the projects that get
-// indexed are the ones the tiles and result list are describing. An empty
-// selection means "this backend's own project" — the endpoint default.
-function rebuildUrl(sel: string, mode: RebuildMode) {
-  const scopePart = !sel
-    ? ""
-    : sel === "all"
-      ? "&scope=all"
-      : `&project=${encodeURIComponent(sel)}`
-  return `/api/codebase/rebuild-index?full=${mode === "full"}&_t=${Date.now()}${scopePart}`
-}
-
-function distinctRoots(runtimes: RuntimeEntry[]) {
-  const out: string[] = []
+function scopeRows(runtimes: RuntimeEntry[]): ScopeRow[] {
+  const out: ScopeRow[] = []
   const seen = new Set<string>()
-  const add = (root: string | undefined | null) => {
-    if (!root || root === "UserScope") return
-    const key = root.toLowerCase()
-    if (seen.has(key)) return
-    seen.add(key)
-    out.push(root)
-  }
-  // Codebase identity is the workspace (cwd), never a .eling ancestor — fall
-  // back to headScopeRoot for runtimes registered by older binaries that omit
-  // workspaceRoot. Runtimes that opted out of indexing never appear as options.
   for (const r of runtimes) {
     if (r.codebaseEnabled === false) continue
-    add(r.workspaceRoot || r.headScopeRoot)
+    const root = r.workspaceRoot || r.headScopeRoot
+    if (!root || root === "UserScope") continue
+    const key = root.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ root, alive: r.isAlive === true })
   }
   return out
-}
-
-function projectName(root: string | undefined | null) {
-  if (!root) return "—"
-  const parts = root.split(/[/\\]+/).filter(Boolean)
-  return parts.length ? parts[parts.length - 1] : root
 }
 
 // Idle time after the last keystroke before a search is issued.
@@ -159,20 +164,68 @@ export function CodebaseList() {
   const [results, setResults] = useState<CodebaseHit[]>([])
   const [searchError, setSearchError] = useState<string | null>(null)
   const [query, setQuery] = useState("")
-  // "all" = every alive project, otherwise an explicit project root.
-  // Defaults to "all" so the first paint already shows every index.
-  const [projectSel, setProjectSel] = useState<string>("all")
-  const handleScopeChange = useCallback((value: string | null) => {
-    if (!value) return
-    setProjectSel(value)
-  }, [])
+  // The URL query is the selection's source of truth: no project params means
+  // "all", otherwise the explicit root list, so reload, back/forward and shared
+  // links all land on the same scope the tiles and rebuild describe.
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const selection = useMemo(
+    () => selectionFromParams(searchParams),
+    [searchParams]
+  )
   const [runtimes, setRuntimes] = useState<RuntimeEntry[]>([])
+  const rows = useMemo(() => scopeRows(runtimes), [runtimes])
+  const allRoots = useMemo(() => rows.map((r) => r.root), [rows])
+  // The open file is URL state, same as the scope: reload, back/forward and
+  // shared links all land on the same viewer state. `file` carries the path
+  // and `fileRoot` the owning project — the same relative path can exist in
+  // two indexed workspaces, and the viewer must know which one to read.
+  const selectedFile = useMemo(
+    () => fileFromParams(searchParams),
+    [searchParams]
+  )
+  // One writer for both kinds of state on this page so changing one never
+  // drops the other: a scope change keeps the open file, closing the file
+  // keeps the scope.
+  const writeUrl = useCallback(
+    (nextSelection: ScopeSelection, file: SelectedFile | null) => {
+      const parts = [
+        selectionQuery(nextSelection),
+        file ? fileQuery(file) : "",
+      ].filter(Boolean)
+      const qs = parts.join("&")
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    },
+    [pathname, router]
+  )
+  // Selection changes flip the skeleton on right in the event handler — before
+  // the router round-trip — so tiles react to the click, not to the next commit.
+  const applySelection = useCallback(
+    (next: ScopeSelection) => {
+      setStatusLoading(true)
+      writeUrl(next, selectedFile)
+    },
+    [writeUrl, selectedFile]
+  )
+  const openFile = useCallback(
+    (file: SelectedFile) => writeUrl(selection, file),
+    [writeUrl, selection]
+  )
+  const closeFile = useCallback(() => writeUrl(selection, null), [
+    writeUrl,
+    selection,
+  ])
+  // Wide screens get the docked file panel; narrow ones keep the centered
+  // dialog. Mirrors Tailwind's xl breakpoint, which FileDetailPanel's own
+  // `xl:flex` class also encodes, so the JS gate and CSS agree by construction.
+  const wide = useMediaQuery(`(min-width: ${XL_BREAKPOINT}px)`)
   const [topFiles, setTopFiles] = useState<CodebaseTopFile[]>([])
   const [topLoading, setTopLoading] = useState(true)
-  // Which file the viewer is showing, or null when it is closed. Both lists
-  // feed the same viewer, so the selection carries the owning project with it:
-  // the same relative path can exist in two indexed workspaces.
-  const [selectedFile, setSelectedFile] = useState<SelectedFile | null>(null)
+  // With the panel docked, the list column is the fixed-width one and the
+  // panel takes the rest — the list keeps its width whether the panel is open
+  // or not, and the code viewer gets every remaining pixel.
+  const panelOpen = selectedFile !== null && wide
   // Rebuild is an async job: the POST returns 202 with the first snapshot and
   // the rest arrives over SSE. `rebuildStarting` covers only the POST itself,
   // before any snapshot exists.
@@ -189,27 +242,29 @@ export function CodebaseList() {
   // Last seen index timestamp — a change means someone rebuilt the index.
   const lastIndexedAtRef = useRef<string | null>(null)
 
-  const loadStatus = useCallback(async (sel: string) => {
-    setStatusLoading(true)
-    setStatusError(null)
+  // All state writes land after the first await: this runs from an effect and
+  // from SSE callbacks, and a synchronously-set loading flag there would
+  // cascade an extra render commit per scope change.
+  const loadStatus = useCallback(async () => {
     try {
-      const res = await fetch(statusUrl(sel), { cache: "no-store" })
+      const res = await fetch(statusUrl(selection), { cache: "no-store" })
       if (!res.ok) throw new Error(`API returned ${res.status}`)
       const s = (await res.json()) as CodebaseStatus
       setStatus(s)
       lastIndexedAtRef.current = s.lastIndexedAt
+      setStatusError(null)
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : "Failed to load status")
     } finally {
       setStatusLoading(false)
     }
-  }, [])
+  }, [selection])
 
   // Empty box shows the most recently indexed files instead of nothing.
   const loadTop = useCallback(async (silent: boolean) => {
     if (!silent) setTopLoading(true)
     try {
-      const res = await fetch(searchUrl("", projectSel), { cache: "no-store" })
+      const res = await fetch(searchUrl("", selection), { cache: "no-store" })
       if (!res.ok) throw new Error(`API returned ${res.status}`)
       const data = await res.json()
       setTopFiles(Array.isArray(data.results) ? data.results : [])
@@ -218,7 +273,7 @@ export function CodebaseList() {
     } finally {
       if (!silent) setTopLoading(false)
     }
-  }, [projectSel])
+  }, [selection])
 
   // includeRegistered: a codebase index is a read-only file in a global store and
   // stays readable after its process exits, so a closed project must stay in the
@@ -226,31 +281,24 @@ export function CodebaseList() {
   // number of dead-but-still-indexed workspaces.
   const runtimesUrl = "/api/coordinator/runtimes?includeRegistered=true";
 
-  // Fetch status + known projects on mount so the page is alive immediately.
+  // Known workspaces on mount so the panel and the narrow-screen Select have
+  // rows to show. Status/tiles ride the [loadStatus] effect below instead of
+  // being fetched here separately — one scope, one loader, so the tiles can
+  // never describe a different set of indexes than the result list.
   useEffect(() => {
     let isMounted = true
     const fetchOnMount = async () => {
-      setStatusLoading(true)
-      setStatusError(null)
       try {
-        const [statusRes, runtimesRes] = await Promise.all([
-          fetch(statusUrl(""), { cache: "no-store" }),
-          fetch(runtimesUrl, { cache: "no-store" }),
-        ])
-        if (!statusRes.ok) throw new Error(`API returned ${statusRes.status}`)
-        const s = (await statusRes.json()) as CodebaseStatus
-        if (!isMounted) return
-        setStatus(s)
-        lastIndexedAtRef.current = s.lastIndexedAt
-        if (runtimesRes.ok) {
-          const r = (await runtimesRes.json()) as RuntimeEntry[]
-          if (isMounted && Array.isArray(r)) setRuntimes(r)
-        }
+        const runtimesRes = await fetch(runtimesUrl, { cache: "no-store" })
+        if (!runtimesRes.ok)
+          throw new Error(`API returned ${runtimesRes.status}`)
+        const r = (await runtimesRes.json()) as RuntimeEntry[]
+        if (isMounted && Array.isArray(r)) setRuntimes(r)
       } catch (e) {
         if (isMounted)
-          setStatusError(e instanceof Error ? e.message : "Failed to load status")
-      } finally {
-        if (isMounted) setStatusLoading(false)
+          setStatusError(
+            e instanceof Error ? e.message : "Failed to load workspaces"
+          )
       }
     }
     void fetchOnMount()
@@ -267,10 +315,13 @@ export function CodebaseList() {
     setRebuildStarting(true)
     setStatusError(null)
     try {
-      const res = await fetch(rebuildUrl(projectSel, rebuildMode), {
-        method: "POST",
-        cache: "no-store",
-      })
+      const res = await fetch(
+        rebuildUrl(selection, rebuildMode === "full", Date.now()),
+        {
+          method: "POST",
+          cache: "no-store",
+        }
+      )
       if (!res.ok) throw new Error(`API returned ${res.status}`)
       setRebuildProgress((await res.json()) as RebuildProgress)
     } catch (e) {
@@ -278,20 +329,20 @@ export function CodebaseList() {
     } finally {
       setRebuildStarting(false)
     }
-  }, [projectSel, rebuildMode])
+  }, [rebuildMode, selection])
 
   // A final snapshot also refetches the tiles, so the numbers stay correct
   // even if the SSE channel is down and the per-root notifications were lost.
   const handleRebuildProgress = useCallback(
     (progress: RebuildProgress) => {
       setRebuildProgress(progress)
-      if (!progress.isRunning) void loadStatus(projectSel)
+      if (!progress.isRunning) void loadStatus()
     },
-    [loadStatus, projectSel]
+    [loadStatus]
   )
 
   // The hook stashes the callback in a ref, so passing the callback directly
-  // does not resubscribe the stream when `projectSel` changes.
+  // does not resubscribe the stream when the scope changes.
   useCodebaseRebuildSse(handleRebuildProgress)
 
   const doSearch = useCallback(async (q: string, opts?: { silent?: boolean }) => {
@@ -307,7 +358,9 @@ export function CodebaseList() {
     if (!silent) setSearching(true)
     setSearchError(null)
     try {
-      const res = await fetch(searchUrl(trimmed, projectSel), { cache: "no-store" })
+      const res = await fetch(searchUrl(trimmed, selection), {
+        cache: "no-store",
+      })
       if (!res.ok) throw new Error(`API returned ${res.status}`)
       const data = await res.json()
       if (searchSeq.current !== seq) return
@@ -325,7 +378,7 @@ export function CodebaseList() {
       // because the superseded manual search skips its own reset above.
       if (searchSeq.current === seq) setSearching(false)
     }
-  }, [projectSel])
+  }, [selection])
 
   // Clearing the box resets the list immediately (in the event handler,
   // not in an effect, to avoid cascading renders).
@@ -343,17 +396,16 @@ export function CodebaseList() {
     []
   )
 
-  // Scope change: the tiles must describe the same project indexes the result
-  // list reads, so refetch status for the new selection. The first run is
-  // skipped because the mount effect already loaded this backend's own status.
-  const statusScopeMounted = useRef(false)
+  // Tiles follow the selection: load on mount and on every scope change, so
+  // the numbers, the result list and the rebuild target can never drift apart.
+  // The awaited wrapper matches the repo's loader pattern (MemoriesList): every
+  // state write in loadStatus lands after its first await.
   useEffect(() => {
-    if (!statusScopeMounted.current) {
-      statusScopeMounted.current = true
-      return
+    const run = async () => {
+      await loadStatus()
     }
-    void loadStatus(projectSel)
-  }, [projectSel, loadStatus])
+    void run()
+  }, [loadStatus])
 
   // Empty box shows the top-files listing; (re)load it on mount and
   // whenever the scope changes while the box stays empty.
@@ -363,7 +415,7 @@ export function CodebaseList() {
       await loadTop(false)
     }
     void fetchTop()
-  }, [query, projectSel, loadTop])
+  }, [query, loadTop])
   // Search-as-you-type: debounce keystrokes so a request goes out only
   // after the user pauses.
   useEffect(() => {
@@ -381,7 +433,7 @@ export function CodebaseList() {
   // "runtimes" on membership changes. No polling — refresh only on events.
   const handleCodebaseEvent = useCallback(async () => {
     try {
-      const statusRes = await fetch(statusUrl(projectSel), { cache: "no-store" })
+      const statusRes = await fetch(statusUrl(selection), { cache: "no-store" })
       if (!statusRes.ok) return
       const s = (await statusRes.json()) as CodebaseStatus
       setStatus(s)
@@ -391,7 +443,7 @@ export function CodebaseList() {
     }
     if (query.trim()) void doSearch(query, { silent: true })
     else void loadTop(true)
-  }, [projectSel, query, doSearch, loadTop])
+  }, [selection, query, doSearch, loadTop])
 
   const handleRuntimesEvent = useCallback(async () => {
     try {
@@ -423,6 +475,15 @@ export function CodebaseList() {
   const hasRebuildReport =
     rebuildProgress !== null &&
     (rebuildProgress.total > 0 || rebuildProgress.skippedRoots.length > 0)
+  // Value the narrow-screen Select can represent: "all", a single root, or a
+  // sentinel for a multi-root selection — no item matches the sentinel, and the
+  // trigger label comes from the selection itself, so nothing lies about state.
+  const selectValue =
+    selection.kind === "all"
+      ? "all"
+      : selection.roots.length === 1
+        ? selection.roots[0]
+        : "multiple"
 
   return (
     <div className="flex w-full flex-col">
@@ -430,7 +491,7 @@ export function CodebaseList() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void loadStatus(projectSel)}
+            onClick={() => void loadStatus()}
             disabled={statusLoading}
           >
             <RefreshCw
@@ -484,7 +545,25 @@ export function CodebaseList() {
           </ButtonGroup>
       </DashboardHeader>
 
-      <div className="flex flex-col gap-4 p-4 pt-4">
+      <div className="flex min-h-0 w-full flex-1">
+        <CodebaseScopePanel
+          rows={rows}
+          selection={selection}
+          onSelectAll={() => applySelection(selectAll())}
+          onSelectOnly={(root) => applySelection(selectOnly(root))}
+          onToggleRoot={(root) =>
+            applySelection(toggleRoot(selection, root, allRoots))
+          }
+        />
+        <div
+          className={cn(
+            "flex min-w-0 flex-col gap-4 p-4 pt-4",
+            // Closed: the list column fills the row, like it always did. Open:
+            // it locks to 30rem and stops growing, so the docked panel takes
+            // every remaining pixel instead of the two sharing the space.
+            panelOpen ? "shrink-0 xl:w-[30rem]" : "flex-1"
+          )}
+        >
         {statusError && (
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
             {statusError}
@@ -549,22 +628,56 @@ export function CodebaseList() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-3",
+            // Closed, the column spans the page and equal thirds fill it
+            // generously. Open, the column is locked at 36rem and even thirds
+            // squeeze the tiles — a 7-column grid with 2:2:3 spans gives Files
+            // and Chunks room for their numbers and Last indexed the extra
+            // width a full timestamp needs.
+            panelOpen ? "sm:grid-cols-7" : "sm:grid-cols-3"
+          )}
+        >
           {statusLoading ? (
+            // Same conditional spans as the real tiles below: in the 7-column
+            // open layout, three unspanned skeletons would fill only the first
+            // three columns and leave the row ragged.
             Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className="h-20 rounded-lg" />
+              <Skeleton
+                key={i}
+                className={cn(
+                  "h-20 rounded-lg",
+                  panelOpen && (i === 2 ? "sm:col-span-3" : "sm:col-span-2")
+                )}
+              />
             ))
           ) : status ? (
             <>
-              <div className="rounded-lg border p-3 text-sm">
+              <div
+                className={cn(
+                  "rounded-lg border p-3 text-sm",
+                  panelOpen && "sm:col-span-2"
+                )}
+              >
                 <div className="text-muted-foreground">Files</div>
                 <div className="text-xl font-medium">{status.files}</div>
               </div>
-              <div className="rounded-lg border p-3 text-sm">
+              <div
+                className={cn(
+                  "rounded-lg border p-3 text-sm",
+                  panelOpen && "sm:col-span-2"
+                )}
+              >
                 <div className="text-muted-foreground">Chunks</div>
                 <div className="text-xl font-medium">{status.chunks}</div>
               </div>
-              <div className="rounded-lg border p-3 text-sm">
+              <div
+                className={cn(
+                  "rounded-lg border p-3 text-sm",
+                  panelOpen && "sm:col-span-3"
+                )}
+              >
                 <div className="text-muted-foreground">Last indexed</div>
                 <div className="truncate text-sm" title={status.lastIndexedAt ?? ""}>
                   {utcToLocal(status.lastIndexedAt) || "—"}
@@ -572,7 +685,12 @@ export function CodebaseList() {
               </div>
             </>
           ) : (
-            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground sm:col-span-3">
+            <div
+              className={cn(
+                "rounded-lg border border-dashed p-4 text-sm text-muted-foreground",
+                panelOpen ? "sm:col-span-7" : "sm:col-span-3"
+              )}
+            >
               No status available.
             </div>
           )}
@@ -608,40 +726,54 @@ export function CodebaseList() {
             onChange={(e) => handleQueryChange(e.target.value)}
             className="min-w-0"
           />
-          <Select value={projectSel} onValueChange={handleScopeChange}>
-            <SelectTrigger
-              aria-label="Search scope"
-              title={projectSel}
-              className="w-full max-w-44 shrink-0 truncate sm:max-w-72"
+          {/* Narrow screens keep the dropdown; the panel covers wide ones. A
+              Select can only express one scope, so a multi-root selection shows
+              as a summary and picking any row switches to that single scope. */}
+          <div className="lg:hidden">
+            <Select
+              value={selectValue}
+              onValueChange={(v) =>
+                applySelection(
+                  !v || v === "all" ? selectAll() : selectOnly(v)
+                )
+              }
             >
-              <SelectValue placeholder="Select scope...">
-                {(v: string | null) =>
-                  v === "all" ? "🌐 All projects" : `📁 ${projectName(v)}`
-                }
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent
-              side="bottom"
-              align="start"
-              alignItemWithTrigger={false}
-              style={{
-                width: "auto",
-                maxWidth: "min(36rem, calc(100vw - 2rem))",
-              }}
-            >
-              <SelectItem value="all">🌐 All projects</SelectItem>
-              {distinctRoots(runtimes).map((root) => (
-                <SelectItem key={root} value={root} title={root}>
-                  <span className="flex min-w-0 flex-col items-start">
-                    <span>📁 {projectName(root)}</span>
-                    <span className="text-xs whitespace-normal break-all text-muted-foreground">
-                      {root}
+              <SelectTrigger
+                aria-label="Search scope"
+                title={scopeSummary(selection)}
+                className="w-full max-w-44 shrink-0 truncate sm:max-w-72"
+              >
+                <SelectValue placeholder="Select scope...">
+                  {() =>
+                    selection.kind === "all"
+                      ? "🌐 All projects"
+                      : `📁 ${scopeSummary(selection)}`
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent
+                side="bottom"
+                align="start"
+                alignItemWithTrigger={false}
+                style={{
+                  width: "auto",
+                  maxWidth: "min(36rem, calc(100vw - 2rem))",
+                }}
+              >
+                <SelectItem value="all">🌐 All projects</SelectItem>
+                {rows.map((r) => (
+                  <SelectItem key={r.root} value={r.root} title={r.root}>
+                    <span className="flex min-w-0 flex-col items-start">
+                      <span>📁 {projectName(r.root)}</span>
+                      <span className="text-xs whitespace-normal break-all text-muted-foreground">
+                        {r.root}
+                      </span>
                     </span>
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <Button
             type="submit"
             size="icon"
@@ -674,8 +806,8 @@ export function CodebaseList() {
               topFiles.map((f) => (
                 <div key={`${f.projectRoot}-${f.path}`} className="p-3 text-sm">
                   <div className="flex flex-wrap items-center gap-2">
-                    <FileName file={f} onOpen={setSelectedFile} />
-                    {projectSel === "all" && (
+                    <FileName file={f} onOpen={openFile} />
+                    {(selection.kind === "all" || selection.roots.length > 1) && (
                       <span
                         className="rounded-full border border-border/50 bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
                         title={f.projectRoot}
@@ -704,8 +836,8 @@ export function CodebaseList() {
             results.map((r: CodebaseHit, i: number) => (
               <div key={`${r.projectRoot}-${r.path}-${r.startLine}-${i}`} className="p-3 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
-                  <FileName file={r} onOpen={setSelectedFile} />
-                  {projectSel === "all" && (
+                  <FileName file={r} onOpen={openFile} />
+                  {(selection.kind === "all" || selection.roots.length > 1) && (
                     <span
                       className="rounded-full border border-border/50 bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
                       title={r.projectRoot}
@@ -729,11 +861,18 @@ export function CodebaseList() {
           )}
         </div>
       </div>
+      {/* Wide screens dock the viewer as this row's right-hand column; narrow
+          ones keep the centered modal. The same selectedFile drives both, so
+          resizing across the breakpoint swaps only the chrome, never the
+          content. */}
+      {panelOpen && (
+        <FileDetailPanel file={selectedFile} onClose={closeFile} />
+      )}
+      </div>
 
-      <FileDetailDialog
-        file={selectedFile}
-        onClose={() => setSelectedFile(null)}
-      />
+      {!wide && (
+        <FileDetailDialog file={selectedFile} onClose={closeFile} />
+      )}
     </div>
   )
 }
