@@ -14,7 +14,10 @@ namespace Eling.Backend.Tools;
 /// at the end of the mutation, persist through a temp file followed by a
 /// move/replace, and swap the in-memory snapshot only after the write
 /// succeeds. A corrupt file degrades to "all enabled" and is left untouched
-/// for inspection.
+/// for inspection. Because the dashboard host and each MCP stdio host are
+/// separate processes sharing this one file, reads and mutations go through
+/// <c>RefreshIfStale</c>, which reloads the file whenever another process
+/// changed it.
 /// </remarks>
 public sealed class ToolPolicyStore
 {
@@ -32,6 +35,9 @@ public sealed class ToolPolicyStore
 
     private ToolPolicyConfig _config = new() { UpdatedAt = DateTimeOffset.UtcNow };
 
+    /// <summary>Stamp of the file as this store last saw it; null means "not yet stamped".</summary>
+    private FileStamp? _stamp;
+
     public ToolPolicyStore(UserScope userScope, ILogger<ToolPolicyStore> logger)
     {
         ArgumentNullException.ThrowIfNull(userScope);
@@ -41,6 +47,7 @@ public sealed class ToolPolicyStore
         _filePath = Path.Combine(userScope.ConfigDirectory, FileName);
         Load();
         EnsureTemplate();
+        _stamp = ReadStamp();
     }
 
     public static bool IsProtected(string? toolName)
@@ -50,6 +57,7 @@ public sealed class ToolPolicyStore
     {
         lock (_gate)
         {
+            RefreshIfStale();
             return new HashSet<string>(_config.DisabledTools, StringComparer.OrdinalIgnoreCase);
         }
     }
@@ -63,6 +71,7 @@ public sealed class ToolPolicyStore
 
         lock (_gate)
         {
+            RefreshIfStale();
             return _config.DisabledTools.Contains(toolName.Trim(), StringComparer.OrdinalIgnoreCase);
         }
     }
@@ -71,6 +80,7 @@ public sealed class ToolPolicyStore
     {
         lock (_gate)
         {
+            RefreshIfStale();
             return _config with { DisabledTools = new List<string>(_config.DisabledTools) };
         }
     }
@@ -81,6 +91,7 @@ public sealed class ToolPolicyStore
 
         lock (_gate)
         {
+            RefreshIfStale();
             var next = new HashSet<string>(_config.DisabledTools, StringComparer.OrdinalIgnoreCase);
             foreach (var name in toolNames)
             {
@@ -103,6 +114,7 @@ public sealed class ToolPolicyStore
 
         lock (_gate)
         {
+            RefreshIfStale();
             var next = new HashSet<string>(_config.DisabledTools, StringComparer.OrdinalIgnoreCase);
             foreach (var name in toolNames)
             {
@@ -123,6 +135,7 @@ public sealed class ToolPolicyStore
     {
         lock (_gate)
         {
+            RefreshIfStale();
             return Commit(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
         }
     }
@@ -139,6 +152,7 @@ public sealed class ToolPolicyStore
         {
             Write(next);
             _config = next;
+            _stamp = ReadStamp();
         }
         catch (Exception ex)
         {
@@ -170,29 +184,90 @@ public sealed class ToolPolicyStore
                 return;
             }
 
-            var config = JsonSerializer.Deserialize(
-                File.ReadAllText(_filePath),
-                ToolPolicyJsonContext.Default.ToolPolicyConfig);
-
-            if (config is null)
-            {
-                return;
-            }
-
-            var sanitized = config.DisabledTools
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Where(name => !IsProtected(name))
-                .Select(name => name.Trim().ToLowerInvariant())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(name => name, StringComparer.Ordinal)
-                .ToList();
-
-            _config = config with { DisabledTools = sanitized };
+            _config = ReadConfig();
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to read tool policy from {Path}", _filePath);
         }
+    }
+
+    /// <summary>
+    /// Reloads the policy file when it changed since this store last read or
+    /// wrote it. Every process sharing the file — the dashboard host and each
+    /// MCP stdio host — holds its own store singleton, so without this a
+    /// change made through one process stays invisible to the others and can
+    /// be silently reverted by a later mutation committed from a stale
+    /// snapshot. Must be called under <see cref="_gate"/>: from every read
+    /// path and before every mutation.
+    /// </summary>
+    private void RefreshIfStale()
+    {
+        var stamp = ReadStamp();
+        if (stamp is null || stamp == _stamp)
+        {
+            // Missing file or no change: keep the last good snapshot. A deleted
+            // file must not silently re-enable every tool.
+            return;
+        }
+
+        try
+        {
+            _config = ReadConfig();
+            _stamp = stamp;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Transient read failure: keep the stamp so the next call retries.
+            _logger.LogWarning(ex, "Could not read tool policy from {Path}; keeping the last good snapshot", _filePath);
+        }
+        catch (JsonException ex)
+        {
+            // The file was read but is corrupt: adopt the stamp so every read
+            // does not re-log the warning, and keep the last good snapshot. A
+            // repaired file changes the stamp and reloads normally.
+            _logger.LogWarning(ex, "Tool policy at {Path} is corrupt; keeping the last good snapshot", _filePath);
+            _stamp = stamp;
+        }
+    }
+
+    /// <summary>
+    /// Stamp of the policy file used to detect writes from other processes,
+    /// or null when the file cannot be inspected.
+    /// </summary>
+    private FileStamp? ReadStamp()
+    {
+        try
+        {
+            var info = new FileInfo(_filePath);
+            return info.Exists ? new FileStamp(info.LastWriteTimeUtc, info.Length) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads and sanitizes the policy file. Throws on unreadable or corrupt
+    /// content; callers decide how to degrade.
+    /// </summary>
+    private ToolPolicyConfig ReadConfig()
+    {
+        var config = JsonSerializer.Deserialize(
+                File.ReadAllText(_filePath),
+                ToolPolicyJsonContext.Default.ToolPolicyConfig)
+            ?? new ToolPolicyConfig();
+
+        var sanitized = config.DisabledTools
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Where(name => !IsProtected(name))
+            .Select(name => name.Trim().ToLowerInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToList();
+
+        return config with { DisabledTools = sanitized };
     }
 
     private void EnsureTemplate()
@@ -233,4 +308,12 @@ public sealed class ToolPolicyStore
         File.WriteAllText(tempPath, payload);
         File.Move(tempPath, _filePath, overwrite: true);
     }
+
+    /// <summary>
+    /// Change detection for the policy file: last write time plus length, so
+    /// two writes landing in the same timestamp tick still compare unequal.
+    /// </summary>
+    private sealed record FileStamp(
+        DateTime LastWriteTimeUtc,
+        long Length);
 }

@@ -1,3 +1,4 @@
+using System.Linq;
 using Eling.Backend.Tools;
 using Eling.Core.Scope;
 using Eling.Core.Tools;
@@ -10,6 +11,12 @@ namespace Eling.Backend.Tests.Tools;
 /// persistence round-trips, protected tool immunity, and graceful
 /// degradation on corrupt files.
 /// </summary>
+/// <remarks>
+/// Several processes (the dashboard host and each MCP stdio host) share one
+/// policy file while holding their own store singleton, so the store must
+/// also observe changes written by other processes — see the
+/// ...Externally... and ...AfterExternal... tests below.
+/// </remarks>
 public sealed class ToolPolicyStoreTests : IDisposable
 {
     private readonly string _root = Path.Combine(
@@ -20,6 +27,61 @@ public sealed class ToolPolicyStoreTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         return new ToolPolicyStore(new UserScope(_root), NullLogger<ToolPolicyStore>.Instance);
+    }
+
+    private string PolicyPath => Path.Combine(_root, "config", "tools-policy.json");
+
+    /// <summary>Writes the policy file directly, simulating another process mutating it.</summary>
+    private void WritePolicy(params string[] disabledTools)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(PolicyPath)!);
+        var names = string.Join(", ", disabledTools.Select(name => $"\"{name}\""));
+        File.WriteAllText(
+            PolicyPath,
+            $"{{\"disabled_tools\": [{names}], \"updated_at\": \"{DateTimeOffset.UtcNow:O}\"}}");
+    }
+
+    [Fact]
+    public void IsToolDisabled_WhenFileChangedExternally_ReflectsNewState()
+    {
+        var store = NewStore();
+        WritePolicy("file_delete");
+
+        Assert.True(store.IsToolDisabled("file_delete"));
+    }
+
+    [Fact]
+    public void DisableTools_AfterExternalEnable_DoesNotRevertExternalChange()
+    {
+        var store = NewStore();
+        store.DisableTools(["file_search"]);
+        WritePolicy();
+
+        store.DisableTools(["file_delete"]);
+
+        Assert.False(store.IsToolDisabled("file_search"));
+        Assert.True(store.IsToolDisabled("file_delete"));
+    }
+
+    [Fact]
+    public void IsToolDisabled_WhenExternalFileIsCorrupt_KeepsLastGoodSnapshot()
+    {
+        var store = NewStore();
+        store.DisableTools(["file_delete"]);
+        File.WriteAllText(PolicyPath, "{ not json");
+
+        Assert.True(store.IsToolDisabled("file_delete"));
+        Assert.Equal("{ not json", File.ReadAllText(PolicyPath));
+    }
+
+    [Fact]
+    public void IsToolDisabled_WhenFileDeletedExternally_KeepsLastGoodSnapshot()
+    {
+        var store = NewStore();
+        store.DisableTools(["file_delete"]);
+        File.Delete(PolicyPath);
+
+        Assert.True(store.IsToolDisabled("file_delete"));
     }
 
     public void Dispose()
