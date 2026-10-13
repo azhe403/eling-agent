@@ -1,5 +1,6 @@
 using Eling.Core;
 using Eling.Core.Runtime;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Eling.Backend;
 
@@ -37,9 +38,15 @@ public static class CoordinatorEndpoints
         // query parameter to a minimal-API route is group-wide here — one
         // misinferred parameter takes down every route in the group.
 
-        group.MapPost("/notify-change", (MemoryChangeBroadcaster broadcaster) =>
+        // A peer backend forwards its mutation topic here; the relayed reason
+        // decides which SSE topic the owner broadcasts, so the codebase page
+        // (which watches only "codebase"/"runtimes") still refreshes on
+        // peer-driven index changes and the memory page is not woken for
+        // them. A body-less notify keeps the historical "coordinator"
+        // contract, which every page watches.
+        group.MapPost("/notify-change", (MemoryChangeBroadcaster broadcaster, [FromBody] string? reason) =>
         {
-            broadcaster.Notify("coordinator");
+            broadcaster.Notify(string.IsNullOrWhiteSpace(reason) ? "coordinator" : reason);
             return Results.Ok();
         });
     }

@@ -75,7 +75,7 @@ public sealed class MemoryPromoteTool
                 id, op, result is not null);
             if (result is not null)
             {
-                await _notifier.NotifyAsync("mcp");
+                await _notifier.NotifyAsync("coordinator");
                 if (hasProjectTarget)
                 {
                     await _scoped.RebuildProjectIndexAsync(targetRoot);
@@ -129,7 +129,7 @@ public sealed class MemoryPromoteTool
                 id, op, result is not null);
             if (result is not null)
             {
-                await _notifier.NotifyAsync("mcp");
+                await _notifier.NotifyAsync("coordinator");
                 await _scoped.RebuildIndexAsync("global");
             }
             return result?.Memory;

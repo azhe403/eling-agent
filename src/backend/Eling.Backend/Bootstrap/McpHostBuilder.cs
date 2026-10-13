@@ -28,7 +28,16 @@ public static class McpHostBuilder
 
             services.AddSingleton(shared.Registry);
             services.AddSingleton(shared.Broadcaster);
-            services.AddSingleton<IMemoryChangeNotifier>(_ => shared.Broadcaster);
+            // MCP mutations are cross-process events. This process may be a
+            // peer that serves no SSE at all — its own broadcaster then has
+            // zero subscribers and the dashboard owner never learns about the
+            // write. The HTTP coordinator notifier is the only channel that
+            // reaches the process that owns the dashboard port (the endpoint
+            // broadcasts "coordinator", which every dashboard page watches).
+            // When this process owns the port the POST lands on itself and
+            // still broadcasts, so peer takeover needs no re-wiring.
+            services.AddSingleton<IMemoryChangeNotifier>(
+                _ => new HttpCoordinatorMemoryChangeNotifier(effectivePort));
             services.AddSingleton(shared.UserScope);
 
             services.AddSingleton(shared);

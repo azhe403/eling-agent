@@ -368,6 +368,37 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
     }
 
     /// <summary>
+    /// A peer process forwards its mutation topic to the owner through this
+    /// endpoint, and the SSE frame must carry that topic: the codebase page
+    /// watches only "codebase"/"runtimes", so a collapse-to-"coordinator"
+    /// relay would leave peer-driven index changes invisible there while the
+    /// memory page reloaded for nothing. A null body keeps the historical
+    /// "coordinator" contract for callers that do not name a topic.
+    /// </summary>
+    [Fact]
+    public async Task PostNotifyChange_WithReasonBody_RelaysNamedTopicOnStream()
+    {
+        var client = EnsureClient();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events/memories");
+        using var sseResponse = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        Assert.Equal(HttpStatusCode.OK, sseResponse.StatusCode);
+
+        using var stream = await sseResponse.Content.ReadAsStreamAsync(cts.Token);
+        using var reader = new StreamReader(stream);
+
+        var initial = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("data: connected", initial);
+        await reader.ReadLineAsync(cts.Token);
+
+        var notify = await client.PostAsJsonAsync(
+            "/api/coordinator/notify-change", "codebase", cts.Token);
+        notify.EnsureSuccessStatusCode();
+
+        await ReadEventDataAsync(reader, "data: codebase", cts.Token);
+    }
+
+    /// <summary>
     /// Every topic must reach this stream. More than one page consumes it —
     /// memory, codebase and create — so a server-side topic filter silently
     /// starves whichever page wanted the topic it dropped. Dropping

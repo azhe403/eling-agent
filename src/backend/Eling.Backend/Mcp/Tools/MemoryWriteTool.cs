@@ -93,7 +93,7 @@ public sealed class MemoryWriteTool
                     var targetRoot = _scoped.ResolveAncestorProjectRoot(project);
                     var targetSaved = await _scoped.SaveToProjectAsync(memory, targetRoot);
                     _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' to ancestor project '{Project}'", targetSaved.Id, targetSaved.Action, project);
-                    await _notifier.NotifyAsync("mcp");
+                    await _notifier.NotifyAsync("coordinator");
                     await _scoped.RebuildProjectIndexAsync(targetRoot);
                     return SaveMemoryResponse.From(targetSaved);
                 }
@@ -112,7 +112,7 @@ public sealed class MemoryWriteTool
                     // project-local shard — never global, never a shared scope.
                     var localSaved = await _scoped.SaveAsync(memory, "project-local");
                     _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' to project-local (project scope disabled)", localSaved.Id, localSaved.Action);
-                    await _notifier.NotifyAsync("mcp");
+                    await _notifier.NotifyAsync("coordinator");
                     await _scoped.RebuildIndexAsync("project-local");
                     return SaveMemoryResponse.From(
                         localSaved,
@@ -124,7 +124,7 @@ public sealed class MemoryWriteTool
                 {
                     var scoped = await _scoped.SaveAsync(memory, scope);
                     _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' scope '{Scope}' type '{Type}' ({Reason})", scoped.Id, scoped.Action, scoped.Memory.Type, scoped.Scope, scoped.Reason);
-                    await _notifier.NotifyAsync("mcp");
+                    await _notifier.NotifyAsync("coordinator");
 
                     if (scoped.Scope == MemoryScopeKind.Global)
                     {
@@ -159,7 +159,7 @@ public sealed class MemoryWriteTool
                         {
                             var localSaved = await _scoped.SaveAsync(memory, "project-local");
                             _logger?.LogInformation("Saved memory '{Id}' to project-local (no project scope initialized)", localSaved.Id);
-                            await _notifier.NotifyAsync("mcp");
+                            await _notifier.NotifyAsync("coordinator");
                             await _scoped.RebuildIndexAsync("project-local");
                             return SaveMemoryResponse.From(
                                 localSaved,
@@ -177,7 +177,7 @@ public sealed class MemoryWriteTool
 
             var saved = await _memory.SaveAsync(memory);
             _logger?.LogInformation("Saved memory '{Id}' with action '{Action}' type '{Type}' and {TagCount} tags ({Reason})", saved.Id, saved.Action, saved.Type, saved.Tags.Count, saved.Reason);
-            await _notifier.NotifyAsync("mcp");
+            await _notifier.NotifyAsync("coordinator");
             await _memory.RebuildIndexAsync();
             return SaveMemoryResponse.From(saved, scope);
         }
@@ -213,7 +213,7 @@ public sealed class MemoryWriteTool
                     _logger?.LogInformation("Deleted memory '{Id}' from ancestor project '{Project}' (result: {Result})", id, project, targetDeleted);
                     if (targetDeleted)
                     {
-                        await _notifier.NotifyAsync("mcp");
+                        await _notifier.NotifyAsync("coordinator");
                         await _scoped.RebuildProjectIndexAsync(targetRoot);
                     }
                     return targetDeleted;
@@ -236,7 +236,7 @@ public sealed class MemoryWriteTool
                 _logger?.LogInformation("Deleted memory '{Id}' scope '{Scope}' (result: {Result})", id, scopeKind, deleted);
                 if (deleted)
                 {
-                    await _notifier.NotifyAsync("mcp");
+                    await _notifier.NotifyAsync("coordinator");
                     await _scoped.RebuildIndexAsync(scope);
                 }
                 return deleted;
@@ -246,7 +246,7 @@ public sealed class MemoryWriteTool
             _logger?.LogInformation("Deleted memory '{Id}' (result: {Result})", id, result);
             if (result)
             {
-                await _notifier.NotifyAsync("mcp");
+                await _notifier.NotifyAsync("coordinator");
                 await _memory.RebuildIndexAsync();
             }
             return result;
