@@ -15,7 +15,6 @@ public sealed class ProjectContextNoAutoCreateTests : IDisposable
 
     private readonly string _userRoot;
     private readonly string _cwd;
-    private readonly string _originalCwd;
     private readonly string? _originalUserScope;
 
     public ProjectContextNoAutoCreateTests()
@@ -24,15 +23,12 @@ public sealed class ProjectContextNoAutoCreateTests : IDisposable
         Directory.CreateDirectory(_userRoot);
         _cwd = Path.Combine(Path.GetTempPath(), "eling-dummy-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_cwd);
-        _originalCwd = Directory.GetCurrentDirectory();
         _originalUserScope = Environment.GetEnvironmentVariable(UserScopeEnv);
         Environment.SetEnvironmentVariable(UserScopeEnv, _userRoot);
-        Directory.SetCurrentDirectory(_cwd);
     }
 
     public void Dispose()
     {
-        Directory.SetCurrentDirectory(_originalCwd);
         Environment.SetEnvironmentVariable(UserScopeEnv, _originalUserScope);
         try { Directory.Delete(_userRoot, recursive: true); } catch { }
         try { Directory.Delete(_cwd, recursive: true); } catch { }
@@ -41,7 +37,11 @@ public sealed class ProjectContextNoAutoCreateTests : IDisposable
     [Fact]
     public void Discover_NoElingAnywhere_DoesNotCreateDotEling()
     {
-        var context = ProjectContext.Discover();
+        // Start directory passed explicitly: mutating the process current
+        // directory here races with parallel test classes that resolve it
+        // (e.g. WebApplication.CreateBuilder's file watcher) and crashes them
+        // when this fixture deletes its temp directory mid-run.
+        var context = ProjectContext.Discover(_cwd);
 
         Assert.False(context.Chain.IsInitialized);
         Assert.False(Directory.Exists(Path.Combine(_cwd, ProjectScope.DataDirectoryName)));

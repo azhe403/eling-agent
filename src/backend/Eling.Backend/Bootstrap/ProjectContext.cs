@@ -29,9 +29,15 @@ public sealed record ProjectContext(
         Chain.IsInitialized ? "ancestor-scope" :
         "uninitialized";
 
-    public static ProjectContext Discover()
+    /// <summary>
+    /// Discover the project context. <paramref name="cwd"/> defaults to the
+    /// process working directory; callers that own a start directory (tests,
+    /// tooling) pass it explicitly rather than mutating global process state
+    /// like the current directory, which other parallel code can observe.
+    /// </summary>
+    public static ProjectContext Discover(string? cwd = null)
     {
-        var chain = ScopeChain.Discover();
+        var chain = ScopeChain.Discover(cwd);
         var userScope = UserScope.Resolve(Environment.GetEnvironmentVariable("ELING_USER_SCOPE"));
         var userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var isUserHome = !string.IsNullOrWhiteSpace(userHome) &&
