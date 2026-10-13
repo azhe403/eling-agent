@@ -2,6 +2,7 @@ using Eling.Backend.Bootstrap;
 using Eling.Backend.Codebase;
 using Eling.Backend.FileSystem;
 using Eling.Backend.Judging;
+using Eling.Backend.Mcp.Filters;
 using Eling.Backend.Mcp.Telemetry;
 using Eling.Backend.Scope;
 using Eling.Backend.Tools;
@@ -221,7 +222,12 @@ public static class McpServiceExtensions
         .WithToolsFromAssembly()
         .WithRequestFilters(filters =>
         {
+            // Telemetry stays outermost so blocked calls are still logged
+            // for audit; the policy filter rejects disabled tools before
+            // the tool handler runs.
             filters.AddCallToolFilter(ToolTelemetryFilter.Create());
+            filters.AddCallToolFilter(ToolPolicyFilters.CreateCallFilter());
+            filters.AddListToolsFilter(ToolPolicyFilters.CreateListFilter());
         });
 
         return services;
