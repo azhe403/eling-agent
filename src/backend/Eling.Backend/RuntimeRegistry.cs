@@ -229,48 +229,6 @@ public sealed class RuntimeRegistry : IDisposable
     }
 
     /// <summary>
-    /// Records every workspace in this runtime's scope chain, not just the head.
-    /// </summary>
-    /// <remarks>
-    /// A registration only names the chain head, so recording just that would
-    /// leave ancestors out of the catalogue — and an ancestor is a scope the
-    /// runtime can genuinely write to. The chain is the same walk
-    /// <see cref="ScopeChain"/> performs elsewhere, so nothing here is a second
-    /// opinion about where a scope lives.
-    /// </remarks>
-    private void RecordChainWorkspaces(Core.Runtime.RuntimeRegistration registration)
-    {
-        if (_workspaces is null) return;
-        if (string.IsNullOrWhiteSpace(registration.HeadScopeRoot)) return;
-        if (string.Equals(registration.HeadScopeRoot, "UserScope", StringComparison.OrdinalIgnoreCase)) return;
-
-        List<ProjectScope> chain;
-        try
-        {
-            chain = ScopeChain.Discover(registration.HeadScopeRoot).Levels.ToList();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not discover the scope chain for {Root}.", registration.HeadScopeRoot);
-            return;
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        foreach (var level in chain)
-        {
-            if (ElingPaths.IsCodebaseExcluded(level.Root)) continue;
-
-            _workspaces.Record(new RegisteredWorkspace(
-                string.Empty,
-                level.Root,
-                level.Root,
-                registration.CodebaseEnabled,
-                now,
-                now));
-        }
-    }
-
-    /// <summary>
     /// Every workspace in the catalogue, live or not. Empty when no store is
     /// attached, which is the same shape as an empty store rather than an error —
     /// the dashboard can render without it.
@@ -282,9 +240,16 @@ public sealed class RuntimeRegistry : IDisposable
     }
 
     /// <summary>
-    /// Registers a process: adds it to the live list and mirrors it, plus every
-    /// <c>.eling</c> in its chain, into the durable workspace catalogue.
+    /// Registers a process: adds it to the live list and mirrors its workspace
+    /// folder into the durable workspace catalogue.
     /// </summary>
+    /// <remarks>
+    /// Exactly one catalogue row: the folder the runtime runs in. Ancestor
+    /// <c>.eling</c> levels of the scope chain are memory scopes, not
+    /// workspaces — the dashboard resolves those on demand with
+    /// <see cref="ScopeChain"/>, and MCP recall fans out over them, so neither
+    /// depends on the catalogue and neither needs a row here.
+    /// </remarks>
     public void Register(Core.Runtime.RuntimeRegistration registration)
     {
         lock (_lock)
@@ -293,7 +258,6 @@ public sealed class RuntimeRegistry : IDisposable
             ResetShutdownTimer();
             WriteToDisk(registration);
             RecordProject(registration);
-            RecordChainWorkspaces(registration);
 
             var existing = _runtimes.FirstOrDefault(r => r.ProcessId == registration.ProcessId);
             if (existing is not null)
