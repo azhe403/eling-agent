@@ -33,4 +33,13 @@ public interface IWorkspacesRegistry
     /// Deletes a workspace entry from the registry by its workspace root.
     /// </summary>
     Task<bool> DeleteByRootAsync(string root, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes every row whose workspace folder no longer exists on disk and
+    /// returns how many were removed. A dead process keeps its row — a codebase
+    /// index stays readable long after its owner exits — but a dead folder has
+    /// nothing left to remember, so its row is garbage in the catalogue.
+    /// Never throws; returns 0 on failure, consistent with the other mutations.
+    /// </summary>
+    Task<int> DeleteMissingRootsAsync(CancellationToken cancellationToken = default);
 }

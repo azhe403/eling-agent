@@ -26,6 +26,7 @@ public sealed class RuntimeRegistry : IDisposable
     private readonly TimeSpan _emptyShutdownDebounce;
     private Timer? _shutdownTimer;
     private bool _everRegistered;
+    private int _pruning;
     private bool disposedValue;
     private readonly UserScope _userScope;
     private IMemoryService? _globalService;
@@ -936,9 +937,10 @@ public sealed class RuntimeRegistry : IDisposable
                 }
             }
 
-            // Prune the in-memory list of runtimes whose heartbeat went stale. Nothing is
-            // written to the catalogue here: its rows describe folders, and a
-            // folder outlives the process by design.
+            // Prune the in-memory list of runtimes whose heartbeat went stale. Their
+            // catalogue rows survive: the rows describe folders, and a folder
+            // outlives the process by design. Rows whose folder itself is gone
+            // are dropped after the lock, in PruneMissingWorkspacesAsync.
             var prunedAny = false;
             foreach (var runtime in _runtimes.Where(r => r.IsAlive && now - r.LastHeartbeat > _staleAfter))
             {
@@ -979,6 +981,46 @@ public sealed class RuntimeRegistry : IDisposable
             {
                 ScheduleEmptyShutdown();
             }
+        }
+
+        // Catalogue hygiene runs outside the lock: the store serializes its own
+        // file access, so the runtime lock would buy nothing but a stall.
+        _ = PruneMissingWorkspacesAsync();
+    }
+
+    /// <summary>
+    /// Drops catalogue rows whose workspace folder no longer exists, so a
+    /// deleted project or a cleaned-up temp dir cannot leave a listing entry
+    /// pointing at nothing. Rows whose folder is still there are kept even
+    /// when their process is dead — that survival is the catalogue's whole
+    /// point.
+    /// </summary>
+    internal async Task PruneMissingWorkspacesAsync()
+    {
+        if (_workspaces is null) return;
+
+        // A prune from the previous pass that has not finished yet buys
+        // nothing to overlap with; the next sweep retries.
+        if (Interlocked.CompareExchange(ref _pruning, 1, 0) != 0) return;
+
+        try
+        {
+            var removed = await _workspaces.DeleteMissingRootsAsync().ConfigureAwait(false);
+            if (removed > 0)
+            {
+                _logger.LogInformation(
+                    "Pruned {Count} workspace row(s) whose folder no longer exists.", removed);
+            }
+        }
+        catch (Exception ex)
+        {
+            // DeleteMissingRootsAsync swallows its own failures; this is the
+            // never-throw belt around the fire-and-forget call site.
+            _logger.LogWarning(ex, "Failed to prune workspace rows with missing folders.");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _pruning, 0);
         }
     }
 

@@ -181,6 +181,47 @@ public sealed class JsonWorkspaceRegistryTests : IDisposable
     }
 
     [Fact]
+    public async Task DeleteMissingRootsAsync_WhenFolderIsGone_RemovesRowAndReportsCount()
+    {
+        // Arrange — alive is a real folder; gone points at a path that was never created.
+        using var registry = new JsonWorkspaceRegistry(RegistryPath);
+        var alive = Path.Combine(_dir, "alive");
+        var gone = Path.Combine(_dir, "gone");
+        Directory.CreateDirectory(alive);
+        registry.Record(NewRow(alive, alive, codebaseEnabled: true));
+        registry.Record(NewRow(gone, gone, codebaseEnabled: true));
+
+        // Act
+        var removed = await registry.DeleteMissingRootsAsync();
+
+        // Assert
+        Assert.Equal(1, removed);
+        var rows = await registry.ListAsync();
+        Assert.Single(rows);
+        Assert.Equal(alive, rows[0].WorkspaceRoot);
+    }
+
+    [Fact]
+    public async Task DeleteMissingRootsAsync_WhenEveryFolderExists_KeepsEveryRowAndReportsZero()
+    {
+        // Arrange
+        using var registry = new JsonWorkspaceRegistry(RegistryPath);
+        var first = Path.Combine(_dir, "first");
+        var second = Path.Combine(_dir, "second");
+        Directory.CreateDirectory(first);
+        Directory.CreateDirectory(second);
+        registry.Record(NewRow(first, first, codebaseEnabled: true));
+        registry.Record(NewRow(second, second, codebaseEnabled: false));
+
+        // Act
+        var removed = await registry.DeleteMissingRootsAsync();
+
+        // Assert
+        Assert.Equal(0, removed);
+        Assert.Equal(2, (await registry.ListAsync()).Count);
+    }
+
+    [Fact]
     public async Task Record_PersistsAcrossRegistryInstances()
     {
         // Arrange

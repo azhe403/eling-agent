@@ -210,6 +210,43 @@ public sealed class JsonWorkspaceRegistry : IWorkspacesRegistry, IDisposable
         }
     }
 
+    /// <summary>
+    /// Deletes every row whose workspace folder is gone, keeping rows whose
+    /// folder still exists even when their process is dead — a codebase index
+    /// stays readable after its owner exits, which is the reason the catalogue
+    /// exists. A row pointing at a folder that no longer exists is nothing but
+    /// a listing entry for a folder nobody can open. The file is rewritten only
+    /// when something was actually removed, so a clean catalogue is never
+    /// rewritten just because a prune pass ran.
+    /// </summary>
+    public Task<int> DeleteMissingRootsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return Task.FromResult(
+                WithGate(() =>
+                {
+                    var rows = LoadCore();
+                    var kept = rows.Where(r => Directory.Exists(r.WorkspaceRoot)).ToList();
+                    var removed = rows.Count - kept.Count;
+                    if (removed > 0)
+                    {
+                        SaveCore(kept);
+                    }
+
+                    return removed;
+                }));
+        }
+        catch (Exception ex)
+        {
+            // Same contract as the other mutations: a failed prune costs the
+            // catalogue a few dead rows, and must never take the caller down.
+            _logger?.LogWarning(ex, "Failed to prune workspaces with missing roots from {Path}.", _filePath);
+            return Task.FromResult(0);
+        }
+    }
+
     private void WithGate(Action action)
     {
         EnterGate();
