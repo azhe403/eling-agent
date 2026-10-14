@@ -89,6 +89,64 @@ public static class TestProcesses
     /// </summary>
     public static readonly string TestUserScope = CreateTestUserScope();
 
+    /// <summary>
+    /// A live test run keeps its scope directory fresh: the spawned runtimes
+    /// heartbeat into <c>runtime/</c> every few hundred milliseconds. So a
+    /// scope dir quiet for this long belongs to a run that is gone — a hard
+    /// kill, a crashed testhost — and is safe to sweep from a later run.
+    /// </summary>
+    private static readonly TimeSpan AbandonedScopeAge = TimeSpan.FromHours(2);
+
+    static TestProcesses()
+    {
+        // Delete leftovers from runs that died without cleaning up, then take
+        // this run's own scope with us when the testhost exits — the normal
+        // case is a clean exit, and a hard kill is what the age guard covers.
+        SweepAbandonedUserScopes();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => DeleteTree(TestUserScope);
+    }
+
+    private static void SweepAbandonedUserScopes()
+    {
+        try
+        {
+            var cutoff = DateTime.UtcNow - AbandonedScopeAge;
+            foreach (var dir in Directory.EnumerateDirectories(Path.GetTempPath(), "eling-usertest-*"))
+            {
+                try
+                {
+                    if (Directory.GetLastWriteTimeUtc(dir) < cutoff)
+                    {
+                        Directory.Delete(dir, recursive: true);
+                    }
+                }
+                catch
+                {
+                    // A concurrent run may be mid-use; leave it for the next pass.
+                }
+            }
+        }
+        catch
+        {
+            // Best effort: a failed sweep only means clutter for another run.
+        }
+    }
+
+    private static void DeleteTree(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch
+        {
+            // Best effort: Windows can hold a handle briefly past exit.
+        }
+    }
+
     private static string CreateTestUserScope()
     {
         var root = Path.Combine(Path.GetTempPath(), "eling-usertest-" + Guid.NewGuid().ToString("N")[..8]);
@@ -146,6 +204,12 @@ public static class TestProcesses
         // And an isolated user scope so the test dashboard never syncs runtime
         // registrations from a live Eling instance owned by another session.
         psi.Environment["ELING_USER_SCOPE"] = TestUserScope;
+        // The workspace catalogue resolves from the central agent directory,
+        // which reads ELING_AGENT_DATA_DIR — a variable ELING_USER_SCOPE does
+        // not cover. Without this, every spawned runtime writes rows into the
+        // developer's real agent-workspaces.json, and running the process tests
+        // resurrects workspace entries the user just deleted.
+        psi.Environment["ELING_AGENT_DATA_DIR"] = TestUserScope;
 
         var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start process.");
         return process;
