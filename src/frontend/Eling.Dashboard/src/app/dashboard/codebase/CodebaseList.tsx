@@ -15,13 +15,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import type { SseTopic } from "@/hooks/use-memories-sse"
@@ -36,20 +29,23 @@ import { cn } from "@/lib/utils"
 import { FileDetailDialog } from "./FileDetailDialog"
 import { FileDetailPanel } from "./FileDetailPanel"
 import type { SelectedFile } from "./fileDetailApi"
-import { CodebaseScopePanel, type ScopeRow } from "./CodebaseScopePanel"
 import {
-  projectName,
   rebuildUrl,
   searchUrl,
-  selectAll,
-  selectOnly,
   selectionFromParams,
   selectionQuery,
-  scopeSummary,
   statusUrl,
-  toggleRoot,
-  type ScopeSelection,
 } from "./scope"
+import {
+  selectAll,
+  selectOnly,
+  toggleRoot,
+  type WorkspaceSelection,
+} from "@/components/workspaces/selection"
+import { useWorkspaceRows } from "@/components/workspaces/use-workspace-rows"
+import { workspaceName } from "@/components/workspaces/runtime-rows"
+import { WorkspaceScopePanel } from "@/components/workspaces/workspace-scope-panel"
+import { WorkspaceSelect } from "@/components/workspaces/workspace-select"
 
 type CodebaseStatus = {
   scope: string
@@ -69,18 +65,6 @@ type CodebaseHit = {
   endLine: number
   content: string
   score: number
-}
-
-type RuntimeEntry = {
-  // The nearest .eling at or above the workspace, where memories are written —
-  // not a project root. Renamed from projectRoot, which read as "root of the
-  // project" and is wrong: it can sit above the repository.
-  headScopeRoot: string
-  workspaceRoot?: string | null
-  codebaseEnabled?: boolean | null
-  // Present when the coordinator tracks heartbeats; absent on older payloads,
-  // where a registered runtime is treated as indexed-but-unknown.
-  isAlive?: boolean
 }
 
 type CodebaseTopFile = {
@@ -116,15 +100,9 @@ function rebuildModeLabel(mode: RebuildMode) {
   return mode === "full" ? "Full re-index" : "Incremental"
 }
 
-// URL builders (search/status/rebuild) and the selection model they serve now
-// live in ./scope.ts, so the scope a request covers is decided in one pure
-// place shared by reads and the rebuild write.
+// URL builders and this page's URL binding of the selection live in ./scope.ts;
+// the selection model itself is shared in @/components/workspaces/selection.
 
-// Codebase identity is the workspace (cwd), never a .eling ancestor — fall
-// back to headScopeRoot for runtimes registered by older binaries that omit
-// workspaceRoot. Runtimes that opted out of indexing never appear as rows.
-// Dead-but-registered workspaces stay listed: a codebase index is a read-only
-// file in the global store and remains searchable after its process exits.
 // The open file's URL identity. Two params rather than one encoded pair: both
 // values are paths, and unmerged they stay readable in the address bar and in
 // a shared link.
@@ -136,21 +114,6 @@ function fileFromParams(params: URLSearchParams): SelectedFile | null {
   const path = params.get("file")?.trim()
   const root = params.get("fileRoot")?.trim()
   return path && root ? { projectRoot: root, path } : null
-}
-
-function scopeRows(runtimes: RuntimeEntry[]): ScopeRow[] {
-  const out: ScopeRow[] = []
-  const seen = new Set<string>()
-  for (const r of runtimes) {
-    if (r.codebaseEnabled === false) continue
-    const root = r.workspaceRoot || r.headScopeRoot
-    if (!root || root === "UserScope") continue
-    const key = root.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push({ root, alive: r.isAlive === true })
-  }
-  return out
 }
 
 // Idle time after the last keystroke before a search is issued.
@@ -174,8 +137,7 @@ export function CodebaseList() {
     () => selectionFromParams(searchParams),
     [searchParams]
   )
-  const [runtimes, setRuntimes] = useState<RuntimeEntry[]>([])
-  const rows = useMemo(() => scopeRows(runtimes), [runtimes])
+  const { rows, error: runtimesError, reload } = useWorkspaceRows()
   const allRoots = useMemo(() => rows.map((r) => r.root), [rows])
   // The open file is URL state, same as the scope: reload, back/forward and
   // shared links all land on the same viewer state. `file` carries the path
@@ -189,7 +151,7 @@ export function CodebaseList() {
   // drops the other: a scope change keeps the open file, closing the file
   // keeps the scope.
   const writeUrl = useCallback(
-    (nextSelection: ScopeSelection, file: SelectedFile | null) => {
+    (nextSelection: WorkspaceSelection, file: SelectedFile | null) => {
       const parts = [
         selectionQuery(nextSelection),
         file ? fileQuery(file) : "",
@@ -202,7 +164,7 @@ export function CodebaseList() {
   // Selection changes flip the skeleton on right in the event handler — before
   // the router round-trip — so tiles react to the click, not to the next commit.
   const applySelection = useCallback(
-    (next: ScopeSelection) => {
+    (next: WorkspaceSelection) => {
       setStatusLoading(true)
       writeUrl(next, selectedFile)
     },
@@ -274,38 +236,6 @@ export function CodebaseList() {
       if (!silent) setTopLoading(false)
     }
   }, [selection])
-
-  // includeRegistered: a codebase index is a read-only file in a global store and
-  // stays readable after its process exits, so a closed project must stay in the
-  // picker. The default live-only mode undercounts the index store by roughly the
-  // number of dead-but-still-indexed workspaces.
-  const runtimesUrl = "/api/coordinator/runtimes?includeRegistered=true";
-
-  // Known workspaces on mount so the panel and the narrow-screen Select have
-  // rows to show. Status/tiles ride the [loadStatus] effect below instead of
-  // being fetched here separately — one scope, one loader, so the tiles can
-  // never describe a different set of indexes than the result list.
-  useEffect(() => {
-    let isMounted = true
-    const fetchOnMount = async () => {
-      try {
-        const runtimesRes = await fetch(runtimesUrl, { cache: "no-store" })
-        if (!runtimesRes.ok)
-          throw new Error(`API returned ${runtimesRes.status}`)
-        const r = (await runtimesRes.json()) as RuntimeEntry[]
-        if (isMounted && Array.isArray(r)) setRuntimes(r)
-      } catch (e) {
-        if (isMounted)
-          setStatusError(
-            e instanceof Error ? e.message : "Failed to load workspaces"
-          )
-      }
-    }
-    void fetchOnMount()
-    return () => {
-      isMounted = false
-    }
-  }, [])
 
   // Starts a rebuild over the selected scope/mode. The 202 body is already a
   // progress snapshot, so the UI has something to render before the first SSE
@@ -446,18 +376,11 @@ export function CodebaseList() {
   }, [selection, query, doSearch, loadTop])
 
   const handleRuntimesEvent = useCallback(async () => {
-    try {
-      const runtimesRes = await fetch(runtimesUrl, { cache: "no-store" })
-      if (runtimesRes.ok) {
-        const r = (await runtimesRes.json()) as RuntimeEntry[]
-        if (Array.isArray(r)) setRuntimes(r)
-      }
-    } catch {
-      // Transient failure: keep the last known runtimes.
-    }
+    // Silent refresh: a failed background reload keeps the last known rows.
+    await reload({ silent: true })
     // Membership changes alter the "all" aggregate, so refresh the numbers too.
     await handleCodebaseEvent()
-  }, [handleCodebaseEvent])
+  }, [reload, handleCodebaseEvent])
 
   // This page lives on codebase traffic: "codebase" for index changes anywhere
   // (rebuild button, MCP call, background watcher) and "runtimes" for membership
@@ -471,20 +394,15 @@ export function CodebaseList() {
     CODEBASE_TOPICS
   )
 
+  // One banner for both loaders: the runtime-row fetch and the status fetch
+  // describe the same backend failure, and the surfaces take turns being the
+  // one that noticed first.
+  const errorMessage = statusError ?? runtimesError
+
   const failedProjects = (rebuildProgress?.results ?? []).filter((r) => !r.ok)
   const hasRebuildReport =
     rebuildProgress !== null &&
     (rebuildProgress.total > 0 || rebuildProgress.skippedRoots.length > 0)
-  // Value the narrow-screen Select can represent: "all", a single root, or a
-  // sentinel for a multi-root selection — no item matches the sentinel, and the
-  // trigger label comes from the selection itself, so nothing lies about state.
-  const selectValue =
-    selection.kind === "all"
-      ? "all"
-      : selection.roots.length === 1
-        ? selection.roots[0]
-        : "multiple"
-
   return (
     <div className="flex w-full flex-col">
       <DashboardHeader label="Codebase">
@@ -546,7 +464,7 @@ export function CodebaseList() {
       </DashboardHeader>
 
       <div className="flex min-h-0 w-full flex-1">
-        <CodebaseScopePanel
+        <WorkspaceScopePanel
           rows={rows}
           selection={selection}
           onSelectAll={() => applySelection(selectAll())}
@@ -564,9 +482,9 @@ export function CodebaseList() {
             panelOpen ? "shrink-0 xl:w-[30rem]" : "flex-1"
           )}
         >
-        {statusError && (
+        {errorMessage && (
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-            {statusError}
+            {errorMessage}
           </div>
         )}
 
@@ -595,7 +513,7 @@ export function CodebaseList() {
 
             {rebuildProgress.currentProject && (
               <div className="mt-1 truncate text-xs text-muted-foreground">
-                Indexing {projectName(rebuildProgress.currentProject)}
+                Indexing {workspaceName(rebuildProgress.currentProject)}
               </div>
             )}
 
@@ -609,7 +527,7 @@ export function CodebaseList() {
               <ul className="mt-2 space-y-1 text-xs text-destructive">
                 {failedProjects.map((r) => (
                   <li key={r.projectRoot} className="break-all">
-                    {projectName(r.projectRoot)}: {r.error}
+                    {workspaceName(r.projectRoot)}: {r.error}
                   </li>
                 ))}
               </ul>
@@ -706,7 +624,7 @@ export function CodebaseList() {
         >
           {status && status.scope !== "project"
             ? `Tiles cover ${status.projectCount} ${status.projectCount === 1 ? "project" : "projects"} in scope`
-            : `Project: ${projectName((status?.roots ?? [])[0])}`}{" "}
+            : `Project: ${workspaceName((status?.roots ?? [])[0])}`}{" "}
           · watcher {status?.watcherActive ? "on" : "off"}
         </div>
 
@@ -726,53 +644,14 @@ export function CodebaseList() {
             onChange={(e) => handleQueryChange(e.target.value)}
             className="min-w-0"
           />
-          {/* Narrow screens keep the dropdown; the panel covers wide ones. A
-              Select can only express one scope, so a multi-root selection shows
-              as a summary and picking any row switches to that single scope. */}
+          {/* Narrow screens keep the dropdown; the panel covers wide ones. */}
           <div className="lg:hidden">
-            <Select
-              value={selectValue}
-              onValueChange={(v) =>
-                applySelection(
-                  !v || v === "all" ? selectAll() : selectOnly(v)
-                )
-              }
-            >
-              <SelectTrigger
-                aria-label="Search scope"
-                title={scopeSummary(selection)}
-                className="w-full max-w-44 shrink-0 truncate sm:max-w-72"
-              >
-                <SelectValue placeholder="Select scope...">
-                  {() =>
-                    selection.kind === "all"
-                      ? "🌐 All projects"
-                      : `📁 ${scopeSummary(selection)}`
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent
-                side="bottom"
-                align="start"
-                alignItemWithTrigger={false}
-                style={{
-                  width: "auto",
-                  maxWidth: "min(36rem, calc(100vw - 2rem))",
-                }}
-              >
-                <SelectItem value="all">🌐 All projects</SelectItem>
-                {rows.map((r) => (
-                  <SelectItem key={r.root} value={r.root} title={r.root}>
-                    <span className="flex min-w-0 flex-col items-start">
-                      <span>📁 {projectName(r.root)}</span>
-                      <span className="text-xs whitespace-normal break-all text-muted-foreground">
-                        {r.root}
-                      </span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <WorkspaceSelect
+              rows={rows}
+              selection={selection}
+              onSelectAll={() => applySelection(selectAll())}
+              onSelectOnly={(root) => applySelection(selectOnly(root))}
+            />
           </div>
           <Button
             type="submit"
@@ -812,7 +691,7 @@ export function CodebaseList() {
                         className="rounded-full border border-border/50 bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
                         title={f.projectRoot}
                       >
-                        📁 {projectName(f.projectRoot)}
+                        📁 {workspaceName(f.projectRoot)}
                       </span>
                     )}
                   </div>
@@ -842,7 +721,7 @@ export function CodebaseList() {
                       className="rounded-full border border-border/50 bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
                       title={r.projectRoot}
                     >
-                      📁 {projectName(r.projectRoot)}
+                      📁 {workspaceName(r.projectRoot)}
                     </span>
                   )}
                 </div>

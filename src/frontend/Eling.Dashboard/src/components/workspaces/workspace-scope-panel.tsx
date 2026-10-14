@@ -2,30 +2,25 @@
 
 import { FolderGit2, Layers } from "lucide-react"
 import { cn } from "cn"
-import { projectName, type ScopeSelection } from "./scope"
-
-/** One workspace row, shaped so the panel knows nothing about runtime DTOs. */
-export type ScopeRow = {
-  readonly root: string
-  readonly alive: boolean
-}
+import { workspaceName, type WorkspaceRow } from "./runtime-rows"
+import type { WorkspaceSelection } from "./selection"
 
 /**
- * The codebase page's scope panel: an always-visible workspace list on wide
- * screens (the narrow-screen Select in the search form is the fallback). Click
- * a row to make it the only scope; use the checkbox to exclude or re-include a
- * workspace in the federated set. Both interactions funnel through the parent
- * so toggle rules and the URL stay in one place.
+ * A workspace list as a side panel: the wide-screen surface, with the
+ * narrow-screen `WorkspaceSelect` as the fallback. Click a row to make it
+ * the only selection; use the checkbox to exclude or re-include a workspace
+ * in the set. Both interactions funnel through the parent so toggle rules
+ * and any URL binding stay in one place.
  */
-export function CodebaseScopePanel({
+export function WorkspaceScopePanel({
   rows,
   selection,
   onSelectAll,
   onSelectOnly,
   onToggleRoot,
 }: {
-  rows: readonly ScopeRow[]
-  selection: ScopeSelection
+  rows: readonly WorkspaceRow[]
+  selection: WorkspaceSelection
   onSelectAll: () => void
   onSelectOnly: (root: string) => void
   onToggleRoot: (root: string) => void
@@ -36,14 +31,14 @@ export function CodebaseScopePanel({
       ? new Set(rows.map((r) => r.root))
       : new Set(selection.roots)
   const singleRoot =
-    selection.kind === "projects" && selection.roots.length === 1
+    selection.kind === "workspaces" && selection.roots.length === 1
       ? selection.roots[0]
       : null
 
   return (
     <nav
-      aria-label="Codebase scope"
-      className="sticky top-16 hidden max-h-[calc(100dvh-4rem)] w-64 shrink-0 flex-col gap-1 self-start border-r p-3 lg:flex"
+      aria-label="Workspace scope"
+      className="sticky top-16 hidden max-h-[calc(100dvh-4rem)] w-72 shrink-0 flex-col gap-1 self-start border-r p-3 lg:flex"
     >
       <div className="flex items-center justify-between px-1 pb-1">
         <span className="text-xs font-medium text-muted-foreground">
@@ -55,7 +50,7 @@ export function CodebaseScopePanel({
       <button
         type="button"
         onClick={onSelectAll}
-        title="Search every workspace with a codebase index"
+        title="Include every workspace in the selection"
         className={cn(
           "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           selection.kind === "all"
@@ -64,12 +59,12 @@ export function CodebaseScopePanel({
         )}
       >
         <Layers className="size-4 shrink-0" />
-        All projects
+        All workspaces
       </button>
 
       <ul className="flex min-h-0 flex-col gap-0.5 overflow-y-auto">
         {rows.map(({ root, alive }) => {
-          const name = projectName(root)
+          const name = workspaceName(root)
           return (
             <li
               key={root}
@@ -80,8 +75,8 @@ export function CodebaseScopePanel({
                 className="accent-primary"
                 checked={included.has(root)}
                 onChange={() => onToggleRoot(root)}
-                aria-label={`Include ${name} in codebase scope`}
-                title="Include this workspace in the search scope"
+                aria-label={`Include ${name}`}
+                title="Include this workspace in the selection"
               />
               <button
                 type="button"
