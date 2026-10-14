@@ -44,12 +44,30 @@ public sealed class MemoryWriteToolProjectScopeTests : IDisposable
     }
 
     [Fact]
-    public async Task Save_OnEmptyChain_SavesProjectLocalWithInitNote()
+    public async Task Save_OnEmptyChain_SavesProjectLocal()
     {
+        // Since 2026-10-14 the default is project-local: on an empty chain the
+        // default save succeeds directly in the local shard — no first attempt
+        // at project scope, and no sharing nudge (that moved to explicit
+        // scope=project saves, covered below).
         var cwd = Path.Combine(_root, "acme");
         var scoped = new FakeScopedMemoryService { Cwd = cwd, Initialized = false };
 
         var response = await new MemoryWriteTool(scoped, policyStore: NewStore()).SaveAsync("hello");
+
+        Assert.Equal("created", response.Action);
+        Assert.Equal("project-local", response.Scope);
+        Assert.False(response.InitRequired);
+        Assert.Equal(["project-local"], scoped.SavedScopes);
+    }
+
+    [Fact]
+    public async Task Save_ExplicitProject_OnEmptyChain_SavesLocalWithInitNote()
+    {
+        var cwd = Path.Combine(_root, "acme");
+        var scoped = new FakeScopedMemoryService { Cwd = cwd, Initialized = false };
+
+        var response = await new MemoryWriteTool(scoped, policyStore: NewStore()).SaveAsync("hello", scope: "project");
 
         Assert.Equal("created", response.Action);
         Assert.Equal("project-local", response.Scope);

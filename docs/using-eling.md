@@ -37,9 +37,9 @@ Just talk to your coding agent naturally:
 
 ## 3. Memory Scopes
 
-- **Project Scope (Default)**: Memories stored in `.eling/memories/` as Markdown files and committed to Git. Shared across the entire team and repository. Use for **durable, shareable knowledge**: architecture decisions, conventions, standing rules, lessons.
-- **Project-Local Scope**: Memories stored machine-only under the central shard (`DATA/eling/projects/<name>-<hash>/`, shared across worktrees of one repo), never committed. Use for **progress or temporary state**: where you left off, scratch findings, machine-specific notes. Save with `scope="project-local"`.
-- **Global Scope**: Memories stored in `~/.config/eling/memories/`. Ideal for cross-project personal preferences and machine-specific tooling rules.
+- **Project-Local Scope (Default)**: Memories stored machine-only under the central shard (`DATA/eling/projects/<name>-<hash>/`, shared across worktrees of one repo), never committed to Git. This is the default for every save: anything bound to one repo — decisions, conventions, repo-specific lessons, in-progress or scratch state, machine-specific notes — lands here unless you say otherwise. Save with `scope="project-local"`.
+- **Project Scope**: Memories stored in `.eling/memories/` as Markdown files and committed to Git. Shared across the entire team and repository. Opt-in only: use `scope="project"` when a memory is explicitly meant to be shared via Git — durable, shareable knowledge with no secrets. Sharing is a deliberate choice, never the default.
+- **Global Scope**: Memories stored in `~/.config/eling/memories/`. Ideal for cross-project personal preferences and machine-specific tooling rules. Use for knowledge that holds in any unrelated project.
 
 ---
 

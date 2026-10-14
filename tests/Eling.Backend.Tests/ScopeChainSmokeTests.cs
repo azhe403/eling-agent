@@ -82,12 +82,16 @@ public sealed class ScopeChainSmokeTests : IDisposable
         Assert.Equal("ancestor-scope", status.Posture);
         Assert.True(status.Adoptable);
 
-        // 2. default save in sub-project without own scope returns init-required
+        // 2. default save in sub-project without own scope lands project-local;
+        //    init-required is now reserved for explicit scope=project saves.
         var (ancestorScoped, ancestorWrite) = await BuildAsync(payments);
         Assert.Equal(Path.GetFullPath(root), ancestorScoped.ChainRoots.Single());
         var ancestorSave = await ancestorWrite.SaveAsync("parent-root memory");
-        Assert.Equal("init-required", ancestorSave.Action);
-        Assert.True(ancestorSave.InitRequired);
+        Assert.Equal("created", ancestorSave.Action);
+        Assert.Equal("project-local", ancestorSave.Scope);
+        var explicitProjectSave = await ancestorWrite.SaveAsync("needs sharing", scope: "project");
+        Assert.Equal("init-required", explicitProjectSave.Action);
+        Assert.True(explicitProjectSave.InitRequired);
 
         // 3. init creates own .eling under payments; status now own-scope
         var initTool = new MemoryInitProjectTool(payments);
@@ -98,11 +102,14 @@ public sealed class ScopeChainSmokeTests : IDisposable
         Assert.Equal("own-scope", statusAfter.Posture);
         Assert.False(statusAfter.Adoptable);
 
-        // 4. default save now lands in payments/.eling
+        // 4. explicit project save lands in payments/.eling; the default save
+        //    (no scope) lands in the machine-local shard instead.
         var (ownScoped, ownWrite) = await BuildAsync(payments);
         Assert.Equal(Path.GetFullPath(payments), ownScoped.ProjectRoot);
-        var ownSave = await ownWrite.SaveAsync("own-scope memory");
+        var ownSave = await ownWrite.SaveAsync("own-scope memory", scope: "project");
         Assert.True(File.Exists(Path.Combine(payments, ".eling", "memories", ownSave.Id.ToString() + ".md")));
+        var defaultSave = await ownWrite.SaveAsync("machine-only memory");
+        Assert.Equal("project-local", defaultSave.Scope);
 
         // 5. recall merged contains own memory
         var recallService = new MemoryRecallService(ownScoped, new NoopIntentionStorage());
@@ -122,22 +129,23 @@ public sealed class ScopeChainSmokeTests : IDisposable
         var status = await new MemoryProjectStatusTool(fresh).GetStatusAsync();
         Assert.Equal("uninitialized", status.Posture);
 
-        // save without any .eling lands in project-local; nothing created in the repo
+        // default save lands in project-local directly; nothing created in the
+        // repo. (The "offer memory_init_project" nudge moved to explicit
+        // scope=project saves — a default save never pushes toward sharing.)
         var (scoped, write) = await BuildFromFresh(fresh);
         Assert.False(scoped.IsInitialized);
         var localSave = await write.SaveAsync("goes local");
         Assert.Equal("created", localSave.Action);
         Assert.Equal("project-local", localSave.Scope);
-        Assert.Contains("memory_init_project", localSave.Note);
         Assert.False(Directory.Exists(Path.Combine(fresh, ".eling")));
 
-        // after consent + init, save works and dir exists
+        // after consent + init, an explicit project save works and dir exists
         var init = await new MemoryInitProjectTool(fresh).InitAsync();
         Assert.Equal("created", init.Status);
         var (initializedScoped, initializedWrite) = await BuildAsync(fresh);
-        var saved = await initializedWrite.SaveAsync("now it works");
+        var saved = await initializedWrite.SaveAsync("now it works", scope: "project");
         Assert.Equal("created", saved.Action);
-        Assert.True(Directory.Exists(Path.Combine(fresh, ".eling", "memories")));
+        Assert.True(File.Exists(Path.Combine(fresh, ".eling", "memories", saved.Id.ToString() + ".md")));
     }
 
     private sealed class NoopIntentionStorage : IIntentionStorage

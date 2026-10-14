@@ -161,4 +161,28 @@ Given repo R with worktrees W1 + W2, and unrelated repo S:
 - Save `project` in W1 → committed under `<repo>/.eling/memories/`, nothing new appears in repo working tree for `project-local` saves (`git status` clean).
 - `merged` order: local hit ranks above same-content project/global hit.
 - `disabled` policy reroutes project-bound saves to `project-local` (machine-only), never to `global` or a shared scope.
-- Empty chain (no `.eling` anywhere, no decision yet): default saves go straight to `project-local` with a note offering `memory_init_project` for git sharing. Ancestor-scope workspaces keep the consent-gated adoption flow.
+- Empty chain (no `.eling` anywhere, no decision yet): default saves go straight to `project-local` — silently since the 2026-10-14 amendment below (the `init-required`/note path now applies to explicit `scope=project` saves). Ancestor-scope workspaces keep the consent-gated adoption flow.
+
+---
+
+## AMENDMENT 2026-10-14 — default scope flips to project-local
+
+**Status:** Implemented 2026-10-14 (Core policy, MCP + agent tools, ServerInstructions, docs; Core 311/311, Backend scope-related suites green).
+
+§5 ("Explicit-only. Default save stays `project`"), §6 (`memory_save` "default `project`"), and §9 ("Write policy: default `project` ... `auto` → `project`") are superseded by:
+
+```
+scope = omitted/blank -> project-local (the default)
+scope = "auto"        -> project-local (tolerated alias of the default)
+scope = "project"     -> project (unchanged; now opt-in sharing)
+scope = "global"      -> global (unchanged)
+```
+
+**Rationale:** agents routinely drifted memories into the commit tier — the `memory_save` default of `project` plus instruction text endorsing "durable shareable knowledge goes to project" made sharing the path of least resistance (a recurring, user-flagged failure mode in this repo). In a public repo whose `.eling/memories/` is never committed, project scope shared nothing anyway, so local-first removes the accidental-commit vector at zero cost and makes sharing deliberate.
+
+**Consequences accepted:**
+- The consent flow (`init-required` → offer `memory_init_project`) now triggers on explicit `scope=project` saves, not default saves; a default save in an uninitialized workspace lands project-local silently.
+- The ancestor-targeting `project` parameter now requires an explicit `scope="project"`; combining it with the default throws `ArgumentException` — sharing must be explicit at both layers.
+- `memory_delete`'s default scope stays `project`.
+- Dashboard create endpoints are unchanged — they already route through an explicit `tier` parameter (human-initiated).
+- `auto` is no longer advertised in tool schemas; the parser still accepts it as an alias so agents that learned the old value do not break.

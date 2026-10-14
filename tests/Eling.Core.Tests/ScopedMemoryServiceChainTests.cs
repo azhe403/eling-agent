@@ -160,11 +160,11 @@ public sealed class ScopedMemoryServiceChainTests
     }
 
     [Fact]
-    public async Task SaveAsync_Head_IsWriteTarget()
+    public async Task SaveAsync_ExplicitProject_HeadIsWriteTarget()
     {
         var (service, child, parent, global) = Build();
 
-        var saved = await service.SaveAsync(NewMemory("default write"));
+        var saved = await service.SaveAsync(NewMemory("default write"), "project");
 
         Assert.Equal(MemoryScopeKind.Project, saved.Scope);
         Assert.Equal(ChildRoot, saved.ProjectRoot);

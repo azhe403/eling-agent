@@ -406,7 +406,7 @@ public class MemoryToolsTests
     {
         var (write, _, _, child, parent, _) = BuildScopedTools();
 
-        var response = await write.SaveAsync("parent rule", project: "integrations");
+        var response = await write.SaveAsync("parent rule", scope: "project", project: "integrations");
 
         Assert.NotNull(response);
         Assert.Equal("project", response.Scope);
@@ -425,12 +425,23 @@ public class MemoryToolsTests
     }
 
     [Fact]
-    public async Task SaveAsync_WithUnknownProjectTarget_Throws()
+    public async Task SaveAsync_WithProjectTarget_DefaultLocalScope_Throws()
+    {
+        var (write, _, _, _, _, _) = BuildScopedTools();
+
+        // Since 2026-10-14 the default scope is project-local, and sharing
+        // must be deliberate: ancestor targeting requires explicit scope=project.
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => write.SaveAsync("x", project: "integrations"));
+    }
+
+    [Fact]
+    public async Task SaveAsync_WithProjectTarget_UnknownProject_Throws()
     {
         var (write, _, _, _, _, _) = BuildScopedTools();
 
         await Assert.ThrowsAsync<InvalidProjectTargetException>(
-            () => write.SaveAsync("x", project: "nope"));
+            () => write.SaveAsync("x", scope: "project", project: "nope"));
     }
 
     [Fact]
@@ -513,5 +524,7 @@ public class MemoryToolsTests
         Assert.Contains("first user turn", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Codebase Indexing (HARD RULE)", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ASK the user for approval to run `codebase_index`", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Memory Content Shape", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("standalone durable guidance", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
     }
 }

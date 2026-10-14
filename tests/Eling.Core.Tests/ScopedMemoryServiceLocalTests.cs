@@ -79,11 +79,23 @@ public sealed class ScopedMemoryServiceLocalTests
     }
 
     [Fact]
-    public async Task Save_Default_StillProject()
+    public async Task Save_Default_LandsProjectLocal()
     {
+        // 2026-10-14: the default flipped from project to project-local.
         var (service, project, local, _) = Build();
 
         await service.SaveAsync(NewMemory("shared note"));
+
+        Assert.Single(local.All);
+        Assert.Empty(project.All);
+    }
+
+    [Fact]
+    public async Task Save_ExplicitProject_LandsProjectOnly()
+    {
+        var (service, project, local, _) = Build();
+
+        await service.SaveAsync(NewMemory("shared note"), "project");
 
         Assert.Single(project.All);
         Assert.Empty(local.All);

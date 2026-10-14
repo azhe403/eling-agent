@@ -50,8 +50,13 @@ public sealed class ScopeChainDiTests : IDisposable
         Assert.Equal([Path.GetFullPath(integrations), Path.GetFullPath(root)], scoped.ChainRoots);
         Assert.Equal(Path.GetFullPath(payments), scoped.Cwd);
 
+        // Explicit project saves still require an initialized scope; since
+        // 2026-10-14 the default (blank) scope routes to project-local instead.
         await Assert.ThrowsAsync<ProjectScopeNotInitializedException>(
-            () => scoped.SaveAsync(new Memory(MemoryType.Fact, "uninitialized subproject write")));
+            () => scoped.SaveAsync(new Memory(MemoryType.Fact, "uninitialized subproject write"), "project"));
+
+        var defaultSave = await scoped.SaveAsync(new Memory(MemoryType.Fact, "default write"));
+        Assert.Equal(MemoryScopeKind.ProjectLocal, defaultSave.Scope);
 
         var saved = await scoped.SaveToProjectAsync(new Memory(MemoryType.Fact, "head write"), Path.GetFullPath(integrations));
         Assert.Equal(MemoryScopeKind.Project, saved.Scope);

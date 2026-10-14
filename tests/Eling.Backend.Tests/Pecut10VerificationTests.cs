@@ -25,7 +25,17 @@ public class Pecut10VerificationTests
 
         var projServiceA = new MemoryService(new FileSystemMemoryStorage(scopeA.DataDirectory), new SqliteMemoryIndex(Path.Combine(scopeA.DataDirectory, "index.db")));
         var globalServiceForA = new MemoryService(new FileSystemMemoryStorage(userScope.GlobalDataDirectory), new SqliteMemoryIndex(Path.Combine(userScope.GlobalDataDirectory, "index.db")));
-        var serviceA = new ScopedMemoryService(projServiceA, globalServiceForA, policy, merger, scopeA.Root);
+        var localDirA = Path.Combine(userDir, "project-local-A");
+        Directory.CreateDirectory(localDirA);
+        var localServiceA = new MemoryService(new FileSystemMemoryStorage(localDirA), new SqliteMemoryIndex(Path.Combine(localDirA, "index.db")));
+        var serviceA = new ScopedMemoryService(
+            [new ProjectLevel(scopeA, projServiceA)],
+            globalServiceForA,
+            policy,
+            merger,
+            projA,
+            localService: localServiceA,
+            canonicalRoot: projA);
 
         var projServiceB = new MemoryService(new FileSystemMemoryStorage(scopeB.DataDirectory), new SqliteMemoryIndex(Path.Combine(scopeB.DataDirectory, "index.db")));
         var globalServiceForB = new MemoryService(new FileSystemMemoryStorage(userScope.GlobalDataDirectory), new SqliteMemoryIndex(Path.Combine(userScope.GlobalDataDirectory, "index.db")));
@@ -106,17 +116,20 @@ public class Pecut10VerificationTests
     }
 
     [Fact]
-    public async Task WritePolicy_DefaultIsProject()
+    public async Task WritePolicy_DefaultIsProjectLocal()
     {
         var (serviceA, _, _, userDir, projA, projB) = CreateServices();
         try
         {
             var mem = new Memory(MemoryType.Fact, "Default write");
-            var saved = await serviceA.SaveAsync(mem); // no scope -> project
-            Assert.Equal(MemoryScopeKind.Project, saved.Scope);
+            var saved = await serviceA.SaveAsync(mem); // no scope -> project-local (2026-10-14: was project)
+            Assert.Equal(MemoryScopeKind.ProjectLocal, saved.Scope);
 
             var autoSaved = await serviceA.SaveAsync(new Memory(MemoryType.Fact, "Auto"), "auto");
-            Assert.Equal(MemoryScopeKind.Project, autoSaved.Scope);
+            Assert.Equal(MemoryScopeKind.ProjectLocal, autoSaved.Scope);
+
+            var projectSaved = await serviceA.SaveAsync(new Memory(MemoryType.Fact, "Shared"), "project");
+            Assert.Equal(MemoryScopeKind.Project, projectSaved.Scope);
 
             var globalSaved = await serviceA.SaveAsync(new Memory(MemoryType.Fact, "Global"), "global");
             Assert.Equal(MemoryScopeKind.Global, globalSaved.Scope);

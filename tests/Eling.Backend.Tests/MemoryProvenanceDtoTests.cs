@@ -111,7 +111,9 @@ public sealed class MemoryProvenanceDtoTests
                 tempDir);
             var tool = new MemoryWriteTool(fallbackService, scoped, notifier: new NullMemoryChangeNotifier());
 
-            var response = await tool.SaveAsync("some content");
+            // Explicit scope=project on an empty chain still returns
+            // init-required (the default no longer routes through project).
+            var response = await tool.SaveAsync("some content", scope: "project");
 
             Assert.Equal("init-required", response.Action);
             Assert.True(response.InitRequired);

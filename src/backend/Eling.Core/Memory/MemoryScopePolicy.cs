@@ -6,7 +6,11 @@ public sealed class MemoryScopePolicy : IMemoryScopePolicy
     {
         if (string.IsNullOrWhiteSpace(scope))
         {
-            return MemoryScopeKind.Project;
+            // No scope specified means the default — and the default is
+            // project-local: saves stay machine-only unless sharing is
+            // explicitly requested. (Blank used to resolve to project, which
+            // quietly pulled agent saves toward the committed tier.)
+            return MemoryScopeKind.ProjectLocal;
         }
 
         var normalized = scope.Trim().ToLowerInvariant();
@@ -15,7 +19,10 @@ public sealed class MemoryScopePolicy : IMemoryScopePolicy
             "project" => MemoryScopeKind.Project,
             "project-local" => MemoryScopeKind.ProjectLocal,
             "global" => MemoryScopeKind.Global,
-            "auto" => MemoryScopeKind.Project,
+            // 'auto' survives only as a tolerated alias for "no preference"
+            // left over from the old string contract; it resolves to the
+            // default, which is now project-local.
+            "auto" => MemoryScopeKind.ProjectLocal,
             _ => throw new ArgumentException($"Invalid scope '{scope}'. Valid: project, project-local, global, auto", nameof(scope))
         };
     }
@@ -24,28 +31,21 @@ public sealed class MemoryScopePolicy : IMemoryScopePolicy
     {
         if (string.IsNullOrWhiteSpace(scope))
         {
-            kind = MemoryScopeKind.Project;
+            kind = MemoryScopeKind.ProjectLocal;
             return true;
         }
 
-        var normalized = scope.Trim().ToLowerInvariant();
-        switch (normalized)
+        // Delegates to Resolve so the string→kind mapping lives in exactly one
+        // switch (the parser and the tool boundary share that same map).
+        try
         {
-            case "project":
-                kind = MemoryScopeKind.Project;
-                return true;
-            case "project-local":
-                kind = MemoryScopeKind.ProjectLocal;
-                return true;
-            case "global":
-                kind = MemoryScopeKind.Global;
-                return true;
-            case "auto":
-                kind = MemoryScopeKind.Project;
-                return true;
-            default:
-                kind = default;
-                return false;
+            kind = Resolve(scope);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            kind = default;
+            return false;
         }
     }
 
@@ -54,4 +54,3 @@ public sealed class MemoryScopePolicy : IMemoryScopePolicy
         throw new NotSupportedException("Use TryParseSearchScope for search scopes (project|global|merged)");
     }
 }
-

@@ -13,12 +13,25 @@ public sealed class MemoryScopePolicyTests
     }
 
     [Fact]
-    public void Resolve_Defaults_Unchanged()
+    public void Resolve_Defaults_ToProjectLocal()
     {
-        Assert.Equal(MemoryScopeKind.Project, _policy.Resolve(null));
-        Assert.Equal(MemoryScopeKind.Project, _policy.Resolve("auto"));
+        // 2026-10-14: the default flipped from project to project-local —
+        // blank and the 'auto' alias now resolve machine-local unless the
+        // caller explicitly asks for a different tier.
+        Assert.Equal(MemoryScopeKind.ProjectLocal, _policy.Resolve(null));
+        Assert.Equal(MemoryScopeKind.ProjectLocal, _policy.Resolve("auto"));
+        Assert.Equal(MemoryScopeKind.ProjectLocal, _policy.Resolve("   "));
         Assert.Equal(MemoryScopeKind.Project, _policy.Resolve("project"));
         Assert.Equal(MemoryScopeKind.Global, _policy.Resolve("global"));
+    }
+
+    [Fact]
+    public void TryResolve_Defaults_ToProjectLocal()
+    {
+        Assert.True(_policy.TryResolve(null, out var blank));
+        Assert.Equal(MemoryScopeKind.ProjectLocal, blank);
+        Assert.True(_policy.TryResolve("auto", out var auto));
+        Assert.Equal(MemoryScopeKind.ProjectLocal, auto);
     }
 
     [Fact]

@@ -21,7 +21,7 @@ public sealed class MemoryScopeValueTests
     [InlineData("project", MemoryScopeKind.Project)]
     [InlineData("project-local", MemoryScopeKind.ProjectLocal)]
     [InlineData("global", MemoryScopeKind.Global)]
-    [InlineData("auto", MemoryScopeKind.Project)]
+    [InlineData("auto", MemoryScopeKind.ProjectLocal)]
     public void TryParseScope_AcceptsAllValid(string input, MemoryScopeKind expected)
     {
         // Act
@@ -36,7 +36,7 @@ public sealed class MemoryScopeValueTests
     [InlineData("  PROJECT  ", MemoryScopeKind.Project)]
     [InlineData("Project-Local", MemoryScopeKind.ProjectLocal)]
     [InlineData("GLOBAL", MemoryScopeKind.Global)]
-    [InlineData(" Auto ", MemoryScopeKind.Project)]
+    [InlineData(" Auto ", MemoryScopeKind.ProjectLocal)]
     public void TryParseScope_IsCaseInsensitive_AndTrims(string input, MemoryScopeKind expected)
     {
         // Act

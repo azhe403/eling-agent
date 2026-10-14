@@ -2,6 +2,11 @@ namespace Eling.Core.Memory;
 
 public static class MemoryScopeParser
 {
+    // The string→kind mapping lives in one place (MemoryScopePolicy.Resolve);
+    // this parser only adds its own contract: a blank scope is "no explicit
+    // scope" (false), never the default.
+    private static readonly MemoryScopePolicy Policy = new();
+
     public static bool TryParseScope(string? scope, out MemoryScopeKind kind)
     {
         if (string.IsNullOrWhiteSpace(scope))
@@ -10,25 +15,7 @@ public static class MemoryScopeParser
             return false;
         }
 
-        var normalized = scope.Trim().ToLowerInvariant();
-        switch (normalized)
-        {
-            case "project":
-                kind = MemoryScopeKind.Project;
-                return true;
-            case "project-local":
-                kind = MemoryScopeKind.ProjectLocal;
-                return true;
-            case "global":
-                kind = MemoryScopeKind.Global;
-                return true;
-            case "auto":
-                kind = MemoryScopeKind.Project;
-                return true;
-            default:
-                kind = default;
-                return false;
-        }
+        return Policy.TryResolve(scope, out kind);
     }
 
     public static bool TryParseSearchScope(string? scope, out string normalized)
