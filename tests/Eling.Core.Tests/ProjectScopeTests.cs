@@ -83,20 +83,19 @@ public sealed class ProjectScopeTests : IDisposable
     }
 
     [Fact]
-    public void Discover_NoOverride_DefaultsToCurrentWorkingDirectory()
+    public void Discover_ExplicitStartDirectory_UsesIt()
     {
-        var original = Directory.GetCurrentDirectory();
-        try
-        {
-            Directory.SetCurrentDirectory(_root);
+        // Do not mutate Directory.SetCurrentDirectory here: xUnit runs test
+        // classes in parallel, and a process-wide CWD swap makes any other
+        // class's Path.GetFullPath anchor racy — MemoryValueTests failed this
+        // way (intermittent, repo-visible flake). Pass the start directory
+        // explicitly instead, mirroring the ProjectContext.Discover fix.
+        var project = CreateDir("project");
+        Directory.CreateDirectory(Path.Combine(project, ".eling"));
 
-            var scope = ProjectScope.Discover(stopAtDirectory: _root);
+        var scope = ProjectScope.Discover(project, stopAtDirectory: _root);
 
-            Assert.Equal(Path.GetFullPath(_root), scope.Root);
-        }
-        finally
-        {
-            Directory.SetCurrentDirectory(original);
-        }
+        Assert.Equal(Path.GetFullPath(project), scope.Root);
+        Assert.Equal(Path.Combine(project, ".eling"), scope.DataDirectory);
     }
 }
