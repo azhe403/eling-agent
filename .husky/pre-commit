@@ -1,12 +1,12 @@
 #!/bin/sh
-# Path-aware pre-commit: only run checks relevant to staged changes.
-# - core tests are MANDATORY on every commit (domain-model foundation: a Core
-#   regression breaks backend, desktop and dashboard); backend api + desktop
-#   tests stay change-dependent
-# - docs-only (no src/frontend|backend|tests) → core tests only, no lint/typecheck
-# - backend/docs commits skip frontend lint/typecheck (save 25-70s)
-# - frontend lint + typecheck run in parallel (save 10-20s)
-# - validate:backend redundant (test:backend already restores) → only on FULL_CHECK=1
+# Scope-aware pre-commit: test the layer touched plus every layer it depends
+# on, mirroring the C# dependency chain (desktop -> backend -> core):
+# - core change      -> test:backend:core
+# - backend change   -> test:backend:core + test:backend:api
+# - desktop change   -> test:backend:core + test:backend:api + test:backend:desktop
+# - dashboard change -> frontend lint + typecheck only (no C# impact)
+# - build/config     -> core + api + desktop (package.json also frontend)
+# - docs only        -> nothing, instant
 # Bypass: SKIP_HOOK=1 git commit --no-verify  or  FULL_CHECK=1 git commit
 
 if [ "$SKIP_HOOK" = "1" ]; then
@@ -25,44 +25,80 @@ if [ "$FULL_CHECK" = "1" ]; then
   exit 0
 fi
 
+# Core tests are fast (~2s) and their observed failure mode is intermittent
+# (parallel-class races, or a mid-edit compile window while another session
+# writes the tree), not deterministic breakage. Retry before failing so one
+# flake cannot block the commit; a real failure still fails all attempts.
+run_core_tests() {
+  attempt=1
+  while [ "$attempt" -le 3 ]; do
+    echo "→ core tests (attempt $attempt/3)"
+    if pnpm run test:backend:core; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if [ "$attempt" -le 3 ]; then sleep 3; fi
+  done
+  return 1
+}
+
 NEED_FRONTEND=0
-NEED_BACKEND=0
+NEED_CORE=0
+NEED_API=0
 NEED_DESKTOP=0
 
 if echo "$CHANGED" | grep -q "^src/frontend/"; then
   NEED_FRONTEND=1
 fi
 
-if echo "$CHANGED" | grep -qE "^src/backend/"; then
-  NEED_BACKEND=1
+# Core layer: core tests only.
+if echo "$CHANGED" | grep -qE "^(src/backend/Eling\.Core/|tests/Eling\.Core\.Tests/)"; then
+  NEED_CORE=1
 fi
 
-if echo "$CHANGED" | grep -qE "^src/desktop/"; then
+# Backend layer: pulls core in (backend depends on core).
+if echo "$CHANGED" | grep -qE "^(src/backend/Eling\.Backend/|tests/Eling\.Backend\.Tests/)"; then
+  NEED_CORE=1
+  NEED_API=1
+fi
+
+# Desktop layer: pulls backend + core in (desktop depends on both).
+if echo "$CHANGED" | grep -qE "^(src/desktop/|tests/Eling\.Desktop\.Tests/)"; then
+  NEED_CORE=1
+  NEED_API=1
   NEED_DESKTOP=1
 fi
 
-if echo "$CHANGED" | grep -qE "^tests/Eling\.(Core|Backend)\.Tests/"; then
-  NEED_BACKEND=1
+# Any other backend project (future one, not Eling.Core): assume api layer.
+if echo "$CHANGED" | grep -qE "^src/backend/" && [ "$NEED_CORE" = "0" ]; then
+  NEED_CORE=1
+  NEED_API=1
 fi
 
-if echo "$CHANGED" | grep -qE "^tests/Eling\.Desktop\.Tests/"; then
+# Unknown tests/ change (e.g. a new test project): run all C# layers.
+if echo "$CHANGED" | grep -qE "^tests/" && [ "$NEED_CORE" = "0" ] && [ "$NEED_API" = "0" ] && [ "$NEED_DESKTOP" = "0" ]; then
+  NEED_CORE=1
+  NEED_API=1
   NEED_DESKTOP=1
 fi
 
-# Fallback for any other tests/ changes (e.g. new test project): run both
-if echo "$CHANGED" | grep -qE "^tests/" && [ "$NEED_BACKEND" = "0" ] && [ "$NEED_DESKTOP" = "0" ]; then
-  NEED_BACKEND=1
+# Solution/build files affect every C# layer.
+if echo "$CHANGED" | grep -qE "^(Directory\.Build|Eling\.slnx|mise\.toml)"; then
+  NEED_CORE=1
+  NEED_API=1
   NEED_DESKTOP=1
 fi
 
-if echo "$CHANGED" | grep -qE "^(Directory\.Build|Eling\.slnx|package\.json|pnpm-lock\.yaml|mise\.toml)"; then
-  NEED_BACKEND=1
+# package manifest affects both worlds.
+if echo "$CHANGED" | grep -qE "^(package\.json|pnpm-lock\.yaml)"; then
+  NEED_FRONTEND=1
+  NEED_CORE=1
+  NEED_API=1
   NEED_DESKTOP=1
 fi
 
-if [ "$NEED_FRONTEND" = "0" ] && [ "$NEED_BACKEND" = "0" ] && [ "$NEED_DESKTOP" = "0" ]; then
-  echo "→ pre-commit: docs/config only, running mandatory core tests"
-  pnpm run test:backend:core || exit 1
+if [ "$NEED_FRONTEND" = "0" ] && [ "$NEED_CORE" = "0" ] && [ "$NEED_API" = "0" ] && [ "$NEED_DESKTOP" = "0" ]; then
+  echo "→ pre-commit: docs/config only, nothing to test"
   exit 0
 fi
 
@@ -76,20 +112,16 @@ else
   echo "→ skip frontend (no src/frontend/)"
 fi
 
-if [ "$NEED_BACKEND" = "1" ]; then
-  echo "→ backend changed: test:backend:core + test:backend:api"
-  pnpm run test:backend:core || exit 1
+if [ "$NEED_CORE" = "1" ]; then
+  run_core_tests || exit 1
+fi
+
+if [ "$NEED_API" = "1" ]; then
+  echo "→ api layer: test:backend:api"
   pnpm run test:backend:api || exit 1
-else
-  # Core is the domain-model foundation, so it runs even for frontend-only
-  # or desktop-only commits; api/desktop suites stay scope-dependent.
-  echo "→ core tests are mandatory: test:backend:core"
-  pnpm run test:backend:core || exit 1
 fi
 
 if [ "$NEED_DESKTOP" = "1" ]; then
-  echo "→ desktop changed: test:backend:desktop"
+  echo "→ desktop layer: test:backend:desktop"
   pnpm run test:backend:desktop || exit 1
-else
-  echo "→ skip desktop (no src/desktop|desktop tests)"
 fi

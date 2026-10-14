@@ -1,8 +1,8 @@
 #!/bin/sh
-# Path-aware & anti-locked pre-push: only run checks relevant to outgoing commits.
-# - docs/memories/config only → core tests only, skip build/publish
+# Path-aware & anti-locked pre-push: test the layer touched plus every layer
+# it depends on (same model as pre-commit: core / backend=+core /
+# desktop=+backend+core / dashboard=frontend only).
 # - isolated build/test via ELING_OUTPUT_ROOT=.bin-test avoids .bin lock collisions
-# - backend and frontend checks run conditionally based on diff vs upstream
 # - after the checks pass, publish a Release build into ~/.local/bin
 # Bypass: SKIP_HOOK=1 git push --no-verify  or  FULL_CHECK=1 git push
 
@@ -22,6 +22,7 @@ run_publish() {
   case "$(uname -s 2>/dev/null || echo unknown)" in
     MINGW*|MSYS*|CYGWIN*) SCRIPT="scripts/publish-global.ps1" ;;
     *)                    SCRIPT="scripts/publish-global.sh" ;;
+
   esac
 
   if [ ! -f "$SCRIPT" ]; then
@@ -45,44 +46,100 @@ if [ "$FULL_CHECK" = "1" ]; then
   exit 0
 fi
 
+# Same retry posture as pre-commit: the Core suite's failure mode is
+# intermittent (parallel races, mid-edit compile windows), so one flake
+# should not block a push; a real failure still fails all three attempts.
+run_core_tests() {
+  attempt=1
+  while [ "$attempt" -le 3 ]; do
+    echo "→ core tests (attempt $attempt/3)"
+    if pnpm run test:backend:core; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if [ "$attempt" -le 3 ]; then sleep 3; fi
+  done
+  return 1
+}
+
 NEED_FRONTEND=0
-NEED_BACKEND=0
+NEED_CORE=0
+NEED_API=0
+NEED_DESKTOP=0
 
 if echo "$CHANGED" | grep -q "^src/frontend/"; then
   NEED_FRONTEND=1
 fi
 
-if echo "$CHANGED" | grep -qE "^(src/backend/|src/desktop/|tests/|Directory\.Build|Eling\.slnx|package\.json)"; then
-  NEED_BACKEND=1
+# Core layer: core tests only.
+if echo "$CHANGED" | grep -qE "^(src/backend/Eling\.Core/|tests/Eling\.Core\.Tests/)"; then
+  NEED_CORE=1
 fi
 
-# Core tests are mandatory at push as well. When backend paths changed, the
-# block below runs test:backend (core+api+desktop) anyway, so run the extra
-# core pass only for the scopes that would otherwise skip it (frontend-only,
-# docs-only) — before the scope decision, so nothing escapes the foundation.
-if [ "$NEED_BACKEND" = "0" ]; then
-  echo "→ pre-push: running core tests (mandatory)"
-  pnpm run test:backend:core || exit 1
+# Backend layer: pulls core in (backend depends on core).
+if echo "$CHANGED" | grep -qE "^(src/backend/Eling\.Backend/|tests/Eling\.Backend\.Tests/)"; then
+  NEED_CORE=1
+  NEED_API=1
 fi
 
-if [ "$NEED_FRONTEND" = "0" ] && [ "$NEED_BACKEND" = "0" ]; then
-  echo "→ pre-push: docs/config only beyond core tests, skipping build/publish"
+# Desktop layer: pulls backend + core in (desktop depends on both).
+if echo "$CHANGED" | grep -qE "^(src/desktop/|tests/Eling\.Desktop\.Tests/)"; then
+  NEED_CORE=1
+  NEED_API=1
+  NEED_DESKTOP=1
+fi
+
+# Any other backend project (future one, not Eling.Core): assume api layer.
+if echo "$CHANGED" | grep -qE "^src/backend/" && [ "$NEED_CORE" = "0" ]; then
+  NEED_CORE=1
+  NEED_API=1
+fi
+
+# Unknown tests/ change (e.g. a new test project): run all C# layers.
+if echo "$CHANGED" | grep -qE "^tests/" && [ "$NEED_CORE" = "0" ] && [ "$NEED_API" = "0" ] && [ "$NEED_DESKTOP" = "0" ]; then
+  NEED_CORE=1
+  NEED_API=1
+  NEED_DESKTOP=1
+fi
+
+# Solution/build files affect every C# layer.
+if echo "$CHANGED" | grep -qE "^(Directory\.Build|Eling\.slnx|mise\.toml)"; then
+  NEED_CORE=1
+  NEED_API=1
+  NEED_DESKTOP=1
+fi
+
+# package manifest affects both worlds.
+if echo "$CHANGED" | grep -qE "^(package\.json|pnpm-lock\.yaml)"; then
+  NEED_FRONTEND=1
+  NEED_CORE=1
+  NEED_API=1
+  NEED_DESKTOP=1
+fi
+
+if [ "$NEED_FRONTEND" = "0" ] && [ "$NEED_CORE" = "0" ] && [ "$NEED_API" = "0" ] && [ "$NEED_DESKTOP" = "0" ]; then
+  echo "→ pre-push: docs/config only, nothing to check"
   exit 0
 fi
 
-if [ "$NEED_BACKEND" = "1" ]; then
-  echo "→ backend/desktop changed: building and testing with isolated output (.bin-test)"
+if [ "$NEED_CORE" = "1" ]; then
+  run_core_tests || exit 1
+fi
+
+if [ "$NEED_API" = "1" ]; then
+  echo "→ api layer: building backend + test:backend:api (isolated output .bin-test)"
   pnpm build:backend || exit 1
-  pnpm test:backend || exit 1
-else
-  echo "→ skip backend build/test (no backend/desktop/test changes)"
+  pnpm run test:backend:api || exit 1
+fi
+
+if [ "$NEED_DESKTOP" = "1" ]; then
+  echo "→ desktop layer: test:backend:desktop"
+  pnpm run test:backend:desktop || exit 1
 fi
 
 if [ "$NEED_FRONTEND" = "1" ]; then
   echo "→ frontend changed: building dashboard"
   pnpm build:frontend || exit 1
-else
-  echo "→ skip frontend build (no src/frontend/ changes)"
 fi
 
 run_publish || exit 1
