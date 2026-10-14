@@ -1,6 +1,9 @@
 #!/bin/sh
 # Path-aware pre-commit: only run checks relevant to staged changes.
-# - docs-only (no src/frontend|backend|tests) → skip all, instant
+# - core tests are MANDATORY on every commit (domain-model foundation: a Core
+#   regression breaks backend, desktop and dashboard); backend api + desktop
+#   tests stay change-dependent
+# - docs-only (no src/frontend|backend|tests) → core tests only, no lint/typecheck
 # - backend/docs commits skip frontend lint/typecheck (save 25-70s)
 # - frontend lint + typecheck run in parallel (save 10-20s)
 # - validate:backend redundant (test:backend already restores) → only on FULL_CHECK=1
@@ -58,7 +61,8 @@ if echo "$CHANGED" | grep -qE "^(Directory\.Build|Eling\.slnx|package\.json|pnpm
 fi
 
 if [ "$NEED_FRONTEND" = "0" ] && [ "$NEED_BACKEND" = "0" ] && [ "$NEED_DESKTOP" = "0" ]; then
-  echo "→ pre-commit: docs/config only, skipping lint/typecheck/test"
+  echo "→ pre-commit: docs/config only, running mandatory core tests"
+  pnpm run test:backend:core || exit 1
   exit 0
 fi
 
@@ -77,7 +81,10 @@ if [ "$NEED_BACKEND" = "1" ]; then
   pnpm run test:backend:core || exit 1
   pnpm run test:backend:api || exit 1
 else
-  echo "→ skip backend (no src/backend|core/api tests|build files)"
+  # Core is the domain-model foundation, so it runs even for frontend-only
+  # or desktop-only commits; api/desktop suites stay scope-dependent.
+  echo "→ core tests are mandatory: test:backend:core"
+  pnpm run test:backend:core || exit 1
 fi
 
 if [ "$NEED_DESKTOP" = "1" ]; then

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Path-aware & anti-locked pre-push: only run checks relevant to outgoing commits.
-# - docs/memories/config only → skip all, instant push
+# - docs/memories/config only → core tests only, skip build/publish
 # - isolated build/test via ELING_OUTPUT_ROOT=.bin-test avoids .bin lock collisions
 # - backend and frontend checks run conditionally based on diff vs upstream
 # - after the checks pass, publish a Release build into ~/.local/bin
@@ -56,8 +56,17 @@ if echo "$CHANGED" | grep -qE "^(src/backend/|src/desktop/|tests/|Directory\.Bui
   NEED_BACKEND=1
 fi
 
+# Core tests are mandatory at push as well. When backend paths changed, the
+# block below runs test:backend (core+api+desktop) anyway, so run the extra
+# core pass only for the scopes that would otherwise skip it (frontend-only,
+# docs-only) — before the scope decision, so nothing escapes the foundation.
+if [ "$NEED_BACKEND" = "0" ]; then
+  echo "→ pre-push: running core tests (mandatory)"
+  pnpm run test:backend:core || exit 1
+fi
+
 if [ "$NEED_FRONTEND" = "0" ] && [ "$NEED_BACKEND" = "0" ]; then
-  echo "→ pre-push: docs/config only, skipping build and tests"
+  echo "→ pre-push: docs/config only beyond core tests, skipping build/publish"
   exit 0
 fi
 
