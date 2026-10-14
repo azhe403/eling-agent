@@ -4,7 +4,7 @@ using Eling.Core.Memory;
 using Eling.Core.Scope;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Serilog;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Backend.Bootstrap;
 
@@ -23,6 +23,13 @@ public static class McpHostBuilder
         builder.ConfigureServices(services =>
         {
             services.AddElingLogging(projectId: ProjectId.FromScope(effectiveContext.ProjectScope, effectiveContext.IsUserHome));
+            // This callback runs during builder.Build(), microseconds before the
+            // provider is constructed — and Serilog's logger itself materializes
+            // with the provider, after this point. The mark therefore measures
+            // "all services registered", not "Serilog live"; the buffered-mark
+            // flush at AttachLogger (hosted-services-started) is what proves
+            // logging actually works.
+            StartupStopwatch.Mark("services-configured");
             services.AddElingCoreServices(effectiveContext.Chain, effectiveContext.UserScope);
             services.AddElingMcpServerStdio();
 
@@ -50,15 +57,30 @@ public static class McpHostBuilder
             {
                 services.AddHostedService(sp => sp.GetRequiredService<CodebaseWatcherService>());
             }
+
+            // Registered last on purpose: its StartAsync then runs after the
+            // port-binding hosted services, and it flushes the StartupStopwatch
+            // marks buffered since process entry through the DI logger.
+            services.AddHostedService<StartupTimingHostedService>();
         });
 
-        Log.Information(
-            "Eling started - Opened folder: {Cwd}; Project root: {ProjectRoot}; Effective data dir: {DataDir}; User-home session: {IsUserHome}",
-            Environment.CurrentDirectory,
-            effectiveContext.ProjectScope.Root,
-            effectiveContext.EffectiveDataDir,
-            effectiveContext.IsUserHome);
+        var host = builder.Build();
 
-        return builder.Build();
+        StartupStopwatch.Mark("host-built");
+
+        // The static Serilog Log is never assigned in this host, so the
+        // historical Log.Information call here was silently dropped. Route the
+        // startup line through the built host's logger factory instead.
+        host.Services
+            .GetService<ILoggerFactory>()
+            ?.CreateLogger("Eling.Backend.Bootstrap.McpHostBuilder")
+            .LogInformation(
+                "Eling started - Opened folder: {Cwd}; Project root: {ProjectRoot}; Effective data dir: {DataDir}; User-home session: {IsUserHome}",
+                Environment.CurrentDirectory,
+                effectiveContext.ProjectScope.Root,
+                effectiveContext.EffectiveDataDir,
+                effectiveContext.IsUserHome);
+
+        return host;
     }
 }

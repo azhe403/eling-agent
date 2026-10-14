@@ -228,6 +228,9 @@ public static class McpServiceExtensions
             filters.AddCallToolFilter(ToolTelemetryFilter.Create());
             filters.AddCallToolFilter(ToolPolicyFilters.CreateCallFilter());
             filters.AddListToolsFilter(ToolPolicyFilters.CreateListFilter());
+            // The first tools/list after the initialize handshake is the
+            // in-process MCP-ready milestone for the startup stopwatch.
+            filters.AddListToolsFilter(StartupTimingFilter.Create());
         });
 
         return services;

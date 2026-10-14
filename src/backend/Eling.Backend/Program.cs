@@ -4,6 +4,8 @@ using Serilog.Debugging;
 
 SelfLog.Enable(Console.Error);
 
+StartupStopwatch.Mark("process-entry");
+
 var host = McpHostBuilder.Build();
 await host.RunAsync();
 return 0;
