@@ -18,8 +18,8 @@ namespace Eling.Backend.Tests;
 /// bridge (<c>HttpCoordinatorMemoryChangeNotifier</c> ->
 /// <c>/api/coordinator/notify-change</c> -> "coordinator" topic, which the
 /// memory page watches), or the dashboard silently stays stale. This is the
-/// regression guard for "dashboard blm realtime saat dipegang eling dari
-/// workspace lain".
+/// regression guard for "dashboard goes stale while eling is held by a peer
+/// from another workspace".
 /// </summary>
 [Collection(ElingDataDirCollection.Name)]
 public sealed class PeerMemoryNotifyTests : IAsyncLifetime, IDisposable
