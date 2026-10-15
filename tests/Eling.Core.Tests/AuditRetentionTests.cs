@@ -46,6 +46,69 @@ public class AuditRetentionTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_root, "access", "2026-08-01.jsonl")));
     }
 
+    [Fact]
+    public async Task RunAsync_RollsUpCompressedDay()
+    {
+        var day = new DateTimeOffset(2026, 8, 1, 10, 0, 0, TimeSpan.Zero);
+        var store = new AuditFileStore(_root, new FixedTimeProvider(day));
+        await store.AppendAsync(
+            AuditTrail.Access,
+            [new AuditEvent { Timestamp = day, Trail = AuditTrail.Access, Category = AuditCategory.Memory, Action = "memory_read", Actor = "mcp", Outcome = AuditOutcome.Success }],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        // Production compresses every closed day (CompressOnRotate defaults true via
+        // BufferedAuditLogger.FlushAsync -> AuditRotation); mirror it so only the
+        // .jsonl.gz survives and the job must roll up the compressed form.
+        await AuditRotation.RotateIfNeededAsync(store, AuditTrail.Access, day.AddDays(1), compress: true, CancellationToken.None);
+        Assert.True(File.Exists(Path.Combine(_root, "access", "2026-08-01.jsonl.gz")));
+        Assert.False(File.Exists(Path.Combine(_root, "access", "2026-08-01.jsonl")));
+
+        var options = new AuditOptions { AccessRetentionDays = 14 };
+        var job = new AuditMaintenanceJob(store, options, new FixedTimeProvider(new DateTimeOffset(2026, 9, 11, 0, 0, 0, TimeSpan.Zero)));
+
+        await job.RunAsync(CancellationToken.None);
+
+        var rollupFile = Directory.GetFiles(Path.Combine(_root, "rollups"), "*.jsonl").Single();
+        var rollup = JsonSerializer.Deserialize(File.ReadAllLines(rollupFile).Single(), AuditJsonContext.Default.AuditRollup)!;
+        Assert.Equal("memory_read", rollup.Action);
+        Assert.Equal(1, rollup.Count);
+        Assert.False(File.Exists(Path.Combine(_root, "access", "2026-08-01.jsonl.gz")));
+    }
+
+    [Fact]
+    public async Task RunAsync_ReEncounteredDay_DoesNotDuplicateRollupLine()
+    {
+        var day = new DateTimeOffset(2026, 8, 1, 10, 0, 0, TimeSpan.Zero);
+        var store = new AuditFileStore(_root, new FixedTimeProvider(day));
+        await store.AppendAsync(
+            AuditTrail.Access,
+            [new AuditEvent { Timestamp = day, Trail = AuditTrail.Access, Category = AuditCategory.Memory, Action = "memory_read", Actor = "mcp", Outcome = AuditOutcome.Success }],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        // Capture the raw day's content so it can be re-placed, simulating a crash
+        // between the rollup write and the raw delete: the next pass re-encounters
+        // the very same day and must overwrite, not append, its group line.
+        var rawPath = store.GetCurrentFilePath(AuditTrail.Access, day);
+        var rawLines = await File.ReadAllLinesAsync(rawPath);
+
+        var options = new AuditOptions { AccessRetentionDays = 14 };
+        var job = new AuditMaintenanceJob(store, options, new FixedTimeProvider(new DateTimeOffset(2026, 9, 11, 0, 0, 0, TimeSpan.Zero)));
+
+        await job.RunAsync(CancellationToken.None);
+        var rollupFile = Directory.GetFiles(Path.Combine(_root, "rollups"), "*.jsonl").Single();
+        // First run folds the day into a single rollup line and deletes the raw file.
+        Assert.Single(File.ReadAllLines(rollupFile));
+
+        await File.WriteAllLinesAsync(rawPath, rawLines);
+        await job.RunAsync(CancellationToken.None);
+
+        // Overwrite, not append: still exactly one line, and the raw file is gone.
+        Assert.Single(File.ReadAllLines(rollupFile));
+        Assert.False(File.Exists(rawPath));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
