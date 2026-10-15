@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Eling.Core.Audit.Retention;
 using Eling.Core.Memory;
 
 namespace Eling.Core.Audit;
@@ -27,6 +28,7 @@ namespace Eling.Core.Audit;
         typeof(KebabCaseEnumConverter<MemoryScopeKind>)
     ])]
 [JsonSerializable(typeof(AuditEvent))]
+[JsonSerializable(typeof(AuditRollup))]
 public partial class AuditJsonContext : JsonSerializerContext
 {
 }
