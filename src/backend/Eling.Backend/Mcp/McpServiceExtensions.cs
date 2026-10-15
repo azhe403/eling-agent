@@ -8,6 +8,8 @@ using Eling.Backend.Scope;
 using Eling.Backend.Tools;
 using Eling.Backend.Updates;
 using Eling.Core;
+using Eling.Core.Audit;
+using Eling.Core.Audit.Storage;
 using Eling.Core.Codebase;
 using Eling.Core.FileSystem;
 using Eling.Core.Memory;
@@ -52,6 +54,9 @@ public static class McpServiceExtensions
         services.AddSingleton<IMemoryMerger, MemoryMerger>();
         services.TryAddSingleton<IMemoryChangeNotifier>(NullMemoryChangeNotifier.Instance);
 
+        // The audit trail (design §6.1) is registered per host by
+        // AddElingAuditTrail, not here — see the note on that method.
+
         // Project-local storage under the central shard (machine-local,
         // worktree-shared via the canonical root). Lazy: nothing touches
         // disk until an actual read/write.
@@ -72,7 +77,7 @@ public static class McpServiceExtensions
             var localStorage = sp.GetRequiredKeyedService<IMemoryStorage>("project-local");
             var localIndex = sp.GetRequiredKeyedService<IMemoryIndex>("project-local");
             var localService = new MemoryService(localStorage, localIndex);
-            return new ScopedMemoryService(projectService, globalService, policy, merger, projectScope.Root, localService, localCanonicalRoot);
+            return new ScopedMemoryService(projectService, globalService, policy, merger, projectScope.Root, localService, localCanonicalRoot, auditLogger: sp.GetService<IAuditLogger>());
         });
 
         // Bounded filesystem tools sandboxed to the project root.
@@ -127,6 +132,9 @@ public static class McpServiceExtensions
         services.AddSingleton<IMemoryIndex>(sp => CreateMemoryIndex(headDataDirectory, sp.GetService<ILoggerFactory>()));
         services.AddSingleton<IIntentionStorage>(new FileSystemIntentionStorage(headDataDirectory));
         services.AddScoped<IMemoryService, MemoryService>();
+
+        // The audit trail is a host concern (AddElingAuditTrail): it resolves the
+        // machine-global store, which a core-graph-only harness must not touch.
 
         // Semantic judge: a separate, per-user setting from the Desktop agent provider,
         // resolved from <user-scope>/config so both the MCP host and the dashboard read
@@ -188,7 +196,7 @@ public static class McpServiceExtensions
             var localStorage = sp.GetRequiredKeyedService<IMemoryStorage>("project-local");
             var localIndex = sp.GetRequiredKeyedService<IMemoryIndex>("project-local");
             var localService = new MemoryService(localStorage, localIndex, new SmartSaveOptions(), judge, logger);
-            return new ScopedMemoryService(levels, globalService, policy, merger, chain.Cwd, localService: localService, canonicalRoot: localCanonicalRoot);
+            return new ScopedMemoryService(levels, globalService, policy, merger, chain.Cwd, localService: localService, canonicalRoot: localCanonicalRoot, auditLogger: sp.GetService<IAuditLogger>());
         });
 
         services.AddScoped<IMemoryRecallService, MemoryRecallService>();
@@ -219,6 +227,32 @@ public static class McpServiceExtensions
         return services;
     }
 
+    /// <summary>
+    /// Registers the audit trail's writer for one host container: the JSONL file
+    /// store plus its rebuildable SQLite cache over the single machine-global
+    /// audit directory (design §6.1), batched by <see cref="BufferedAuditLogger"/>.
+    /// </summary>
+    /// <remarks>
+    /// Host-level rather than part of <c>AddElingCoreServices</c> on purpose: the
+    /// store root resolves through <see cref="CentralAuditDirectory"/> and
+    /// <c>ElingPaths</c>, which honours <c>ELING_DATA_DIR</c> for the hosts that
+    /// set it (amendment A2) but falls back to the real machine-global store when
+    /// nothing does. A unit-test harness that builds only the core graph — the
+    /// scope-chain DI tests, the agent-tool tests, the MCP tool tests — runs with
+    /// that variable unset, and resolving the trail there would write test noise
+    /// into the real store: the exact failure class amendment A2 was written
+    /// about. Hosts therefore opt in explicitly: the MCP stdio host
+    /// (<c>McpHostBuilder</c>) and the dashboard owner's HTTP host
+    /// (<c>HttpLoop.BuildWebApplication</c>). Both write one trail; each
+    /// container owns its own writer, which the store's process-wide write gate
+    /// serializes (design §7.2).
+    /// </remarks>
+    public static IServiceCollection AddElingAuditTrail(this IServiceCollection services)
+    {
+        services.TryAddSingleton<IAuditLogger>(_ => CreateAuditLogger());
+        return services;
+    }
+
     public static IServiceCollection AddElingMcpServerStdio(this IServiceCollection services)
     {
         services.AddMcpServer(options =>
@@ -233,6 +267,11 @@ public static class McpServiceExtensions
             // for audit; the policy filter rejects disabled tools before
             // the tool handler runs.
             filters.AddCallToolFilter(ToolTelemetryFilter.Create());
+            // The ambient audit actor: every entry recorded underneath a tool
+            // call carries the calling client (design §5, amendment A3). It sits
+            // inside telemetry — which stays outermost — and outside the policy
+            // filter, so a rejected call still carries the actor it was made as.
+            filters.AddCallToolFilter(AuditActorFilter.Create());
             filters.AddCallToolFilter(ToolPolicyFilters.CreateCallFilter());
             filters.AddListToolsFilter(ToolPolicyFilters.CreateListFilter());
             // The first tools/list after the initialize handshake is the
@@ -261,6 +300,59 @@ public static class McpServiceExtensions
         services.TryAddSingleton<CodebaseWatcherService>();
         services.TryAddSingleton<CodebaseRebuildBroadcaster>();
         services.TryAddSingleton<CodebaseRebuildJobRunner>();
+    }
+
+    /// <summary>
+    /// Creates the audit trail's single writer over the machine-global store
+    /// (design §6.1): the JSONL file store plus its rebuildable SQLite cache,
+    /// batched by <see cref="BufferedAuditLogger"/>. The store root resolves
+    /// through <see cref="CentralAuditDirectory"/>, so the <c>ELING_DATA_DIR</c>
+    /// override isolates a test scope exactly as it does for logs (amendment A2).
+    /// </summary>
+    /// <remarks>
+    /// The host's container owns the singleton's lifetime and disposes it at
+    /// shutdown, which drains the flusher channel — both hosts dispose their
+    /// provider (the MCP host on host disposal, the dashboard owner per HTTP
+    /// host attempt in <see cref="HttpLoop"/>), so the change trail's pending
+    /// entries always land. The logger is wrapped in
+    /// <see cref="DisposableAuditLogger"/> because the engine drains only
+    /// asynchronously, and a container disposed synchronously would otherwise
+    /// refuse the singleton.
+    /// </remarks>
+    private static IAuditLogger CreateAuditLogger()
+    {
+        var auditRoot = CentralAuditDirectory.Resolve();
+        var store = new AuditFileStore(auditRoot, TimeProvider.System);
+        var index = new SqliteAuditIndex(auditRoot, store);
+
+        // The index is a cache that starts empty and creates its tables only on
+        // initialize. Left uninitialized, the logger's first flush would fail on
+        // a missing table — swallowed fail-open, but the batch's per-entry
+        // confirmations are set after the index write, so every change entry
+        // would wait out its whole FlushTimeout instead of returning confirmed
+        // (amendment A6). Initializing here, before the logger exists, is what
+        // keeps the change trail durable-before-return.
+        var indexed = TryInitializeIndex(index);
+        return new DisposableAuditLogger(
+            new BufferedAuditLogger(store, indexed ? index : null, new AuditOptions(), TimeProvider.System));
+    }
+
+    private static bool TryInitializeIndex(SqliteAuditIndex index)
+    {
+        try
+        {
+            index.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
+            return true;
+        }
+        catch
+        {
+            // A cache that cannot be created is not worth failing the host over:
+            // the JSONL stays canonical (design §6.3) and a rebuild repopulates
+            // the index later. Returning false keeps the logger on the JSONL
+            // alone rather than on an index whose first insert would fail and
+            // hold every change entry's confirmation for the full FlushTimeout.
+            return false;
+        }
     }
 
     /// <summary>

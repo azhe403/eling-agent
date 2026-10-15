@@ -1,3 +1,4 @@
+using Eling.Core.Audit;
 using Eling.Core.Exceptions;
 using Eling.Core.Memory.Storage;
 using Eling.Core.Scope;
@@ -14,6 +15,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     private readonly IMemoryMerger _merger;
     private readonly string _cwd;
     private readonly SmartSaveOptions _smartSave;
+    private readonly MemoryAuditRecorder _audit;
 
     public IReadOnlyList<string> ChainRoots => _levels.Select(l => l.Scope.Root).ToList().AsReadOnly();
 
@@ -83,6 +85,13 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     /// no scope is ever created here.
     /// </summary>
     public async Task<ScopedMemorySaveResult> SaveToProjectAsync(Memory memory, string targetProjectRoot)
+    {
+        var result = await SaveToProjectCoreAsync(memory, targetProjectRoot);
+        await _audit.RecordSaveAsync(result);
+        return result;
+    }
+
+    private async Task<ScopedMemorySaveResult> SaveToProjectCoreAsync(Memory memory, string targetProjectRoot)
     {
         ArgumentNullException.ThrowIfNull(memory);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetProjectRoot);
@@ -159,7 +168,8 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         IMemoryMerger merger,
         string? projectRoot,
         IMemoryService? localService = null,
-        string? canonicalRoot = null)
+        string? canonicalRoot = null,
+        IAuditLogger? auditLogger = null)
         : this(
             [new ProjectLevel(new ProjectScope(projectRoot ?? Directory.GetCurrentDirectory()), projectService)],
             globalService,
@@ -167,7 +177,8 @@ public sealed class ScopedMemoryService : IScopedMemoryService
             merger,
             projectRoot ?? Directory.GetCurrentDirectory(),
             localService: localService,
-            canonicalRoot: canonicalRoot)
+            canonicalRoot: canonicalRoot,
+            auditLogger: auditLogger)
     {
     }
 
@@ -179,7 +190,8 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         string cwd,
         SmartSaveOptions? smartSave = null,
         IMemoryService? localService = null,
-        string? canonicalRoot = null)
+        string? canonicalRoot = null,
+        IAuditLogger? auditLogger = null)
     {
         ArgumentNullException.ThrowIfNull(levels);
         ArgumentNullException.ThrowIfNull(globalService);
@@ -194,6 +206,10 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         _smartSave = smartSave ?? new SmartSaveOptions();
         _localService = localService;
         _canonicalRoot = string.IsNullOrWhiteSpace(canonicalRoot) ? null : Path.GetFullPath(canonicalRoot);
+        // Optional so every existing construction site keeps compiling: without a
+        // logger the service records nothing (NullAuditLogger), which is the
+        // same behaviour it had before the audit trail existed.
+        _audit = MemoryAuditRecorder.Create(auditLogger);
     }
 
     private IMemoryService LocalOrThrow() =>
@@ -226,7 +242,45 @@ public sealed class ScopedMemoryService : IScopedMemoryService
                 StringComparison.OrdinalIgnoreCase))?.Service ?? _levels[0].Service;
     }
 
+    /// <summary>
+    /// The service a reference-based mutation targets, with the scope and project
+    /// root the operation's audit entry carries. A null service means the
+    /// project-local tier is not wired for this workspace.
+    /// </summary>
+    private IMemoryService? ResolveMutationService(
+        MemoryReference reference,
+        out MemoryScopeKind kind,
+        out string? projectRoot)
+    {
+        kind = reference.Scope;
+        if (reference.Scope == MemoryScopeKind.ProjectLocal)
+        {
+            projectRoot = reference.ProjectRoot ?? _canonicalRoot;
+            return _localService;
+        }
+
+        if (reference.Scope == MemoryScopeKind.Project)
+        {
+            // Same fallback the read paths use: an unmatched or absent root reads
+            // and writes the head level, so the entry names the head level too.
+            projectRoot = reference.ProjectRoot ?? (_levels.Count > 0 ? _levels[0].Scope.Root : null);
+            return ResolveProjectLevel(reference.ProjectRoot);
+        }
+
+        projectRoot = null;
+        return _globalService;
+    }
+
     public async Task<ScopedMemorySaveResult> SaveAsync(Memory memory, string? scope = null)
+    {
+        var result = await SaveCoreAsync(memory, scope);
+        // One entry per save, whatever path it took: a create, a smart-save
+        // merge, or a cross-scope match that updated another tier (design §8).
+        await _audit.RecordSaveAsync(result);
+        return result;
+    }
+
+    private async Task<ScopedMemorySaveResult> SaveCoreAsync(Memory memory, string? scope = null)
     {
         ArgumentNullException.ThrowIfNull(memory);
         var kind = _policy.Resolve(scope);
@@ -317,6 +371,19 @@ public sealed class ScopedMemoryService : IScopedMemoryService
 
     public async Task<ScopedMemory?> GetByIdAsync(MemoryReference reference)
     {
+        var found = await GetByIdCoreAsync(reference);
+        // memory_get: the scope and root actually read (the reference's own when
+        // the memory is not there to say).
+        await _audit.RecordGetAsync(
+            found?.Scope ?? reference.Scope,
+            found?.ProjectRoot ?? reference.ProjectRoot,
+            reference.Id,
+            found is not null);
+        return found;
+    }
+
+    private async Task<ScopedMemory?> GetByIdCoreAsync(MemoryReference reference)
+    {
         ArgumentNullException.ThrowIfNull(reference);
         if (reference.Scope == MemoryScopeKind.ProjectLocal)
         {
@@ -337,6 +404,22 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     public async Task<ScopedMemory?> GetByIdAsync(MemoryId id, string? scope)
     {
         var kind = _policy.Resolve(scope);
+        var found = await GetByIdCoreAsync(id, scope);
+        if (found is not null)
+        {
+            await _audit.RecordGetAsync(found.Scope, found.ProjectRoot, id, found: true);
+            return found;
+        }
+
+        // Not found: the scope that was asked for is still what the read was
+        // against, so the attempt is recorded rather than dropped.
+        await _audit.RecordGetAsync(kind, projectRoot: null, id, found: false);
+        return null;
+    }
+
+    private async Task<ScopedMemory?> GetByIdCoreAsync(MemoryId id, string? scope)
+    {
+        var kind = _policy.Resolve(scope);
         if (kind == MemoryScopeKind.ProjectLocal)
         {
             if (_localService is null) return null;
@@ -355,19 +438,45 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     public async Task<bool> DeleteAsync(MemoryReference reference)
     {
         ArgumentNullException.ThrowIfNull(reference);
-        if (reference.Scope == MemoryScopeKind.ProjectLocal)
+        var service = ResolveMutationService(reference, out var kind, out var projectRoot);
+        if (service is null)
         {
-            return _localService is not null && await _localService.DeleteAsync(reference.Id);
+            return false;
         }
-        if (reference.Scope == MemoryScopeKind.Project)
+
+        // The removed state is the entry's before-side (design §4.2), so it is
+        // read before the delete takes it. Best effort: a snapshot read that
+        // fails leaves the entry without its before-state, never breaks the
+        // delete.
+        Memory? removed = null;
+        try
         {
-            var service = ResolveProjectLevel(reference.ProjectRoot);
-            return await service.DeleteAsync(reference.Id);
+            removed = await service.GetByIdAsync(reference.Id);
         }
-        return await _globalService.DeleteAsync(reference.Id);
+        catch
+        {
+            // The delete below reads and writes the same storage; a failure here
+            // is the storage's to report, not the audit snapshot's.
+        }
+
+        var deleted = await service.DeleteAsync(reference.Id);
+        if (deleted && removed is not null)
+        {
+            await _audit.RecordDeleteAsync(new ScopedMemory(removed, kind, projectRoot));
+        }
+
+        return deleted;
     }
 
     public async Task<IReadOnlyCollection<ScopedMemory>> ListAsync(string? scope = null, MemoryStatus? status = null)
+    {
+        var result = await ListCoreAsync(scope, status);
+        // memory_list: an access entry with the count, never the contents.
+        await _audit.RecordListAsync(result.Count);
+        return result;
+    }
+
+    private async Task<IReadOnlyCollection<ScopedMemory>> ListCoreAsync(string? scope = null, MemoryStatus? status = null)
     {
         var normalized = string.IsNullOrWhiteSpace(scope) ? "merged" : scope.Trim().ToLowerInvariant();
 
@@ -439,6 +548,15 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     }
 
     public async Task<IReadOnlyCollection<ScopedSearchResult>> SearchAsync(string query, string? scope = null, int? limit = null)
+    {
+        var result = await SearchCoreAsync(query, scope, limit);
+        // memory_search: the query text and the hit count, never the hits
+        // themselves — the access trail records event detail only (design §4).
+        await _audit.RecordSearchAsync(query, result.Count);
+        return result;
+    }
+
+    private async Task<IReadOnlyCollection<ScopedSearchResult>> SearchCoreAsync(string query, string? scope = null, int? limit = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
         var normalizedScope = string.IsNullOrWhiteSpace(scope) ? "merged" : scope.Trim().ToLowerInvariant();
@@ -547,20 +665,38 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     public async Task<ScopedMemory?> UpdateAsync(MemoryReference reference, string? content = null, MemoryType? type = null, string[]? tags = null, string? source = null, MemoryStatus? status = null)
     {
         ArgumentNullException.ThrowIfNull(reference);
-        if (reference.Scope == MemoryScopeKind.ProjectLocal)
+        var service = ResolveMutationService(reference, out var kind, out var projectRoot);
+        if (service is null)
         {
-            if (_localService is null) return null;
-            var localUpdated = await _localService.UpdateAsync(reference.Id, content, type, tags, source, status);
-            return localUpdated is null ? null : new ScopedMemory(localUpdated, MemoryScopeKind.ProjectLocal, reference.ProjectRoot ?? _canonicalRoot);
+            return null;
         }
-        if (reference.Scope == MemoryScopeKind.Project)
+
+        // The before-side of the entry (design §4.2), read before the update
+        // writes over it. Best effort: a snapshot read that fails leaves the
+        // entry without its before-state, never breaks the update.
+        Memory? previous = null;
+        try
         {
-            var service = ResolveProjectLevel(reference.ProjectRoot);
-            var updated = await service.UpdateAsync(reference.Id, content, type, tags, source, status);
-            return updated is null ? null : new ScopedMemory(updated, MemoryScopeKind.Project, reference.ProjectRoot ?? _levels[0].Scope.Root);
+            previous = await service.GetByIdAsync(reference.Id);
         }
-        var globalUpdated = await _globalService.UpdateAsync(reference.Id, content, type, tags, source, status);
-        return globalUpdated is null ? null : new ScopedMemory(globalUpdated, MemoryScopeKind.Global, null);
+        catch
+        {
+            // Same reasoning as the delete path: the storage owns the failure.
+        }
+
+        var updated = await service.UpdateAsync(reference.Id, content, type, tags, source, status);
+        if (updated is null)
+        {
+            return null;
+        }
+
+        var after = new ScopedMemory(updated, kind, projectRoot);
+        if (previous is not null)
+        {
+            await _audit.RecordUpdateAsync(new ScopedMemory(previous, kind, projectRoot), after);
+        }
+
+        return after;
     }
 
     public async Task RebuildIndexAsync(string? scope = null)
@@ -646,7 +782,9 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         var copy = new Memory(memory.Type, memory.Content, memory.Tags, memory.Source, memory.Status);
         var (targetService, _) = ResolveTargetService(targetProjectRoot);
         var saved = await targetService.SaveAsync(copy);
-        return new ScopedMemory(saved, MemoryScopeKind.Project, targetProjectRoot);
+        var target = new ScopedMemory(saved, MemoryScopeKind.Project, targetProjectRoot);
+        await _audit.RecordCopiedAsync(MemoryAuditActions.CopyToProject, target);
+        return target;
     }
 
     /// <summary>Resolves the read service for any scope, including project-local.</summary>
@@ -672,7 +810,16 @@ public sealed class ScopedMemoryService : IScopedMemoryService
 
         var copy = new Memory(memory.Type, memory.Content, memory.Tags, memory.Source, memory.Status);
         var saved = await _globalService.SaveAsync(copy);
-        return new ScopedMemory(saved, MemoryScopeKind.Global, null);
+        var target = new ScopedMemory(saved, MemoryScopeKind.Global, null);
+        // A promote records the source state as its before-side even when the
+        // source survives: that row is design §4.2's contract for the promote
+        // action, and the source tier is the half of the story the target alone
+        // cannot tell.
+        await _audit.RecordMovedAsync(
+            MemoryAuditActions.PromoteToGlobal,
+            new ScopedMemory(memory, source.Scope, source.ProjectRoot),
+            target);
+        return target;
     }
 
     public async Task<ScopedMemory?> PromoteToGlobalAsync(MemoryReference source)
@@ -689,7 +836,12 @@ public sealed class ScopedMemoryService : IScopedMemoryService
 
         var copy = new Memory(memory.Type, memory.Content, memory.Tags, memory.Source, memory.Status);
         var saved = await _globalService.SaveAsync(copy);
-        return new ScopedMemory(saved, MemoryScopeKind.Global, null);
+        var target = new ScopedMemory(saved, MemoryScopeKind.Global, null);
+        await _audit.RecordMovedAsync(
+            MemoryAuditActions.PromoteToGlobal,
+            new ScopedMemory(memory, source.Scope, source.ProjectRoot),
+            target);
+        return target;
     }
 
     /// <summary>
@@ -718,7 +870,12 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         var saved = await targetService.SaveAsync(MoveCopy(memory));
         await sourceService.DeleteAsync(source.Id);
 
-        return new ScopedMemory(saved, MemoryScopeKind.Project, targetProjectRoot);
+        var target = new ScopedMemory(saved, MemoryScopeKind.Project, targetProjectRoot);
+        await _audit.RecordMovedAsync(
+            MemoryAuditActions.CopyToProject,
+            new ScopedMemory(memory, source.Scope, source.ProjectRoot),
+            target);
+        return target;
     }
 
     public async Task<ScopedMemory?> MoveToGlobalAsync(MemoryReference source)
@@ -736,7 +893,12 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         var saved = await _globalService.SaveAsync(MoveCopy(memory));
         await sourceService.DeleteAsync(source.Id);
 
-        return new ScopedMemory(saved, MemoryScopeKind.Global, null);
+        var target = new ScopedMemory(saved, MemoryScopeKind.Global, null);
+        await _audit.RecordMovedAsync(
+            MemoryAuditActions.PromoteToGlobal,
+            new ScopedMemory(memory, source.Scope, source.ProjectRoot),
+            target);
+        return target;
     }
 
     /// <summary>

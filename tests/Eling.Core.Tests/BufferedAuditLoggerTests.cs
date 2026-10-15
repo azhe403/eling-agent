@@ -6,6 +6,15 @@ using Xunit;
 
 namespace Eling.Core.Tests;
 
+/// <summary>
+/// Shares a collection with <see cref="AuditMemoryHookTests"/>: the backed-up
+/// channel test measures how many of 4128 entries the drain landed inside a
+/// five-second budget, which the suite's other audit classes — appending through
+/// the store's process-wide write gate at the same time — can tip over. One
+/// collection keeps them from running concurrently; see
+/// <see cref="AuditTrailCollection"/>.
+/// </summary>
+[Collection(AuditTrailCollection.Name)]
 public class BufferedAuditLoggerTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "eling-audit-buf-" + Guid.NewGuid().ToString("N"));

@@ -210,6 +210,12 @@ public static class TestProcesses
         // developer's real agent-workspaces.json, and running the process tests
         // resurrects workspace entries the user just deleted.
         psi.Environment["ELING_AGENT_DATA_DIR"] = TestUserScope;
+        // Same reasoning for the shared data directory: it is where the audit
+        // trail, the codebase index and the logs resolve. With it unset a spawned
+        // backend writes its audit store into the developer's real
+        // machine-global one — the test-noise failure class amendment A2 exists
+        // to prevent.
+        psi.Environment["ELING_DATA_DIR"] = TestUserScope;
 
         var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start process.");
         return process;

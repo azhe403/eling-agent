@@ -31,6 +31,11 @@ public static class McpHostBuilder
             // logging actually works.
             StartupStopwatch.Mark("services-configured");
             services.AddElingCoreServices(effectiveContext.Chain, effectiveContext.UserScope);
+            // The audit trail is a host concern, not part of the core graph: this
+            // host is the one that serves MCP tools, whose memory operations the
+            // trail records (design §8). See AddElingAuditTrail for why it is not
+            // registered inside AddElingCoreServices.
+            services.AddElingAuditTrail();
             services.AddElingMcpServerStdio();
 
             services.AddSingleton(shared.Registry);

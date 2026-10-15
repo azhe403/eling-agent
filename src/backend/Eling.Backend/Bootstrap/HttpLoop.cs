@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using Eling.Backend.Mcp;
 using Eling.Core;
 using Eling.Core.Logging;
 using Eling.Backend.Updates;
@@ -147,6 +148,13 @@ public static class HttpLoop
         }
 
         DashboardServices.Register(builder.Services, context, shared, ownerMode);
+
+        // The dashboard owner's own container records the same trail the MCP host
+        // writes, so an entry never depends on which container happened to serve
+        // the operation (design §8). See AddElingAuditTrail for why this is not
+        // part of AddElingCoreServices. TestAppBuilder sets ELING_DATA_DIR, so a
+        // test host's copy lands in its isolated data directory.
+        builder.Services.AddElingAuditTrail();
 
         // The periodic pump runs only on the production owner: test hosts build
         // through this same path and must never start network background work.
