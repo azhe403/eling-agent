@@ -17,17 +17,23 @@ import { selectionSummary, type WorkspaceSelection } from "./selection"
  * the selection itself, so nothing lies about state. Picking any row switches
  * to that single workspace. The parent decides when this is visible (the
  * codebase page hides it on wide screens, where the panel covers the job).
+ *
+ * `label` overrides the trigger text for parents whose selection is not a
+ * workspace set at all (the memory page's global scope), so the trigger never
+ * has to describe one.
  */
 export function WorkspaceSelect({
   rows,
   selection,
   onSelectAll,
   onSelectOnly,
+  label,
 }: {
   rows: readonly WorkspaceRow[]
   selection: WorkspaceSelection
   onSelectAll: () => void
   onSelectOnly: (root: string) => void
+  label?: string
 }) {
   return (
     <Select
@@ -43,8 +49,7 @@ export function WorkspaceSelect({
           {() =>
             selection.kind === "all"
               ? "🌐 All workspaces"
-              : `📁 ${selectionSummary(selection)}`
-          }
+              : (label ?? `📁 ${selectionSummary(selection)}`)}
         </SelectValue>
       </SelectTrigger>
       <SelectContent

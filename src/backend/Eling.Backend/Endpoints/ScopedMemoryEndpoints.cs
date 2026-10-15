@@ -1,6 +1,7 @@
 using Eling.Backend.Dtos;
 using Eling.Core;
 using Eling.Core.Memory;
+using Eling.Core.Scope;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace Eling.Backend.Endpoints;
@@ -43,26 +44,35 @@ public static class ScopedMemoryEndpoints
 
     // ---- Global ----
 
-    private static async Task<Results<Ok<IReadOnlyCollection<ScopedMemoryDto>>, BadRequest<string>>> ListGlobalAsync(
-        RuntimeRegistry registry, string? status, string? type, int? limit, int? offset)
+    private static async Task<Results<Ok<MemoryListDto>, BadRequest<string>>> ListGlobalAsync(
+        RuntimeRegistry registry, string? status, string? type, string? q, int? limit, int? offset)
     {
         var service = registry.GetGlobalMemoryService();
         var all = await service.ListAllAsync();
+        var scopeCount = all.Count;
         all = all.OrderByDescending(m => m.UpdatedAt).ThenByDescending(m => m.CreatedAt).ToList();
         if (!string.IsNullOrEmpty(status))
         {
-            if (!Enum.TryParse<MemoryStatus>(status, true, out var parsed)) return TypedResults.BadRequest($"Invalid status '{status}'");
+            if (!Enum.TryParse<MemoryStatus>(status, true, out var parsed)) return TypedResults.BadRequest<string>($"Invalid status '{status}'");
             all = all.Where(m => m.Status == parsed).ToList();
         }
         if (!string.IsNullOrEmpty(type))
         {
-            if (!Enum.TryParse<MemoryType>(type, true, out var parsed)) return TypedResults.BadRequest($"Invalid type '{type}'");
+            if (!Enum.TryParse<MemoryType>(type, true, out var parsed)) return TypedResults.BadRequest<string>($"Invalid type '{type}'");
             all = all.Where(m => m.Type == parsed).ToList();
         }
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var needle = q.Trim();
+            all = all.Where(m =>
+                m.Content.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                m.Id.Value.Contains(needle, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+        var matching = all.Count;
         if (offset is > 0) all = all.Skip(offset.Value).ToList();
         if (limit is not null) all = all.Take(limit.Value).ToList();
         var dtos = all.Select(m => ScopedMemoryDto.From(m, MemoryScopeKind.Global, null)).ToList().AsReadOnly();
-        return TypedResults.Ok((IReadOnlyCollection<ScopedMemoryDto>)dtos);
+        return TypedResults.Ok(new MemoryListDto(new MemoryListMetadata(scopeCount, matching, limit, offset), dtos));
     }
 
     private static async Task<Results<Ok<IReadOnlyCollection<ScopedSearchResultDto>>, BadRequest<string>>> SearchGlobalAsync(
@@ -141,19 +151,32 @@ public static class ScopedMemoryEndpoints
 
     // ---- Aggregated ----
 
-    private static async Task<Ok<IReadOnlyCollection<ScopedMemoryDto>>> ListAggregatedAsync(RuntimeRegistry registry, string? status, string? type, int? limit, int? offset)
+    private static async Task<Results<Ok<MemoryListDto>, BadRequest<string>>> ListAggregatedAsync(RuntimeRegistry registry, string? status, string? type, string? q, int? limit, int? offset)
     {
         MemoryStatus? statusFilter = null;
         if (!string.IsNullOrEmpty(status) && Enum.TryParse<MemoryStatus>(status, true, out var parsedStatus)) statusFilter = parsedStatus;
         var all = await registry.ListAggregatedAsync(statusFilter);
+        var scopeCount = all.Count;
         var filtered = all.AsEnumerable();
-        if (!string.IsNullOrEmpty(type) && Enum.TryParse<MemoryType>(type, true, out var typeParsed))
+        if (!string.IsNullOrEmpty(type))
+        {
+            if (!Enum.TryParse<MemoryType>(type, true, out var typeParsed))
+                return TypedResults.BadRequest<string>($"Invalid type '{type}'");
             filtered = filtered.Where(s => s.Memory.Type == typeParsed);
+        }
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var needle = q.Trim();
+            filtered = filtered.Where(s =>
+                s.Memory.Content.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                s.Memory.Id.Value.Contains(needle, StringComparison.OrdinalIgnoreCase));
+        }
+        var matching = filtered.Count();
         filtered = filtered.OrderByDescending(s => s.Memory.CreatedAt);
         if (offset is > 0) filtered = filtered.Skip(offset.Value);
         if (limit is not null) filtered = filtered.Take(limit.Value);
         var dtos = filtered.Select(s => ScopedMemoryDto.From(s.Memory, s.Scope, s.ProjectRoot)).ToList().AsReadOnly();
-        return TypedResults.Ok((IReadOnlyCollection<ScopedMemoryDto>)dtos);
+        return TypedResults.Ok(new MemoryListDto(new MemoryListMetadata(scopeCount, matching, limit, offset), dtos));
     }
 
     private static async Task<Ok<IReadOnlyCollection<ScopedSearchResultDto>>> SearchAggregatedAsync(RuntimeRegistry registry, string q, int? limit)
@@ -166,58 +189,233 @@ public static class ScopedMemoryEndpoints
 
     // ---- Project ----
 
-    private static async Task<Results<Ok<IReadOnlyCollection<ScopedMemoryDto>>, BadRequest<string>, NotFound<string>>> ListProjectAsync(
-        RuntimeRegistry registry, string projectRoot, string? status, string? type, int? limit, int? offset, string? tier = null)
-    {
-        if (string.IsNullOrWhiteSpace(projectRoot)) return TypedResults.BadRequest("projectRoot is required");
-        if (IsLocalTier(tier))
-        {
-            return await ListProjectLocalAsync(registry, projectRoot, status, type, limit, offset);
-        }
-        var service = registry.TryResolveMemoryServiceByScopeRoot(projectRoot);
-        if (service is null) return TypedResults.NotFound<string>($"Project '{projectRoot}' not found or not alive");
-        var all = await service.ListAllAsync();
-        all = all.OrderByDescending(m => m.UpdatedAt).ThenByDescending(m => m.CreatedAt).ToList();
-        if (!string.IsNullOrEmpty(status))
-        {
-            if (!Enum.TryParse<MemoryStatus>(status, true, out var parsed)) return TypedResults.BadRequest($"Invalid status '{status}'");
-            all = all.Where(m => m.Status == parsed).ToList();
-        }
-        if (!string.IsNullOrEmpty(type))
-        {
-            if (!Enum.TryParse<MemoryType>(type, true, out var parsed)) return TypedResults.BadRequest($"Invalid type '{type}'");
-            all = all.Where(m => m.Type == parsed).ToList();
-        }
-        if (offset is > 0) all = all.Skip(offset.Value).ToList();
-        if (limit is not null) all = all.Take(limit.Value).ToList();
-        var dtos = all.Select(m => ScopedMemoryDto.From(m, MemoryScopeKind.Project, projectRoot)).ToList().AsReadOnly();
-        return TypedResults.Ok((IReadOnlyCollection<ScopedMemoryDto>)dtos);
-    }
-
     private static bool IsLocalTier(string? tier)
         => string.Equals(tier?.Trim(), "project-local", StringComparison.OrdinalIgnoreCase);
 
-    private static async Task<Results<Ok<IReadOnlyCollection<ScopedMemoryDto>>, BadRequest<string>, NotFound<string>>> ListProjectLocalAsync(
-        RuntimeRegistry registry, string projectRoot, string? status, string? type, int? limit, int? offset)
+    /// <summary>
+    /// One priority position in a merged project read: a scope level with its
+    /// shared memories and — when the tier asks — its local shard. Nearest
+    /// level first, and local before shared within a level: the same
+    /// nearest-wins rule <see cref="IMemoryMerger"/> applies, kept here in one
+    /// place so the dashboard list and MCP recall agree on which copy of a
+    /// duplicated memory wins.
+    /// </summary>
+    private sealed record ProjectReadLevel(
+        string Root,
+        IReadOnlyCollection<Memory>? Shared,
+        LocalShard? Local);
+
+    /// <summary>A level's local tier: its canonical root and the memories in it.</summary>
+    private sealed record LocalShard(
+        string CanonicalRoot,
+        IReadOnlyCollection<Memory> Memories);
+
+    /// <summary>
+    /// The memory list for one or more workspace roots, merged. <paramref name="project"/>
+    /// repeats for a multi-workspace selection; <paramref name="projectRoot"/> stays
+    /// accepted as the single-root alias. With <paramref name="includeAncestors"/>
+    /// each root expands to its full <c>.eling</c> chain (nearest first, disk
+    /// fallback so an unregistered ancestor is still readable), and with
+    /// <paramref name="global"/> the global scope joins the merge additively —
+    /// appended last, so a chain level still wins a tie over global, exactly the
+    /// priority the MCP merged view uses. One call is the whole view, and every
+    /// memory keeps the scope and root it truly came from.
+    /// </summary>
+    private static async Task<Results<Ok<MemoryListDto>, BadRequest<string>, NotFound<string>>> ListProjectAsync(
+        RuntimeRegistry registry,
+        string? projectRoot = null,
+        string[]? project = null,
+        bool includeAncestors = false,
+        bool global = false,
+        string? status = null,
+        string? type = null,
+        string? q = null,
+        int? limit = null,
+        int? offset = null,
+        string? tier = null)
     {
-        var service = registry.TryResolveLocalServiceByScopeRoot(projectRoot, out var canonicalRoot);
-        if (service is null) return TypedResults.Ok((IReadOnlyCollection<ScopedMemoryDto>)Array.Empty<ScopedMemoryDto>());
-        var all = await service.ListAllAsync();
-        all = all.OrderByDescending(m => m.UpdatedAt).ThenByDescending(m => m.CreatedAt).ToList();
+        var roots = CollectRequestedRoots(projectRoot, project);
+        if (roots.Count == 0) return TypedResults.BadRequest<string>("projectRoot is required");
+
+        var wantShared = !IsLocalTier(tier);
+        var wantLocal = IsLocalTier(tier) ||
+            string.Equals(tier?.Trim(), "all", StringComparison.OrdinalIgnoreCase);
+
+        // Priority order: selection order; inside a root, its chain nearest-first
+        // when the caller asked for ancestors, otherwise the root alone. A root
+        // that is both selected directly and an ancestor of another selected root
+        // keeps its first — highest-priority — position, and every level is read
+        // at most once.
+        var levels = new List<string>();
+        var seenLevels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in roots)
+        {
+            foreach (var level in ChainOf(root, includeAncestors))
+            {
+                if (seenLevels.Add(level)) levels.Add(level);
+            }
+        }
+
+        var readLevels = new List<ProjectReadLevel>();
+        foreach (var level in levels)
+        {
+            IReadOnlyCollection<Memory>? shared = null;
+            if (wantShared)
+            {
+                var service = registry.TryResolveMemoryServiceByScopeRoot(level);
+                if (service is not null) shared = await service.ListAllAsync();
+            }
+            LocalShard? local = null;
+            if (wantLocal)
+            {
+                // Read-only: never creates a local shard for a chain level.
+                var localService = registry.TryResolveLocalServiceByScopeRoot(level, out var canonicalRoot);
+                if (localService is not null)
+                {
+                    local = new LocalShard(canonicalRoot ?? level, await localService.ListAllAsync());
+                }
+            }
+            if (shared is not null || local is not null)
+            {
+                readLevels.Add(new ProjectReadLevel(level, shared, local));
+            }
+        }
+
+        // Nothing readable anywhere in the chains. Local-only tier never 404s —
+        // a real project with no local shard is an empty view, the contract the
+        // pre-merge local handler had. An ancestor request whose chain has no
+        // .eling at all is likewise a normal empty view. Only the legacy
+        // shared read keeps the "unknown project" 404 — and only when the
+        // global scope is not riding along, because then there is still a scope
+        // left to answer with.
+        if (readLevels.Count == 0 && !global)
+        {
+            if (includeAncestors || !wantShared)
+            {
+                return TypedResults.Ok(new MemoryListDto(
+                    new MemoryListMetadata(0, 0, limit, offset),
+                    Array.Empty<ScopedMemoryDto>()));
+            }
+            return TypedResults.NotFound<string>($"Project '{projectRoot}' not found or not alive");
+        }
+
+        var merged = new List<ScopedMemory>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var readLevel in readLevels)
+        {
+            if (readLevel.Local is { } localEntry)
+            {
+                foreach (var m in localEntry.Memories)
+                {
+                    if (seen.Add(m.Id.Value))
+                    {
+                        merged.Add(new ScopedMemory(m, MemoryScopeKind.ProjectLocal, localEntry.CanonicalRoot));
+                    }
+                }
+            }
+            if (readLevel.Shared is { } sharedMemories)
+            {
+                foreach (var m in sharedMemories)
+                {
+                    if (seen.Add(m.Id.Value))
+                    {
+                        merged.Add(new ScopedMemory(m, MemoryScopeKind.Project, readLevel.Root));
+                    }
+                }
+            }
+        }
+
+        // The global scope joins additively and goes last: a chain level that
+        // already listed an id keeps it, the same nearest-wins priority the
+        // MCP merged view applies.
+        if (global)
+        {
+            var globalMemories = await registry.GetGlobalMemoryService().ListAllAsync();
+            foreach (var m in globalMemories)
+            {
+                if (seen.Add(m.Id.Value))
+                {
+                    merged.Add(new ScopedMemory(m, MemoryScopeKind.Global, null));
+                }
+            }
+        }
+
+        var scopeCount = merged.Count;
+        var filtered = merged.AsEnumerable();
         if (!string.IsNullOrEmpty(status))
         {
-            if (!Enum.TryParse<MemoryStatus>(status, true, out var parsed)) return TypedResults.BadRequest($"Invalid status '{status}'");
-            all = all.Where(m => m.Status == parsed).ToList();
+            if (!Enum.TryParse<MemoryStatus>(status, true, out var parsedStatus))
+                return TypedResults.BadRequest<string>($"Invalid status '{status}'");
+            filtered = filtered.Where(s => s.Memory.Status == parsedStatus);
         }
         if (!string.IsNullOrEmpty(type))
         {
-            if (!Enum.TryParse<MemoryType>(type, true, out var parsed)) return TypedResults.BadRequest($"Invalid type '{type}'");
-            all = all.Where(m => m.Type == parsed).ToList();
+            if (!Enum.TryParse<MemoryType>(type, true, out var parsedType))
+                return TypedResults.BadRequest<string>($"Invalid type '{type}'");
+            filtered = filtered.Where(s => s.Memory.Type == parsedType);
         }
-        if (offset is > 0) all = all.Skip(offset.Value).ToList();
-        if (limit is not null) all = all.Take(limit.Value).ToList();
-        var dtos = all.Select(m => ScopedMemoryDto.From(m, MemoryScopeKind.ProjectLocal, canonicalRoot)).ToList().AsReadOnly();
-        return TypedResults.Ok((IReadOnlyCollection<ScopedMemoryDto>)dtos);
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            // The same match the dashboard used to do in the browser: substring
+            // on content or id, case-insensitive.
+            var needle = q.Trim();
+            filtered = filtered.Where(s =>
+                s.Memory.Content.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                s.Memory.Id.Value.Contains(needle, StringComparison.OrdinalIgnoreCase));
+        }
+        var matching = filtered.Count();
+        filtered = filtered
+            .OrderByDescending(s => s.Memory.UpdatedAt)
+            .ThenByDescending(s => s.Memory.CreatedAt);
+        if (offset is > 0) filtered = filtered.Skip(offset.Value);
+        if (limit is not null) filtered = filtered.Take(limit.Value);
+        var dtos = filtered
+            .Select(s => ScopedMemoryDto.From(s.Memory, s.Scope, s.ProjectRoot))
+            .ToList()
+            .AsReadOnly();
+        return TypedResults.Ok(new MemoryListDto(new MemoryListMetadata(scopeCount, matching, limit, offset), dtos));
+    }
+
+    /// <summary>
+    /// Requested roots in query order, path-normalized and deduplicated
+    /// case-insensitively. An unusable path resolves to nothing downstream, the
+    /// same as a root nobody ever initialized.
+    /// </summary>
+    private static List<string> CollectRequestedRoots(string? projectRoot, string[]? project)
+    {
+        var requested = new List<string>();
+        if (!string.IsNullOrWhiteSpace(projectRoot)) requested.Add(projectRoot);
+        if (project is not null) requested.AddRange(project.Where(r => !string.IsNullOrWhiteSpace(r)));
+
+        var roots = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in requested)
+        {
+            string normalized;
+            try
+            {
+                normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(raw));
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+            if (seen.Add(normalized)) roots.Add(normalized);
+        }
+        return roots;
+    }
+
+    /// <summary>
+    /// The root alone, or its <c>.eling</c> chain nearest-first. Discovery never
+    /// throws for a missing directory — an uninitialized root simply yields an
+    /// empty chain.
+    /// </summary>
+    private static IEnumerable<string> ChainOf(string root, bool includeAncestors)
+    {
+        if (!includeAncestors) return [root];
+        return ScopeChain.Discover(root)
+            .Levels
+            .Select(l => Path.TrimEndingDirectorySeparator(Path.GetFullPath(l.Root)));
     }
 
     private static async Task<Results<Ok<IReadOnlyCollection<ScopedSearchResultDto>>, BadRequest<string>, NotFound<string>>> SearchProjectAsync(

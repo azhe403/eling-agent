@@ -85,10 +85,11 @@ async function fetchAggregatedMemories(): Promise<{
       return { items: null, error: `API returned ${res.status}` }
     }
     const data: unknown = await res.json()
-    if (!Array.isArray(data)) {
+    const rows: unknown = (data as { items?: unknown } | null)?.items
+    if (!Array.isArray(rows)) {
       return { items: null, error: "Unexpected response shape" }
     }
-    const items: AggregatedMemory[] = data.map((raw) => {
+    const items: AggregatedMemory[] = rows.map((raw) => {
       const r = raw as Record<string, unknown>
       return {
         id: String(r["id"] ?? ""),

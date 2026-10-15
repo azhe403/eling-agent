@@ -22,3 +22,19 @@ public record MemoryDto(
         ? "🌐 Global"
         : (Project != null && !string.IsNullOrWhiteSpace(Project.Id) ? $"📁 {Project.Id}" : "📁 Project");
 }
+
+/// <summary>
+/// The memory list envelope: the requested window's <see cref="Items"/> plus
+/// <see cref="Metadata"/> carrying the full count the query matches before
+/// paging, so the UI can say how many exist without guessing from the page.
+/// </summary>
+public record MemoryListDto(
+    MemoryListMetadata Metadata,
+    List<MemoryDto> Items);
+
+/// <summary>Paging metadata for a memory list: the scope size, how many survive the request's filters, and the window asked for.</summary>
+public record MemoryListMetadata(
+    int Total,
+    int Matching,
+    int? Limit,
+    int? Offset);

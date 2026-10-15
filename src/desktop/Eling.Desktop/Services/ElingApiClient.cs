@@ -68,8 +68,8 @@ public sealed class ElingApiClient
             var response = await client.GetAsync(url, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var dtos = await response.Content.ReadFromJsonAsync<List<MemoryDto>>(JsonOptions, cancellationToken);
-                return dtos ?? [];
+                var list = await response.Content.ReadFromJsonAsync<MemoryListDto>(JsonOptions, cancellationToken);
+                return list?.Items ?? [];
             }
             _logger.LogWarning("GetMemories failed with status {StatusCode}", response.StatusCode);
         }

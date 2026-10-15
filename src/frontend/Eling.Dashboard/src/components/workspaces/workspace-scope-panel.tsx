@@ -62,7 +62,7 @@ export function WorkspaceScopePanel({
         All workspaces
       </button>
 
-      <ul className="flex min-h-0 flex-col gap-0.5 overflow-y-auto">
+      <ul className="flex min-h-0 flex-col gap-0.5 overflow-y-auto pr-2 [scrollbar-gutter:stable]">
         {rows.map(({ root, alive }) => {
           const name = workspaceName(root)
           return (
