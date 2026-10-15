@@ -272,6 +272,7 @@ export function AuditTrailList() {
           <thead>
             <tr className="border-b text-left text-muted-foreground">
               <th className="p-3">Timestamp</th>
+              <th className="p-3">Type</th>
               <th className="p-3">Actor</th>
               <th className="p-3">Category</th>
               <th className="p-3">Action</th>
@@ -282,14 +283,14 @@ export function AuditTrailList() {
           <tbody>
             {loading && items.length === 0 && (
               <tr>
-                <td className="p-3" colSpan={6}>
+                <td className="p-3" colSpan={7}>
                   <Skeleton className="h-6 w-full" />
                 </td>
               </tr>
             )}
             {!loading && items.length === 0 && !error && (
               <tr>
-                <td className="p-6 text-center text-muted-foreground" colSpan={6}>
+                <td className="p-6 text-center text-muted-foreground" colSpan={7}>
                   No entries in this window. Save or search a memory through the
                   MCP tools or the dashboard, then refresh.
                 </td>
@@ -298,6 +299,17 @@ export function AuditTrailList() {
             {items.map((e, i) => (
               <tr className="border-b last:border-0" key={`${e.timestamp}-${e.action}-${i}`}>
                 <td className="p-3 whitespace-nowrap">{formatTimestamp(e.timestamp)}</td>
+                <td className="p-3">
+                  <span
+                    className={
+                      e.trail === "change"
+                        ? "rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400"
+                        : "rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-medium text-sky-600 dark:text-sky-400"
+                    }
+                  >
+                    {e.trail === "change" ? "change" : e.trail === "access" ? "access" : e.trail}
+                  </span>
+                </td>
                 <td className="p-3">{e.actor}</td>
                 <td className="p-3">{e.category}</td>
                 <td className="p-3 font-mono text-xs">{e.action}</td>
