@@ -20,6 +20,7 @@ public static class ElingPaths
     public const string MemoriesDirName = "memories";
     public const string RuntimeDirName = "runtime";
     public const string CodebaseDirName = "codebase";
+    public const string AuditDirName = "audit";
     public const string MemoryDbFileName = "memory.db";
     public const string LegacyMemoryDbFileName = "index.db";
     public const string CodebaseDbFileName = "codebase.db";
@@ -100,6 +101,22 @@ public static class ElingPaths
     {
         var dataRoot = ResolveDataDir(xdgDataHome, userHome, elingDataDir);
         return Path.Combine(dataRoot, CodebaseDirName);
+    }
+
+    /// <summary>
+    /// The central, machine-global audit root: &lt;dataRoot&gt;/audit. Global on
+    /// purpose — entries carry their originating scope and projectRoot as fields,
+    /// so one store serves every project. Resolved through ResolveDataDir so the
+    /// ELING_DATA_DIR override isolates test scopes exactly as it already does
+    /// for logs and codebase.
+    /// </summary>
+    public static string ResolveAuditDir(
+        string? xdgDataHome = null,
+        string? userHome = null,
+        string? elingDataDir = null)
+    {
+        var dataRoot = ResolveDataDir(xdgDataHome, userHome, elingDataDir);
+        return Path.Combine(dataRoot, AuditDirName);
     }
 
     /// <summary>
