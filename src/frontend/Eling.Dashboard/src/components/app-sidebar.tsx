@@ -32,37 +32,31 @@ const navMain = [
     title: "Dashboard",
     url: "/dashboard",
     icon: <LayoutDashboard className="size-4" />,
-    isActive: true,
   },
   {
     title: "Workspaces",
     url: "/dashboard/workspaces",
     icon: <FolderGit2 className="size-4" />,
-    isActive: true,
   },
   {
     title: "Codebase",
     url: "/dashboard/codebase",
     icon: <BookOpen className="size-4" />,
-    isActive: true,
   },
   {
     title: "Memories",
     url: "/dashboard/memories",
     icon: <Database className="size-4" />,
-    isActive: true,
   },
   {
     title: "Judge",
     url: "/dashboard/judge",
     icon: <Scale className="size-4" />,
-    isActive: true,
   },
   {
     title: "Tools",
     url: "/dashboard/tools",
     icon: <Wrench className="size-4" />,
-    isActive: true,
   },
 ]
 
