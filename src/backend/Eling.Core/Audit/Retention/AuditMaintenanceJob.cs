@@ -58,6 +58,13 @@ public sealed class AuditMaintenanceJob(AuditFileStore store, AuditOptions optio
         // Lines whose (Trail, Date) this pass DOES re-fold are dropped here and
         // replaced by this pass's fresh lines — which keeps the pass idempotent per
         // (trail, date). Read-before-write keeps a crash to old-or-new, never a mix.
+        //
+        // The day is compared as a day label, not as an instant (see SameDay): a
+        // rollup line written by the transitional build on a non-UTC machine carries
+        // local midnight of the day it labels ("2026-08-01T00:00:00+07:00"), while
+        // this fold normalizes the same day to UTC ("2026-08-01T00:00:00+00:00") —
+        // the same day, two instants seven hours apart. Both are also what names
+        // the rollup file, so the label is the identity that has to match.
         foreach (var pair in rollupLinesByDate)
         {
             var date = pair.Key;
@@ -72,7 +79,7 @@ public sealed class AuditMaintenanceJob(AuditFileStore store, AuditOptions optio
                     if (string.IsNullOrWhiteSpace(line)) continue;
                     var prior = JsonSerializer.Deserialize(line, AuditJsonContext.Default.AuditRollup);
                     if (prior is null) continue;
-                    var reFolded = closedDays.Any(d => d.Trail == prior.Trail && d.Date == prior.Date);
+                    var reFolded = closedDays.Any(d => d.Trail == prior.Trail && SameDay(d.Date, prior.Date));
                     if (reFolded) continue;
                     kept.Add(line);
                 }
@@ -98,6 +105,20 @@ public sealed class AuditMaintenanceJob(AuditFileStore store, AuditOptions optio
             File.Delete(day.SourceFile);
         }
     }
+
+    /// <summary>
+    /// Whether two rollup labels denote the same day, whatever offset each writer
+    /// stamped on its midnight. Every writer emits midnight of the day it labels
+    /// in its own frame — the transitional build in local time, the UTC-normalized
+    /// build in UTC — so the date the label reads is the one identity both share,
+    /// and it is the same date that names the rollup file
+    /// (<c>$"{date:yyyy-MM-dd}"</c>). Comparing the values as instants instead
+    /// (DateTimeOffset equality, or UtcDateTime equality, which is the same
+    /// comparison) would read "2026-08-01T00:00:00+07:00" and
+    /// "2026-08-01T00:00:00+00:00" as different days and leave a permanent
+    /// duplicate aggregate for one of them.
+    /// </summary>
+    private static bool SameDay(DateTimeOffset left, DateTimeOffset right) => left.Date == right.Date;
 
     private static IEnumerable<string> RollupLines(DateTimeOffset date, AuditTrail trail, IReadOnlyList<AuditEvent> entries)
     {

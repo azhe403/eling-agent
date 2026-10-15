@@ -275,6 +275,56 @@ public class AuditRetentionTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_ReplacesARollupLineSeededWithALocalOffsetDate()
+    {
+        // A rollup line written by the transitional build on a non-UTC machine
+        // carries a local-offset Date (2026-08-01T00:00:00+07:00). The new fold
+        // of that same day is UTC-normalized (2026-08-01T00:00:00+00:00): the
+        // same day label, two instants seven hours apart, so the merge drop
+        // predicate has to compare them as days rather than as instants — or the
+        // stale line survives and the date keeps a permanent duplicate aggregate.
+        var day = new DateTimeOffset(2026, 8, 1, 10, 0, 0, TimeSpan.Zero);
+        var store = new AuditFileStore(_root, new FixedTimeProvider(day));
+        await store.AppendAsync(
+            AuditTrail.Change,
+            [new AuditEvent { Timestamp = day, Trail = AuditTrail.Change, Category = AuditCategory.Memory, Action = "memory_save", Actor = "mcp", Outcome = AuditOutcome.Success }],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        // The stale rollup for that day: the same group the pass is about to
+        // fold, but with the local-offset Date the old writer emitted.
+        var rollupDir = Path.Combine(_root, "rollups");
+        Directory.CreateDirectory(rollupDir);
+        var seeded = JsonSerializer.Serialize(
+            new AuditRollup(
+                new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.FromHours(7)),
+                AuditTrail.Change,
+                AuditCategory.Memory,
+                "memory_save",
+                "mcp",
+                AuditOutcome.Success,
+                1,
+                null,
+                null,
+                null),
+            AuditJsonContext.Default.AuditRollup);
+        var rollupFile = Path.Combine(rollupDir, "2026-08-01.jsonl");
+        await File.WriteAllTextAsync(rollupFile, seeded + "\n");
+
+        await new AuditMaintenanceJob(store, new AuditOptions(), new FixedTimeProvider(new DateTimeOffset(2026, 9, 11, 0, 0, 0, TimeSpan.Zero)))
+            .RunAsync(CancellationToken.None);
+
+        // Exactly one line for (change, 2026-08-01): the stale one is dropped and
+        // replaced, not kept alongside this pass's fresh line.
+        var lines = await File.ReadAllLinesAsync(rollupFile);
+        Assert.Single(lines);
+        var rollup = JsonSerializer.Deserialize(lines[0], AuditJsonContext.Default.AuditRollup)!;
+        Assert.Equal(AuditTrail.Change, rollup.Trail);
+        Assert.Equal(new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero), rollup.Date);
+        Assert.Equal(1, rollup.Count);
+    }
+
+    [Fact]
     public async Task RunAsync_MergesAccessAndChangeRollupsForSameDate()
     {
         // The rollup file for a date covers BOTH trails, but the trails expire on
