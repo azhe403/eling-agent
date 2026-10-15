@@ -119,6 +119,12 @@ function fileFromParams(params: URLSearchParams): SelectedFile | null {
 // Idle time after the last keystroke before a search is issued.
 const SEARCH_DEBOUNCE_MS = 500
 
+// While a status error is on screen the tiles are known-bad, so re-check the
+// backend until it answers 200 again. The probe lives only in the error state
+// and stops the instant loadStatus clears it (statusError → null), so healthy
+// browsing never polls — the page keeps its "refresh only on events" design.
+const HEALTH_PROBE_INTERVAL_MS = 5_000
+
 export function CodebaseList() {
   const [statusLoading, setStatusLoading] = useState(true)
   const [searching, setSearching] = useState(false)
@@ -336,6 +342,20 @@ export function CodebaseList() {
     }
     void run()
   }, [loadStatus])
+
+  // Reactive recovery: an error stays up only as long as the last health check
+  // was bad. While either loader's error is set, keep probing; each loader
+  // clears its own error on the first 200, which also tears this interval down
+  // (self-stopping). The row reload runs silent so a probe never flashes the
+  // banner or drops the last good rows while the failure persists.
+  useEffect(() => {
+    if (statusError === null && runtimesError === null) return
+    const timer = setInterval(() => {
+      void loadStatus()
+      if (runtimesError !== null) void reload({ silent: true })
+    }, HEALTH_PROBE_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [statusError, runtimesError, loadStatus, reload])
 
   // Empty box shows the top-files listing; (re)load it on mount and
   // whenever the scope changes while the box stays empty.
