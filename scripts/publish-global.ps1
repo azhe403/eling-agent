@@ -173,7 +173,9 @@ try {
     $savedId = $Matches[0]
 
     Send-Mcp @{ jsonrpc = '2.0'; id = 3; method = 'tools/call'; params = @{
-        name = 'memory_get'; arguments = @{ id = $savedId; scope = 'project' } } }
+        # merged: since a3286f3 the save above uses the project-local default,
+        # so a project-tier-only read would miss it
+        name = 'memory_get'; arguments = @{ id = $savedId; scope = 'merged' } } }
     $getLine = Read-McpResponse 30
 
     if (-not $getLine -or $getLine -notmatch [regex]::Escape($savedId)) {
