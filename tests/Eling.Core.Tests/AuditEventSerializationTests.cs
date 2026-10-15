@@ -60,4 +60,21 @@ public class AuditEventSerializationTests
         Assert.Equal(128, back.ByteSize);
         Assert.Null(back.Metadata);
     }
+
+    [Fact]
+    public void Serialize_ProjectLocalScope_UsesCanonicalKebabCaseLabel()
+    {
+        var entry = new AuditEvent
+        {
+            Timestamp = DateTimeOffset.UnixEpoch,
+            Trail = AuditTrail.Change,
+            Category = AuditCategory.Memory,
+            Action = "memory_update",
+            Scope = MemoryScopeKind.ProjectLocal
+        };
+
+        var json = JsonSerializer.Serialize(entry, AuditJsonContext.Default.AuditEvent);
+
+        Assert.Contains("\"scope\":\"project-local\"", json);
+    }
 }

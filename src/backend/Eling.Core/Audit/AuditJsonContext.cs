@@ -8,9 +8,12 @@ namespace Eling.Core.Audit;
 /// </summary>
 /// <remarks>
 /// camelCase field names, single-line output and null omission keep each entry a compact
-/// JSONL record. Enum values are camelCase too, registered per enum below: the source
+/// JSONL record. Enum values are kebab-case too, registered per enum below: the source
 /// generator's <see cref="JsonSourceGenerationOptionsAttribute.UseStringEnumConverter"/> flag
 /// has no naming policy to pass, so it would spell members as declared ("Change", "Memory").
+/// Kebab-case keeps the scope labels canonical — "project-local" for
+/// <see cref="MemoryScopeKind.ProjectLocal"/>, as <c>MemoryScopeLabels</c> and
+/// <c>MemoryScopeParser</c> spell it.
 /// </remarks>
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
@@ -18,10 +21,10 @@ namespace Eling.Core.Audit;
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     Converters =
     [
-        typeof(CamelCaseEnumConverter<AuditTrail>),
-        typeof(CamelCaseEnumConverter<AuditCategory>),
-        typeof(CamelCaseEnumConverter<AuditOutcome>),
-        typeof(CamelCaseEnumConverter<MemoryScopeKind>)
+        typeof(KebabCaseEnumConverter<AuditTrail>),
+        typeof(KebabCaseEnumConverter<AuditCategory>),
+        typeof(KebabCaseEnumConverter<AuditOutcome>),
+        typeof(KebabCaseEnumConverter<MemoryScopeKind>)
     ])]
 [JsonSerializable(typeof(AuditEvent))]
 public partial class AuditJsonContext : JsonSerializerContext
