@@ -249,9 +249,34 @@ public static class McpServiceExtensions
     /// </remarks>
     public static IServiceCollection AddElingAuditTrail(this IServiceCollection services)
     {
-        services.TryAddSingleton<IAuditLogger>(_ => CreateAuditLogger());
+        // One writer, one index, one container. The read API's endpoints
+        // resolve the SAME cache the writer batches into, so a query sees what
+        // the writer wrote — and the index is registered unconditionally: an
+        // unregistered IAuditIndex parameter makes minimal-API route mapping
+        // infer it as a request body (GET cannot have one) and fail the host
+        // at startup, which is exactly how 62 host-based tests failed before
+        // this registration existed.
+        services.TryAddSingleton(_ => CreateAuditWriter());
+        services.TryAddSingleton<IAuditLogger>(sp =>
+        {
+            var writer = sp.GetRequiredService<AuditTrailWriter>();
+            return new DisposableAuditLogger(
+                new BufferedAuditLogger(writer.Store, writer.Index, new AuditOptions(), TimeProvider.System));
+        });
+        services.TryAddSingleton<IAuditIndex>(sp =>
+            sp.GetRequiredService<AuditTrailWriter>().Index ?? throw new InvalidOperationException(
+                "The audit index failed to initialize; the audit read API has no cache to answer from."));
         return services;
     }
+
+    /// <summary>
+    /// One container's audit trail: the file store and its rebuildable cache,
+    /// shared by the writer (above) and the read API. A nested record so no
+    /// file-scoped helper type is needed and no tuple appears.
+    /// </summary>
+    private sealed record AuditTrailWriter(
+        AuditFileStore Store,
+        IAuditIndex? Index);
 
     public static IServiceCollection AddElingMcpServerStdio(this IServiceCollection services)
     {
@@ -319,7 +344,7 @@ public static class McpServiceExtensions
     /// asynchronously, and a container disposed synchronously would otherwise
     /// refuse the singleton.
     /// </remarks>
-    private static IAuditLogger CreateAuditLogger()
+    private static AuditTrailWriter CreateAuditWriter()
     {
         var auditRoot = CentralAuditDirectory.Resolve();
         var store = new AuditFileStore(auditRoot, TimeProvider.System);
@@ -333,8 +358,7 @@ public static class McpServiceExtensions
         // (amendment A6). Initializing here, before the logger exists, is what
         // keeps the change trail durable-before-return.
         var indexed = TryInitializeIndex(index);
-        return new DisposableAuditLogger(
-            new BufferedAuditLogger(store, indexed ? index : null, new AuditOptions(), TimeProvider.System));
+        return new AuditTrailWriter(store, indexed ? index : null);
     }
 
     private static bool TryInitializeIndex(SqliteAuditIndex index)

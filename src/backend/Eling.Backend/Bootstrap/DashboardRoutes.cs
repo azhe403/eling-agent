@@ -3,6 +3,7 @@ using System.Text.Json;
 using Eling.Backend.Codebase;
 using Eling.Backend.Dtos;
 using Eling.Backend.Endpoints;
+using Eling.Backend.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 
@@ -58,6 +59,7 @@ public static class DashboardRoutes
         app.MapAgentHostEndpoints();
         app.MapAgentChatEndpoints();
         app.MapCodebaseRoutes();
+        app.MapAuditRoutes();
         app.MapControllers();
         app.MapFallbackToFile("index.html");
     }
@@ -83,6 +85,15 @@ public static class DashboardRoutes
         {
             var ct = context.RequestAborted;
             return WriteSseAsync(context, broadcaster.SubscribeAsync(ct), SerializeRebuildProgress, ct);
+        });
+
+        // Runtime metrics ride the same typed-channel pattern: volatile
+        // payloads on a 2s pump, not change events on the topic stream, so
+        // the lifecycle stream's contract stays untouched.
+        app.MapGet("/api/events/runtime-metrics", (HttpContext context, RuntimeMetricsBroadcaster broadcaster) =>
+        {
+            var ct = context.RequestAborted;
+            return WriteSseAsync(context, broadcaster.SubscribeAsync(ct), item => JsonSerializer.Serialize(item, SseJsonOptions), ct);
         });
     }
 

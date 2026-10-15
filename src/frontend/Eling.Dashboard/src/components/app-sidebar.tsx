@@ -9,6 +9,7 @@ import {
   BookOpen,
   Scale,
   FolderGit2,
+  ScrollText,
   Wrench,
 } from "lucide-react"
 
@@ -47,6 +48,11 @@ const navMain = [
     title: "Memories",
     url: "/dashboard/memories",
     icon: <Database className="size-4" />,
+  },
+  {
+    title: "Audit Trail",
+    url: "/dashboard/audit-trail",
+    icon: <ScrollText className="size-4" />,
   },
   {
     title: "Judge",
