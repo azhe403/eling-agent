@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Eling.Core.Memory;
 using Microsoft.Data.Sqlite;
 
@@ -107,15 +106,15 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$ts", e.Timestamp.ToString("O"));
-        command.Parameters.AddWithValue("$trail", e.Trail.ToString());
-        command.Parameters.AddWithValue("$cat", e.Category.ToString());
+        command.Parameters.AddWithValue("$trail", AuditLabels.ToWireString(e.Trail));
+        command.Parameters.AddWithValue("$cat", AuditLabels.ToWireString(e.Category));
         command.Parameters.AddWithValue("$action", e.Action);
         command.Parameters.AddWithValue("$actor", e.Actor);
         command.Parameters.AddWithValue("$source", e.Source);
-        command.Parameters.AddWithValue("$scope", (object?)e.Scope?.ToString() ?? DBNull.Value);
+        command.Parameters.AddWithValue("$scope", (object?)(e.Scope.HasValue ? AuditLabels.ToWireString(e.Scope.Value) : null) ?? DBNull.Value);
         command.Parameters.AddWithValue("$root", (object?)e.ProjectRoot ?? DBNull.Value);
         command.Parameters.AddWithValue("$target", (object?)e.Target ?? DBNull.Value);
-        command.Parameters.AddWithValue("$outcome", e.Outcome.ToString());
+        command.Parameters.AddWithValue("$outcome", AuditLabels.ToWireString(e.Outcome));
         command.Parameters.AddWithValue("$duration", (object?)e.DurationMs ?? DBNull.Value);
         command.Parameters.AddWithValue("$size", (object?)e.ByteSize ?? DBNull.Value);
         command.Parameters.AddWithValue("$hash", (object?)e.Hash ?? DBNull.Value);
@@ -174,18 +173,19 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
         var records = new List<AuditRecord>();
         foreach (var trail in new[] { AuditTrail.Change, AuditTrail.Access })
         {
-            var dir = Path.Combine(auditRoot, trail == AuditTrail.Change ? "changes" : "access");
-            if (!Directory.Exists(dir)) continue;
-            foreach (var file in Directory.GetFiles(dir, "*.jsonl"))
+            // The trail directory comes from the store rather than a second
+            // hard-coded "changes"/"access" mapping, and every day form is read
+            // through the shared day-file reader: a rebuild after rotation must
+            // still see the closed days, and Directory.GetFiles(dir, "*.jsonl")
+            // does not match "*.jsonl.gz".
+            var dir = Path.GetDirectoryName(store.GetCurrentFilePath(trail, DateTimeOffset.UnixEpoch))!;
+            await foreach (var day in AuditDayFiles.ReadAsync(dir, trail, cancellationToken))
             {
-                var lineNumber = 0;
-                foreach (var line in await File.ReadAllLinesAsync(file, cancellationToken))
+                var line = 0;
+                foreach (var entry in day.Entries)
                 {
-                    lineNumber++;
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-                    var entry = JsonSerializer.Deserialize(line, AuditJsonContext.Default.AuditEvent);
-                    if (entry is null) continue;
-                    records.Add(new AuditRecord(Path.GetFileName(file), lineNumber, entry));
+                    line++;
+                    records.Add(new AuditRecord(Path.GetFileName(day.SourceFile), line, entry));
                 }
             }
         }
@@ -216,7 +216,7 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
                 ORDER BY timestamp DESC
                 LIMIT $limit
                 """;
-            command.Parameters.AddWithValue("$trail", query.Trail.ToString());
+            command.Parameters.AddWithValue("$trail", AuditLabels.ToWireString(query.Trail));
             command.Parameters.AddWithValue("$action", (object?)query.Action ?? DBNull.Value);
             command.Parameters.AddWithValue("$actor", (object?)query.Actor ?? DBNull.Value);
             command.Parameters.AddWithValue("$from", (object?)query.From?.ToString("O") ?? DBNull.Value);
@@ -233,15 +233,21 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
                     new AuditEvent
                     {
                         Timestamp = DateTimeOffset.Parse(reader.GetString(3)),
-                        Trail = Enum.Parse<AuditTrail>(reader.GetString(4)),
-                        Category = Enum.Parse<AuditCategory>(reader.GetString(5)),
+                        Trail = ParseLabel<AuditTrail>(reader.GetString(4)),
+                        Category = ParseLabel<AuditCategory>(reader.GetString(5)),
                         Action = reader.GetString(6),
                         Actor = reader.GetString(7),
                         Source = reader.GetString(8),
-                        Scope = reader.IsDBNull(9) ? null : Enum.Parse<MemoryScopeKind>(reader.GetString(9)),
+                        Scope = reader.IsDBNull(9)
+                            ? null
+                            // The stored label is the canonical kebab spelling
+                            // ("project-local"), so it is read back through the
+                            // scope parser rather than Enum.Parse, which does
+                            // not recognise a hyphenated member name.
+                            : MemoryScopeParser.TryParseScope(reader.GetString(9), out var scope) ? scope : null,
                         ProjectRoot = reader.IsDBNull(10) ? null : reader.GetString(10),
                         Target = reader.IsDBNull(11) ? null : reader.GetString(11),
-                        Outcome = Enum.Parse<AuditOutcome>(reader.GetString(12)),
+                        Outcome = ParseLabel<AuditOutcome>(reader.GetString(12)),
                         DurationMs = reader.IsDBNull(13) ? null : reader.GetInt32(13),
                         ByteSize = reader.IsDBNull(14) ? null : reader.GetInt64(14),
                         Hash = reader.IsDBNull(15) ? null : reader.GetString(15),
@@ -326,6 +332,16 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
 
         return result;
     }
+
+    /// <summary>
+    /// A stored label read back as its typed value. The write sites store the
+    /// kebab label, which for the single-word members is exactly the member name
+    /// in lower case, so a case-insensitive parse is its inverse. The scope label
+    /// is the exception — "project-local" is not an identifier — and is read
+    /// through <see cref="MemoryScopeParser"/> above instead.
+    /// </summary>
+    private static T ParseLabel<T>(string label) where T : struct
+        => Enum.TryParse(label, ignoreCase: true, out T value) ? value : default;
 
     private static AuditEvent WithState(AuditEvent e, AuditMetadata? after, AuditMetadata? previous) => new()
     {

@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using Eling.Core.Audit;
 using Eling.Core.Audit.Retention;
@@ -107,6 +109,100 @@ public class AuditRetentionTests : IDisposable
         // Overwrite, not append: still exactly one line, and the raw file is gone.
         Assert.Single(File.ReadAllLines(rollupFile));
         Assert.False(File.Exists(rawPath));
+    }
+
+    [Fact]
+    public async Task RunAsync_FoldsClosedDayBeforeItsWindowElapses()
+    {
+        // Amendment C3: the pass folds EVERY closed day, so the change trail has
+        // an aggregate during its (long) retention window instead of only on the
+        // day its raw file expires — and a raw file lost before its window
+        // elapses still has its aggregate. Rolling up only expired days left
+        // 365 days of the change trail with no aggregate at all.
+        var day = new DateTimeOffset(2026, 9, 10, 10, 0, 0, TimeSpan.Zero);
+        var now = new DateTimeOffset(2026, 9, 11, 4, 0, 0, TimeSpan.Zero);
+        var store = new AuditFileStore(_root, new FixedTimeProvider(day));
+        await store.AppendAsync(
+            AuditTrail.Change,
+            [new AuditEvent { Timestamp = day, Trail = AuditTrail.Change, Category = AuditCategory.Memory, Action = "memory_save", Actor = "mcp", Outcome = AuditOutcome.Success }],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        var raw = store.GetCurrentFilePath(AuditTrail.Change, day);
+        await new AuditMaintenanceJob(store, new AuditOptions(), new FixedTimeProvider(now)).RunAsync(CancellationToken.None);
+
+        var rollupFile = Path.Combine(_root, "rollups", "2026-09-10.jsonl");
+        Assert.True(File.Exists(rollupFile));
+        var rollup = JsonSerializer.Deserialize(File.ReadAllLines(rollupFile).Single(), AuditJsonContext.Default.AuditRollup)!;
+        Assert.Equal(AuditTrail.Change, rollup.Trail);
+        Assert.Equal("memory_save", rollup.Action);
+        Assert.Equal(1, rollup.Count);
+
+        // Folded is not expired: the raw day stays for the read API until its
+        // window elapses.
+        Assert.True(File.Exists(raw));
+    }
+
+    [Fact]
+    public async Task RunAsync_RollupLine_UsesTheCanonicalKebabLabels()
+    {
+        var day = new DateTimeOffset(2026, 8, 1, 10, 0, 0, TimeSpan.Zero);
+        var store = new AuditFileStore(_root, new FixedTimeProvider(day));
+        await store.AppendAsync(
+            AuditTrail.Access,
+            [new AuditEvent { Timestamp = day, Trail = AuditTrail.Access, Category = AuditCategory.Filesystem, Action = "fs_read", Actor = "dashboard", Outcome = AuditOutcome.Success }],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        var options = new AuditOptions { AccessRetentionDays = 14 };
+        var job = new AuditMaintenanceJob(store, options, new FixedTimeProvider(new DateTimeOffset(2026, 9, 11, 0, 0, 0, TimeSpan.Zero)));
+
+        await job.RunAsync(CancellationToken.None);
+
+        var rollupFile = Directory.GetFiles(Path.Combine(_root, "rollups"), "*.jsonl").Single();
+        var line = File.ReadAllLines(rollupFile).Single();
+
+        // A rollup is retained indefinitely (§13), so its labels are settled at
+        // first write: the same kebab spellings the JSONL carries, never the
+        // PascalCase enum names ("Filesystem"/"Success") the rollup used to
+        // write (amendment C1).
+        Assert.Contains("\"trail\":\"access\"", line);
+        Assert.Contains("\"category\":\"filesystem\"", line);
+        Assert.Contains("\"outcome\":\"success\"", line);
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenBothDayFormsExist_FoldsTheDayOnce()
+    {
+        var day = new DateTimeOffset(2026, 8, 1, 10, 0, 0, TimeSpan.Zero);
+        var store = new AuditFileStore(_root, new FixedTimeProvider(day));
+        await store.AppendAsync(
+            AuditTrail.Access,
+            [new AuditEvent { Timestamp = day, Trail = AuditTrail.Access, Category = AuditCategory.Memory, Action = "memory_read", Actor = "mcp", Outcome = AuditOutcome.Success }],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        // Simulate a rotation that crashed between writing the .gz and deleting
+        // the raw, so the day exists in both forms. The compressed form wins and
+        // the day is counted once, not twice.
+        var raw = store.GetCurrentFilePath(AuditTrail.Access, day);
+        var content = await File.ReadAllTextAsync(raw);
+        await using (var input = new MemoryStream(Encoding.UTF8.GetBytes(content)))
+        await using (var output = File.Create(raw + ".gz"))
+        await using (var gzip = new GZipStream(output, CompressionLevel.SmallestSize))
+        {
+            await input.CopyToAsync(gzip);
+        }
+
+        var options = new AuditOptions { AccessRetentionDays = 14 };
+        var job = new AuditMaintenanceJob(store, options, new FixedTimeProvider(new DateTimeOffset(2026, 9, 11, 0, 0, 0, TimeSpan.Zero)));
+
+        await job.RunAsync(CancellationToken.None);
+
+        var rollupFile = Directory.GetFiles(Path.Combine(_root, "rollups"), "*.jsonl").Single();
+        var rollup = JsonSerializer.Deserialize(File.ReadAllLines(rollupFile).Single(), AuditJsonContext.Default.AuditRollup)!;
+        Assert.Equal(1, rollup.Count);
+        Assert.False(File.Exists(raw + ".gz"));
     }
 
     [Fact]

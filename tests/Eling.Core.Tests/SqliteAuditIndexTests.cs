@@ -1,5 +1,7 @@
 using Eling.Core.Audit;
 using Eling.Core.Audit.Storage;
+using Eling.Core.Memory;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace Eling.Core.Tests;
@@ -48,6 +50,78 @@ public class SqliteAuditIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task RebuildAsync_SeesCompressedClosedDays()
+    {
+        var day = new DateTimeOffset(2026, 9, 10, 9, 0, 0, TimeSpan.Zero);
+        var store = new AuditFileStore(_root, new FixedTimeProvider(day));
+        await store.AppendAsync(
+            AuditTrail.Change,
+            [new AuditEvent { Timestamp = day, Trail = AuditTrail.Change, Action = "memory_save" }],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        // Production compresses every closed day. A rebuild after rotation must
+        // still see it: Directory.GetFiles(dir, "*.jsonl") does not match
+        // "*.jsonl.gz", so the rebuild silently dropped every closed day from an
+        // index whose contract is "rescans every JSONL file".
+        await AuditRotation.RotateIfNeededAsync(store, AuditTrail.Change, day.AddDays(1), compress: true, CancellationToken.None);
+        Assert.True(File.Exists(Path.Combine(_root, "changes", "2026-09-10.jsonl.gz")));
+
+        var index = new SqliteAuditIndex(_root, store);
+        await index.RebuildAsync(CancellationToken.None);
+
+        var entry = (await index.QueryAsync(new AuditQuery(AuditTrail.Change, null, null), CancellationToken.None)).Single().Event;
+        Assert.Equal("memory_save", entry.Action);
+        Assert.Equal(day, entry.Timestamp);
+    }
+
+    [Fact]
+    public async Task IndexAsync_StoresTheCanonicalKebabLabels()
+    {
+        var store = new AuditFileStore(_root, TimeProvider.System);
+        var index = new SqliteAuditIndex(_root, store);
+        await index.InitializeAsync(CancellationToken.None);
+
+        var t0 = new DateTimeOffset(2026, 9, 11, 8, 0, 0, TimeSpan.Zero);
+        await index.IndexAsync(
+        [
+            new AuditRecord("changes/2026-09-11.jsonl", 1, new AuditEvent
+            {
+                Timestamp = t0,
+                Trail = AuditTrail.Change,
+                Category = AuditCategory.Memory,
+                Action = "memory_update",
+                Actor = "mcp",
+                Source = "mcp_stdio",
+                Scope = MemoryScopeKind.ProjectLocal,
+                Outcome = AuditOutcome.Error
+            })
+        ], CancellationToken.None);
+
+        // The index and the JSONL speak one vocabulary (amendment C1). The
+        // PascalCase rows this used to store were a second vocabulary, and
+        // routing the write sites through the kebab labels is only sound because
+        // the read sites accept them too — Enum.Parse("project-local") would
+        // throw, so the scope is read back through the scope parser.
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_root, "audit-index.db")};Pooling=False");
+        await connection.OpenAsync(CancellationToken.None);
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT trail, category, outcome, scope FROM audit_events;";
+            await using var reader = await command.ExecuteReaderAsync(CancellationToken.None);
+            Assert.True(await reader.ReadAsync(CancellationToken.None));
+            Assert.Equal("change", reader.GetString(0));
+            Assert.Equal("memory", reader.GetString(1));
+            Assert.Equal("error", reader.GetString(2));
+            Assert.Equal("project-local", reader.GetString(3));
+        }
+
+        var row = (await index.QueryAsync(new AuditQuery(AuditTrail.Change, null, null), CancellationToken.None)).Single();
+        Assert.Equal(MemoryScopeKind.ProjectLocal, row.Event.Scope);
+        Assert.Equal(AuditOutcome.Error, row.Event.Outcome);
+    }
+
+    [Fact]
     public async Task IndexAsync_PersistsStateAndTagsAcrossTheThreeTables()
     {
         var store = new AuditFileStore(_root, TimeProvider.System);
@@ -80,5 +154,10 @@ public class SqliteAuditIndexTests : IDisposable
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
+    }
+
+    internal sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 }
