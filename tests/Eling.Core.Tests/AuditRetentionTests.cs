@@ -109,6 +109,50 @@ public class AuditRetentionTests : IDisposable
         Assert.False(File.Exists(rawPath));
     }
 
+    [Fact]
+    public async Task RunAsync_MergesAccessAndChangeRollupsForSameDate()
+    {
+        // The rollup file for a date covers BOTH trails, but the trails expire on
+        // different windows (access 14 days, change 365 by default), so their days
+        // for one date are folded in different passes. The later change pass must
+        // MERGE into the file the earlier access pass wrote, not clobber it.
+        var day = new DateTimeOffset(2026, 8, 1, 10, 0, 0, TimeSpan.Zero);
+        var store = new AuditFileStore(_root, new FixedTimeProvider(day));
+        await store.AppendAsync(
+            AuditTrail.Access,
+            [new AuditEvent { Timestamp = day, Trail = AuditTrail.Access, Category = AuditCategory.Memory, Action = "memory_read", Actor = "mcp", Outcome = AuditOutcome.Success }],
+            flushToDisk: true,
+            CancellationToken.None);
+        await store.AppendAsync(
+            AuditTrail.Change,
+            [new AuditEvent { Timestamp = day, Trail = AuditTrail.Change, Category = AuditCategory.Memory, Action = "memory_save", Actor = "mcp", Outcome = AuditOutcome.Success }],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        var now = new DateTimeOffset(2026, 9, 11, 0, 0, 0, TimeSpan.Zero);
+
+        // Pass 1: only the access day is expired (change default is 365 days); its
+        // aggregate lands in rollups/2026-08-01.jsonl and the change day is left.
+        var accessOptions = new AuditOptions { AccessRetentionDays = 14, ChangeRetentionDays = 365 };
+        await new AuditMaintenanceJob(store, accessOptions, new FixedTimeProvider(now)).RunAsync(CancellationToken.None);
+        Assert.False(File.Exists(Path.Combine(_root, "access", "2026-08-01.jsonl")));
+        Assert.True(File.Exists(Path.Combine(_root, "changes", "2026-08-01.jsonl")));
+
+        // Pass 2, months later: the change day finally expires (shorter window now).
+        // Its aggregate must be merged alongside the access aggregate, not overwrite it.
+        var changeOptions = new AuditOptions { AccessRetentionDays = 14, ChangeRetentionDays = 14 };
+        await new AuditMaintenanceJob(store, changeOptions, new FixedTimeProvider(now)).RunAsync(CancellationToken.None);
+
+        var rollupFile = Directory.GetFiles(Path.Combine(_root, "rollups"), "*.jsonl").Single();
+        var rollups = File.ReadAllLines(rollupFile)
+            .Select(l => JsonSerializer.Deserialize(l, AuditJsonContext.Default.AuditRollup)!)
+            .ToList();
+        Assert.Equal(2, rollups.Count);
+        Assert.Contains(rollups, r => r.Trail == AuditTrail.Access && r.Action == "memory_read");
+        Assert.Contains(rollups, r => r.Trail == AuditTrail.Change && r.Action == "memory_save");
+        Assert.False(File.Exists(Path.Combine(_root, "changes", "2026-08-01.jsonl")));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);

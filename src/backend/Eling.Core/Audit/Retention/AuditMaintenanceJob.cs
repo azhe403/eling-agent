@@ -34,6 +34,16 @@ public sealed class AuditMaintenanceJob(AuditFileStore store, AuditOptions optio
                 if (TryParseDateStem(file) is not DateTimeOffset date) continue;
                 if (!AuditRetentionPolicy.IsExpired(trail, date, now, options)) continue;
 
+                // Dedupe both forms for one (trail, date): only reachable when a
+                // rotation crashed between writing the .gz and deleting the raw.
+                // Prefer the compressed form and skip the raw so the day is not
+                // counted twice; the orphaned raw is folded on the next pass.
+                if (file.EndsWith(RawExtension, StringComparison.OrdinalIgnoreCase)
+                    && File.Exists(file + GzipExtension))
+                {
+                    continue;
+                }
+
                 var entries = await ReadEntriesAsync(file, cancellationToken);
                 expiredDays.Add(new ExpiredDay(file, trail, date, entries));
             }
@@ -52,16 +62,36 @@ public sealed class AuditMaintenanceJob(AuditFileStore store, AuditOptions optio
             lines.AddRange(RollupLines(day.Date, day.Trail, day.Entries));
         }
 
-        // Phase 3 — write. Rewrite each date's rollup once, overwriting any prior
-        // file. Because every day's raw content was fully read in phase 1 before a
-        // single byte is written, a crash leaves either the previous complete rollup
-        // or this one — never the same group line appended twice (idempotency).
+        // Phase 3 — write/merge. Rewrite each folded date's rollup once. The prior
+        // file is read and every line whose (Trail, Date) this pass does NOT re-fold
+        // is kept, so a change day folded months after the access day augments the
+        // file instead of clobbering the access aggregate the design retains forever.
+        // Lines whose (Trail, Date) this pass DOES re-fold are dropped here and
+        // replaced by this pass's fresh lines — which keeps the pass idempotent per
+        // (trail, date). Read-before-write keeps a crash to old-or-new, never a mix.
         foreach (var pair in rollupLinesByDate)
         {
-            if (pair.Value.Count == 0) continue;
-            var content = string.Join("\n", pair.Value) + "\n";
-            await File.WriteAllTextAsync(
-                Path.Combine(rollupDir, $"{pair.Key:yyyy-MM-dd}.jsonl"), content, cancellationToken);
+            var date = pair.Key;
+            var newLines = pair.Value;
+            var path = Path.Combine(rollupDir, $"{date:yyyy-MM-dd}.jsonl");
+
+            var kept = new List<string>();
+            if (File.Exists(path))
+            {
+                foreach (var line in await File.ReadAllLinesAsync(path, cancellationToken))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    var prior = JsonSerializer.Deserialize(line, AuditJsonContext.Default.AuditRollup);
+                    if (prior is null) continue;
+                    var reFolded = expiredDays.Any(d => d.Trail == prior.Trail && d.Date == prior.Date);
+                    if (reFolded) continue;
+                    kept.Add(line);
+                }
+            }
+
+            if (kept.Count == 0 && newLines.Count == 0) continue;
+            var content = string.Join("\n", kept.Concat(newLines)) + "\n";
+            await File.WriteAllTextAsync(path, content, cancellationToken);
         }
 
         // Phase 4 — delete. Only after every rollup above is written, remove the raw
@@ -79,8 +109,9 @@ public sealed class AuditMaintenanceJob(AuditFileStore store, AuditOptions optio
     /// <summary>
     /// The date encoded in a day file's name, stripping the full compound suffix:
     /// <c>2026-09-10.jsonl.gz</c> and <c>2026-09-10.jsonl</c> both yield the stem
-    /// <c>2026-09-10</c>. Returns <c>null</c> for a stem that is not a date, so one
-    /// stray file cannot abort the whole pass.
+    /// <c>2026-09-10</c>. The stem must match the writer-generated
+    /// <c>yyyy-MM-dd</c> shape exactly; a non-matching name returns <c>null</c> so
+    /// one stray file cannot abort the whole pass.
     /// </summary>
     private static DateTimeOffset? TryParseDateStem(string file)
     {
@@ -88,7 +119,8 @@ public sealed class AuditMaintenanceJob(AuditFileStore store, AuditOptions optio
         var stem = name.EndsWith(GzipExtension, StringComparison.OrdinalIgnoreCase)
             ? name[..^GzipExtension.Length]
             : Path.GetFileNameWithoutExtension(name);
-        return DateTimeOffset.TryParse(stem, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+        return DateTimeOffset.TryParseExact(
+            stem, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
             ? date
             : null;
     }
