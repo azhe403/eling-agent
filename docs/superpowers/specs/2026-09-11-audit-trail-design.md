@@ -1,6 +1,6 @@
 # Audit Trail v1 — Change + Access Trails (Design)
 
-> **Status:** LOCKED v1 — 2026-09-11.
+> **Status:** LOCKED v1 — 2026-09-11. **Amended 2026-10-14** — see the amendment block at the end of this document.
 > **Supersedes:** `docs/superpowers/specs/2026-08-29-audit-trail-spec.md` (superseded). The previous
 > design assumed a Vestige mirror that has no client in the source tree and is not
 > implementable from the backend; it also covered only mutations and did not anticipate the
@@ -288,17 +288,16 @@ JSONL scan. A request MUST be bounded by a time window; unbounded scans are reje
 Phase 4 reuses the existing SSE infrastructure (`MemoryChangeBroadcaster` +
 `/api/events/memories` + `useMemoriesSse`). Because mutations and lifecycle changes already
 broadcast, and peer processes relay through `HttpCoordinatorMemoryChangeNotifier` to the
-owner's `/api/coordinator/notify-change`, the Activity Log can refetch on those events with no
+owner's `/api/coordinator/notify-change`, the audit-trail view can refetch on those events with no
 new backend plumbing. A later enhancement may publish structured audit payloads on a dedicated
 topic for incremental (no-refetch) streaming. Events are broadcast **after** a successful
 append so the live view matches the durable log.
 
 ## 11. UI
 
-A new `/dashboard/activity-log` route shows the historical view (table with timestamp, actor,
+A new `/dashboard/audit-trail` route shows the historical view (table with timestamp, actor,
 category, action, scope, target; filters; cursor pagination; virtualized list; detail modal with
-before/after diff for change entries) and the live view (refetch on SSE). The activity-log read
-API is itself excluded from auditing. Desktop clients consume the same API and SSE; no backend
+before/after diff for change entries) and the live view (refetch on SSE). The audit-trail read API is itself excluded from auditing. Desktop clients consume the same API and SSE; no backend
 change is required for desktop.
 
 ## 12. Exclusions and Recursion Guards
@@ -343,7 +342,7 @@ Each phase is its own plan and review cycle.
 2. **Phase 2 — Change trail:** memory + runtime + filesystem-write hooks; `GET /api/audit/changes`.
 3. **Phase 3 — Access trail:** memory read + HTTP GET middleware + filesystem-read hooks;
    rollups; `GET /api/audit/access` and `/api/audit/rollups`.
-4. **Phase 4 — Activity Log UI:** historical + realtime, diff modal.
+4. **Phase 4 — Audit Trail UI:** historical + realtime, diff modal.
 5. **Phase 5 — Hardening:** size caps, backup sink, hash-chain activation, query-hash policy.
 
 ## 17. Acceptance Criteria
@@ -357,6 +356,60 @@ Each phase is its own plan and review cycle.
 5. `audit-index.db` can be deleted and rebuilt from the JSONL files alone.
 6. A bounded query returns in well under a second on the central store holding hundreds of MB of
    raw audit data.
-7. The Activity Log view is live (refetch on SSE) and can filter by actor/category/action/scope/
+7. The audit-trail view is live (refetch on SSE) and can filter by actor/category/action/scope/
    time.
 8. Phase 1 unit tests cover the writer, rotation, index, and concurrency paths at ≥90%.
+
+---
+
+## Amendment 2026-10-14 (post-lock, verified against implementation state)
+
+Appended after a review of this document against the codebase as it exists on 2026-10-14, four weeks after it was locked. The architecture above stands; these amendments correct contract points that drifted while other work landed (the single-binary backend merge, the memory-scope default flip, the `ElingPaths` consolidation). Phasing (§16) is unchanged.
+
+**A1 — Scope gains `project-local` (§3.1, §4, §4.1, §9).** `MemoryScopeKind.ProjectLocal` was added on 2026-10-14 and is now the default target of `memory_save`. The audit `scope` field is therefore `project`, `project-local`, `global`, or `null`, using the canonical labels from `MemoryScopeLabels`; the string-enum serializer picks this up with no format change. For project-local entries, `projectRoot` carries the project's *relative* label (folder name), never an absolute path: the source value on `ScopedMemoryService.CanonicalRoot` is a full path and must be relativized by the Phase 2 hook before recording.
+
+**A2 — Store root resolves through `ElingPaths` (§6.1, and Phase 1 Task 0).** Resolution no longer follows "the same rule as CentralLogDirectory" — `CentralLogDirectory` itself is now a thin wrapper over `ElingPaths.ResolveDataDir(xdgDataHome, userHome, elingDataDir)`, which introduced an `ELING_DATA_DIR` override the September text does not know. The audit root is `ElingPaths.ResolveAuditDir(...)`, a sibling of `ResolveRuntimeDir`/`ResolveCodebaseDir`, with `CentralAuditDirectory` a thin wrapper like `CentralLogDirectory` is. This is not cosmetic: process scopes isolate per run via `ELING_DATA_DIR`, so an audit root that bypasses it writes test noise into the real machine-global store — the same failure class observed live on 2026-10-14 with the workspace catalogue. The on-disk layout in §6.1 is unchanged.
+
+**A3 — The actor name has no source yet (§5).** `ELING_MCP_SERVER_NAME` does not exist anywhere in the codebase, and one binary serves every client, so the client-chosen server name is invisible to the host. Phase 2 supplies it per host entry via environment variable (unset → `mcp`, source still `mcp_stdio`). Phase 1 is unaffected: `AuditActorContext` and the `unknown` default are the whole surface.
+
+**A4 — Hook points corrected (§5, §8).** Memory audit scope comes from `ScopedMemoryService` and each memory's `MemoryReference` — not from "an audit scope descriptor injected at construction" on `MemoryService`, which is scope-agnostic by design and stays that way. Filesystem hooks go on `FileSystemService` (`Eling.Backend/FileSystem/`), the single choke point behind both the MCP `FileSystemTools` and the builtin agent's file tools; hooking `FileSystemTools` alone would miss agent-driven operations.
+
+**A5 — The index applies the repo's SQLite pragmas (§6.3, and Phase 1 Task 6).** `audit-index.db` is machine-global and written by every process, so `SqliteAuditIndex` opens every connection through a helper that runs `PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;` — the contract `SqliteCodebaseIndex` established for the same reason. Without it, concurrent flushes from peer processes race on `SQLITE_BUSY`.
+
+**A6 — Change-trail durability is a confirmation, not a bound (§7.3, acceptance criterion 2).** "Flushes to disk before the operation returns" means the `RecordAsync` caller learns the entry was written. The Task 7 sketch waited on `Task.WhenAny(pump, Delay(FlushTimeout))`, which cannot distinguish "written" from "still pending" — two rapid saves could both time out with nothing on disk. The logger now carries a per-entry completion signal that the flusher sets when the batch containing the entry lands; `RecordAsync` awaits it bounded by `FlushTimeout`, and the audit stays fail-open: a timeout or writer failure never fails the user's operation, and a failed write is never reported as persisted.
+
+---
+
+## Amendment 2026-10-14 (B) — Tool-surface scope: verified names, two new domains, agent actor
+
+Recorded after the scope review of 2026-10-14 (same day as amendment A). It supersedes the §3 action tables and extends §5's actor list, using the tool surface as it actually exists on that date (`[McpServerTool]` names in `Eling.Backend/Mcp/Tools/`), not as it was imagined in September. No Phase 1 engine change is implied: actions are open strings, so everything here lands with the Phase 2/3 hook plans.
+
+**B1 — Action names mirror real tool names (§3).** September's tables named tools that never shipped. Corrected surface:
+
+| Domain | Change actions | Access actions |
+|---|---|---|
+| `memory` | `memory_save` (create and smart-save update — `MemorySaveResult.SaveAction` distinguishes the two for the entry), `memory_delete`, `memory_copy_to_project` (its `operation=move` is the old `memory_move`), `memory_promote_to_global`, `memory_init_project`, `memory_project_scope_policy`, `memory_rebuild_index`, `memory_maintenance` | `memory_get` (the old `memory_read` never existed), `memory_list`, `memory_search`, `memory_recall`, `memory_project_status` |
+| `runtime` | unchanged from §3.2 | unchanged from §3.2 |
+| `filesystem` | `file_write`, `file_edit`, `file_append`, `file_delete`, `file_move`, `file_copy`, `directory_create`, `directory_move`, `directory_copy`, `directory_delete` | `file_read`, `file_read_any`, `file_search`, `glob`, `directory_list`, `path_test`, `workspace_root` |
+
+One-to-one correspondence between log line and tool name is the point: filtering the trail by action must read back as "this tool ran", with no translation table in the auditor's head.
+
+**B2 — Two new domains (§3).** Five domains total, each operation in exactly one. `codebase` — change: `codebase_index`, recorded for explicit invocations only, with watcher-driven incremental refreshes excluded under the same §12 rule as `runtime_stale_sweep`; access: `codebase_search`, `codebase_status`. `tools` — change: `tools_policy` mutations (`enable`, `disable`, `reset`, per tool or per group), one entry per mutation with the tool or group in `target` and outcome `denied` when the mutation targets a protected tool, which the store already rejects; access: `tools_policy` `list`. Neither domain's change actions carry a state snapshot: the action verb plus target describes the transition (`tools_policy` disable on `target=file_read` needs no "before" row), so §4.2's content/tags/status snapshot stays memory-specific.
+
+**B3 — Agent actor (§5).** Fourth actor family: `agent:<name>`, fallback `agent`, source `agent`. The builtin agent turn (`AgentTurnService`) opens the ambient actor scope for the duration of a turn, so service-level hooks attribute agent-driven operations to the agent instead of letting them masquerade as `dashboard` or `system`. Without this, the in-app agent's own tools — which reach `MemoryService`, the recall service, and `FileSystemService` through their own wrappers — would be indistinguishable from any other in-process caller.
+
+**B4 — The promise already shipped.** Six filesystem tool descriptions (`file_read`, `file_write`, `file_edit`, `file_search`, `glob`, `path_test`) already advertise "audited via telemetry" to every client that lists tools. Until Phase 2 lands, that is a promise without a system; it is recorded here so the gap is visible from the design side too.
+
+**B5 — Explicitly out of scope: raw gateway payloads.** Gateway-level capture of every tool invocation with its full argument payloads is a deliberate non-goal (decided 2026-10-14). The unit of audit remains the domain operation, not the transport call: payload-level logging would duplicate entries for the same logical operation, multiply access-trail volume, and collide with the query-text privacy posture in §13. What the caller needs to know — who did what, from which surface, with what outcome, on which target — is fully answered by the domain entry plus the actor field.
+
+---
+
+## Amendment 2026-10-15 (C) — Label vocabulary, timestamp ownership, rollup cadence
+
+Recorded after the Phase 1 whole-branch review, which found three places where implementation diverged from the design's own Phase-1 text. All three are implementation corrections under the existing design, not new design.
+
+**C1 — One canonical label vocabulary everywhere (§4.1, §4.2).** Every artifact that carries a category, action, outcome, trail, or scope label uses the same canonical spellings — kebab-case string enums as amendment A1 pins (`project-local`, not `projectLocal`), and the same for `category` (`memory`, `runtime`, `filesystem`, later `codebase`, `tools`) and `outcome` (`success`, `error`, `denied`). The JSONL is the reference; rollups and the SQLite index carry the identical strings. A rollup retained indefinitely (§13) is a permanent artifact — its labels are settled at first write and never drift from the entry vocabulary.
+
+**C2 — The logger owns UTC normalisation (§4.1).** "ISO-8601 UTC … set at record time by the logger, not the caller" is enforced, not aspirational: the logger normalizes any caller-supplied timestamp to UTC (`DateTimeOffset` with `TimeSpan.Zero` offset) before writing. A caller's timestamp is advisory data, not a storage-format decision.
+
+**C3 — Rollups fold every closed day; retention gates only deletion (§6.4).** The daily maintenance pass aggregates EVERY closed day (any day strictly before the current one), not only days whose raw retention window has elapsed. Deletion of the raw file stays gated on expiry (§13). Rationale: rollups are the long-term aggregate retained indefinitely, so a day whose raw file is lost before its window elapses must still have its aggregate — and the read API's rollup view must not be empty for the change trail during its (long) retention window.

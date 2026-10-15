@@ -21,6 +21,7 @@
 - Tests run **per csproj**, never solution-wide: `dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj --artifacts-path .bin-test`.
 - Use xUnit (`[Fact]`, `Assert.*`); async tests return `Task`.
 - The store lives outside the repository (under the user data root), so no `.gitignore` change is required. Phase 1 works purely against temp directories in tests.
+- The audit store root resolves through `ElingPaths` (`ResolveAuditDir`), never a bespoke XDG computation, so the `ELING_DATA_DIR` override isolates test scopes (amendment A2 in the design doc).
 
 ---
 
@@ -49,16 +50,15 @@ Tests in `tests/Eling.Core.Tests/` (project root namespace `Eling.Core.Tests`).
 ### Task 0: Central audit directory resolution
 
 **Files:**
-- Modify: `src/backend/Eling.Core/Scope/CentralLogDirectory.cs`
+- Modify: `src/backend/Eling.Core/Scope/ElingPaths.cs` (add `ResolveAuditDir`)
 - Create: `src/backend/Eling.Core/Scope/CentralAuditDirectory.cs`
 - Test: `tests/Eling.Core.Tests/CentralAuditDirectoryTests.cs`
 
 **Interfaces:**
 - Consumes: nothing.
 - Produces:
-  - `CentralLogDirectory.ResolveRoot(string? xdgDataHome = null, string? userHome = null)` → `<dataRoot>/eling`, creating the directory.
-  - `CentralLogDirectory.Resolve(...)` — behaviour unchanged: `Path.Combine(ResolveRoot(...), DirectoryName)`.
-  - `static class CentralAuditDirectory` with `const string DirectoryName = "audit"` and `Resolve(xdgDataHome = null, userHome = null)` → `Path.Combine(CentralLogDirectory.ResolveRoot(...), DirectoryName)`, creating the directory.
+  - `ElingPaths.ResolveAuditDir(string? xdgDataHome = null, string? userHome = null, string? elingDataDir = null)` → `Path.Combine(ResolveDataDir(...), AuditDirName)`, a sibling of `ResolveRuntimeDir`/`ResolveCodebaseDir`, plus `const string AuditDirName = "audit"`.
+  - `static class CentralAuditDirectory` with `const string DirectoryName = "audit"` and `Resolve(xdgDataHome = null, userHome = null, elingDataDir = null)` → `Path.Combine(ElingPaths.ResolveDataDir(...), DirectoryName)`, creating the directory — a thin wrapper mirroring `CentralLogDirectory`. `CentralLogDirectory.cs` is NOT modified: it already delegates to `ElingPaths.ResolveDataDir`, and the `ELING_DATA_DIR` override it inherits is what keeps test scopes isolated (amendment A2).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -92,6 +92,18 @@ public sealed class CentralAuditDirectoryTests
 
         Assert.Equal(expected, actual);
     }
+
+    [Fact]
+    public void Resolve_HonoursElingDataDirOverride()
+    {
+        var dataDir = Path.Combine(Path.GetTempPath(), $"eling-audit-data-{Guid.NewGuid():N}");
+        var expected = Path.Combine(dataDir, "audit");
+
+        var actual = CentralAuditDirectory.Resolve(elingDataDir: dataDir);
+
+        Assert.Equal(expected, actual);
+        Assert.True(Directory.Exists(actual));
+    }
 }
 ```
 
@@ -102,61 +114,28 @@ Expected: FAIL — `CentralAuditDirectory` does not exist.
 
 - [ ] **Step 3: Write the minimal implementation**
 
-Refactor `CentralLogDirectory.cs` to expose the root, keeping `Resolve` behaviour identical:
+`CentralLogDirectory.cs` is untouched — it already delegates to `ElingPaths.ResolveDataDir`. Add the audit resolver to `ElingPaths.cs` (const with the other `*DirName` consts, method beside `ResolveRuntimeDir` / `ResolveCodebaseDir`):
 ```csharp
-namespace Eling.Core.Scope;
+public const string AuditDirName = "audit";
 
-public static class CentralLogDirectory
+/// <summary>
+/// The central, machine-global audit root: &lt;dataRoot&gt;/audit. Global on
+/// purpose — entries carry their originating scope and projectRoot as fields,
+/// so one store serves every project. Resolved through ResolveDataDir so the
+/// ELING_DATA_DIR override isolates test scopes exactly as it already does
+/// for logs and codebase.
+/// </summary>
+public static string ResolveAuditDir(
+    string? xdgDataHome = null,
+    string? userHome = null,
+    string? elingDataDir = null)
 {
-    public const string DirectoryName = "logs"; // subdir under the eling root
-
-    /// <summary>
-    /// Resolves the Eling data root: <c>$XDG_DATA_HOME/eling</c> when set,
-    /// otherwise <c>&lt;userHome&gt;/.local/share/eling</c>, on every platform
-    /// (Windows included; %LOCALAPPDATA% is intentionally not used).
-    /// </summary>
-    public static string ResolveRoot(string? xdgDataHome = null, string? userHome = null)
-    {
-        var envXdg = !string.IsNullOrWhiteSpace(xdgDataHome)
-            ? xdgDataHome
-            : Environment.GetEnvironmentVariable("XDG_DATA_HOME");
-
-        var home = string.IsNullOrWhiteSpace(userHome)
-            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
-            : userHome;
-        ArgumentException.ThrowIfNullOrWhiteSpace(home);
-
-        var dataRoot = !string.IsNullOrWhiteSpace(envXdg)
-            ? envXdg!
-            : Path.Combine(home, ".local", "share");
-
-        var root = Path.Combine(dataRoot, "eling");
-        try
-        {
-            Directory.CreateDirectory(root);
-        }
-        catch
-        {
-        }
-        return root;
-    }
-
-    public static string Resolve(string? xdgDataHome = null, string? userHome = null)
-    {
-        var path = Path.Combine(ResolveRoot(xdgDataHome, userHome), DirectoryName);
-        try
-        {
-            Directory.CreateDirectory(path);
-        }
-        catch
-        {
-        }
-        return path;
-    }
+    var dataRoot = ResolveDataDir(xdgDataHome, userHome, elingDataDir);
+    return Path.Combine(dataRoot, AuditDirName);
 }
 ```
 
-`CentralAuditDirectory.cs`:
+`CentralAuditDirectory.cs` — a thin wrapper mirroring `CentralLogDirectory`:
 ```csharp
 namespace Eling.Core.Scope;
 
@@ -167,11 +146,13 @@ public static class CentralAuditDirectory
     /// <summary>
     /// Resolves the central, machine-global audit store beside the log directory.
     /// It is global on purpose: entries carry their originating <c>scope</c> and
-    /// <c>projectRoot</c> as fields, so one store serves every project.
+    /// <c>projectRoot</c> as fields, so one store serves every project. Resolution
+    /// goes through <see cref="ElingPaths"/> so the <c>ELING_DATA_DIR</c> override
+    /// isolates test scopes exactly as it already does for logs.
     /// </summary>
-    public static string Resolve(string? xdgDataHome = null, string? userHome = null)
+    public static string Resolve(string? xdgDataHome = null, string? userHome = null, string? elingDataDir = null)
     {
-        var path = Path.Combine(CentralLogDirectory.ResolveRoot(xdgDataHome, userHome), DirectoryName);
+        var path = Path.Combine(ElingPaths.ResolveDataDir(xdgDataHome, userHome, elingDataDir), DirectoryName);
         try
         {
             Directory.CreateDirectory(path);
@@ -187,7 +168,7 @@ public static class CentralAuditDirectory
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj --artifacts-path .bin-test --filter FullyQualifiedName~CentralAuditDirectoryTests`
-Expected: PASS (2 tests). Also re-run `CentralLogDirectoryTests` to confirm the refactor kept its behaviour: `--filter FullyQualifiedName~CentralLogDirectoryTests` → PASS (6 tests).
+Expected: PASS (3 tests). `CentralLogDirectory` is untouched — the only production edit is the new member on `ElingPaths` — so also confirm nothing regressed: `--filter FullyQualifiedName~CentralLogDirectoryTests` → PASS (unchanged count).
 
 - [ ] **Step 5: Commit**
 
@@ -945,7 +926,7 @@ git commit -m "feat(audit): add lazy daily rotation with gzip"
   - `sealed record AuditRecord(string File, int Line, AuditEvent Event)`
   - `sealed record AuditQuery(AuditTrail Trail, DateTimeOffset? From, DateTimeOffset? To, string? Action = null, string? Actor = null, int Limit = 200)`
   - `interface IAuditIndex` with `Task InitializeAsync(CancellationToken)`, `Task IndexAsync(IReadOnlyList<AuditRecord> records, CancellationToken)`, `Task RebuildAsync(CancellationToken)`, `Task<IReadOnlyList<AuditRecord>> QueryAsync(AuditQuery query, CancellationToken)`.
-  - `sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store)` — normalized into three tables (`audit_events`, `audit_state`, `audit_tags`); no JSON payload column.
+  - `sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store)` — normalized into three tables (`audit_events`, `audit_state`, `audit_tags`); no JSON payload column. Every connection opens through a shared helper that applies `PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;` (the `SqliteCodebaseIndex` contract) — the database is machine-global and written by every process (amendment A5).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1100,8 +1081,7 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(auditRoot);
-        await using var connection = new SqliteConnection($"Data Source={DbPath}");
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
         await ExecuteAsync(connection, """
             CREATE TABLE IF NOT EXISTS audit_events (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1153,8 +1133,7 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
     public async Task IndexAsync(IReadOnlyList<AuditRecord> records, CancellationToken cancellationToken)
     {
         if (records.Count == 0) return;
-        await using var connection = new SqliteConnection($"Data Source={DbPath}");
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         foreach (var record in records)
         {
@@ -1242,9 +1221,8 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
     public async Task RebuildAsync(CancellationToken cancellationToken)
     {
         await InitializeAsync(cancellationToken);
-        await using (var connection = new SqliteConnection($"Data Source={DbPath}"))
+        await using (var connection = await OpenConnectionAsync(cancellationToken))
         {
-            await connection.OpenAsync(cancellationToken);
             await ExecuteAsync(connection, "DELETE FROM audit_tags; DELETE FROM audit_state; DELETE FROM audit_events;", cancellationToken);
         }
 
@@ -1277,9 +1255,8 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
     public async Task<IReadOnlyList<AuditRecord>> QueryAsync(AuditQuery query, CancellationToken cancellationToken)
     {
         var rows = new List<(long Id, string File, int Line, AuditEvent Event)>();
-        await using (var connection = new SqliteConnection($"Data Source={DbPath}"))
+        await using (var connection = await OpenConnectionAsync(cancellationToken))
         {
-            await connection.OpenAsync(cancellationToken);
             await using var command = connection.CreateCommand();
             command.CommandText = """
                 SELECT id, file, line, timestamp, trail, category, action, actor, source, scope,
@@ -1352,8 +1329,7 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
         var result = new Dictionary<long, (AuditMetadata? After, AuditMetadata? Previous)>();
         var states = new List<(long StateId, long EventId, string Side, AuditMetadata State)>();
 
-        await using var connection = new SqliteConnection($"Data Source={DbPath}");
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
         var idList = string.Join(",", eventIds);
 
         await using (var command = connection.CreateCommand())
@@ -1436,6 +1412,22 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// One machine-global database written by every Eling process, so every
+    /// connection applies the WAL + busy-timeout pragmas — the same contract
+    /// SqliteCodebaseIndex already established for its shared store, and the
+    /// reason concurrent flushes from peer processes do not race on SQLITE_BUSY.
+    /// </summary>
+    private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
+    {
+        var connection = new SqliteConnection($"Data Source={DbPath}");
+        await connection.OpenAsync(cancellationToken);
+        await using var pragma = connection.CreateCommand();
+        pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;";
+        await pragma.ExecuteNonQueryAsync(cancellationToken);
+        return connection;
+    }
 }
 ```
 
@@ -1464,7 +1456,7 @@ git commit -m "feat(audit): add rebuildable sqlite audit index"
 - Produces: `sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable` constructed as
   `BufferedAuditLogger(AuditFileStore store, IAuditIndex? index, AuditOptions options, TimeProvider timeProvider)`.
   - Fills `Timestamp`, `Actor`, `Source` from the ambient context when unset.
-  - Change trail: `RecordAsync` completes after the entry is enqueued **and** the flusher has attempted the write within `FlushTimeout`.
+  - Change trail: `RecordAsync` completes once the flusher confirms the entry landed on disk — a per-entry completion signal the flusher sets when the batch containing the entry is appended — bounded by `FlushTimeout`. A timeout never fails the caller (fail-open) and a failed write is never reported as persisted (amendment A6).
   - Access trail: fire-and-forget.
   - `DisposeAsync` drains the channel and flushes.
 
@@ -1558,7 +1550,7 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
     private readonly IAuditIndex? _index;
     private readonly AuditOptions _options;
     private readonly TimeProvider _timeProvider;
-    private readonly Channel<AuditEvent> _channel;
+    private readonly Channel<(AuditEvent Entry, TaskCompletionSource Written)> _channel;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _pump;
@@ -1569,7 +1561,7 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
         _index = index;
         _options = options;
         _timeProvider = timeProvider;
-        _channel = Channel.CreateBounded<AuditEvent>(new BoundedChannelOptions(4096)
+        _channel = Channel.CreateBounded<(AuditEvent Entry, TaskCompletionSource Written)>(new BoundedChannelOptions(4096)
         {
             SingleReader = true,
             SingleWriter = false,
@@ -1601,12 +1593,16 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
             Metadata = entry.Metadata
         };
 
-        _channel.Writer.TryWrite(enriched);
+        var written = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _channel.Writer.TryWrite((enriched, written));
 
         if (entry.Trail == AuditTrail.Change)
         {
-            // Bounded wait so a stuck writer cannot freeze the caller; fail-open.
-            await Task.WhenAny(_pump, Task.Delay(_options.FlushTimeout, cancellationToken));
+            // The caller is told the entry reached disk — or gives up after the
+            // bound. Either way the user's operation completes: audit is
+            // fail-open, but "flushed before return" must be a confirmation,
+            // not merely a bounded wait (amendment A6).
+            await Task.WhenAny(written.Task, Task.Delay(_options.FlushTimeout, cancellationToken));
         }
     }
 
@@ -1615,34 +1611,43 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
         var reader = _channel.Reader;
         while (await reader.WaitToReadAsync(_cts.Token))
         {
-            var batch = new List<AuditEvent>(_options.FlushBatchSize);
+            var batch = new List<(AuditEvent Entry, TaskCompletionSource Written)>(_options.FlushBatchSize);
             while (batch.Count < _options.FlushBatchSize && reader.TryRead(out var item))
             {
                 batch.Add(item);
             }
 
-            foreach (var group in batch.GroupBy(e => e.Trail))
+            foreach (var group in batch.GroupBy(e => e.Entry.Trail))
             {
                 await FlushAsync(group.Key, group.ToList());
             }
         }
     }
 
-    private async Task FlushAsync(AuditTrail trail, IReadOnlyList<AuditEvent> batch)
+    private async Task FlushAsync(AuditTrail trail, IReadOnlyList<(AuditEvent Entry, TaskCompletionSource Written)> batch)
     {
         await _writeLock.WaitAsync(_cts.Token);
         try
         {
             var now = _timeProvider.GetUtcNow();
             await AuditRotation.RotateIfNeededAsync(_store, trail, now, _options.CompressOnRotate, _cts.Token);
-            await _store.AppendAsync(trail, batch, flushToDisk: trail == AuditTrail.Change, _cts.Token);
+            await _store.AppendAsync(trail, batch.Select(b => b.Entry).ToList(), flushToDisk: trail == AuditTrail.Change, _cts.Token);
 
             if (_index is not null)
             {
                 var file = Path.GetFileName(_store.GetCurrentFilePath(trail, now));
                 await _index.IndexAsync(
-                    batch.Select(e => new AuditRecord(file, 0, e)).ToList(),
+                    batch.Select(b => new AuditRecord(file, 0, b.Entry)).ToList(),
                     _cts.Token);
+            }
+
+            // Durability confirmation for the change trail: every waiter in this
+            // batch learns its entry is on disk. The failure path deliberately
+            // leaves the signal unset — a failed write must not be reported as
+            // persisted, and the caller's bounded wait still ends at FlushTimeout.
+            foreach (var item in batch)
+            {
+                item.Written.TrySetResult();
             }
         }
         catch
@@ -1676,7 +1681,7 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj --artifacts-path .bin-test --filter FullyQualifiedName~BufferedAuditLoggerTests`
-Expected: PASS (2 tests).
+Expected: PASS (2 tests). The first test now proves durability by construction: `RecordAsync` returns only after the flusher confirmed the append, so the file read that follows is a real assertion rather than a race with a 2-second timeout.
 
 - [ ] **Step 5: Commit**
 
@@ -1883,3 +1888,16 @@ git commit -m "feat(audit): add retention policy and daily rollups"
 **Known follow-ups for later phases (do not implement now):**
 - `SqliteAuditIndex.IndexAsync` is called with an interim `line: 0` from the logger; a later phase can compute exact line offsets or drop the column's precision requirement.
 - `BufferedAuditLogger` registers `_pump` before fields are fully initialized in the constructor; if a future editor reorders initialization, guard against the captured `this` by starting the pump in an `InitializeAsync` if needed.
+
+## Amendment 2026-10-15 (A7) — Post-execution corrections to Tasks 6-8's code blocks
+
+Recorded after the Phase 1 whole-branch review. The code blocks above are the September originals; the shipped code differs in these ways, each ratified:
+
+- **Task 7 — `PendingEntry` record** replaces the tuple shapes in `_channel`/`PumpAsync`/`FlushAsync` (tracked `NoTuples_BeyondAllowlist`; ruling R12).
+- **Task 7 — `enriched` carries every field**: `Action` (ruling R13; the original plan code always had it — a later brief transcription dropped it once) plus the access-detail fields `Query`/`ResultCount`/`Path`/`Matches`/`Pid` and the change-trail `PreviousMetadata`. The enriched copy omitting them was a defect against design §4.1/§4.2: access entries lose their query text and result counts, change entries lose the before-snapshot, while the index keeps persisting both — silent store divergence.
+- **Task 7 — the change trail never silently drops an entry**: the bounded channel uses `FullMode.Wait` with an awaited write bounded by `FlushTimeout` (design §2's "must not silently lose entries" beats the sketch's `DropWrite` + discarded `TryWrite`). A full channel delays the caller, bounded; it never fabricates durability.
+- **Task 7 — the logger normalizes timestamps to UTC** (design §4.1; amendment C2).
+- **Tasks 3/7 — `AuditOptions.FlushInterval` implemented** as the pump's accumulation window (design §7.1's batching intent); `FlushBatchSize` validated at construction (a value ≤ 0 hot-spins the pump while writing nothing).
+- **Task 8 — rollups fold every closed day**, deletion stays expiry-gated (design §6.4/§13; amendment C3).
+- **Tasks 6/8 — day-file enumeration and gzip reading are one shared helper** (`AuditDayFiles`), used by both `AuditMaintenanceJob` and `SqliteAuditIndex.RebuildAsync`; the latter's `store` constructor parameter is consumed by it (the CS9113 warning and the duplicated trail-directory mapping both retire).
+- **Tasks 6/8 — one canonical label helper** (`AuditLabels`) feeds the index and rollup writes; `AuditRollup`'s `Category`/`Outcome` become typed enums so the kebab converters apply (amendment C1). Rollup lines and index rows therefore read identically to JSONL entries.
