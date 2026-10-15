@@ -122,6 +122,49 @@ public class SqliteAuditIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task QueryAsync_ReadsRowsWrittenByThePreviousLabelVocabulary()
+    {
+        var store = new AuditFileStore(_root, TimeProvider.System);
+        var index = new SqliteAuditIndex(_root, store);
+        await index.InitializeAsync(CancellationToken.None);
+
+        var t0 = new DateTimeOffset(2026, 9, 11, 8, 0, 0, TimeSpan.Zero);
+        await index.IndexAsync(
+        [
+            new AuditRecord("changes/2026-09-11.jsonl", 1, new AuditEvent
+            {
+                Timestamp = t0,
+                Trail = AuditTrail.Change,
+                Category = AuditCategory.Memory,
+                Action = "memory_update",
+                Actor = "mcp",
+                Scope = MemoryScopeKind.ProjectLocal,
+                Outcome = AuditOutcome.Error
+            })
+        ], CancellationToken.None);
+
+        // An upgraded database still holds rows written by the previous
+        // PascalCase writer. The index is a rebuildable cache, but a query that
+        // returns nothing — and a scope that reads back null — is a silent
+        // misread, not a cache miss: SQLite's TEXT "=" is case-sensitive, and
+        // MemoryScopeParser lowercases "ProjectLocal" to "projectlocal", which
+        // matches no scope at all.
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_root, "audit-index.db")};Pooling=False");
+        await connection.OpenAsync(CancellationToken.None);
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "UPDATE audit_events SET trail = 'Change', category = 'Memory', outcome = 'Error', scope = 'ProjectLocal' WHERE id = (SELECT MAX(id) FROM audit_events);";
+            await command.ExecuteNonQueryAsync(CancellationToken.None);
+        }
+
+        var row = (await index.QueryAsync(new AuditQuery(AuditTrail.Change, null, null), CancellationToken.None)).Single();
+        Assert.Equal(AuditTrail.Change, row.Event.Trail);
+        Assert.Equal(AuditCategory.Memory, row.Event.Category);
+        Assert.Equal(AuditOutcome.Error, row.Event.Outcome);
+        Assert.Equal(MemoryScopeKind.ProjectLocal, row.Event.Scope);
+    }
+
+    [Fact]
     public async Task IndexAsync_PersistsStateAndTagsAcrossTheThreeTables()
     {
         var store = new AuditFileStore(_root, TimeProvider.System);

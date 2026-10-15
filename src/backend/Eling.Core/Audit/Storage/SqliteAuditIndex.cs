@@ -208,7 +208,7 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
                        project_root, target, outcome, duration_ms, byte_size, hash, prev_hash,
                        query_text, result_count, path, matches, pid
                 FROM audit_events
-                WHERE trail = $trail
+                WHERE trail = $trail COLLATE NOCASE
                   AND ($action IS NULL OR action = $action)
                   AND ($actor IS NULL OR actor = $actor)
                   AND ($from IS NULL OR timestamp >= $from)
@@ -217,6 +217,10 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
                 LIMIT $limit
                 """;
             command.Parameters.AddWithValue("$trail", AuditLabels.ToWireString(query.Trail));
+            // Case-insensitive on purpose: an upgraded database still holds rows
+            // written by the previous PascalCase writer ("Change"), and SQLite's
+            // TEXT "=" is case-sensitive — without this those rows are silently
+            // invisible to every query.
             command.Parameters.AddWithValue("$action", (object?)query.Action ?? DBNull.Value);
             command.Parameters.AddWithValue("$actor", (object?)query.Actor ?? DBNull.Value);
             command.Parameters.AddWithValue("$from", (object?)query.From?.ToString("O") ?? DBNull.Value);
@@ -240,11 +244,7 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
                         Source = reader.GetString(8),
                         Scope = reader.IsDBNull(9)
                             ? null
-                            // The stored label is the canonical kebab spelling
-                            // ("project-local"), so it is read back through the
-                            // scope parser rather than Enum.Parse, which does
-                            // not recognise a hyphenated member name.
-                            : MemoryScopeParser.TryParseScope(reader.GetString(9), out var scope) ? scope : null,
+                            : ParseScope(reader.GetString(9)),
                         ProjectRoot = reader.IsDBNull(10) ? null : reader.GetString(10),
                         Target = reader.IsDBNull(11) ? null : reader.GetString(11),
                         Outcome = ParseLabel<AuditOutcome>(reader.GetString(12)),
@@ -336,12 +336,24 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
     /// <summary>
     /// A stored label read back as its typed value. The write sites store the
     /// kebab label, which for the single-word members is exactly the member name
-    /// in lower case, so a case-insensitive parse is its inverse. The scope label
-    /// is the exception — "project-local" is not an identifier — and is read
-    /// through <see cref="MemoryScopeParser"/> above instead.
+    /// in lower case, so a case-insensitive parse is its inverse — and it
+    /// therefore accepts the PascalCase spelling the previous writer left behind.
     /// </summary>
     private static T ParseLabel<T>(string label) where T : struct
         => Enum.TryParse(label, ignoreCase: true, out T value) ? value : default;
+
+    /// <summary>
+    /// A stored scope label read back as its typed value. The canonical spelling
+    /// is "project-local", which no enum member name matches, so it goes through
+    /// the scope parser; a row written before the label-vocabulary change holds
+    /// the declared member name ("ProjectLocal"), which the parser lowercases to
+    /// "projectlocal" and rejects. That legacy spelling is accepted as a fallback
+    /// so an upgraded cache misreads no row.
+    /// </summary>
+    private static MemoryScopeKind? ParseScope(string label)
+        => MemoryScopeParser.TryParseScope(label, out var scope)
+            ? scope
+            : Enum.TryParse(label, ignoreCase: true, out MemoryScopeKind legacy) ? legacy : null;
 
     private static AuditEvent WithState(AuditEvent e, AuditMetadata? after, AuditMetadata? previous) => new()
     {

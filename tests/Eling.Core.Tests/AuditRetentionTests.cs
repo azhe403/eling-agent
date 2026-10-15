@@ -138,9 +138,78 @@ public class AuditRetentionTests : IDisposable
         Assert.Equal("memory_save", rollup.Action);
         Assert.Equal(1, rollup.Count);
 
+        // The day stem is a UTC instant. Parsed with no styles it took the
+        // machine's offset instead, so on this +07:00 box the folded date
+        // compared seven hours off against the job's UTC-midnight clock — and
+        // against every expiry window.
+        Assert.Equal(TimeSpan.Zero, rollup.Date.Offset);
+        Assert.Equal(new DateTimeOffset(2026, 9, 10, 0, 0, 0, TimeSpan.Zero), rollup.Date);
+
         // Folded is not expired: the raw day stays for the read API until its
         // window elapses.
         Assert.True(File.Exists(raw));
+    }
+
+    [Fact]
+    public async Task RunAsync_DoesNotFoldTheDayStillInProgress()
+    {
+        // The in-progress day must clear the same closed-day gate on every
+        // machine. A stem parsed with no styles takes the machine's offset, so
+        // on a positive-offset one (this is +07:00) "today" lands at yesterday
+        // 17:00 UTC — an instant the job already counts as closed, and it folds
+        // the day into rollups/<today>.jsonl while it is still being appended to.
+        var todayUtc = new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero);
+        var clock = new FixedTimeProvider(todayUtc);
+        var store = new AuditFileStore(_root, clock);
+        await store.AppendAsync(
+            AuditTrail.Change,
+            [new AuditEvent { Timestamp = todayUtc, Trail = AuditTrail.Change, Category = AuditCategory.Memory, Action = "memory_save", Actor = "mcp", Outcome = AuditOutcome.Success }],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        var raw = store.GetCurrentFilePath(AuditTrail.Change, todayUtc);
+        Assert.True(File.Exists(raw));
+
+        await new AuditMaintenanceJob(store, new AuditOptions(), clock).RunAsync(CancellationToken.None);
+
+        // No rollup at all for the day in progress, and the raw file survives for
+        // the appends still to come.
+        Assert.Empty(Directory.GetFiles(Path.Combine(_root, "rollups"), "*.jsonl"));
+        Assert.True(File.Exists(raw));
+    }
+
+    [Fact]
+    public async Task RunAsync_IgnoresStrayFilesThatAreNotDayFiles()
+    {
+        var day = new DateTimeOffset(2026, 8, 1, 10, 0, 0, TimeSpan.Zero);
+        var store = new AuditFileStore(_root, new FixedTimeProvider(day));
+        await store.AppendAsync(
+            AuditTrail.Access,
+            [new AuditEvent { Timestamp = day, Trail = AuditTrail.Access, Category = AuditCategory.Memory, Action = "memory_read", Actor = "mcp", Outcome = AuditOutcome.Success }],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        // A day file must end in exactly ".jsonl" or exactly ".jsonl.gz". Both of
+        // these stem to the same date, but the reader decompresses only the
+        // compound suffix, so they were read as raw text and the JSON parse
+        // aborted the whole pass.
+        var dir = Path.GetDirectoryName(store.GetCurrentFilePath(AuditTrail.Access, day))!;
+        await File.WriteAllTextAsync(Path.Combine(dir, "2026-08-01.gz"), "not a gzip day file");
+        await File.WriteAllTextAsync(Path.Combine(dir, "2026-08-01.json"), "not a jsonl day file");
+
+        var options = new AuditOptions { AccessRetentionDays = 14 };
+        var job = new AuditMaintenanceJob(store, options, new FixedTimeProvider(new DateTimeOffset(2026, 9, 11, 0, 0, 0, TimeSpan.Zero)));
+
+        await job.RunAsync(CancellationToken.None);
+
+        var rollupFile = Directory.GetFiles(Path.Combine(_root, "rollups"), "*.jsonl").Single();
+        var rollup = JsonSerializer.Deserialize(File.ReadAllLines(rollupFile).Single(), AuditJsonContext.Default.AuditRollup)!;
+        Assert.Equal("memory_read", rollup.Action);
+        Assert.Equal(1, rollup.Count);
+
+        // Untouched: they are not day files, so the pass has no business with them.
+        Assert.True(File.Exists(Path.Combine(dir, "2026-08-01.gz")));
+        Assert.True(File.Exists(Path.Combine(dir, "2026-08-01.json")));
     }
 
     [Fact]

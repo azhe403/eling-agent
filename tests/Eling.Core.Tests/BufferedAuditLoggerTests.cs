@@ -171,7 +171,7 @@ public class BufferedAuditLoggerTests : IDisposable
     }
 
     [Fact]
-    public void AuditOptions_CarryTheDesignDefaultsAndGuardTheBatchSize()
+    public void AuditOptions_CarryTheDesignDefaultsAndRejectAnUnflushableConfiguration()
     {
         var defaults = new AuditOptions();
 
@@ -190,6 +190,16 @@ public class BufferedAuditLoggerTests : IDisposable
             new AuditFileStore(_root, TimeProvider.System),
             index: null,
             new AuditOptions { FlushBatchSize = 0 },
+            TimeProvider.System));
+
+        // An accumulation window as long as the confirmation budget never leaves
+        // any time for the flush it was waiting to batch: every change entry
+        // returns unconfirmed and lands later, if at all. The 250ms default sits
+        // well inside the 2s bound, so the shipped configuration is valid.
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BufferedAuditLogger(
+            new AuditFileStore(_root, TimeProvider.System),
+            index: null,
+            new AuditOptions { FlushInterval = TimeSpan.FromSeconds(2), FlushTimeout = TimeSpan.FromSeconds(2) },
             TimeProvider.System));
     }
 

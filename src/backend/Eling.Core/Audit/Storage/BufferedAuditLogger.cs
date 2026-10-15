@@ -43,6 +43,18 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
         // the first flush.
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.FlushBatchSize);
 
+        // The accumulation window has to leave time for the flush it batches
+        // inside the confirmation budget: a window as long as FlushTimeout means
+        // every change entry's A6 wait expires before its batch is written, so
+        // nothing is ever confirmed. The 250ms default sits well inside 2s.
+        if (options.FlushInterval >= options.FlushTimeout)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options.FlushInterval),
+                options.FlushInterval,
+                "FlushInterval must be shorter than FlushTimeout, so the accumulation window still leaves the flush confirmation budget time to complete.");
+        }
+
         _store = store;
         _index = index;
         _options = options;

@@ -67,28 +67,48 @@ internal static class AuditDayFiles
     }
 
     /// <summary>
-    /// Whether the file name is a day file at all: the stem must match the
-    /// writer-generated <c>yyyy-MM-dd</c> shape exactly, so one stray file
-    /// cannot abort the whole pass.
+    /// Whether the file name is a day file at all: it must end in exactly one of
+    /// the writer's two suffixes and carry a <c>yyyy-MM-dd</c> stem, so one stray
+    /// file cannot abort the whole pass.
     /// </summary>
     private static bool IsDayFile(string file) => TryParseDate(file).HasValue;
 
     /// <summary>
-    /// The date encoded in a day file's name, stripping the full compound
-    /// suffix: <c>2026-09-10.jsonl.gz</c> and <c>2026-09-10.jsonl</c> both yield
-    /// the stem <c>2026-09-10</c>. Returns <c>null</c> for anything else.
+    /// The date encoded in a day file's name, stripping the writer's own suffix:
+    /// <c>2026-09-10.jsonl.gz</c> and <c>2026-09-10.jsonl</c> both yield the stem
+    /// <c>2026-09-10</c>. A name ending in anything else — <c>2026-09-10.gz</c>,
+    /// <c>2026-09-10.json</c> — is not a day file, even though its stem would
+    /// still parse.
     /// </summary>
     private static DateTimeOffset? TryParseDate(string file)
     {
         var name = Path.GetFileName(file);
-        var stem = name.EndsWith(GzipExtension, StringComparison.OrdinalIgnoreCase)
-            ? name[..^GzipExtension.Length]
-            : Path.GetFileNameWithoutExtension(name);
-        return DateTimeOffset.TryParseExact(
-            stem, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+        if (name.EndsWith(GzipExtension, StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseDayStem(name[..^GzipExtension.Length]);
+        }
+
+        if (name.EndsWith(RawExtension, StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseDayStem(name[..^RawExtension.Length]);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The stem parsed as a UTC instant. A day file is named against a UTC clock
+    /// (the writer formats <c>now</c>, which the logger normalizes to UTC), so
+    /// the stem must not be re-stamped with the machine's local offset: on a
+    /// +07:00 box the in-progress day would land at yesterday 17:00 UTC — an
+    /// instant the job's UTC day boundary already counts as closed.
+    /// </summary>
+    private static DateTimeOffset? ParseDayStem(string stem)
+        => DateTimeOffset.TryParseExact(
+            stem, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var date)
             ? date
             : null;
-    }
 
     private static async Task<List<AuditEvent>> ReadEntriesAsync(string file, CancellationToken cancellationToken)
     {
