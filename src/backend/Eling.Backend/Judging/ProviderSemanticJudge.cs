@@ -24,7 +24,7 @@ namespace Eling.Backend.Judging;
 /// The caller (<c>MemoryService</c>) owns the fallback: it degrades to the heuristic
 /// decision and records the reason.
 /// </remarks>
-public sealed class ProviderSemanticJudge : ISemanticJudge
+public sealed class ProviderSemanticJudge : ISemanticJudge, ISemanticSummarizer
 {
     private static readonly ResiliencePropertyKey<int> BaseTimeoutKey = new("BaseTimeout");
     private static readonly ResiliencePropertyKey<int> AttemptIndexKey = new("AttemptIndex");
@@ -85,10 +85,7 @@ public sealed class ProviderSemanticJudge : ISemanticJudge
             ? customTimeoutSeconds.Value
             : (int)_smartSave.InitialJudgeTimeout.TotalSeconds;
 
-        var client = new ChatClient(
-            model,
-            new ApiKeyCredential(string.IsNullOrEmpty(apiKey) ? "no-key" : apiKey),
-            new OpenAIClientOptions { Endpoint = new Uri(baseUrl.TrimEnd('/') + "/") });
+        var client = CreateClient(baseUrl, model, apiKey);
 
         var messages = new List<ChatMessage>
         {
@@ -104,43 +101,7 @@ public sealed class ProviderSemanticJudge : ISemanticJudge
             incoming.Type,
             baseSeconds);
 
-        string text;
-        var context = ResilienceContextPool.Shared.Get(cancellationToken);
-        try
-        {
-            context.Properties.Set(BaseTimeoutKey, baseSeconds);
-            var completion = await _pipeline.ExecuteAsync(
-                async ctx => await client.CompleteChatAsync(messages, cancellationToken: ctx.CancellationToken),
-                context);
-
-            // Project the text parts without naming the SDK's content-part enum: a null
-            // Text is exactly a non-text part, and keeping to the stable surface is
-            // cheaper than tracking which SDK version renamed it.
-            text = string.Concat(completion.Value.Content
-                .Select(part => part.Text)
-                .Where(value => !string.IsNullOrEmpty(value)));
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            _logger.LogInformation(
-                "Judge cancelled by caller after {ElapsedMs} ms (budget {BudgetMs} ms); caller will fall back",
-                ElapsedMs(started),
-                (int)_smartSave.JudgeTimeout.TotalMilliseconds);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Judge call failed after {ElapsedMs} ms for {CandidateCount} candidate(s)",
-                ElapsedMs(started),
-                candidates.Count);
-            throw;
-        }
-        finally
-        {
-            ResilienceContextPool.Shared.Return(context);
-        }
+        var text = await CompleteChatAsync(client, messages, baseSeconds, "Judge", candidates.Count, cancellationToken);
 
         // Null means the answer was unusable; the caller treats that as "create".
         var parsed = JudgePrompt.Parse(text, candidates);
@@ -166,6 +127,128 @@ public sealed class ProviderSemanticJudge : ISemanticJudge
             candidates.Count);
 
         return verdict;
+    }
+
+    public async Task<MemorySummary> SummarizeAsync(
+        IReadOnlyCollection<Memory> items,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+
+        if (items.Count == 0)
+        {
+            return new MemorySummary([], "judge");
+        }
+
+        if (!_store.TryGetConfig(out var baseUrl, out var model, out var apiKey, out var customTimeoutSeconds))
+        {
+            throw new InvalidOperationException("Semantic judge is not configured.");
+        }
+
+        // Same timeout policy as the judge: config value wins, otherwise the
+        // escalating SmartSaveOptions timeouts apply inside the shared pipeline.
+        var baseSeconds = customTimeoutSeconds is > 0
+            ? customTimeoutSeconds.Value
+            : (int)_smartSave.InitialJudgeTimeout.TotalSeconds;
+
+        var client = CreateClient(baseUrl, model, apiKey);
+
+        var messages = new List<ChatMessage>
+        {
+            new SystemChatMessage(RecallSummaryPrompt.SystemInstructions),
+            new UserChatMessage(RecallSummaryPrompt.Build(items)),
+        };
+
+        var started = Stopwatch.GetTimestamp();
+        _logger.LogDebug(
+            "Recall summary calling model={Model} for {ItemCount} item(s) (baseTimeout={BaseSeconds}s)",
+            model,
+            items.Count,
+            baseSeconds);
+
+        var text = await CompleteChatAsync(client, messages, baseSeconds, "Recall summary", items.Count, cancellationToken);
+
+        var paragraphs = RecallSummaryPrompt.Parse(text);
+        if (paragraphs.Count == 0)
+        {
+            // Unusable answer: not an error. The caller falls back to a
+            // deterministic digest, exactly as a save falls back to the
+            // heuristic when the judge cannot decide.
+            _logger.LogWarning(
+                "Recall summary returned an unusable answer after {ElapsedMs} ms ({Length} chars)",
+                ElapsedMs(started),
+                text.Length);
+            return new MemorySummary([], "judge");
+        }
+
+        _logger.LogInformation(
+            "Recall summary produced {ParagraphCount} paragraph(s) after {ElapsedMs} ms ({ItemCount} item(s))",
+            paragraphs.Count,
+            ElapsedMs(started),
+            items.Count);
+
+        return new MemorySummary(paragraphs, "judge");
+    }
+
+    private static ChatClient CreateClient(string baseUrl, string model, string apiKey)
+        => new(
+            model,
+            new ApiKeyCredential(string.IsNullOrEmpty(apiKey) ? "no-key" : apiKey),
+            new OpenAIClientOptions { Endpoint = new Uri(baseUrl.TrimEnd('/') + "/") });
+
+    /// <summary>
+    /// Runs one chat completion through the shared resilience pipeline and
+    /// returns the concatenated text parts. Every failure mode throws, on
+    /// purpose: the caller owns the fallback (heuristic decision for the
+    /// judge, deterministic digest for the summary).
+    /// </summary>
+    private async Task<string> CompleteChatAsync(
+        ChatClient client,
+        List<ChatMessage> messages,
+        int baseSeconds,
+        string operation,
+        int itemCount,
+        CancellationToken cancellationToken)
+    {
+        var started = Stopwatch.GetTimestamp();
+        var context = ResilienceContextPool.Shared.Get(cancellationToken);
+        try
+        {
+            context.Properties.Set(BaseTimeoutKey, baseSeconds);
+            var completion = await _pipeline.ExecuteAsync(
+                async ctx => await client.CompleteChatAsync(messages, cancellationToken: ctx.CancellationToken),
+                context);
+
+            // Project the text parts without naming the SDK's content-part enum: a null
+            // Text is exactly a non-text part, and keeping to the stable surface is
+            // cheaper than tracking which SDK version renamed it.
+            return string.Concat(completion.Value.Content
+                .Select(part => part.Text)
+                .Where(value => !string.IsNullOrEmpty(value)));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogInformation(
+                "{Operation} cancelled by caller after {ElapsedMs} ms (budget {BudgetMs} ms); caller will fall back",
+                operation,
+                ElapsedMs(started),
+                (int)_smartSave.JudgeTimeout.TotalMilliseconds);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "{Operation} call failed after {ElapsedMs} ms for {ItemCount} item(s)",
+                operation,
+                ElapsedMs(started),
+                itemCount);
+            throw;
+        }
+        finally
+        {
+            ResilienceContextPool.Shared.Return(context);
+        }
     }
 
     private ResiliencePipeline<ClientResult<ChatCompletion>> BuildPipeline()

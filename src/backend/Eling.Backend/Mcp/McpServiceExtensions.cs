@@ -143,6 +143,13 @@ public static class McpServiceExtensions
             sp.GetService<ILoggerFactory>()?.CreateLogger<ProviderSemanticJudge>()
                 ?? NullLogger<ProviderSemanticJudge>.Instance));
 
+        // The recall-overflow summarizer is the same provider-backed judge: one
+        // configured provider serves both the save-time judgement and the
+        // recall digest, and an unconfigured provider fails the same cheap way,
+        // leaving the deterministic digest in charge.
+        services.TryAddSingleton<ISemanticSummarizer>(sp =>
+            (ProviderSemanticJudge)sp.GetRequiredService<ISemanticJudge>());
+
         // Logging falls back to a null logger so the judge stays constructible in tests
         // and in hosts with no logging configured; a real host always supplies one.
         ILogger<MemoryService> MemoryLogger(IServiceProvider sp) =>

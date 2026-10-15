@@ -21,7 +21,7 @@ To prevent context bloat and empty retrieval loops, all agents interacting with 
          Active Context]                           │
                                                    ▼
                                          [Hop 1: Initial Query]
-                                         topics=['term1', 'term2']
+                                         context.topics=['term1', 'term2']
                                                    │
                                                    ▼
                                       Retrieved Items >= 3?
@@ -44,6 +44,8 @@ To prevent context bloat and empty retrieval loops, all agents interacting with 
 1. **Target Baseline ($\ge 3$ Items):** A recall is considered complete and sufficient as soon as it retrieves at least 3 relevant items in `recallMemories`. The agent proceeds immediately.
 2. **Retry Trigger ($\le 2$ Items):** If fewer than 3 memories return, the agent must retry using broader, synonymous, or associative topics (e.g. expanding `['pre-commit']` to `['git', 'commit', 'hygiene']`).
 3. **Hard Cap (3 Hops Max):** An agent must **never** execute a 4th recall on the same topic. If after 3 attempts the count remains $\le 2$, the agent accepts that the repository has limited stored entries on that subject and moves on.
+4. **Session-Start Breadth:** The first-turn recall is never anchored solely on the opening message's subject. Sweep broadly — the opening message's topics plus standing rules and preferences, standing decisions, lessons and known gotchas, workflow/repo conventions, and recently touched work — and pass them with the canonical shape `context: { topics: [...] }` (a top-level `topics` alias is also accepted). The breadth floor is server-enforced: every recall response includes `standingMemories`, a topic-independent baseline of standing rules/preferences, decisions, and lessons (current-project first, then most recently updated, capped), so even a narrow topic call still carries the consistency spine.
+5. **Zero-Result Self-Check:** A session-start call that returns `stats.recallCount == 0` is a failed call, not an empty world: the topics were passed in a shape the tool ignored, or nothing matched. Re-issue with the nested `context.topics` shape and broader terms (bounded by the Hard Cap) before answering.
 
 ---
 
@@ -124,7 +126,7 @@ Every recall hit surfaces transparent metadata explaining *why* it matched:
 * `matchedVia`: Lists the exact search tables (`porter`, `trigram`) that found the record.
 * `porterScore`: BM25 score contribution from whole-word and stemmed token matching.
 * `trigramScore`: BM25 score contribution from 3-gram character substring matching.
-* `queryMode`: Indicates whether the memory was retrieved under strict precision (`"and"`) or via adaptive fallback (`"or-fallback"`).
+* `queryMode`: Indicates whether the memory was retrieved under strict precision (`"and"`) or via adaptive fallback (`"or-fallback"`). Standing-baseline entries report `matchedVia: ["standing"]` with `queryMode: "standing-baseline"`: they are not search hits but a topic-independent baseline of standing rules/preferences, standing decisions, and lessons (current-project first, then most recently updated, capped) that every recall payload carries so a narrow topic call still surfaces the consistency spine.
 
 ---
 
@@ -148,3 +150,32 @@ Every recall hit surfaces transparent metadata explaining *why* it matched:
 * `initialized` / `headRoot`: scope-chain facts.
 
 The policy lives at `~/.config/eling/config/project-policy.json` and is managed with the `memory_project_scope_policy` MCP tool. Timestamps are intentionally not part of this block; they are returned by `memory_project_status` and the policy tool. See `docs/superpowers/specs/2026-09-11-project-scope-policy-design.md`.
+
+---
+
+## 6. Overflow Summary (`recallSummary`)
+
+`recallLimit` used to end the story: the search asked for at most N hits, so relevant items ranked N+1 and beyond never left the FTS layer — present in the store, invisible to the agent. The recall service now fetches one overflow window beyond the limit (`recallLimit + 10`); the top N still arrive in full as `recallMemories`, and the rest are summarized instead of skipped.
+
+```
+                     Topic hits beyond recallLimit
+                                │
+              ┌─────────────────┴─────────────────┐
+              │ Overflow exists?                  │ No → recallSummary omitted (lean payload)
+              ▼                                   ▼
+     [Semantic summarizer available?]      [No overflow to summarize]
+              │
+     ┌────────┴────────┐
+     │ YES             │ NO
+     ▼                 ▼
+[Judge paragraphs]  [Deterministic digest]
+source: "judge"      source: "heuristic" + note
+```
+
+* `itemCount` / `summarizedCount`: total overflow hits vs. how many the digest covers (bounded by the window).
+* `source`: `judge` (semantic summarizer, the same provider-backed judge as `memory_save` uses, with the same Polly/circuit-breaker policy) or `heuristic` (deterministic digest — one compact `[Type] content` fragment per item, grouped into paragraphs).
+* `note`: present only when the digest degraded — judge not configured, timed out, returned nothing usable, or failed. Mirrors the save pipeline's `judge-failed: ...; fell back` posture so a dead provider is diagnosable rather than silent.
+* `paragraphs`: multi-paragraph by design — long records are split across paragraphs instead of being crammed into one block.
+* `summarizeOverflow: false` skips the whole summary for minimum latency.
+
+The judge's summary prompt (`RecallSummaryPrompt`) asks for 2–5 theme-grouped paragraphs with no ids, and parsing caps at five paragraphs of ~600 characters; the deterministic digest (`RecallSummaryFallback`) caps at ten items, five paragraphs, ~180 characters per fragment. Both are pure functions, unit-tested without a provider. See `docs/semantic-judge-architecture.md` §6 for the shared-judge rationale.

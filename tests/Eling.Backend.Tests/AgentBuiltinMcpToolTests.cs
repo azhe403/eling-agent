@@ -86,6 +86,7 @@ public sealed class AgentBuiltinMcpToolTests : IDisposable
 
         Assert.True(doc.RootElement.TryGetProperty("recallMemories", out _));
         Assert.True(doc.RootElement.TryGetProperty("recentMemories", out _));
+        Assert.True(doc.RootElement.TryGetProperty("standingMemories", out _));
         Assert.True(doc.RootElement.TryGetProperty("stats", out _));
     }
 

@@ -13,6 +13,22 @@ public sealed class MemoryRecallResponse
     [JsonPropertyName("recentMemories")]
     public IReadOnlyCollection<MemoryRecallMemory> RecentMemories { get; set; } = [];
 
+    /// <summary>
+    /// Digest of relevant hits beyond the recall limit. Present only when
+    /// there is overflow to summarize, so quiet payloads stay lean.
+    /// </summary>
+    [JsonPropertyName("recallSummary")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RecallSummaryDto? RecallSummary { get; set; }
+
+    /// <summary>
+    /// Topic-independent baseline of standing rules and preferences, standing
+    /// decisions, and lessons. Returned on every call — even a narrow topic
+    /// call still carries this consistency spine.
+    /// </summary>
+    [JsonPropertyName("standingMemories")]
+    public IReadOnlyCollection<MemoryRecallMemory> StandingMemories { get; set; } = [];
+
     [JsonPropertyName("intentions")]
     public IReadOnlyCollection<MemoryRecallIntention> Intentions { get; set; } = [];
 

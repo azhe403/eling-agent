@@ -168,4 +168,127 @@ public sealed class MemoryRecallServiceChainTests
         Assert.Equal(MemoryScopeKind.Global, globalRecent.Scope);
         Assert.Null(globalRecent.ProjectRoot);
     }
+
+    [Fact]
+    public async Task Recall_StandingBaseline_SurfacesEvenWhenTopicMisses()
+    {
+        var (scoped, child, _, _) = Build();
+        await child.SaveAsync(new Memory.Memory(MemoryType.Preference, "always run git hygiene before review"));
+
+        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new MemoryRecallContext(["zzz-nomatch"], null, null));
+
+        Assert.Empty(result.RecallMemories);
+        var standing = Assert.Single(result.StandingMemories!);
+        Assert.Equal("standing-baseline", standing.QueryMode);
+        Assert.Contains("standing", standing.MatchedVia!);
+        Assert.Equal(MemoryType.Preference, standing.Memory.Type);
+    }
+
+    [Fact]
+    public async Task Recall_StandingBaseline_IgnoresNonStandingTypes()
+    {
+        var (scoped, child, _, _) = Build();
+        await child.SaveAsync(new Memory.Memory(MemoryType.Fact, "a plain fact"));
+
+        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new MemoryRecallContext(["fact"], null, null));
+
+        Assert.Single(result.RecallMemories);
+        Assert.Empty(result.StandingMemories!);
+    }
+
+    [Fact]
+    public async Task Recall_StandingBaseline_CapsAtFive()
+    {
+        var (scoped, child, _, _) = Build();
+        for (var i = 0; i < 7; i++)
+        {
+            await child.SaveAsync(new Memory.Memory(MemoryType.Preference, $"rule {i}"));
+        }
+
+        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new MemoryRecallContext(["zzz-nomatch"], null, null));
+
+        Assert.Equal(5, result.StandingMemories!.Count);
+    }
+
+    [Fact]
+    public async Task Recall_StandingBaseline_ExcludesMemoriesAlreadyInTopicHits()
+    {
+        var (scoped, child, _, _) = Build();
+        await child.SaveAsync(new Memory.Memory(MemoryType.Decision, "decision about topic"));
+
+        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new MemoryRecallContext(["topic"], null, null));
+
+        Assert.Single(result.RecallMemories);
+        Assert.Empty(result.StandingMemories!);
+    }
+
+    [Fact]
+    public async Task Recall_StandingBaseline_CurrentProjectOutranksNewerParent()
+    {
+        var (scoped, child, parent, _) = Build();
+        await child.SaveAsync(new Memory.Memory(MemoryType.Preference, "child rule"));
+        await parent.SaveAsync(new Memory.Memory(
+            MemoryType.Preference, "parent rule", updatedAt: DateTimeOffset.UtcNow.AddHours(1)));
+
+        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new MemoryRecallContext(["zzz-nomatch"], null, null));
+
+        Assert.Equal(2, result.StandingMemories!.Count);
+        Assert.Equal(ChildRoot, result.StandingMemories[0].ProjectRoot);
+        Assert.Equal(ParentRoot, result.StandingMemories[1].ProjectRoot);
+    }
+
+    [Fact]
+    public async Task Recall_Overflow_BeyondLimit_ReportedNotDropped()
+    {
+        var (scoped, child, _, _) = Build();
+        for (var i = 0; i < 12; i++)
+        {
+            await child.SaveAsync(new Memory.Memory(MemoryType.Fact, $"topic item {i}"));
+        }
+
+        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new MemoryRecallContext(["topic"], null, null), recallLimit: 10);
+
+        Assert.Equal(10, result.RecallMemories.Count);
+        Assert.Equal(2, result.OverflowMemories!.Count);
+        var recallIds = result.RecallMemories.Select(h => h.Memory.Id).ToHashSet();
+        Assert.All(result.OverflowMemories, h => Assert.DoesNotContain(h.Memory.Id, recallIds));
+    }
+
+    [Fact]
+    public async Task Recall_Overflow_BoundedByWindow()
+    {
+        var (scoped, child, _, _) = Build();
+        for (var i = 0; i < 25; i++)
+        {
+            await child.SaveAsync(new Memory.Memory(MemoryType.Fact, $"topic item {i}"));
+        }
+
+        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new MemoryRecallContext(["topic"], null, null), recallLimit: 10);
+
+        Assert.Equal(10, result.RecallMemories.Count);
+        Assert.Equal(10, result.OverflowMemories!.Count);
+    }
+
+    [Fact]
+    public async Task Recall_NoOverflow_WhenHitsWithinLimit()
+    {
+        var (scoped, child, _, _) = Build();
+        for (var i = 0; i < 4; i++)
+        {
+            await child.SaveAsync(new Memory.Memory(MemoryType.Fact, $"topic item {i}"));
+        }
+
+        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new MemoryRecallContext(["topic"], null, null), recallLimit: 10);
+
+        Assert.Equal(4, result.RecallMemories.Count);
+        Assert.Null(result.OverflowMemories);
+    }
 }

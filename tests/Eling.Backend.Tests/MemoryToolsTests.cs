@@ -522,6 +522,12 @@ public class MemoryToolsTests
         Assert.Contains("Memory Recall Strategy", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Mandatory Session-Start Recall", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("first user turn", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("BROAD set of topics", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("{\"context\": {\"topics\"", options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("stats.recallCount", options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("standingMemories", options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("Recall Overflow Summary", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Never anchor session-start recall solely on the opening message's subject", options.ServerInstructions, StringComparison.Ordinal);
         Assert.Contains("Codebase Indexing (HARD RULE)", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ASK the user for approval to run `codebase_index`", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Memory Content Shape", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);

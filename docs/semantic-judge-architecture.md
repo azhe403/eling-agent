@@ -169,3 +169,20 @@ Example log output:
 [INF] Judge verdict "Revision" confidence=0.95 target=01m4be9j... after 8708 ms (4 candidate(s))
 [INF] Saved memory '01m4be9j...' with action '"Updated"' (judge: revision into '01m4be9j...' ...)
 ```
+
+---
+
+## 6. Recall Summaries (judge reuse)
+
+The same provider-backed judge also digests memory for the **recall** path. When `memory_recall` surfaces more relevant hits than `recallLimit`, the overflow is summarized instead of dropped: `ProviderSemanticJudge` implements `ISemanticSummarizer` alongside `ISemanticJudge`, sharing the config store, the Polly pipeline, and the circuit breaker — one configured provider, two callers. The register-time rationale is identical to §4: the judge is a per-user setting, decoupled from the Desktop agent gateway.
+
+Two contracts, deliberately different shapes:
+
+| | Save judging | Recall summary |
+|---|---|---|
+| Input | incoming record + candidates | overflow memory records (M1..Mn) |
+| Output | strict JSON verdict | 2–5 prose paragraphs |
+| Failure | heuristic decision, `judge-failed: ...` in `reason` | deterministic digest, `note` in `recallSummary` |
+| Budget | `SmartSaveOptions.JudgeTimeout` | same budget, per recall call |
+
+Both share the rule that the external boundary never breaks the operation: the save falls back to the heuristic decision, the recall falls back to `RecallSummaryFallback`. The response field `source` tells the two apart (`judge` vs `heuristic`), and `summarizeOverflow: false` skips the judge entirely for latency-sensitive calls.

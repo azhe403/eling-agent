@@ -73,6 +73,7 @@ public sealed class MemoryRecallService : IMemoryRecallService
         // on SearchAsync's ranking (SQLite FTS5 BM25) to order results, so
         // no client-side re-ranking is needed.
         var recall = new List<MemoryRecallHit>(recallLimit);
+        var overflow = new List<MemoryRecallHit>(OverflowWindow);
         var topics = context?.Topics ?? [];
         if (topics.Count > 0 && recallLimit > 0)
         {
@@ -113,8 +114,48 @@ public sealed class MemoryRecallService : IMemoryRecallService
                     }
                     if (recall.Count >= recallLimit) break;
                 }
+
+                // Overflow can only exist once the cap is filled, so the wider
+                // second fetch runs at most once and only then. Requesting the
+                // window from the start would weaken the interleave guarantee
+                // the primary list depends on (a level with hits is guaranteed
+                // a slot within the first N).
+                if (recall.Count >= recallLimit)
+                {
+                    var known = recall.Select(h => h.Memory.Id).ToHashSet();
+                    var wideHits = await _scoped.SearchAsync(query, scope, recallLimit + OverflowWindow);
+                    foreach (var hit in wideHits)
+                    {
+                        if (overflow.Count >= OverflowWindow) break;
+                        if (!known.Add(hit.Id)) continue;
+                        var reference = hit.Scope switch
+                        {
+                            MemoryScopeKind.Global => MemoryReference.ForGlobal(hit.Id),
+                            MemoryScopeKind.ProjectLocal => MemoryReference.ForProjectLocal(
+                                hit.Id, hit.ProjectRoot ?? _scoped.CanonicalRoot ?? _scoped.ProjectRoot ?? "."),
+                            _ => MemoryReference.ForProject(hit.Id, hit.ProjectRoot ?? _scoped.ProjectRoot ?? "."),
+                        };
+                        var scoped = await _scoped.GetByIdAsync(reference);
+                        if (scoped is not null)
+                        {
+                            overflow.Add(new MemoryRecallHit(
+                                scoped.Memory,
+                                hit.MatchedVia,
+                                hit.PorterScore,
+                                hit.TrigramScore,
+                                hit.QueryMode,
+                                scoped.Scope,
+                                scoped.ProjectRoot));
+                        }
+                    }
+                }
             }
         }
+
+        // Active enumeration is needed three ways — recent, the standing
+        // baseline, and the active stat — so fetch it once.
+        var activeMemories = await _scoped.ListAsync(scope, MemoryStatus.Active);
+        var currentRoot = _scoped.ProjectRoot;
 
         // Recent: most recently updated active memories in the requested
         // scope, keeping their scope provenance. The previous session_start
@@ -129,19 +170,22 @@ public sealed class MemoryRecallService : IMemoryRecallService
         var recent = new List<ScopedMemory>(recentLimit);
         if (recentLimit > 0)
         {
-            var active = await _scoped.ListAsync(scope, MemoryStatus.Active);
-            var currentRoot = _scoped.ProjectRoot;
-            recent.AddRange(active
+            recent.AddRange(activeMemories
                 .OrderBy(s => IsCurrentProject(s, currentRoot) ? 0 : 1)
                 .ThenByDescending(s => s.Memory.UpdatedAt)
                 .Take(recentLimit));
         }
 
+        // Standing baseline: the topic-independent consistency spine, so even
+        // a narrow topic call (or one that matched nothing) still surfaces
+        // the standing rules, decisions, and lessons the conversation must
+        // not contradict.
+        var standing = BuildStandingBaseline(activeMemories, currentRoot, recall);
+
         // Stats: total + active counts derive from ListAsync rather than two
         // hard-coded project/global calls, so they reflect whatever scope
         // the caller asked for.
         var allMemories = await _scoped.ListAsync(scope, null);
-        var activeMemories = await _scoped.ListAsync(scope, MemoryStatus.Active);
         var stats = new MemoryRecallStats(
             TotalMemories: allMemories.Count,
             ActiveMemories: activeMemories.Count,
@@ -149,7 +193,52 @@ public sealed class MemoryRecallService : IMemoryRecallService
             RecallCount: recall.Count,
             RecentCount: recent.Count);
 
-        return new MemoryRecallResult(recall, recent, intentionResults, stats);
+        return new MemoryRecallResult(recall, recent, intentionResults, stats, standing, overflow.Count > 0 ? overflow : null);
+    }
+
+    /// <summary>Cap on the standing baseline so a broad payload never swamps the topic hits.</summary>
+    private const int StandingBaselineLimit = 5;
+
+    /// <summary>
+    /// How many relevant hits beyond <c>recallLimit</c> to fetch for the
+    /// overflow summary. Keeps the summary input bounded while still
+    /// capturing the items the limit would have dropped.
+    /// </summary>
+    private const int OverflowWindow = 10;
+
+    /// <summary>Memory kinds that define how work must be done, independent of any topic.</summary>
+    private static readonly MemoryType[] StandingTypes =
+    [
+        MemoryType.Preference, MemoryType.Decision, MemoryType.Lesson
+    ];
+
+    /// <summary>
+    /// Builds the topic-independent baseline: standing rules/preferences,
+    /// standing decisions, and lessons, ordered current-project first then
+    /// most recently updated, capped at <see cref="StandingBaselineLimit"/>.
+    /// Ids already present in the topic hits are skipped so the same memory
+    /// never shows up twice in the two primary sections.
+    /// </summary>
+    private static IReadOnlyList<MemoryRecallHit> BuildStandingBaseline(
+        IReadOnlyCollection<ScopedMemory> active,
+        string? currentRoot,
+        IReadOnlyCollection<MemoryRecallHit> topicHits)
+    {
+        var alreadySurfaced = topicHits.Select(h => h.Memory.Id).ToHashSet();
+        return active
+            .Where(s => StandingTypes.Contains(s.Memory.Type) && !alreadySurfaced.Contains(s.Memory.Id))
+            .OrderBy(s => IsCurrentProject(s, currentRoot) ? 0 : 1)
+            .ThenByDescending(s => s.Memory.UpdatedAt)
+            .Take(StandingBaselineLimit)
+            .Select(s => new MemoryRecallHit(
+                s.Memory,
+                ["standing"],
+                0.0,
+                0.0,
+                "standing-baseline",
+                s.Scope,
+                s.ProjectRoot))
+            .ToList();
     }
 
     /// <summary>

@@ -19,7 +19,7 @@ public sealed class AgentTurnService(
         "You must strictly operate within this active workspace directory: {0}\n" +
         "You have direct access to Eling's official MCP tools: memory_recall, memory_save, file_read, file_write, directory_list, glob, file_search, etc. " +
         "Always prefer recalling relevant memories with memory_recall and checking files before answering. " +
-        "Mandatory session-start behavior: in the first user turn of every new session, call memory_recall before any other tool call or reply, even when the message looks casual or ambiguous. " +
+        "Mandatory session-start behavior: in the first user turn of every new session, call memory_recall before any other tool call or reply — with a BROAD topic set (the opening message's topics plus standing rules, preferences, decisions, lessons, and recent work), passed as context: {{ topics: [...] }} or the top-level topics alias; if stats.recallCount is 0, re-issue before answering — even when the message looks casual or ambiguous. " +
         "If a tool reports an error, state it honestly.";
 
     public Task<TurnResponse> SendAsync(string workspace, string? chatId, string message, CancellationToken ct) =>
