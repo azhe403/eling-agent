@@ -31,7 +31,7 @@ public sealed class MemoryProjectStatusTool
         _policyStore = policyStore;
     }
 
-    [McpServerTool(Name = "memory_project_status"), Description("Report the project-scope posture of the current working directory: own-scope, ancestor-scope, uninitialized, or user-home, the resolved project-scope policy (ask | disabled), whether this project can be adopted (needs memory_init_project consent), and the policy decision's dates.")]
+    [McpServerTool(Name = "memory_project_status"), Description("Report the project-scope posture of the current working directory: own-scope, ancestor-scope, uninitialized, or user-home, the resolved project-scope policy (ask | disabled), whether this project can be adopted (needs memory_init_project consent), and the policy decision's dates. 'Initialized' describes only the committed .eling tier — project-local and global saves work regardless.")]
     public Task<ProjectStatusDto> GetStatusAsync()
         => ProjectScopePosture.EvaluateAsync(_cwd, _userHomeDirectory, _policyStore);
 }

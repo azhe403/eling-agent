@@ -191,7 +191,7 @@ public sealed class MemoryWriteTool
     [McpServerTool(Name = "memory_delete"), Description("Delete a memory by its ID. Returns true if the memory was deleted, false if it was not found. Provide 'project' to target an existing ancestor scope; this requires the current workspace to already have its own .eling scope.")]
     public async Task<bool> DeleteAsync(
         [Description("The ULID of the memory to delete")] string id,
-        [Description("Scope: project, project-local, or global. Defaults to 'project'.")] string scope = "project",
+        [Description("Scope: project, project-local, or global. Defaults to 'project' — but saves now default to 'project-local', so pass scope explicitly ('project-local') to delete a project-local memory by ID.")] string scope = "project",
         [Description("Optional logical name of an ancestor project to target (e.g. the parent .eling). Requires this workspace to already have its own .eling scope; never creates a scope.")] string? project = null)
     {
         try

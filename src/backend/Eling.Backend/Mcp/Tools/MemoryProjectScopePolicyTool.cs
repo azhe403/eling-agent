@@ -36,7 +36,7 @@ public sealed class MemoryProjectScopePolicyTool
         _logger = logger;
     }
 
-    [McpServerTool(Name = "memory_project_scope_policy"), Description("Set a machine-local project-scope policy decision. decision: 'ask' (offer consent-gated onboarding), 'disabled' (project scope off; writes go to global), or 'clear' (remove an override). target: 'project' (this workspace), 'pattern' (a path glob), or 'default'. Only call this when the user explicitly asks to disable or re-enable project scope.")]
+    [McpServerTool(Name = "memory_project_scope_policy"), Description("Set a machine-local project-scope policy decision. decision: 'ask' (offer consent-gated onboarding), 'disabled' (project scope off for the target; project-bound writes route to project-local, machine-only, never committed), or 'clear' (remove an override). target: 'project' (this workspace), 'pattern' (a path glob), or 'default'. Only call this when the user explicitly asks to disable or re-enable project scope.")]
     public async Task<MemoryProjectScopePolicyResultDto> SetAsync(
         [Description("ask | disabled | clear")] string decision,
         [Description("project (this workspace) | pattern | default")] string target = "project",

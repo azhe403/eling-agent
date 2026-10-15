@@ -45,7 +45,7 @@ public sealed class MemoryReadTool
     [McpServerTool(Name = "memory_get"), Description("Retrieve a memory by its ID. Provide 'project' to target an existing ancestor scope; this requires the current workspace to already have its own .eling scope.")]
     public async Task<ScopedMemoryDto?> GetByIdAsync(
         [Description("The ULID of the memory to retrieve")] string id,
-        [Description("Scope: project, project-local, global, or merged. Defaults to 'project'.")] string scope = "project",
+        [Description("Scope: project, project-local, global, or merged. Defaults to 'project' — but saves now default to 'project-local', so pass scope explicitly or use 'merged' to reach memories regardless of tier.")] string scope = "project",
         [Description("Optional logical name of an ancestor project to target (e.g. the parent .eling). Requires this workspace to already have its own .eling scope; never creates a scope.")] string? project = null)
     {
         try
