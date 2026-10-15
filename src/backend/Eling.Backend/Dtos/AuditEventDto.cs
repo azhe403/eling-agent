@@ -66,6 +66,7 @@ public sealed record AuditEventDto(
     {
         AuditTrail.Change => "change",
         AuditTrail.Access => "access",
+        _ => trail.ToString().ToLowerInvariant(),
     };
 
     private static string AuditLabelsOf(AuditCategory category) => category switch
@@ -73,6 +74,7 @@ public sealed record AuditEventDto(
         AuditCategory.Memory => "memory",
         AuditCategory.Runtime => "runtime",
         AuditCategory.Filesystem => "filesystem",
+        _ => category.ToString().ToLowerInvariant(),
     };
 
     private static string AuditLabelsOf(AuditOutcome outcome) => outcome switch
@@ -80,5 +82,6 @@ public sealed record AuditEventDto(
         AuditOutcome.Success => "success",
         AuditOutcome.Error => "error",
         AuditOutcome.Denied => "denied",
+        _ => outcome.ToString().ToLowerInvariant(),
     };
 }
