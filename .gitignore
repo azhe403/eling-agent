@@ -32,6 +32,7 @@ build/
 
 # Superpowers scratch directory
 .superpowers/
+.eling/
 
 # Test run outputs
 TestResults/
