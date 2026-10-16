@@ -4,6 +4,8 @@
 **Status:** Proposed  
 **Target Projects:** `Eling.Core`, `Eling.Backend`, `Eling.Mcp`, `Eling.Dashboard`, `Eling.Desktop`
 
+> **Partial supersession (2026-10-13):** the DB-connection portion of this spec (connection model, adapters, connection registry, backend endpoints) is superseded by `docs/superpowers/specs/2026-10-13-db-connection-design.md`, which narrows it to SQLite + MySQL with read-only queries. Mutation, MCP-tool, approval-gate, and GUI sections below remain the roadmap for Phases 2-3 but are **deferred**.
+
 ---
 
 ## 1. Overview & Objectives
