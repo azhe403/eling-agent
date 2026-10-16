@@ -39,6 +39,14 @@ public sealed class MemoryRecallResponse
     public MemoryRecallProjectScopeDto ProjectScope { get; set; } = new();
 
     /// <summary>
+    /// Codebase index status for the current workspace. Included so agents can
+    /// verify index readiness at session start without a separate tool call.
+    /// </summary>
+    [JsonPropertyName("codebase")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CodebaseStatusResponse? Codebase { get; set; }
+
+    /// <summary>
     /// Update notice, serialized only when an update is available so quiet
     /// payloads stay lean.
     /// </summary>

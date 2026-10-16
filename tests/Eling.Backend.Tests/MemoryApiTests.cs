@@ -53,7 +53,8 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
         var registration = new
         {
             processId = Environment.ProcessId,
-            projectRoot = _tempDir,
+            headScopeRoot = _tempDir,
+            workspaceRoot = _tempDir,
             dataDirectory = Path.Combine(_tempDir, ".eling"),
             startTime = DateTimeOffset.UtcNow,
             mcpEnabled = false,
@@ -557,7 +558,8 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
         var reg = new
         {
             processId = testPid,
-            projectRoot = _tempDir,
+            headScopeRoot = _tempDir,
+            workspaceRoot = _tempDir,
             dataDirectory = Path.Combine(_tempDir, ".eling"),
             startTime = DateTimeOffset.UtcNow,
             mcpEnabled = false,
@@ -573,6 +575,43 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
         unregResp.EnsureSuccessStatusCode();
 
         await ReadRuntimesEventAsync(reader, cts.Token);
+    }
+
+    /// <summary>
+    /// The metrics stream is the workspaces page's live feed for CPU/RAM. The
+    /// fixture registers the test process as a runtime, so the first snapshot
+    /// frame must carry that pid with a working set — either the pump's
+    /// immediate sample on subscribe or the 2s tick after it.
+    /// </summary>
+    [Fact]
+    public async Task GetMetricsStream_Subscribed_ReceivesSnapshotFrames()
+    {
+        var client = EnsureClient();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events/runtime-metrics");
+        using var sseResponse = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        Assert.Equal(HttpStatusCode.OK, sseResponse.StatusCode);
+        Assert.Equal("text/event-stream", sseResponse.Content.Headers.ContentType?.MediaType);
+
+        using var stream = await sseResponse.Content.ReadAsStreamAsync(cts.Token);
+        using var reader = new StreamReader(stream);
+
+        var initial = await reader.ReadLineAsync(cts.Token);
+        Assert.Equal("data: connected", initial);
+        await reader.ReadLineAsync(cts.Token); // blank line
+
+        JsonElement[]? batch = null;
+        while (batch is null)
+        {
+            var line = await reader.ReadLineAsync(cts.Token)
+                       ?? throw new InvalidOperationException("stream closed before a metrics frame arrived");
+            if (line.StartsWith("data: [", StringComparison.Ordinal))
+                batch = JsonSerializer.Deserialize<JsonElement[]>(line["data: ".Length..], JsonOptions);
+        }
+
+        Assert.NotEmpty(batch);
+        var own = batch.First(e => e.GetProperty("pid").GetInt32() == Environment.ProcessId);
+        Assert.True(own.GetProperty("memoryBytes").GetInt64() > 0);
     }
 
     /// <summary>

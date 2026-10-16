@@ -73,6 +73,15 @@ public sealed class CodebaseRebuildEndpointTests : IAsyncLifetime
         builder.Services.AddSingleton(new MemoryChangeBroadcaster());
         builder.Services.AddSingleton<IMemoryChangeNotifier>(NullMemoryChangeNotifier.Instance);
         builder.Services.AddSingleton<CodebaseWatcherService>();
+        // MapSseEvents maps the runtime-metrics channel too, so its broadcaster
+        // must be resolvable here or the minimal-API inference falls back to
+        // treating the service parameter as a GET body. Same contract as the
+        // rebuild broadcaster above.
+        builder.Services.AddSingleton<Eling.Backend.Services.ProcessMetricsTracker>();
+        builder.Services.AddSingleton<Eling.Backend.Services.RuntimeMetricsSampler>();
+        builder.Services.AddSingleton(sp => new Eling.Backend.Services.RuntimeMetricsBroadcaster(
+            sp.GetRequiredService<Eling.Backend.Services.RuntimeMetricsSampler>(),
+            sp.GetRequiredService<ILogger<Eling.Backend.Services.RuntimeMetricsBroadcaster>>()));
         builder.Services.AddSingleton<CodebaseRebuildJobRunner>(sp =>
             new CodebaseRebuildJobRunner(
                 local,

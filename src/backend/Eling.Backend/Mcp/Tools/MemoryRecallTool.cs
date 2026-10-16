@@ -5,6 +5,7 @@ using Eling.Backend.Judging;
 using Eling.Backend.Scope;
 using Eling.Backend.Updates;
 using Eling.Core;
+using Eling.Core.Codebase;
 using Eling.Core.Memory;
 using Eling.Core.MemoryRecall;
 using Microsoft.Extensions.Logging;
@@ -31,6 +32,8 @@ public sealed class MemoryRecallTool
     private readonly IUpdateChecker? _updateChecker;
     private readonly ISemanticSummarizer? _summarizer;
     private readonly SmartSaveOptions? _smartSave;
+    private readonly CodebaseIndexService? _codebaseIndex;
+    private readonly CodebaseWatcherService? _watcher;
 
     /// <summary>Bound on how many overflow items one summary may cover.</summary>
     private const int MaxSummarizedItems = 10;
@@ -43,7 +46,9 @@ public sealed class MemoryRecallTool
         IProjectScopePolicyStore? policyStore = null,
         IUpdateChecker? updateChecker = null,
         ISemanticSummarizer? summarizer = null,
-        SmartSaveOptions? smartSave = null)
+        SmartSaveOptions? smartSave = null,
+        CodebaseIndexService? codebaseIndex = null,
+        CodebaseWatcherService? watcher = null)
     {
         _recall = recall;
         _logger = logger;
@@ -53,9 +58,11 @@ public sealed class MemoryRecallTool
         _updateChecker = updateChecker;
         _summarizer = summarizer;
         _smartSave = smartSave;
+        _codebaseIndex = codebaseIndex;
+        _watcher = watcher;
     }
 
-    [McpServerTool(Name = "memory_recall"), Description("Call this BEFORE answering or acting, not after. On the first user turn of any session, on every step progression/subtask transition, and whenever the topic shifts, call this first — with a BROAD topic set: topics derived from the current step or message AND topics covering other relevant areas (standing rules and preferences, standing decisions, lessons and known gotchas, workflow and repo conventions, recently touched work); never anchor solely on the opening message's subject. Pass topics as `context: { topics: [...] }` — a top-level `topics` array is also accepted and, when non-empty, replaces `context.topics`. It costs ~500ms and prevents wrong assumptions about project conventions and past decisions. After a session-start call, check `stats.recallCount`: if it is 0, the call was mis-shaped or matched nothing — re-issue with `context: { topics: [...] }` and broader terms before proceeding (bounded retries). Also triggers on 'eling <topic>'. When topic recall returns more than `recallLimit` items, the response also carries `recallSummary` — digest paragraphs of the overflowing items (the ones the limit would drop); pass `summarizeOverflow: false` to skip it, and read `source` to tell a judge-written digest ('judge') from a deterministic one ('heuristic'). Every response also carries `standingMemories` — a topic-independent baseline of standing rules/preferences, standing decisions, and lessons (project-first, capped); read it on session start even when your topic call was narrow, because it is the server-enforced consistency spine. Returns topic-relevant full memories (search-based recall), the most recently updated active memories (so writes from other agents are visible), the standing baseline, the overflow digest, outstanding intentions with their trigger-match state, the project-scope posture (posture, policy, adoptable) so the agent can offer onboarding only when adoptable, and lightweight stats.")]
+    [McpServerTool(Name = "memory_recall"), Description("Call this BEFORE answering or acting, not after. On the first user turn of any session, on every step progression/subtask transition, and whenever the topic shifts, call this first — with a BROAD topic set: topics derived from the current step or message AND topics covering other relevant areas (standing rules and preferences, standing decisions, lessons and known gotchas, workflow and repo conventions, recently touched work); never anchor solely on the opening message's subject. Pass topics as `context: { topics: [...] }` — a top-level `topics` array is also accepted and, when non-empty, replaces `context.topics`. It costs ~500ms and prevents wrong assumptions about project conventions and past decisions. After a session-start call, check `stats.recallCount`: if it is 0, the call was mis-shaped or matched nothing — re-issue with `context: { topics: [...] }` and broader terms before proceeding (bounded retries). Also triggers on 'eling <topic>'. When topic recall returns more than `recallLimit` items, the response also carries `recallSummary` — digest paragraphs of the overflowing items (the ones the limit would drop); pass `summarizeOverflow: false` to skip it, and read `source` to tell a judge-written digest ('judge') from a deterministic one ('heuristic'). Every response also carries `standingMemories` — a topic-independent baseline of standing rules/preferences, standing decisions, and lessons (project-first, capped); read it on session start even when your topic call was narrow, because it is the server-enforced consistency spine. Returns topic-relevant full memories (search-based recall), the most recently updated active memories (so writes from other agents are visible), the standing baseline, the overflow digest, outstanding intentions with their trigger-match state, the project-scope posture (posture, policy, adoptable) so the agent can offer onboarding only when adoptable, codebase status (file/chunk counts, freshness, watcher state), and lightweight stats.")]
     public async Task<MemoryRecallResponse> RecallAsync(
         [Description("Current task context (filePath, topics, project). Optional.")] MemoryRecallContextInput? context = null,
         [Description("Max recalled memories (default 10).")] int recallLimit = 10,
@@ -112,6 +119,7 @@ public sealed class MemoryRecallTool
 
             response.RecallSummary = await BuildRecallSummaryAsync(result.OverflowMemories, summarizeOverflow, cancellationToken);
 
+            await AttachCodebaseStatusAsync(response, cancellationToken);
             await AttachUpdateNoticeAsync(response, cancellationToken);
             return response;
         }
@@ -182,6 +190,35 @@ public sealed class MemoryRecallTool
         }
 
         return summary;
+    }
+
+    /// <summary>
+    /// Attaches the codebase status for the current workspace. Isolated in its own
+    /// try block so an indexer query failure can never break recall itself.
+    /// </summary>
+    private async Task AttachCodebaseStatusAsync(MemoryRecallResponse response, CancellationToken cancellationToken)
+    {
+        if (_codebaseIndex is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var stats = await _codebaseIndex.GetStatsAsync(cancellationToken);
+            response.Codebase = new CodebaseStatusResponse(
+                _codebaseIndex.ProjectRoot,
+                stats.LastIndexedAt,
+                stats.FileCount,
+                stats.ChunkCount,
+                WatcherActive: _watcher?.IsActive ?? false,
+                PendingFiles: 0,
+                stats.DbPath);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to attach codebase status to memory_recall");
+        }
     }
 
     /// <summary>
