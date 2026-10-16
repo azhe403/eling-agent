@@ -31,7 +31,10 @@ async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
 async function errorMessage(res: Response): Promise<string> {
   // The endpoints answer with a plain-text reason, which is far more useful
   // than a bare status code — a rejected path names the offender.
-  const body = await res.text().catch(() => "")
+  const body = await res.text().catch(() => {
+    console.debug("error body unreadable, falling back to status code")
+    return ""
+  })
   return body.trim() || `API returned ${res.status}`
 }
 

@@ -26,6 +26,7 @@ function getSidebarOpenSnapshot(): boolean {
     // anything other than the literal string "false" means "open".
     return !isSidebarCollapsed(stored)
   } catch {
+    console.debug("sidebar stored state unreadable, falling back to open")
     return true
   }
 }

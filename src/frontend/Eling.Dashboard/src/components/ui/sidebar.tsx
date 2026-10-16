@@ -91,7 +91,9 @@ function SidebarProvider({
         } else {
           document.documentElement.setAttribute("data-sidebar-collapsed", "true")
         }
-      } catch {}
+      } catch {
+        console.debug("sidebar state storage write failed")
+      }
     },
     [setOpenProp, open]
   )
