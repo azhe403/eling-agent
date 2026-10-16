@@ -2,7 +2,9 @@
 # Path-aware & anti-locked pre-push: test the layer touched plus every layer
 # it depends on (same model as pre-commit: core / backend=+core /
 # desktop=+backend+core / dashboard=frontend only).
-# - isolated build/test via ELING_OUTPUT_ROOT=.bin-test avoids .bin lock collisions
+# - isolated build/test via ELING_OUTPUT_ROOT=.bin-hook-<pid> (disposable
+#   per-run root) avoids .bin lock collisions with the dev server,
+#   manual runs, MCP hosts, and concurrent hooks
 # - after the checks pass, publish a Release build into ~/.local/bin
 # Bypass: SKIP_HOOK=1 git push --no-verify  or  FULL_CHECK=1 git push
 
@@ -10,6 +12,34 @@ if [ "$SKIP_HOOK" = "1" ]; then
   echo "→ SKIP_HOOK=1: skipping pre-push checks"
   exit 0
 fi
+
+# Anti-lock: every dotnet invocation below builds/tests under a disposable
+# per-run root (.bin-hook-<pid>), so it can never collide with the dev
+# server (.bin), manual runs (.bin-test), MCP hosts, or another hook
+# running concurrently. NOTE: plain `export ELING_OUTPUT_ROOT` does not
+# work here — package.json scripts hardcode it via cross-env — so the
+# dotnet calls below set it inline (same precedent as scripts/ci-check.sh).
+# Already gitignored (.bin*) and auto-cleaned by scripts/clean-bin.ps1.
+HOOK_ROOT=".bin-hook-$$"
+trap 'rm -rf "$HOOK_ROOT"' EXIT INT TERM
+
+# Same retry posture as pre-commit: the Core suite's failure mode is
+# intermittent (parallel races, mid-edit compile windows), so one flake
+# should not block a push; a real failure still fails all three attempts.
+# Runs under $HOOK_ROOT (see above) so retries never meet a locked output.
+# Defined before FULL_CHECK because that block calls it.
+run_core_tests() {
+  attempt=1
+  while [ "$attempt" -le 3 ]; do
+    echo "→ core tests (attempt $attempt/3)"
+    if ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if [ "$attempt" -le 3 ]; then sleep 3; fi
+  done
+  return 1
+}
 
 CHANGED=$(git diff --name-only "@{u}..HEAD" 2>/dev/null || git diff --name-only "origin/main...HEAD" 2>/dev/null || git diff --name-only HEAD~1 2>/dev/null)
 
@@ -38,29 +68,17 @@ run_publish() {
 }
 
 if [ "$FULL_CHECK" = "1" ]; then
-  echo "→ FULL_CHECK=1: running full build and tests"
-  pnpm build:backend || exit 1
-  pnpm test:backend || exit 1
+  echo "→ FULL_CHECK=1: running full build and tests (isolated output $HOOK_ROOT)"
+  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet build Eling.slnx || exit 1
+  run_core_tests || exit 1
+  echo "→ api layer: test:backend:api"
+  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests || exit 1
+  echo "→ desktop layer: test:backend:desktop"
+  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Desktop.Tests/Eling.Desktop.Tests.csproj || exit 1
   pnpm build:frontend || exit 1
   run_publish || exit 1
   exit 0
 fi
-
-# Same retry posture as pre-commit: the Core suite's failure mode is
-# intermittent (parallel races, mid-edit compile windows), so one flake
-# should not block a push; a real failure still fails all three attempts.
-run_core_tests() {
-  attempt=1
-  while [ "$attempt" -le 3 ]; do
-    echo "→ core tests (attempt $attempt/3)"
-    if pnpm run test:backend:core; then
-      return 0
-    fi
-    attempt=$((attempt + 1))
-    if [ "$attempt" -le 3 ]; then sleep 3; fi
-  done
-  return 1
-}
 
 NEED_FRONTEND=0
 NEED_CORE=0
@@ -127,14 +145,14 @@ if [ "$NEED_CORE" = "1" ]; then
 fi
 
 if [ "$NEED_API" = "1" ]; then
-  echo "→ api layer: building backend + test:backend:api (isolated output .bin-test)"
-  pnpm build:backend || exit 1
-  pnpm run test:backend:api || exit 1
+  echo "→ api layer: building backend + test:backend:api (isolated output $HOOK_ROOT)"
+  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet build Eling.slnx || exit 1
+  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests || exit 1
 fi
 
 if [ "$NEED_DESKTOP" = "1" ]; then
-  echo "→ desktop layer: test:backend:desktop"
-  pnpm run test:backend:desktop || exit 1
+  echo "→ desktop layer: test:backend:desktop (isolated output $HOOK_ROOT)"
+  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Desktop.Tests/Eling.Desktop.Tests.csproj || exit 1
 fi
 
 if [ "$NEED_FRONTEND" = "1" ]; then
