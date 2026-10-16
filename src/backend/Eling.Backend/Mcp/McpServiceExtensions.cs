@@ -1,3 +1,4 @@
+using Eling.Backend;
 using Eling.Backend.Bootstrap;
 using Eling.Backend.Codebase;
 using Eling.Backend.FileSystem;
@@ -266,6 +267,16 @@ public static class McpServiceExtensions
         services.TryAddSingleton<IAuditIndex>(sp =>
             sp.GetRequiredService<AuditTrailWriter>().Index ?? throw new InvalidOperationException(
                 "The audit index failed to initialize; the audit read API has no cache to answer from."));
+        // The store watcher behind the per-trail live topics ("audit:changes" /
+        // "audit:access"). Registered on every opted-in host but started by the
+        // dashboard owner only (see DashboardRoutes): peers own no SSE
+        // subscribers, and an unstarted watcher holds no file handles. The
+        // factory resolves lazily, so registration order against the
+        // broadcaster does not matter.
+        services.TryAddSingleton(sp => new AuditDirWatcher(
+            CentralAuditDirectory.Resolve(),
+            sp.GetRequiredService<MemoryChangeBroadcaster>(),
+            sp.GetService<ILogger<AuditDirWatcher>>()));
         return services;
     }
 

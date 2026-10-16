@@ -45,6 +45,7 @@ public static class DashboardRoutes
         // codebase dir ("codebase" events on any index rebuild).
         app.Services.GetService<RuntimeDirWatcher>()?.Start();
         app.Services.GetService<CodebaseDirWatcher>()?.Start();
+        app.Services.GetService<AuditDirWatcher>()?.Start();
 
         app.MapGet("/health", () => Results.Ok(new { status = "Healthy", pid = Environment.ProcessId }));
         app.MapSseEvents();
