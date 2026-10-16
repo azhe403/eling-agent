@@ -1,15 +1,16 @@
+using Eling.Core.Exceptions;
 using Eling.Core.Memory.Storage;
 
 namespace Eling.Core.Memory;
+
 public class MemoryMaintenanceService : IMemoryMaintenanceService
 {
-    private readonly IMemoryService _service;
-    private readonly IMemoryIndex _index;
+    private readonly IScopedMemoryService _scoped;
 
-    public MemoryMaintenanceService(IMemoryService service, IMemoryIndex index)
+    public MemoryMaintenanceService(IScopedMemoryService scoped)
     {
-        _service = service;
-        _index = index;
+        ArgumentNullException.ThrowIfNull(scoped);
+        _scoped = scoped;
     }
 
     public async Task<MaintenanceReport> RunAsync(MaintenanceRequest request, CancellationToken cancellationToken = default)
@@ -24,8 +25,12 @@ public class MemoryMaintenanceService : IMemoryMaintenanceService
             throw new ArgumentOutOfRangeException(nameof(request), "staleDays must be >= 0.");
         }
 
+        // Merged scans every tier; each scope gets its OWN storage list, so a
+        // finding's scope label is always truthful. An unwired local shard or
+        // an uninitialized project scope contributes an empty scan, never a
+        // crash and never another scope's list.
         var scopes = request.Scope == MaintenanceScope.Merged
-            ? new[] { MaintenanceScope.Project, MaintenanceScope.Global }
+            ? new[] { MaintenanceScope.ProjectLocal, MaintenanceScope.Project, MaintenanceScope.Global }
             : new[] { request.Scope };
 
         var allFindings = new List<MaintenanceFinding>();
@@ -34,7 +39,13 @@ public class MemoryMaintenanceService : IMemoryMaintenanceService
         foreach (var scope in scopes)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var scoped = await _service.ListAllAsync();
+            var service = ResolveService(scope);
+            if (service is null)
+            {
+                continue;
+            }
+
+            var scoped = await service.ListAllAsync();
             stats.MemoriesScanned += scoped.Count;
             var scopeFindings = await RunForScopeAsync(scope, scoped, request, stats, cancellationToken);
             allFindings.AddRange(scopeFindings);
@@ -103,6 +114,31 @@ public class MemoryMaintenanceService : IMemoryMaintenanceService
         }
 
         return findings;
+    }
+
+    private IMemoryService? ResolveService(MaintenanceScope scope)
+    {
+        switch (scope)
+        {
+            case MaintenanceScope.ProjectLocal:
+                return _scoped.LocalService;
+            case MaintenanceScope.Global:
+                return _scoped.GlobalService;
+            case MaintenanceScope.Project:
+                // An uninitialized project scope has nothing to scan; mirror
+                // IScopedMemoryService.ListAsync("project"), which returns
+                // empty instead of throwing.
+                try
+                {
+                    return _scoped.ProjectService;
+                }
+                catch (ProjectScopeNotInitializedException)
+                {
+                    return null;
+                }
+            default:
+                return null;
+        }
     }
 
     private static List<MaintenanceFinding> DetectExactDuplicates(MaintenanceScope scope, IReadOnlyCollection<Memory> memories)
@@ -251,6 +287,9 @@ public class MemoryMaintenanceService : IMemoryMaintenanceService
 
     private static List<MaintenanceFinding> DetectReconcileCandidates(MaintenanceScope scope)
     {
+        // Index reconcile is not implemented: there is nothing to find yet, and
+        // ApplyApprovedAsync reports any stale finding as a noop instead of
+        // silently pretending it ran.
         return new List<MaintenanceFinding>();
     }
 
@@ -303,14 +342,22 @@ public class MemoryMaintenanceService : IMemoryMaintenanceService
 
     private async Task ApplyMergeAsync(MaintenanceFinding finding, MaintenanceStats stats, CancellationToken cancellationToken)
     {
+        var service = ResolveService(finding.Scope);
+        if (service is null)
+        {
+            finding.Result = $"skipped: scope {finding.Scope} not available";
+            stats.Skipped++;
+            return;
+        }
+
         var memories = new List<Memory>();
         foreach (var idValue in finding.MemoryIds)
         {
-            var memory = await _service.GetByIdAsync(MemoryId.Parse(idValue));
+            var memory = await service.GetByIdAsync(MemoryId.Parse(idValue));
             if (memory is null)
             {
-                stats.Skipped++;
                 finding.Result = $"skipped: missing {idValue}";
+                stats.Skipped++;
                 return;
             }
             memories.Add(memory);
@@ -330,7 +377,7 @@ public class MemoryMaintenanceService : IMemoryMaintenanceService
             .Select(m => m.Source)
             .FirstOrDefault();
 
-        await _service.UpdateAsync(
+        await service.UpdateAsync(
             survivor.Id,
             content: survivor.Content,
             type: null,
@@ -341,7 +388,7 @@ public class MemoryMaintenanceService : IMemoryMaintenanceService
 
         foreach (var a in absorbed)
         {
-            await _service.UpdateAsync(
+            await service.UpdateAsync(
                 a.Id,
                 content: null,
                 type: null,
@@ -356,11 +403,20 @@ public class MemoryMaintenanceService : IMemoryMaintenanceService
 
     private async Task ApplyDeleteAsync(MaintenanceFinding finding, MaintenanceStats stats, CancellationToken cancellationToken)
     {
+        var service = ResolveService(finding.Scope);
+        if (service is null)
+        {
+            finding.Result = $"skipped: scope {finding.Scope} not available";
+            stats.Skipped++;
+            return;
+        }
+
         foreach (var idValue in finding.MemoryIds)
         {
-            await _service.DeleteAsync(MemoryId.Parse(idValue));
+            await service.DeleteAsync(MemoryId.Parse(idValue));
             stats.Deleted++;
         }
+
         finding.Result = "deleted";
     }
 }

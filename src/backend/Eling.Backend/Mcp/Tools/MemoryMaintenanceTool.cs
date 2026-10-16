@@ -34,9 +34,10 @@ public sealed class MemoryMaintenanceTool
     {
         try
         {
-            var maintenanceScope = scope?.ToLowerInvariant() switch
+            var maintenanceScope = scope?.Trim().ToLowerInvariant() switch
             {
                 "project" => MaintenanceScope.Project,
+                "project-local" or "local" => MaintenanceScope.ProjectLocal,
                 "global" => MaintenanceScope.Global,
                 _ => MaintenanceScope.Merged
             };
