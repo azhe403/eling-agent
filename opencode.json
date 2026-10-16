@@ -29,7 +29,7 @@
         "command": [
           "eling-backend"
         ],
-        "disabled": false
+        "disabled": true
       },
       "shadcn": {
         "type": "local",
@@ -40,6 +40,15 @@
         ],
         "disabled": false
       }
+    },
+    "shadcn": {
+      "type": "local",
+      "command": [
+        "npx",
+        "shadcn@latest",
+        "mcp"
+      ],
+      "enabled": true
     }
   }
 }

@@ -1,11 +1,17 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { RefreshCw } from "lucide-react"
 
+import { DashboardHeader } from "@/components/dashboard-header"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useMemoriesSse } from "@/hooks/use-memories-sse"
+import { utcToLocal } from "@/lib/date-utils"
+import { DateRangePicker } from "@/components/ui/date-range-picker"
 
 type AuditEntry = {
   timestamp: string
@@ -59,55 +65,35 @@ type TrailKey = (typeof TRAILS)[number]["key"]
 // the two bounded windows itself — newest-first — on one combined cursor.
 const ALL_TRAIL_KEYS = ["changes", "access"] as const
 
-const LAST_AUDIT_VIEW_KEY = "eling-audit-trail-view"
-
-function loadLastView(): { trail?: string; actor?: string; action?: string } {
-  try {
-    const raw = localStorage.getItem(LAST_AUDIT_VIEW_KEY)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw) as { trail?: unknown; actor?: unknown; action?: unknown }
-    return {
-      trail: typeof parsed.trail === "string" ? parsed.trail : undefined,
-      actor: typeof parsed.actor === "string" ? parsed.actor : undefined,
-      action: typeof parsed.action === "string" ? parsed.action : undefined,
-    }
-  } catch {
-    return {}
-  }
-}
-
-function saveLastView(view: { trail: TrailKey; actor: string; action: string }): void {
-  try {
-    localStorage.setItem(LAST_AUDIT_VIEW_KEY, JSON.stringify(view))
-  } catch {
-    // Private browsing or full storage — the view is simply not restored.
-  }
-}
-
 function isoDaysAgo(days: number): string {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
 }
 
-function formatTimestamp(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString()
+function isTrailKey(value: string | null): value is TrailKey {
+  return value === "all" || value === "changes" || value === "access"
 }
 
 /**
- * The audit trail's historical view (design §11). Live streaming and the
- * before/after diff modal are deliberately not here yet — this page reads the
- * same bounded windows the API requires (design §9) and pages by cursor.
+ * The audit trail's historical view (design §11). Filters live in the URL
+ * (?trail=all&q=...), like the other dashboard list pages, so a reload, a
+ * shared link, and the back button all land on the same view. Live streaming
+ * and the before/after diff modal are deliberately not here yet — this page
+ * reads the same bounded windows the API requires (design §9) and pages by
+ * cursor.
  */
 export function AuditTrailList() {
-  const persisted = loadLastView()
-  const [trail, setTrailState] = useState<TrailKey>(() =>
-    persisted.trail === "access" || persisted.trail === "all" ? persisted.trail : "changes",
-  )
-  const [from, setFrom] = useState(() => isoDaysAgo(7))
-  const [to, setTo] = useState(() => new Date().toISOString())
-  const [actor, setActorState] = useState(() => persisted.actor ?? "")
-  const [action, setActionState] = useState(() => persisted.action ?? "")
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  // Filter state lives in the URL, like the workspaces/codebase pages: absent
+  // params mean the default view, which keeps shared URLs clean.
+  const trailParam = searchParams.get("trail")
+  const trail: TrailKey = isTrailKey(trailParam) ? trailParam : "all"
+  const actor = searchParams.get("actor") ?? ""
+  const action = searchParams.get("action") ?? ""
+  const from = searchParams.get("from") ?? isoDaysAgo(7)
+  const to = searchParams.get("to") ?? new Date().toISOString()
 
   const [items, setItems] = useState<AuditEntry[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -117,6 +103,17 @@ export function AuditTrailList() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const requestId = useRef(0)
+
+  const setParam = useCallback(
+    (key: "trail" | "actor" | "action" | "from" | "to", value: string | null) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (value === null || value === "") params.delete(key)
+      else params.set(key, value)
+      const qs = params.toString()
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    },
+    [router, pathname, searchParams],
+  )
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams({ from, to, limit: "50" })
@@ -169,22 +166,6 @@ export function AuditTrailList() {
     [trail, queryString],
   )
 
-  // Trail/actor/action setters persist through the same key the view
-  // restores from on mount (same localStorage habit as memories/scope.ts).
-  const setTrail = (t: TrailKey) => {
-    setTrailState(t)
-    setLoading(true)
-    saveLastView({ trail: t, actor, action })
-  }
-  const setActor = (v: string) => {
-    setActorState(v)
-    saveLastView({ trail, actor: v, action })
-  }
-  const setAction = (v: string) => {
-    setActionState(v)
-    saveLastView({ trail, actor, action: v })
-  }
-
   useEffect(() => {
     let isMounted = true
 
@@ -201,135 +182,198 @@ export function AuditTrailList() {
     }
   }, [load])
 
-  return (
-    <div className="flex flex-1 flex-col gap-4 p-4 pt-4">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold">Audit Trail</h1>
-        <p className="text-sm text-muted-foreground">
-          Every recorded Eling operation — state changes and reads — for the
-          selected window. The API only answers bounded windows.
-        </p>
-      </div>
+  // Live view (design §10): reuse the memories SSE stream — mutations and
+  // lifecycle changes already broadcast there, so the page refetches its
+  // window on those events with no new backend plumbing. Access-only
+  // operations broadcast nothing (reads change no state), so the access view
+  // stays refresh-driven until a dedicated audit topic exists.
+  //
+  // Broadcasts arrive in bursts (one memory_save can emit several), so live
+  // refetches are debounced: an event schedules a reload 2s out, and a later
+  // event inside that window pushes it back. One refetch per burst instead of
+  // one per event. The timer lives in a ref; the load callback goes through
+  // a ref too, so the SSE subscription below is mounted once and the lint's
+  // no-setState-in-effect rule holds.
+  const loadRef = useRef(load)
+  useEffect(() => {
+    loadRef.current = load
+  }, [load])
+  const liveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scheduleLiveReload = useCallback(() => {
+    if (liveTimer.current !== null) clearTimeout(liveTimer.current)
+    liveTimer.current = setTimeout(() => {
+      liveTimer.current = null
+      setLoading(true)
+      void loadRef.current(null)
+    }, 2000)
+  }, [])
+  useEffect(
+    () => () => {
+      if (liveTimer.current !== null) clearTimeout(liveTimer.current)
+    },
+    [],
+  )
+  const { status: sseStatus } = useMemoriesSse(scheduleLiveReload)
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1 rounded-lg border p-1">
-          {TRAILS.map((t) => (
+  // Wrapper mirrors the other dashboard list pages: the content column is
+  // min-width zero so it never pushes past the sidebar; only the table
+  // wrapper scrolls horizontally.
+  const contentColumn = "flex min-w-0 w-full flex-1 flex-col gap-4 p-4"
+
+  return (
+    <div className="flex w-full flex-col">
+      <DashboardHeader label="Audit Trail">
+        <span
+          className={
+            sseStatus === "connected"
+              ? "rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400"
+              : "rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+          }
+          title={
+            sseStatus === "connected"
+              ? "Live: the list refetches when a mutation is broadcast"
+              : sseStatus === "connecting"
+                ? "Connecting to the live event stream…"
+                : "Live stream unavailable — use Refresh"
+          }
+        >
+          {sseStatus === "connected" ? "● Live" : sseStatus === "connecting" ? "● Connecting" : "○ Offline"}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            setLoading(true)
+            void load(null)
+          }}
+          disabled={loading}
+        >
+          <RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} />
+          <span className="hidden sm:inline-block">Refresh</span>
+        </Button>
+      </DashboardHeader>
+
+      <div className={contentColumn}>
+        <div className="sticky top-16 z-10 flex min-w-0 flex-wrap items-center gap-2 bg-background py-1">
+          <ButtonGroup>
+            {TRAILS.map((t) => (
+              <Button
+                key={t.key}
+                size="sm"
+                variant={trail === t.key ? "default" : "outline"}
+                onClick={() => {
+                  setLoading(true)
+                  setParam("trail", t.key === "all" ? null : t.key)
+                }}
+              >
+                {t.label}
+              </Button>
+            ))}
+          </ButtonGroup>
+          <div className="flex items-center gap-2">
+            <DateRangePicker
+              from={from}
+              to={to}
+              onChange={(f, t) => {
+                setParam("from", f)
+                setParam("to", t)
+              }}
+              disabled={loading}
+            />
+          </div>
+          <Input
+            aria-label="Actor filter"
+            className="w-40"
+            value={actor}
+            onChange={(e) => setParam("actor", e.target.value)}
+            placeholder="actor"
+          />
+          <Input
+            aria-label="Action filter"
+            className="w-44"
+            value={action}
+            onChange={(e) => setParam("action", e.target.value)}
+            placeholder="action (e.g. memory_save)"
+          />
+        </div>
+
+        {error && (
+          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+
+        <div className="overflow-x-auto rounded-xl border">
+          <table className="w-full min-w-max text-sm">
+            <thead>
+              <tr className="border-b text-left text-muted-foreground">
+                <th className="p-3">Timestamp</th>
+                <th className="p-3">Type</th>
+                <th className="p-3">Actor</th>
+                <th className="p-3">Category</th>
+                <th className="p-3">Action</th>
+                <th className="p-3">Scope</th>
+                <th className="p-3">Target</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && items.length === 0 && (
+                <tr>
+                  <td className="p-3" colSpan={7}>
+                    <Skeleton className="h-6 w-full" />
+                  </td>
+                </tr>
+              )}
+              {!loading && items.length === 0 && !error && (
+                <tr>
+                  <td className="p-6 text-center text-muted-foreground" colSpan={7}>
+                    No entries in this window. Save or search a memory through the
+                    MCP tools or the dashboard, then refresh.
+                  </td>
+                </tr>
+              )}
+              {items.map((e, i) => (
+                <tr className="border-b last:border-0" key={`${e.timestamp}-${e.action}-${i}`}>
+                  <td className="p-3 whitespace-nowrap">{utcToLocal(e.timestamp) || e.timestamp}</td>
+                  <td className="p-3">
+                    <span
+                      className={
+                        e.trail === "change"
+                          ? "rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400"
+                          : "rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-medium text-sky-600 dark:text-sky-400"
+                      }
+                    >
+                      {e.trail === "change" ? "change" : e.trail === "access" ? "access" : e.trail}
+                    </span>
+                  </td>
+                  <td className="p-3">{e.actor}</td>
+                  <td className="p-3">{e.category}</td>
+                  <td className="p-3 font-mono text-xs">{e.action}</td>
+                  <td className="p-3">{e.scope ?? "—"}</td>
+                  <td className="max-w-[240px] truncate p-3 font-mono text-xs">
+                    {e.target ?? e.path ?? "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {nextCursor && (
+          <div className="flex justify-center">
             <Button
-              key={t.key}
-              size="sm"
-              variant={trail === t.key ? "default" : "ghost"}
+              variant="outline"
               onClick={() => {
                 setLoading(true)
-                setTrail(t.key)
+                void load(nextCursor)
               }}
+              disabled={loading}
             >
-              {t.label}
+              {loading ? "Loading…" : "Load more"}
             </Button>
-          ))}
-        </div>
-        <Input
-          aria-label="From (ISO-8601 UTC)"
-          className="w-64"
-          value={from}
-          onChange={(e) => setFrom(e.target.value)}
-          placeholder="from (ISO-8601 UTC)"
-        />
-        <Input
-          aria-label="To (ISO-8601 UTC)"
-          className="w-64"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          placeholder="to (ISO-8601 UTC)"
-        />
-        <Input
-          aria-label="Actor filter"
-          className="w-40"
-          value={actor}
-          onChange={(e) => setActor(e.target.value)}
-          placeholder="actor"
-        />
-        <Input
-          aria-label="Action filter"
-          className="w-44"
-          value={action}
-          onChange={(e) => setAction(e.target.value)}
-          placeholder="action (e.g. memory_save)"
-        />
-        <Button size="sm" variant="outline" onClick={() => { setLoading(true); void load(null) }} disabled={loading}>
-          <RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} />
-          Refresh
-        </Button>
+          </div>
+        )}
       </div>
-
-      {error && (
-        <div className="rounded-lg border border-destructive/40 p-3 text-sm text-destructive">
-          {error}
-        </div>
-      )}
-
-      <div className="rounded-xl border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b text-left text-muted-foreground">
-              <th className="p-3">Timestamp</th>
-              <th className="p-3">Type</th>
-              <th className="p-3">Actor</th>
-              <th className="p-3">Category</th>
-              <th className="p-3">Action</th>
-              <th className="p-3">Scope</th>
-              <th className="p-3">Target</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && items.length === 0 && (
-              <tr>
-                <td className="p-3" colSpan={7}>
-                  <Skeleton className="h-6 w-full" />
-                </td>
-              </tr>
-            )}
-            {!loading && items.length === 0 && !error && (
-              <tr>
-                <td className="p-6 text-center text-muted-foreground" colSpan={7}>
-                  No entries in this window. Save or search a memory through the
-                  MCP tools or the dashboard, then refresh.
-                </td>
-              </tr>
-            )}
-            {items.map((e, i) => (
-              <tr className="border-b last:border-0" key={`${e.timestamp}-${e.action}-${i}`}>
-                <td className="p-3 whitespace-nowrap">{formatTimestamp(e.timestamp)}</td>
-                <td className="p-3">
-                  <span
-                    className={
-                      e.trail === "change"
-                        ? "rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400"
-                        : "rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-medium text-sky-600 dark:text-sky-400"
-                    }
-                  >
-                    {e.trail === "change" ? "change" : e.trail === "access" ? "access" : e.trail}
-                  </span>
-                </td>
-                <td className="p-3">{e.actor}</td>
-                <td className="p-3">{e.category}</td>
-                <td className="p-3 font-mono text-xs">{e.action}</td>
-                <td className="p-3">{e.scope ?? "—"}</td>
-                <td className="p-3 max-w-[240px] truncate font-mono text-xs">
-                  {e.target ?? e.path ?? "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {nextCursor && (
-        <div className="flex justify-center">
-          <Button variant="outline" onClick={() => { setLoading(true); void load(nextCursor) }} disabled={loading}>
-            {loading ? "Loading…" : "Load more"}
-          </Button>
-        </div>
-      )}
     </div>
   )
 }
