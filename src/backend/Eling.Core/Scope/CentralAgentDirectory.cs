@@ -16,7 +16,7 @@ public static class CentralAgentDirectory
             var customPath = string.IsNullOrWhiteSpace(subDirectory)
                 ? customBase
                 : Path.Combine(customBase, subDirectory);
-            try { Directory.CreateDirectory(customPath); } catch { }
+            try { Directory.CreateDirectory(customPath); } catch { /* Best-effort directory ensure; caller proceeds with the path regardless. */ }
             return customPath;
         }
 
@@ -31,6 +31,7 @@ public static class CentralAgentDirectory
         }
         catch
         {
+            // Best-effort directory ensure; caller proceeds with the path regardless.
         }
         return path;
     }

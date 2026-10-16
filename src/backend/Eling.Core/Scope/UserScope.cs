@@ -1,3 +1,5 @@
+using Serilog;
+
 namespace Eling.Core.Scope;
 
 public sealed class UserScope
@@ -101,8 +103,9 @@ public sealed class UserScope
                 File.Copy(legacyIndex, targetIndex);
             }
         }
-        catch
+        catch(Exception ex)
         {
+            Log.Error(ex, "Failed to migrate legacy data");
             // Best-effort migration: a failure here must not fail boot.
         }
     }

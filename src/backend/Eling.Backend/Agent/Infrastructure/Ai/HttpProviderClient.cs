@@ -108,6 +108,7 @@ public sealed class HttpProviderClient(HttpClient http, ILogger<HttpProviderClie
         }
         catch
         {
+            // Body unreadable; empty excerpt signals caller to omit provider detail.
             return string.Empty;
         }
     }

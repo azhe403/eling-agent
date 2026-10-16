@@ -907,8 +907,10 @@ public sealed class RuntimeRegistry : IDisposable
                             }
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        // Best-effort sweep; ignore per-file failures and continue.
+                        _logger.LogDebug(ex, "Runtime sweep skipped file {File}", file);
                     }
                 }
             }

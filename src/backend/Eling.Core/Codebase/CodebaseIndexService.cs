@@ -95,8 +95,9 @@ public sealed class CodebaseIndexService
             var stats = await GetStatsAsync(ct);
             return stats.FileCount > 0;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogDebug(ex, "Index initialization probe failed for {DbPath}; treating index as uninitialized.", DbPath);
             return false;
         }
     }

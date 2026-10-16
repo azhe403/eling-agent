@@ -58,7 +58,7 @@ public static class StoreMigration
                         File.Move(file, dest);
                     }
                 }
-                try { Directory.Delete(legacyDir, true); } catch { }
+                try { Directory.Delete(legacyDir, true); } catch (Exception ex) { logger.LogDebug(ex, "Skipped best-effort cleanup of legacy {Label} directory", label); }
                 return;
             }
 

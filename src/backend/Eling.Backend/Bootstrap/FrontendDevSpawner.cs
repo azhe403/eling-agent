@@ -196,6 +196,7 @@ internal static class FrontendDevSpawner
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
+            // Probe failure is expected control flow (frontend down/starting); caller treats false as "not responding".
             return false;
         }
     }

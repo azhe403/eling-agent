@@ -120,6 +120,7 @@ public sealed class MemoryProjectScopePolicyTool
         }
         catch (KeyNotFoundException ex)
         {
+            _logger?.LogDebug(ex, "memory_project_scope_policy target not found for {Target}", normalizedTarget);
             return Error(normalizedTarget, "not_found", ex.Message);
         }
         catch (Exception ex)

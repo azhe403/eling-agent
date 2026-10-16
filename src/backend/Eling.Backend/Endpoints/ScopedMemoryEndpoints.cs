@@ -398,6 +398,7 @@ public static class ScopedMemoryEndpoints
             }
             catch (ArgumentException)
             {
+                // Malformed root path: skip it; downstream treats it as an uninitialized root.
                 continue;
             }
             if (seen.Add(normalized)) roots.Add(normalized);
@@ -659,6 +660,7 @@ public static class ScopedMemoryEndpoints
 
     private static bool TryParseMemoryId(string id, out MemoryId memoryId)
     {
+        // Try-pattern: invalid id is a validation failure (caller returns BadRequest), not an error.
         try { memoryId = MemoryId.Parse(id); return true; } catch (ArgumentException) { memoryId = default; return false; }
     }
 }

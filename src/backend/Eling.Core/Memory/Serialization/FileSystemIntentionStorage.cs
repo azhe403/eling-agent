@@ -156,6 +156,7 @@ public class FileSystemIntentionStorage : IIntentionStorage
         }
         catch
         {
+            // Malformed front-matter; caller skips this file (treated as absent).
             return null;
         }
 

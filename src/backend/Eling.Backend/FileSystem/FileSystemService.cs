@@ -868,6 +868,7 @@ public sealed class FileSystemService : IFileSystemService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // Treat unreadable files as binary so they are never served as text.
             return true;
         }
     }
@@ -985,6 +986,7 @@ public sealed class FileSystemService : IFileSystemService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // Treat unreadable paths as non-links.
             isDirectory = false;
             return false;
         }
@@ -1043,6 +1045,7 @@ public sealed class FileSystemService : IFileSystemService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // Skip inaccessible directories; return a partial listing.
             return result;
         }
 

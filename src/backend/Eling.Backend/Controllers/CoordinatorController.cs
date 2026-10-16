@@ -121,6 +121,7 @@ public sealed class CoordinatorController(
             }
             catch
             {
+                // Unreadable/corrupt index: fall back to zero-count DTO so one bad DB never fails the batch.
                 result.Add(new ProjectCodebaseStatusDto(normalized, 0, 0, null, dbPath));
             }
         }

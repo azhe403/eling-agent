@@ -40,6 +40,7 @@ internal static class DevModeDetector
         }
         catch
         {
+            // Detection probe failed (port closed/timed out): not dev mode, no diagnostics needed.
             return false;
         }
     }

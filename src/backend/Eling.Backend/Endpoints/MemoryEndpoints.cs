@@ -201,6 +201,7 @@ public static class MemoryEndpoints
 
     private static bool TryParseMemoryId(string id, out MemoryId memoryId)
     {
+        // Try-pattern: invalid id is a validation failure (caller returns BadRequest), not an error.
         try
         {
             memoryId = MemoryId.Parse(id);

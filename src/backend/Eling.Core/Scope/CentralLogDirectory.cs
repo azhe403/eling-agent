@@ -19,6 +19,7 @@ public static class CentralLogDirectory
         }
         catch
         {
+            // Best-effort directory ensure; caller proceeds with the path regardless.
         }
         return path;
     }

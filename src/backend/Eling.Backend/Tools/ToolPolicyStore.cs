@@ -244,6 +244,7 @@ public sealed class ToolPolicyStore
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            _logger.LogDebug(ex, "Could not read tool policy stamp from {Path}; treating as absent", _filePath);
             return null;
         }
     }

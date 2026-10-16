@@ -20,6 +20,7 @@ public static class CentralAuditDirectory
         }
         catch
         {
+            // Best-effort directory ensure; caller proceeds with the path regardless.
         }
         return path;
     }

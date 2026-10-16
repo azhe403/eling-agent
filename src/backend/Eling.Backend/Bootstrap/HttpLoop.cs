@@ -100,8 +100,10 @@ public static class HttpLoop
                     {
                         await app.DisposeAsync();
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        // Best-effort teardown on the restart path; loop continues regardless.
+                        logger.LogDebug(ex, "WebApplication dispose failed during HTTP host restart");
                     }
                 }
             }
