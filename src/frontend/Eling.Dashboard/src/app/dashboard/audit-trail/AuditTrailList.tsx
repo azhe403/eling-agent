@@ -87,13 +87,19 @@ export function AuditTrailList() {
   const searchParams = useSearchParams()
 
   // Filter state lives in the URL, like the workspaces/codebase pages: absent
-  // params mean the default view, which keeps shared URLs clean.
+  // params mean the default view, which keeps shared URLs clean. The defaults
+  // are computed ONCE (state initializers): deriving them inline would mint a
+  // fresh ISO string on every render, giving queryString/load a new identity
+  // each time and re-firing the mount effect below forever — an infinite
+  // refetch loop that reads in the backend log as continuous polling.
+  const [defaultFrom] = useState(() => isoDaysAgo(7))
+  const [defaultTo] = useState(() => new Date().toISOString())
   const trailParam = searchParams.get("trail")
   const trail: TrailKey = isTrailKey(trailParam) ? trailParam : "all"
   const actor = searchParams.get("actor") ?? ""
   const action = searchParams.get("action") ?? ""
-  const from = searchParams.get("from") ?? isoDaysAgo(7)
-  const to = searchParams.get("to") ?? new Date().toISOString()
+  const from = searchParams.get("from") ?? defaultFrom
+  const to = searchParams.get("to") ?? defaultTo
 
   const [items, setItems] = useState<AuditEntry[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -213,7 +219,18 @@ export function AuditTrailList() {
     },
     [],
   )
-  const { status: sseStatus } = useMemoriesSse(scheduleLiveReload)
+  // The subscription is the store itself, watched: the backend's audit-dir
+  // watcher broadcasts "audit:changes"/"audit:access" when that trail's
+  // JSONL grows, from whichever process wrote it — including MCP-only peers
+  // whose writes no operation broadcast ever reaches. Each view listens to
+  // exactly its own trail, so an access burst never refetches the changes
+  // view and vice versa. The memories-SSE topics are deliberately gone:
+  // every recorded write lands in the store first, so the store watcher is
+  // the single source of truth for "something new arrived".
+  const { status: sseStatus } = useMemoriesSse(scheduleLiveReload, undefined, [
+    "audit:changes",
+    "audit:access",
+  ])
 
   // Wrapper mirrors the other dashboard list pages: the content column is
   // min-width zero so it never pushes past the sidebar; only the table
@@ -231,7 +248,7 @@ export function AuditTrailList() {
           }
           title={
             sseStatus === "connected"
-              ? "Live: the list refetches when a mutation is broadcast"
+              ? "Live: the list refetches when this trail grows on disk"
               : sseStatus === "connecting"
                 ? "Connecting to the live event stream…"
                 : "Live stream unavailable — use Refresh"

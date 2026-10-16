@@ -5,7 +5,13 @@ import { useEffect, useMemo, useRef, useState } from "react"
 export type SseStatus = "connected" | "connecting" | "error"
 
 /** Notification topics the backend broadcasts on `/api/events/memories`. */
-export type SseTopic = "dashboard" | "coordinator" | "codebase" | "runtimes"
+export type SseTopic =
+  | "dashboard"
+  | "coordinator"
+  | "codebase"
+  | "runtimes"
+  | "audit:changes"
+  | "audit:access"
 
 /**
  * Subscribe to the backend's change SSE stream (`/api/events/memories`).
