@@ -1,8 +1,11 @@
+using System.Diagnostics;
 using Eling.Backend.Codebase;
 using Eling.Backend.Dtos;
+using Eling.Core.Audit;
 using Eling.Core.Codebase;
 using Eling.Core.Memory;
 using Eling.Core.Scope;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -26,8 +29,26 @@ public static class CodebaseEndpoints
         return group;
     }
 
-    private static async Task<IResult> GetStatusAsync(CodebaseIndexService svc, Bootstrap.CodebaseWatcherService watcher, RuntimeRegistry registry, ILoggerFactory loggerFactory, string? scope = null, string[]? project = null, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// The audit recorder for an endpoint invocation: resolved from the
+    /// request's own container, so a host built without audit wiring (a
+    /// minimal test host) simply records nothing instead of failing to start
+    /// — the same failure class that once took down every host-based test
+    /// when an unregistered service became a route parameter.
+    /// </summary>
+    private static CodebaseAuditRecorder AuditFor(HttpContext context) =>
+        CodebaseAuditRecorder.Create(context.RequestServices.GetService<IAuditLogger>());
+
+    /// <summary>
+    /// The ambient actor every dashboard endpoint records as (design §5):
+    /// HTTP endpoints are the dashboard surface, whatever client called them.
+    /// </summary>
+    private static AuditActor DashboardActor() => new("dashboard", "dashboard_web");
+
+    private static async Task<IResult> GetStatusAsync(CodebaseIndexService svc, Bootstrap.CodebaseWatcherService watcher, RuntimeRegistry registry, ILoggerFactory loggerFactory, HttpContext context, string? scope = null, string[]? project = null, CancellationToken cancellationToken = default)
     {
+        using var _actor = AuditActorContext.Begin(DashboardActor());
+        var audit = AuditFor(context);
         var logger = loggerFactory.CreateLogger("Eling.Backend.Endpoints.CodebaseEndpoints");
         try
         {
@@ -44,6 +65,7 @@ public static class CodebaseEndpoints
                     : ElingPaths.ResolveCodebaseDbPath(targetRoot))
                 : svc.DbPath;
 
+            await audit.RecordStatusAsync(targetRoot ?? svc.ProjectRoot);
             return TypedResults.Ok(new
             {
                 scope = resolved.EffectiveScope,
@@ -166,11 +188,14 @@ public static class CodebaseEndpoints
         return new CodebaseRebuildRequest(resolved.EffectiveScope, targets, skipped, full);
     }
 
-    private static async Task<IResult> SearchAsync(CodebaseIndexService svc, RuntimeRegistry registry, ILoggerFactory loggerFactory, string? q, int? limit, string? pathPrefix = null, string? scope = null, string[]? project = null, CancellationToken cancellationToken = default)
+    private static async Task<IResult> SearchAsync(CodebaseIndexService svc, RuntimeRegistry registry, ILoggerFactory loggerFactory, HttpContext context, string? q, int? limit, string? pathPrefix = null, string? scope = null, string[]? project = null, CancellationToken cancellationToken = default)
     {
+        using var _actor = AuditActorContext.Begin(DashboardActor());
+        var audit = AuditFor(context);
         var logger = loggerFactory.CreateLogger("Eling.Backend.Endpoints.CodebaseEndpoints");
         if (limit is < 1 or > 50)
             limit = 20;
+        var sw = Stopwatch.StartNew();
         try
         {
             var resolved = await ResolveScopeAsync(svc, registry, scope, project, cancellationToken);
@@ -178,6 +203,8 @@ public static class CodebaseEndpoints
             var effectiveScope = resolved.EffectiveScope;
 
             // Empty query = top mode: most recently indexed files, same scope.
+            // A listing, not a search — unrecorded, like the tool's own empty
+            // query path.
             if (string.IsNullOrWhiteSpace(q))
             {
                 var files = await svc.GetRecentFilesAsync(limit ?? 20, roots);
@@ -195,16 +222,25 @@ public static class CodebaseEndpoints
                     .Select(h => new ScopedCodebaseHit(svc.ProjectRoot, h.Path, h.StartLine, h.EndLine, h.Content, h.Score))
                     .ToList();
             }
+            await audit.RecordSearchAsync(q, hits.Count, svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
             return TypedResults.Ok(new { query = q, limit = limit, scope = effectiveScope, mode = "search", results = hits.Select(h => new { h.ProjectRoot, h.Path, h.StartLine, h.EndLine, h.Content, h.Score }) });
         }
         catch (ArgumentException ex)
         {
             logger.LogWarning("Rejected codebase search scope: {Reason}", ex.Message);
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                await audit.RecordSearchAsync(q, 0, svc.ProjectRoot, (int)sw.ElapsedMilliseconds, AuditOutcome.Error);
+            }
             return TypedResults.BadRequest(ex.Message);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Codebase search failed for query {Query} (scope={Scope}).", q, scope);
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                await audit.RecordSearchAsync(q, 0, svc.ProjectRoot, (int)sw.ElapsedMilliseconds, AuditOutcome.Error);
+            }
             return TypedResults.BadRequest("Search failed.");
         }
     }
@@ -213,19 +249,26 @@ public static class CodebaseEndpoints
     /// Starts a rebuild over the selected scope and returns immediately with
     /// the job snapshot; progress follows on the rebuild SSE channel. Calling
     /// it without parameters keeps the original behaviour: this backend's own
-    /// workspace, incremental.
+    /// workspace, incremental. Starting the job records one
+    /// <c>codebase_index</c> change entry for the dashboard actor — the entry
+    /// documents the request being accepted, not the background job finishing
+    /// (progress stays on the rebuild SSE channel).
     /// </summary>
     private static async Task<IResult> RebuildIndexAsync(
         CodebaseIndexService svc,
         CodebaseRebuildJobRunner runner,
         RuntimeRegistry registry,
         ILoggerFactory loggerFactory,
+        HttpContext context,
         [FromQuery] string? scope = null,
         [FromQuery] string[]? project = null,
         [FromQuery] bool full = false,
         CancellationToken cancellationToken = default)
     {
+        using var _actor = AuditActorContext.Begin(DashboardActor());
+        var audit = AuditFor(context);
         var logger = loggerFactory.CreateLogger("Eling.Backend.Endpoints.CodebaseEndpoints");
+        var sw = Stopwatch.StartNew();
         try
         {
             var request = await ResolveRebuildRequestAsync(svc, registry, scope, project, full, cancellationToken);
@@ -236,16 +279,24 @@ public static class CodebaseEndpoints
                     "Codebase rebuild skipped {Skipped} project(s) with no index yet.",
                     request.Skipped.Count);
             }
+            // One entry per accepted rebuild, whatever its breadth: the target
+            // is the folder label of every root folded, which is the single
+            // workspace in the common case. An empty target set falls back to
+            // the local workspace rather than recording no target at all.
+            var target = CodebaseAuditRecorder.TargetLabel(request.Targets) ?? svc.ProjectRoot;
+            await audit.RecordIndexAsync(target, (int)sw.ElapsedMilliseconds);
             return TypedResults.Accepted($"/api/codebase/rebuild-index/{snapshot.JobId}", snapshot);
         }
         catch (ArgumentException ex)
         {
             logger.LogWarning("Rejected codebase rebuild scope: {Reason}", ex.Message);
+            await audit.RecordIndexAsync(svc.ProjectRoot, (int)sw.ElapsedMilliseconds, AuditOutcome.Error);
             return TypedResults.BadRequest(ex.Message);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Codebase index rebuild failed to start (scope={Scope}).", scope);
+            await audit.RecordIndexAsync(svc.ProjectRoot, (int)sw.ElapsedMilliseconds, AuditOutcome.Error);
             return TypedResults.BadRequest("Rebuild failed.");
         }
     }

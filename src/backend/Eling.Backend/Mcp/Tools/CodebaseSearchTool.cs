@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using Eling.Backend.Dtos;
+using Eling.Core.Audit;
 using Eling.Core.Codebase;
 using Eling.Core.Scope;
 using Microsoft.Extensions.Logging;
@@ -14,21 +15,27 @@ namespace Eling.Backend.Mcp.Tools;
 /// searches this project only; "all" federates over every alive runtime
 /// project (read-only, missing indexes skipped). Never throws on a
 /// missing index — returns empty hits with a hint to run codebase_index.
+/// Each completed search records one <c>codebase_search</c> access entry with
+/// the query text and the hit count; file contents never enter the trail
+/// (design §3: metadata only).
 /// </summary>
 [McpServerToolType]
 public sealed class CodebaseSearchTool
 {
     private readonly CodebaseIndexService _svc;
     private readonly RuntimeRegistry? _registry;
+    private readonly CodebaseAuditRecorder _audit;
     private readonly ILogger<CodebaseSearchTool>? _logger;
 
     public CodebaseSearchTool(
         CodebaseIndexService svc,
         RuntimeRegistry? registry = null,
-        ILogger<CodebaseSearchTool>? logger = null)
+        ILogger<CodebaseSearchTool>? logger = null,
+        IAuditLogger? audit = null)
     {
         _svc = svc;
         _registry = registry;
+        _audit = CodebaseAuditRecorder.Create(audit);
         _logger = logger;
     }
 
@@ -93,6 +100,7 @@ public sealed class CodebaseSearchTool
                     ? "No hits matched the query and filters."
                     : "No index for this scope. Run codebase_index to build it."
                 : null;
+            await _audit.RecordSearchAsync(query, filtered.Count, _svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
             return new CodebaseSearchResponse(
                 filtered.Select(h => new CodebaseSearchHit(h.ProjectRoot, h.Path, h.StartLine, h.EndLine, h.Content, h.Score)).ToList(),
                 new CodebaseSearchStats(filtered.Count, sw.ElapsedMilliseconds, fresh, hint));
@@ -104,12 +112,14 @@ public sealed class CodebaseSearchTool
             // correct its own arguments instead of retrying blindly.
             sw.Stop();
             _logger?.LogWarning("Rejected codebase search scope: {Reason}", ex.Message);
+            await _audit.RecordSearchAsync(query, 0, _svc.ProjectRoot, (int)sw.ElapsedMilliseconds, AuditOutcome.Error);
             return new CodebaseSearchResponse([], new CodebaseSearchStats(0, sw.ElapsedMilliseconds, false, ex.Message));
         }
         catch (Exception ex)
         {
             sw.Stop();
             _logger?.LogError(ex, "Codebase search failed for query {Query} (scope={Scope}).", query, scope);
+            await _audit.RecordSearchAsync(query, 0, _svc.ProjectRoot, (int)sw.ElapsedMilliseconds, AuditOutcome.Error);
             return new CodebaseSearchResponse([], new CodebaseSearchStats(0, sw.ElapsedMilliseconds, false, "Search failed or index missing. Run codebase_index first."));
         }
     }

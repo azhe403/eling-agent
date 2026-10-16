@@ -74,6 +74,7 @@ public sealed record AuditEventDto(
         AuditCategory.Memory => "memory",
         AuditCategory.Runtime => "runtime",
         AuditCategory.Filesystem => "filesystem",
+        AuditCategory.Codebase => "codebase",
         _ => category.ToString().ToLowerInvariant(),
     };
 

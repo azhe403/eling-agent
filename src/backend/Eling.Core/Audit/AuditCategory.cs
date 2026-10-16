@@ -4,5 +4,6 @@ public enum AuditCategory
 {
     Memory,
     Runtime,
-    Filesystem
+    Filesystem,
+    Codebase
 }

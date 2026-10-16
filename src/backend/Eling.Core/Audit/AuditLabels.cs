@@ -35,6 +35,7 @@ internal static class AuditLabels
         AuditCategory.Memory => "memory",
         AuditCategory.Runtime => "runtime",
         AuditCategory.Filesystem => "filesystem",
+        AuditCategory.Codebase => "codebase",
         _ => throw new ArgumentOutOfRangeException(nameof(category), category, "Unknown audit category.")
     };
 
