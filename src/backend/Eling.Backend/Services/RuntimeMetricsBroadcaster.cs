@@ -140,8 +140,9 @@ public sealed class RuntimeMetricsBroadcaster
         {
             // One failed tick must never kill the stream: the next tick
             // retries, and the on-demand runtimes endpoint remains the
-            // fallback a consumer can always read.
-            _logger.LogDebug(ex, "Runtime metrics tick failed");
+            // fallback a consumer can always read. Warn, not debug: a lost
+            // batch is otherwise indistinguishable from a quiet workspace.
+            _logger.LogWarning(ex, "Runtime metrics tick failed");
         }
     }
 }

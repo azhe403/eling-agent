@@ -386,7 +386,13 @@ public sealed class RuntimeRegistry : IDisposable
         }
     }
 
-    public IReadOnlyList<RuntimeInfo> Alive()
+    /// <param name="allProcesses">
+    /// When true the dedupe is skipped and every live runtime is returned —
+    /// several stdio sessions can run in one folder, and the dashboard needs
+    /// all of them to aggregate. Default false keeps one row per project root
+    /// for memory and codebase-tool consumers.
+    /// </param>
+    public IReadOnlyList<RuntimeInfo> Alive(bool allProcesses = false)
     {
         SyncFromDisk();
         lock (_lock)
@@ -402,7 +408,7 @@ public sealed class RuntimeRegistry : IDisposable
 
                 if (!IsProjectScopedRoot(normalizedRoot)) continue;
 
-                if (seenRoots.Add(normalizedRoot))
+                if (allProcesses || seenRoots.Add(normalizedRoot))
                 {
                     result.Add(runtime);
                 }
@@ -437,10 +443,16 @@ public sealed class RuntimeRegistry : IDisposable
     /// the two subdomains.
     /// </para>
     /// </remarks>
+    /// <param name="allProcesses">
+    /// When true every live runtime is kept instead of one row per workspace
+    /// root; remembered rows still join only for roots no live process covers,
+    /// so a closed workspace never duplicates a running one.
+    /// </param>
     public async Task<IReadOnlyList<RuntimeInfo>> AliveOrRegisteredAsync(
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool allProcesses = false)
     {
-        var live = Alive();
+        var live = Alive(allProcesses);
         if (_workspaces is null) return live;
 
         var remembered = await _workspaces.ListAsync(cancellationToken).ConfigureAwait(false);

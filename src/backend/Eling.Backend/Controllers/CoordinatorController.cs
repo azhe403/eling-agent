@@ -44,26 +44,38 @@ public sealed class CoordinatorController(
     /// also contains workspaces whose process has exited; those carry
     /// <c>processId = 0</c> and <c>isAlive = false</c>, and otherwise have the
     /// same shape as a live entry, so consumers need no special case.
+    /// <para>
+    /// With <paramref name="allProcesses"/> the live list is no longer deduped
+    /// to one row per workspace: several stdio sessions can run in one folder
+    /// (one per opencode/openchamber session, plus peers and the desktop app),
+    /// and the dashboard aggregates or lists them instead of showing a single
+    /// representative process. Remembered rows still appear only for roots no
+    /// live process covers.
+    /// </para>
     /// </summary>
     [HttpGet("runtimes")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyCollection<RuntimeInfoDto>>> GetRuntimesAsync(
         [FromQuery] bool includeRegistered = false,
+        [FromQuery] bool allProcesses = false,
         CancellationToken cancellationToken = default)
     {
         var runtimes = includeRegistered
-            ? await registry.AliveOrRegisteredAsync(cancellationToken)
-            : registry.Alive();
+            ? await registry.AliveOrRegisteredAsync(cancellationToken, allProcesses)
+            : registry.Alive(allProcesses);
 
         var dtos = runtimes.Select(r =>
         {
-            var dto = RuntimeInfoDto.From(r);
+            var dto = RuntimeInfoDto.From(r) with
+            {
+                IsDashboardOwner = r.ProcessId > 0 && r.ProcessId == Environment.ProcessId,
+            };
             if (r.IsAlive && r.ProcessId > 0 && metricsTracker is not null)
             {
                 var metrics = metricsTracker.Sample(r.ProcessId);
                 if (metrics is not null)
                 {
-                    return dto with
+                    dto = dto with
                     {
                         MemoryBytes = metrics.MemoryBytes,
                         CpuPercent = metrics.CpuPercent

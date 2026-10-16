@@ -27,6 +27,11 @@ namespace Eling.Backend.Dtos;
 /// <param name="IsAlive">False for a workspace that is only remembered.</param>
 /// <param name="MemoryBytes">Working set memory in bytes for live process.</param>
 /// <param name="CpuPercent">CPU usage percent for live process.</param>
+/// <param name="IsDashboardOwner">
+/// True when this process owns the dashboard HTTP port (4417). The process
+/// answering the request is by definition that owner, so peers are told apart
+/// without any cross-process lookup. False for remembered rows and peers.
+/// </param>
 public sealed record RuntimeInfoDto(
     int ProcessId,
     string HeadScopeRoot,
@@ -39,7 +44,8 @@ public sealed record RuntimeInfoDto(
     DateTimeOffset LastHeartbeat,
     bool IsAlive,
     long? MemoryBytes = null,
-    double? CpuPercent = null)
+    double? CpuPercent = null,
+    bool IsDashboardOwner = false)
 {
     public static RuntimeInfoDto From(RuntimeInfo runtime) => new(
         runtime.ProcessId,

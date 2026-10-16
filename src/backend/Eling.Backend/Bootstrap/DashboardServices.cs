@@ -165,6 +165,14 @@ public static class DashboardServices
                 sp.GetRequiredService<MemoryChangeBroadcaster>(),
                 sp.GetRequiredService<ILogger<CodebaseDirWatcher>>()));
 
+            // Metrics streaming for the workspaces page. Owner-mode only: only
+            // the owner maps the SSE route, and the broadcaster's pump is gated
+            // on subscribers, so a closed dashboard costs nothing.
+            services.AddSingleton<Services.RuntimeMetricsSampler>();
+            services.AddSingleton(sp => new Services.RuntimeMetricsBroadcaster(
+                sp.GetRequiredService<Services.RuntimeMetricsSampler>(),
+                sp.GetRequiredService<ILogger<Services.RuntimeMetricsBroadcaster>>()));
+
             // Update-check graph: file cache plus the checker itself. The periodic
             // pump (UpdateCheckerService) is added by the production host builder so
             // test hosts never start network-capable background work.

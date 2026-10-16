@@ -223,6 +223,73 @@ public sealed class CoordinatorControllerTests : IAsyncLifetime
         Assert.DoesNotContain(entries, e => RootOf(e).EndsWith("UserScope", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Several stdio sessions can live in one folder — one per opencode or
+    /// openchamber session, plus peers and the desktop app. The default stays
+    /// deduped because memory and codebase-tool consumers want one root; the
+    /// flag returns every live process so the dashboard can aggregate them.
+    /// </summary>
+    [Fact]
+    public async Task AllProcesses_ReturnsEveryLiveRuntimeOfAWorkspace()
+    {
+        var workspace = Workspace("many-sessions");
+        _registry.Register(Registration(workspace, 701));
+        _registry.Register(Registration(workspace, 702));
+        _registry.Register(Registration(workspace, 703));
+
+        var single = await GetAsync("/api/coordinator/runtimes?includeRegistered=true");
+        var all = await GetAsync("/api/coordinator/runtimes?includeRegistered=true&allProcesses=true");
+
+        Assert.Single(single, e => RootOf(e) == workspace);
+        Assert.Equal(
+            new[] { 701, 702, 703 },
+            all.Where(e => RootOf(e) == workspace)
+               .Select(e => e.GetProperty("processId").GetInt32())
+               .OrderBy(pid => pid)
+               .ToArray());
+    }
+
+    /// <summary>
+    /// The process serving the request owns the dashboard port, so peers can
+    /// be told apart without any cross-process lookup.
+    /// </summary>
+    [Fact]
+    public async Task AllProcesses_MarksTheServingProcessAsOwner()
+    {
+        var workspace = Workspace("owner-marker");
+        var own = Environment.ProcessId;
+        _registry.Register(Registration(workspace, own));
+        _registry.Register(Registration(workspace, 704));
+
+        var all = await GetAsync("/api/coordinator/runtimes?allProcesses=true");
+
+        Assert.Equal(2, all.Count);
+        Assert.All(all, entry =>
+        {
+            var pid = entry.GetProperty("processId").GetInt32();
+            Assert.Equal(pid == own, entry.GetProperty("isDashboardOwner").GetBoolean());
+        });
+    }
+
+    /// <summary>
+    /// The flag is additive: a closed-but-remembered workspace still appears
+    /// beside the live processes, exactly as it does without the flag.
+    /// </summary>
+    [Fact]
+    public async Task AllProcesses_StillIncludesRememberedWorkspaces()
+    {
+        var live = Workspace("live-with-memory");
+        var closed = Workspace("closed-with-memory");
+        _registry.Register(Registration(live, 705));
+        _registry.Register(Registration(closed, 706));
+        _registry.Unregister(706);
+
+        var all = await GetAsync("/api/coordinator/runtimes?includeRegistered=true&allProcesses=true");
+
+        Assert.Contains(all, e => RootOf(e) == live && e.GetProperty("isAlive").GetBoolean());
+        Assert.Contains(all, e => RootOf(e) == closed && !e.GetProperty("isAlive").GetBoolean());
+    }
+
     [Fact]
     public async Task SqliteWorkspacesRegistry_DoesNotRecord_UserScopeOrRelativePaths()
     {

@@ -2,19 +2,21 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
-  FolderGit2,
-  RefreshCw,
-  BookOpen,
-  Radio,
-  Clock,
-  Layers,
-  FileCode2,
-  Trash2,
   AlertTriangle,
-  Loader2,
+  BookOpen,
+  ChevronDown,
+  Clock,
   Cpu,
+  FileCode2,
+  FolderGit2,
+  Layers,
+  Loader2,
   MemoryStick,
+  Radio,
+  RefreshCw,
+  Trash2,
 } from "lucide-react"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { Button } from "@/components/ui/button"
@@ -33,21 +35,7 @@ import {
 import { useMemoriesSse, type SseTopic } from "@/hooks/use-memories-sse"
 import { utcToLocal } from "@/lib/date-utils"
 import { PathText } from "@/components/path-text"
-
-type RuntimeDto = {
-  processId: number
-  headScopeRoot: string
-  workspaceRoot: string
-  codebaseEnabled: boolean
-  dataDirectory: string
-  startTime: string
-  mcpEnabled: boolean
-  mcpTransport: string
-  lastHeartbeat: string
-  isAlive: boolean
-  memoryBytes?: number | null
-  cpuPercent?: number | null
-}
+import { group, uptime, type RuntimeDto, type WorkspaceGroup } from "./aggregate"
 
 type CodebaseStatusDto = {
   files: number
@@ -70,10 +58,6 @@ function workspaceName(root: string | undefined | null) {
   return parts.length ? parts[parts.length - 1] : root
 }
 
-function isRunning(r: RuntimeDto) {
-  return r.isAlive && r.processId > 0
-}
-
 /** Working set in MB, one decimal. Bytes are what the OS reports. */
 function formatMegabytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
@@ -82,8 +66,11 @@ function formatMegabytes(bytes: number) {
 type FilterStatus = "all" | "active" | "offline"
 
 async function fetchWorkspacesAndStatuses() {
+  // allProcesses: every live eling process, not the old single deduped row per
+  // workspace — one folder can host several sessions at once. Grouping and the
+  // metric sums happen client-side in ./aggregate.
   const [runtimesRes, statusesRes] = await Promise.all([
-    fetch("/api/coordinator/runtimes?includeRegistered=true", { cache: "no-store" }),
+    fetch("/api/coordinator/runtimes?includeRegistered=true&allProcesses=true", { cache: "no-store" }),
     fetch("/api/coordinator/projects/codebase-statuses", { cache: "no-store" }),
   ])
   if (!runtimesRes.ok) throw new Error(`HTTP ${runtimesRes.status} from coordinator`)
@@ -105,16 +92,43 @@ async function fetchWorkspacesAndStatuses() {
 }
 
 export function WorkspacesList() {
-  const [runtimes, setRuntimes] = useState<RuntimeDto[]>([])
+  const [groups, setGroups] = useState<WorkspaceGroup[]>([])
   const [statusMap, setStatusMap] = useState<Record<string, CodebaseStatusDto>>({})
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [reindexingRoot, setReindexingRoot] = useState<string | null>(null)
-  const [query, setQuery] = useState("")
-  const [filter, setFilter] = useState<FilterStatus>("all")
+  // Filter and search live in the URL (?status=active&q=...), so a reload, a
+  // shared link, and the back button all land on the same view. Absent params
+  // mean the default view, which keeps shared URLs clean.
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const statusParam = searchParams.get("status")
+  const filter: FilterStatus =
+    statusParam === "active" || statusParam === "offline" ? statusParam : "all"
+  const query = searchParams.get("q") ?? ""
+
+  const setParam = useCallback(
+    (key: "status" | "q", value: string | null) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (value === null || value === "") params.delete(key)
+      else params.set(key, value)
+      const qs = params.toString()
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    },
+    [router, pathname, searchParams]
+  )
+
+  const setQuery = useCallback((q: string) => setParam("q", q), [setParam])
+  const setFilter = useCallback(
+    (f: FilterStatus) => setParam("status", f === "all" ? null : f),
+    [setParam]
+  )
   const [error, setError] = useState<string | null>(null)
 
   // Delete modal state
-  const [deleteTarget, setDeleteTarget] = useState<RuntimeDto | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<WorkspaceGroup | null>(null)
   const [deleteRegistry, setDeleteRegistry] = useState(true)
   const [deleteCodebaseIndex, setDeleteCodebaseIndex] = useState(true)
   const [deleteDotEling, setDeleteDotEling] = useState(false)
@@ -122,9 +136,9 @@ export function WorkspacesList() {
 
   const loadData = useCallback(async () => {
     try {
-      const { runtimes: r, statuses: s } = await fetchWorkspacesAndStatuses()
-      setRuntimes(r)
-      setStatusMap(s)
+      const { runtimes, statuses } = await fetchWorkspacesAndStatuses()
+      setGroups(group(runtimes))
+      setStatusMap(statuses)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load workspaces")
     }
@@ -133,10 +147,10 @@ export function WorkspacesList() {
   useEffect(() => {
     let isMounted = true
     void fetchWorkspacesAndStatuses()
-      .then(({ runtimes: r, statuses: s }) => {
+      .then(({ runtimes, statuses }) => {
         if (!isMounted) return
-        setRuntimes(r)
-        setStatusMap(s)
+        setGroups(group(runtimes))
+        setStatusMap(statuses)
       })
       .catch((err: unknown) => {
         if (!isMounted) return
@@ -170,6 +184,15 @@ export function WorkspacesList() {
   const sseTopics = useMemo<SseTopic[]>(() => ["runtimes", "codebase"], [])
   const { status: sseStatus } = useMemoriesSse(handleReload, handleReload, sseTopics)
 
+  const toggleExpanded = useCallback((root: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(root)) next.delete(root)
+      else next.add(root)
+      return next
+    })
+  }, [])
+
   const triggerReindex = async (root: string) => {
     setReindexingRoot(root)
     try {
@@ -188,7 +211,6 @@ export function WorkspacesList() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return
-    const root = deleteTarget.workspaceRoot || deleteTarget.headScopeRoot
     setIsDeleting(true)
     setError(null)
     try {
@@ -196,7 +218,7 @@ export function WorkspacesList() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          workspaceRoot: root,
+          workspaceRoot: deleteTarget.root,
           deleteRegistry,
           deleteCodebaseIndex,
           deleteDotEling,
@@ -214,25 +236,26 @@ export function WorkspacesList() {
 
   const normalizedQuery = query.trim().toLowerCase()
   const filtered = useMemo(() => {
-    return runtimes.filter((r) => {
-      const root = r.workspaceRoot || r.headScopeRoot || ""
-      const name = workspaceName(root).toLowerCase()
+    return groups.filter((g) => {
+      const name = workspaceName(g.root).toLowerCase()
       const matchesQuery =
         !normalizedQuery ||
         name.includes(normalizedQuery) ||
-        root.toLowerCase().includes(normalizedQuery) ||
-        r.processId.toString().includes(normalizedQuery)
+        g.root.toLowerCase().includes(normalizedQuery) ||
+        g.processes.some((p) => p.pid.toString().includes(normalizedQuery))
 
       if (!matchesQuery) return false
 
-      if (filter === "active") return isRunning(r)
-      if (filter === "offline") return !isRunning(r)
+      if (filter === "active") return g.running
+      if (filter === "offline") return !g.running
       return true
     })
-  }, [runtimes, normalizedQuery, filter])
+  }, [groups, normalizedQuery, filter])
 
-  const totalWorkspaces = runtimes.length
-  const activeCount = runtimes.filter(isRunning).length
+  const activeWorkspaces = groups.filter((g) => g.running).length
+  // Processes, not rows: several sessions can share one workspace, and that
+  // count is the honest number for a tile labelled "instances".
+  const totalInstances = groups.reduce((sum, g) => sum + g.processes.length, 0)
   const totalFiles = Object.values(statusMap).reduce((acc, s) => acc + (s.files || 0), 0)
 
   return (
@@ -290,12 +313,15 @@ export function WorkspacesList() {
             <>
               <div className="rounded-lg border p-3 text-sm">
                 <div className="text-muted-foreground">Registered Workspaces</div>
-                <div className="text-xl font-medium">{totalWorkspaces}</div>
+                <div className="text-xl font-medium">{groups.length}</div>
               </div>
               <div className="rounded-lg border p-3 text-sm">
                 <div className="text-muted-foreground">Active Instances</div>
                 <div className="text-xl font-medium text-emerald-600 dark:text-emerald-400">
-                  {activeCount}
+                  {totalInstances}
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  di {activeWorkspaces} workspace aktif
                 </div>
               </div>
               <div className="rounded-lg border p-3 text-sm">
@@ -357,15 +383,16 @@ export function WorkspacesList() {
               <span>No workspaces match the current filter.</span>
             </div>
           ) : (
-            filtered.map((r) => {
-              const root = r.workspaceRoot || r.headScopeRoot
-              const name = workspaceName(root)
-              const status = statusMap[root.toLowerCase()]
-              const isAlive = isRunning(r)
+            filtered.map((g) => {
+              const name = workspaceName(g.root)
+              const status = statusMap[g.root.toLowerCase()]
+              const key = g.root.toLowerCase()
+              const single = g.processes.length === 1
+              const expandedFlag = expanded.has(key)
 
               return (
                 <div
-                  key={root}
+                  key={key}
                   className="flex flex-col justify-between gap-3 rounded-xl border bg-card p-4 transition-colors hover:border-border sm:flex-row sm:items-center"
                 >
                   <div className="flex flex-col gap-1.5 min-w-0 flex-1">
@@ -373,10 +400,10 @@ export function WorkspacesList() {
                       <span className="font-semibold text-base">{name}</span>
 
                       {/* Status & PID Badge */}
-                      {isAlive ? (
+                      {g.running ? (
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
                           <Radio className="size-3 animate-pulse" />
-                          Running (PID: {r.processId})
+                          {single ? `Running (PID: ${g.processes[0].pid})` : `Running · ${g.processes.length} instances`}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
@@ -384,14 +411,30 @@ export function WorkspacesList() {
                         </span>
                       )}
 
-                      {r.mcpEnabled && (
+                      {g.transport && (
                         <span className="rounded-md border border-border/50 bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
-                          MCP ({r.mcpTransport})
+                          MCP ({g.transport})
                         </span>
+                      )}
+
+                      {/* Per-process drill-down only pays off past one instance. */}
+                      {g.running && !single && (
+                        <button
+                          type="button"
+                          onClick={() => toggleExpanded(key)}
+                          aria-expanded={expandedFlag}
+                          aria-label={`Toggle process list for ${name}`}
+                          title={expandedFlag ? "Hide processes" : "Show processes"}
+                          className="inline-flex size-6 items-center justify-center rounded-md border border-border/50 text-muted-foreground transition-colors hover:bg-muted"
+                        >
+                          <ChevronDown
+                            className={`size-3.5 transition-transform ${expandedFlag ? "rotate-180" : ""}`}
+                          />
+                        </button>
                       )}
                     </div>
 
-                    <PathText prefix="📁" path={root} className="text-xs" />
+                    <PathText prefix="📁" path={g.root} className="text-xs" />
 
                     {/* The db file path only means something once an index exists —
                         hiding it for never-indexed workspaces keeps the card scannable. */}
@@ -406,20 +449,24 @@ export function WorkspacesList() {
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground mt-1">
                       <span className="inline-flex items-center gap-1">
                         <Clock className="size-3.5" />
-                        Last active: {utcToLocal(r.lastHeartbeat) || "—"}
+                        Last active: {utcToLocal(g.lastHeartbeat) || "—"}
                       </span>
 
-                      {/* Only a live process has metrics to report. */}
-                      {isAlive && r.memoryBytes != null && (
-                        <span className="inline-flex items-center gap-1">
+                      {/* Sums across every live process of this workspace; null
+                          until at least one process has been sampled. */}
+                      {g.running && g.totalMemoryBytes != null && (
+                        <span
+                          className="inline-flex items-center gap-1"
+                          title="Akumulasi semua proses workspace ini (100% = seluruh core)"
+                        >
                           <Cpu className="size-3.5" />
-                          CPU: {r.cpuPercent?.toFixed(1) ?? "0.0"}%
+                          CPU: {(g.totalCpuPercent ?? 0).toFixed(1)}%
                         </span>
                       )}
-                      {isAlive && r.memoryBytes != null && (
+                      {g.running && g.totalMemoryBytes != null && (
                         <span className="inline-flex items-center gap-1">
                           <MemoryStick className="size-3.5" />
-                          RAM: {formatMegabytes(r.memoryBytes)}
+                          RAM: {formatMegabytes(g.totalMemoryBytes)}
                         </span>
                       )}
 
@@ -440,20 +487,55 @@ export function WorkspacesList() {
                         </>
                       )}
                     </div>
+
+                    {expandedFlag && g.processes.length > 1 && (
+                      <div className="mt-2 flex flex-col gap-1 border-t border-border/50 pt-2">
+                        {g.processes.map((p) => (
+                          <div
+                            key={p.pid}
+                            className="flex items-center gap-2 rounded-lg bg-muted/40 px-2.5 py-1.5 text-xs"
+                          >
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                p.owner
+                                  ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
+                                  : "bg-muted text-muted-foreground"
+                              }`}
+                              title={
+                                p.owner
+                                  ? "Owns the dashboard HTTP host (port 4417)"
+                                  : "MCP-only session attached to the workspace"
+                              }
+                            >
+                              {p.owner ? "owner" : "peer"}
+                            </span>
+                            <span className="font-mono font-medium">{p.pid}</span>
+                            <span className="text-muted-foreground">
+                              {uptime(p.startTime)} · {p.transport}
+                            </span>
+                            {p.memoryBytes != null && (
+                              <span className="ml-auto font-mono text-muted-foreground">
+                                {formatMegabytes(p.memoryBytes)} · {(p.cpuPercent ?? 0).toFixed(1)}%
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex flex-col items-stretch gap-2 self-stretch shrink-0 sm:w-40 sm:self-center">
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => void triggerReindex(root)}
-                      disabled={reindexingRoot === root}
+                      onClick={() => void triggerReindex(g.root)}
+                      disabled={reindexingRoot === g.root}
                       title="Trigger incremental re-indexing for this workspace"
                       className="justify-start"
                     >
                       <RefreshCw
                         className={`size-3.5 mr-1 ${
-                          reindexingRoot === root ? "animate-spin" : ""
+                          reindexingRoot === g.root ? "animate-spin" : ""
                         }`}
                       />
                       Re-index
@@ -468,7 +550,7 @@ export function WorkspacesList() {
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        setDeleteTarget(r)
+                        setDeleteTarget(g)
                         setDeleteRegistry(true)
                         setDeleteCodebaseIndex(true)
                         setDeleteDotEling(false)
@@ -506,7 +588,7 @@ export function WorkspacesList() {
               <AlertDialogTitle>Delete Workspace Confirmation</AlertDialogTitle>
             </div>
             <AlertDialogDescription>
-              Select the components you want to remove for this workspace:
+              Select the components to remove for this workspace:
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -514,14 +596,22 @@ export function WorkspacesList() {
             <div className="flex flex-col gap-3 py-2 text-xs">
               <div className="rounded-lg border bg-muted/40 p-3">
                 <div className="font-semibold text-foreground text-sm">
-                  {workspaceName(deleteTarget.workspaceRoot || deleteTarget.headScopeRoot)}
+                  {workspaceName(deleteTarget.root)}
                 </div>
                 <div className="text-muted-foreground break-all mt-0.5">
-                  {deleteTarget.workspaceRoot || deleteTarget.headScopeRoot}
+                  {deleteTarget.root}
                 </div>
-                {deleteTarget.isAlive && deleteTarget.processId > 0 && (
+                {deleteTarget.processes.length === 1 && (
                   <div className="mt-2 text-amber-600 dark:text-amber-400 font-medium">
-                    ⚠️ Instance is currently running (PID: {deleteTarget.processId}). Deleting will unregister this instance from coordinator registry.
+                    ⚠️ Instance is currently running (PID: {deleteTarget.processes[0].pid}). Deleting will unregister this instance from coordinator registry.
+                  </div>
+                )}
+                {deleteTarget.processes.length > 1 && (
+                  <div className="mt-2 text-amber-600 dark:text-amber-400 font-medium">
+                    ⚠️ {deleteTarget.processes.length} instances are running (PIDs:{" "}
+                    {deleteTarget.processes.map((p) => p.pid).join(", ")}). Deleting will
+                    unregister them from the coordinator registry — sessions that are still
+                    alive will re-register on their next heartbeat.
                   </div>
                 )}
               </div>
@@ -572,7 +662,7 @@ export function WorkspacesList() {
                     type="checkbox"
                     checked={deleteDotEling}
                     onChange={(e) => setDeleteDotEling(e.target.checked)}
-                    className="mt-0.5 accent-destructive"
+                    className="mt-0.5 accent-primary"
                   />
                   <div className="flex-1">
                     <div className="font-medium text-destructive">
@@ -602,7 +692,7 @@ export function WorkspacesList() {
             >
               {isDeleting ? (
                 <>
-                  <Loader2 className="size-4 animate-spin mr-1.5" />
+                  <Loader2 className="size-4 mr-1.5" />
                   Deleting...
                 </>
               ) : (
