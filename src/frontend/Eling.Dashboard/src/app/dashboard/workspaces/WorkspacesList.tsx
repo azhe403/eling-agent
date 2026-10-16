@@ -417,6 +417,15 @@ export function WorkspacesList() {
                         </span>
                       )}
 
+                      {g.ownerPort && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2.5 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400"
+                          title={`Memegang port dashboard :${g.ownerPort}`}
+                        >
+                          owner · :{g.ownerPort}
+                        </span>
+                      )}
+
                       {/* Per-process drill-down only pays off past one instance. */}
                       {g.running && !single && (
                         <button

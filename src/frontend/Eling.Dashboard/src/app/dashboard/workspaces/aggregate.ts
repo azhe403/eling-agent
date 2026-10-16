@@ -21,6 +21,7 @@ export type RuntimeDto = {
   memoryBytes?: number | null
   cpuPercent?: number | null
   isDashboardOwner: boolean
+  dashboardPort?: number | null
 }
 
 export type WorkspaceProcess = {
@@ -28,6 +29,7 @@ export type WorkspaceProcess = {
   startTime: string
   transport: string
   owner: boolean
+  ownerPort: number | null
   memoryBytes: number | null
   cpuPercent: number | null
 }
@@ -43,6 +45,7 @@ export type WorkspaceGroup = {
   lastHeartbeat: string
   codebaseEnabled: boolean
   transport: string | null
+  ownerPort: number | null
 }
 
 /** Coarse elapsed time since the process started: `3h 02m`, `12m 30s`, `4s`. */
@@ -78,6 +81,7 @@ export function group(runtimes: RuntimeDto[]): WorkspaceGroup[] {
         startTime: r.startTime,
         transport: r.mcpTransport,
         owner: r.isDashboardOwner,
+        ownerPort: r.dashboardPort ?? null,
         memoryBytes: r.memoryBytes ?? null,
         cpuPercent: r.cpuPercent ?? null,
       }))
@@ -88,6 +92,7 @@ export function group(runtimes: RuntimeDto[]): WorkspaceGroup[] {
       .map((r) => Date.parse(r.lastHeartbeat))
       .filter((t) => !Number.isNaN(t))
 
+    const ownerPort = processes.find((p) => p.owner)?.ownerPort ?? null
     return {
       root: rows[0].workspaceRoot || rows[0].headScopeRoot,
       processes,
@@ -97,6 +102,7 @@ export function group(runtimes: RuntimeDto[]): WorkspaceGroup[] {
       lastHeartbeat: heartbeats.length > 0 ? new Date(Math.max(...heartbeats)).toISOString() : rows[0].lastHeartbeat,
       codebaseEnabled: rows[0].codebaseEnabled,
       transport: rows.find((r) => r.mcpEnabled)?.mcpTransport ?? null,
+      ownerPort,
     }
   })
 }
