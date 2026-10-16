@@ -28,9 +28,13 @@ namespace Eling.Backend.Dtos;
 /// <param name="MemoryBytes">Working set memory in bytes for live process.</param>
 /// <param name="CpuPercent">CPU usage percent for live process.</param>
 /// <param name="IsDashboardOwner">
-/// True when this process owns the dashboard HTTP port (4417). The process
-/// answering the request is by definition that owner, so peers are told apart
-/// without any cross-process lookup. False for remembered rows and peers.
+/// True when this process owns the dashboard HTTP port (4317 global, 4417 dev).
+/// The process answering the request is by definition that owner, so peers are
+/// told apart without any cross-process lookup. False for remembered rows and peers.
+/// </param>
+/// <param name="DashboardPort">
+/// Port the owner binds (<c>4317</c> staging, <c>4417</c> when <c>ELING_DASHBOARD_PORT</c> is set).
+/// Only set when <see cref="IsDashboardOwner"/> is true; otherwise <c>null</c>.
 /// </param>
 public sealed record RuntimeInfoDto(
     int ProcessId,
@@ -45,7 +49,8 @@ public sealed record RuntimeInfoDto(
     bool IsAlive,
     long? MemoryBytes = null,
     double? CpuPercent = null,
-    bool IsDashboardOwner = false)
+    bool IsDashboardOwner = false,
+    int? DashboardPort = null)
 {
     public static RuntimeInfoDto From(RuntimeInfo runtime) => new(
         runtime.ProcessId,

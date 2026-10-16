@@ -1,3 +1,4 @@
+using Eling.Backend.Bootstrap;
 using Eling.Backend.Dtos;
 using Eling.Backend.Services;
 using Eling.Core.Scope;
@@ -66,9 +67,11 @@ public sealed class CoordinatorController(
 
         var dtos = runtimes.Select(r =>
         {
+            var isOwner = r.ProcessId > 0 && r.ProcessId == Environment.ProcessId;
             var dto = RuntimeInfoDto.From(r) with
             {
-                IsDashboardOwner = r.ProcessId > 0 && r.ProcessId == Environment.ProcessId,
+                IsDashboardOwner = isOwner,
+                DashboardPort = isOwner ? DashboardPort.Resolve() : null,
             };
             if (r.IsAlive && r.ProcessId > 0 && metricsTracker is not null)
             {
