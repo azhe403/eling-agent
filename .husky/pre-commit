@@ -60,29 +60,26 @@ fi
 
 # Enforce one-layer-per-commit: dashboard, backend, desktop must not mix.
 # Shared/build files are excluded from the count so they may join any layer.
-if [ "$ALLOW_MIXED" != "1" ]; then
-  SCOPE_FILES=$(echo "$CHANGED" | grep -vE "^(Directory\.Build|Eling\.slnx|mise\.toml|package\.json|pnpm-lock\.yaml|CHANGELOG\.md|README\.md|INSTALL\.md|NUGET-WEEKLY-CHECK\.md|docs/|\.husky/|\.github/)" || true)
-  TOUCH_DASHBOARD=0
-  TOUCH_BACKEND=0
-  TOUCH_DESKTOP=0
-  if echo "$SCOPE_FILES" | grep -qE "^(src/frontend/|tests/.*Frontend|tests/.*Dashboard)"; then
-    TOUCH_DASHBOARD=1
-  fi
-  if echo "$SCOPE_FILES" | grep -qE "^(src/backend/|tests/Eling\.Core|tests/Eling\.Backend)"; then
-    TOUCH_BACKEND=1
-  fi
-  if echo "$SCOPE_FILES" | grep -qE "^(src/desktop/|tests/Eling\.Desktop)"; then
-    TOUCH_DESKTOP=1
-  fi
-  TOUCH_COUNT=$((TOUCH_DASHBOARD + TOUCH_BACKEND + TOUCH_DESKTOP))
-  if [ "$TOUCH_COUNT" -gt 1 ]; then
-    echo "⛔ This commit mixes $TOUCH_COUNT layers (dashboard / backend / desktop)."
-    echo "Please split it into one commit per layer."
-    echo "Example: one commit for dashboard, one for backend, one for desktop."
-    echo "If it is truly shared config, use a separate 'chore: shared config' commit."
-    echo "To bypass once (emergency only): ALLOW_MIXED=1 git commit"
-    exit 1
-  fi
+SCOPE_FILES=$(echo "$CHANGED" | grep -vE "^(Directory\.Build|Eling\.slnx|mise\.toml|package\.json|pnpm-lock\.yaml|CHANGELOG\.md|README\.md|INSTALL\.md|NUGET-WEEKLY-CHECK\.md|docs/|\.husky/|\.github/)" || true)
+TOUCH_DASHBOARD=0
+TOUCH_BACKEND=0
+TOUCH_DESKTOP=0
+if echo "$SCOPE_FILES" | grep -qE "^(src/frontend/|tests/.*Frontend|tests/.*Dashboard)"; then
+  TOUCH_DASHBOARD=1
+fi
+if echo "$SCOPE_FILES" | grep -qE "^(src/backend/|tests/Eling\.Core|tests/Eling\.Backend)"; then
+  TOUCH_BACKEND=1
+fi
+if echo "$SCOPE_FILES" | grep -qE "^(src/desktop/|tests/Eling\.Desktop)"; then
+  TOUCH_DESKTOP=1
+fi
+TOUCH_COUNT=$((TOUCH_DASHBOARD + TOUCH_BACKEND + TOUCH_DESKTOP))
+if [ "$TOUCH_COUNT" -gt 1 ]; then
+  echo "⛔ This commit mixes $TOUCH_COUNT layers (dashboard / backend / desktop)."
+  echo "Please split it into one commit per layer."
+  echo "Example: one commit for dashboard, one for backend, one for desktop."
+  echo "If it is truly shared config, use a separate 'chore: shared config' commit."
+  exit 1
 fi
 
 NEED_FRONTEND=0
