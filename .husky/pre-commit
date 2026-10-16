@@ -14,26 +14,27 @@ if [ "$SKIP_HOOK" = "1" ]; then
   exit 0
 fi
 
-CHANGED=$(git diff --cached --name-only 2>/dev/null)
-
-if [ "$FULL_CHECK" = "1" ]; then
-  echo "→ FULL_CHECK=1: running all checks"
-  pnpm lint:frontend || exit 1
-  pnpm typecheck:frontend || exit 1
-  pnpm validate:backend || exit 1
-  pnpm test:backend || exit 1
-  exit 0
-fi
+# Anti-lock: every dotnet invocation below builds/tests under a disposable
+# per-run root (.bin-hook-<pid>), so it can never collide with the dev
+# server (.bin), manual runs (.bin-test), MCP hosts, or another hook
+# running concurrently. NOTE: plain `export ELING_OUTPUT_ROOT` does not
+# work here — package.json scripts hardcode it via cross-env — so the
+# dotnet calls below set it inline (same precedent as scripts/ci-check.sh).
+# Already gitignored (.bin*) and auto-cleaned by scripts/clean-bin.ps1.
+HOOK_ROOT=".bin-hook-$$"
+trap 'rm -rf "$HOOK_ROOT"' EXIT INT TERM
 
 # Core tests are fast (~2s) and their observed failure mode is intermittent
 # (parallel-class races, or a mid-edit compile window while another session
 # writes the tree), not deterministic breakage. Retry before failing so one
 # flake cannot block the commit; a real failure still fails all attempts.
+# Runs under $HOOK_ROOT (see above) so retries never meet a locked output.
+# Defined before FULL_CHECK because that block calls it.
 run_core_tests() {
   attempt=1
   while [ "$attempt" -le 3 ]; do
     echo "→ core tests (attempt $attempt/3)"
-    if pnpm run test:backend:core; then
+    if ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj; then
       return 0
     fi
     attempt=$((attempt + 1))
@@ -41,6 +42,48 @@ run_core_tests() {
   done
   return 1
 }
+
+CHANGED=$(git diff --cached --name-only 2>/dev/null)
+
+if [ "$FULL_CHECK" = "1" ]; then
+  echo "→ FULL_CHECK=1: running all checks (isolated output $HOOK_ROOT)"
+  pnpm lint:frontend || exit 1
+  pnpm typecheck:frontend || exit 1
+  pnpm validate:backend || exit 1
+  run_core_tests || exit 1
+  echo "→ api layer: test:backend:api"
+  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests || exit 1
+  echo "→ desktop layer: test:backend:desktop"
+  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Desktop.Tests/Eling.Desktop.Tests.csproj || exit 1
+  exit 0
+fi
+
+# Enforce one-layer-per-commit: dashboard, backend, desktop must not mix.
+# Shared/build files are excluded from the count so they may join any layer.
+if [ "$ALLOW_MIXED" != "1" ]; then
+  SCOPE_FILES=$(echo "$CHANGED" | grep -vE "^(Directory\.Build|Eling\.slnx|mise\.toml|package\.json|pnpm-lock\.yaml|CHANGELOG\.md|README\.md|INSTALL\.md|NUGET-WEEKLY-CHECK\.md|docs/|\.husky/|\.github/)" || true)
+  TOUCH_DASHBOARD=0
+  TOUCH_BACKEND=0
+  TOUCH_DESKTOP=0
+  if echo "$SCOPE_FILES" | grep -qE "^(src/frontend/|tests/.*Frontend|tests/.*Dashboard)"; then
+    TOUCH_DASHBOARD=1
+  fi
+  if echo "$SCOPE_FILES" | grep -qE "^(src/backend/|tests/Eling\.Core|tests/Eling\.Backend)"; then
+    TOUCH_BACKEND=1
+  fi
+  if echo "$SCOPE_FILES" | grep -qE "^(src/desktop/|tests/Eling\.Desktop)"; then
+    TOUCH_DESKTOP=1
+  fi
+  TOUCH_COUNT=$((TOUCH_DASHBOARD + TOUCH_BACKEND + TOUCH_DESKTOP))
+  if [ "$TOUCH_COUNT" -gt 1 ]; then
+    echo "⛔ This commit mixes $TOUCH_COUNT layers (dashboard / backend / desktop)."
+    echo "Please split it into one commit per layer."
+    echo "Example: one commit for dashboard, one for backend, one for desktop."
+    echo "If it is truly shared config, use a separate 'chore: shared config' commit."
+    echo "To bypass once (emergency only): ALLOW_MIXED=1 git commit"
+    exit 1
+  fi
+fi
 
 NEED_FRONTEND=0
 NEED_CORE=0
@@ -117,11 +160,11 @@ if [ "$NEED_CORE" = "1" ]; then
 fi
 
 if [ "$NEED_API" = "1" ]; then
-  echo "→ api layer: test:backend:api"
-  pnpm run test:backend:api || exit 1
+  echo "→ api layer: test:backend:api (isolated output $HOOK_ROOT)"
+  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests || exit 1
 fi
 
 if [ "$NEED_DESKTOP" = "1" ]; then
-  echo "→ desktop layer: test:backend:desktop"
-  pnpm run test:backend:desktop || exit 1
+  echo "→ desktop layer: test:backend:desktop (isolated output $HOOK_ROOT)"
+  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Desktop.Tests/Eling.Desktop.Tests.csproj || exit 1
 fi
