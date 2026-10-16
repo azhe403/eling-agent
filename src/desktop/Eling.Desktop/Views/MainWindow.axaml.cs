@@ -180,6 +180,7 @@ public partial class MainWindow : Window
         }
         catch
         {
+            // Fail-safe: assume visible when screen enumeration is unavailable.
             return true;
         }
     }

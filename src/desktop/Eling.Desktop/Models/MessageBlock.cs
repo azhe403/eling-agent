@@ -37,6 +37,7 @@ public sealed class MessageBlock
         }
         catch
         {
+            // Clipboard failure is benign; copy is fire-and-forget.
         }
     }
 }
