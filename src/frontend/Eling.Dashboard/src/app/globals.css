@@ -127,6 +127,44 @@
     animation: none !important;
   }
 
+  /* Angular Material-style indeterminate progress bar for search */
+  @keyframes progress-query {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  @keyframes progress-active {
+    0%   { width: 0%;   transform: translateX(0); }
+    40%  { width: 25%;  transform: translateX(0); }
+    60%  { width: 50%;  transform: translateX(25%); }
+    100% { width: 0%;   transform: translateX(100%); }
+  }
+
+  @keyframes progress-secondary-query {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  @keyframes progress-secondary-active {
+    0%   { width: 0%;   transform: translateX(0); }
+    30%  { width: 30%;  transform: translateX(0); }
+    60%  { width: 70%;  transform: translateX(30%); }
+    100% { width: 0%;   transform: translateX(100%); }
+  }
+
+  .animate-progress-query {
+    animation: progress-query 2s linear infinite;
+  }
+  .animate-progress-active {
+    animation: progress-active 2s linear infinite;
+  }
+  .animate-progress-secondary-query {
+    animation: progress-secondary-query 2s linear infinite;
+  }
+  .animate-progress-secondary-active {
+    animation: progress-secondary-active 2s linear infinite;
+  }
+
   /* Anti-flicker instant sidebar collapse on initial paint.
      Must match SIDEBAR_WIDTH_ICON ("3rem") in components/ui/sidebar.tsx so the
      pre-paint layout and the hydrated React layout agree. */

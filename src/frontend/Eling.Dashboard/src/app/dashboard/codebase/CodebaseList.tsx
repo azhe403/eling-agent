@@ -79,7 +79,7 @@ function FileName({
   file,
   onOpen,
 }: {
-  file: { projectRoot: string; path: string }
+  file: SelectedFile
   onOpen: (file: SelectedFile) => void
 }) {
   return (
@@ -105,15 +105,27 @@ function rebuildModeLabel(mode: RebuildMode) {
 
 // The open file's URL identity. Two params rather than one encoded pair: both
 // values are paths, and unmerged they stay readable in the address bar and in
-// a shared link.
+// a shared link. `line` jumps the viewer straight to a search hit's line.
 function fileQuery(file: SelectedFile) {
-  return `file=${encodeURIComponent(file.path)}&fileRoot=${encodeURIComponent(file.projectRoot)}`
+  const parts = [
+    `file=${encodeURIComponent(file.path)}`,
+    `fileRoot=${encodeURIComponent(file.projectRoot)}`,
+  ]
+  if (file.startLine) parts.push(`line=${file.startLine}`)
+  return parts.join("&")
 }
 
 function fileFromParams(params: URLSearchParams): SelectedFile | null {
   const path = params.get("file")?.trim()
   const root = params.get("fileRoot")?.trim()
-  return path && root ? { projectRoot: root, path } : null
+  const line = params.get("line")?.trim()
+  return path && root
+    ? {
+        projectRoot: root,
+        path,
+        ...(line ? { startLine: Number(line) } : {}),
+      }
+    : null
 }
 
 // Idle time after the last keystroke before a search is issued.
@@ -423,6 +435,41 @@ export function CodebaseList() {
   const hasRebuildReport =
     rebuildProgress !== null &&
     (rebuildProgress.total > 0 || rebuildProgress.skippedRoots.length > 0)
+
+  // Top-files listing shown when the query box is empty, and also while the
+  // first search is in flight (no previous results to keep visible yet).
+  const topFilesView = (
+    <>
+      {topLoading && topFiles.length === 0 ? (
+        <div className="p-4 text-sm text-muted-foreground">
+          Loading recent files…
+        </div>
+      ) : topFiles.length ? (
+        topFiles.map((f) => (
+          <div key={`${f.projectRoot}-${f.path}`} className="p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <FileName file={f} onOpen={openFile} />
+              {(selection.kind === "all" || selection.roots.length > 1) && (
+                <span
+                  className="rounded-full border border-border/50 bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                  title={f.projectRoot}
+                >
+                  📁 {workspaceName(f.projectRoot)}
+                </span>
+              )}
+            </div>
+            <div className="text-muted-foreground text-xs">
+              {f.chunkCount} {f.chunkCount === 1 ? "chunk" : "chunks"} · indexed {utcToLocal(f.lastIndexedAt)}
+            </div>
+          </div>
+        ))
+      ) : (
+        <div className="p-4 text-sm text-muted-foreground">
+          Index is empty. Rebuild to populate.
+        </div>
+      )}
+    </>
+  )
   return (
     <div className="flex w-full flex-col">
       <DashboardHeader label="Codebase">
@@ -693,44 +740,28 @@ export function CodebaseList() {
           </div>
         )}
 
-        <div className="min-w-0 rounded-lg border divide-y">
-          {!query.trim() ? (
-            topLoading && topFiles.length === 0 ? (
-              <div className="flex flex-col gap-2 p-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-12 w-full rounded-lg" />
-                ))}
-              </div>
-            ) : topFiles.length ? (
-              topFiles.map((f) => (
-                <div key={`${f.projectRoot}-${f.path}`} className="p-3 text-sm">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <FileName file={f} onOpen={openFile} />
-                    {(selection.kind === "all" || selection.roots.length > 1) && (
-                      <span
-                        className="rounded-full border border-border/50 bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                        title={f.projectRoot}
-                      >
-                        📁 {workspaceName(f.projectRoot)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-muted-foreground text-xs">
-                    {f.chunkCount} {f.chunkCount === 1 ? "chunk" : "chunks"} · indexed {utcToLocal(f.lastIndexedAt)}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="p-4 text-sm text-muted-foreground">
-                Index is empty. Rebuild to populate.
-              </div>
-            )
-          ) : searching ? (
-            <div className="flex flex-col gap-2 p-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-16 w-full rounded-lg" />
-              ))}
+        <div className="relative min-w-0">
+          {searching && (
+            <div className="absolute top-0 left-0 right-0 h-1 z-10 overflow-hidden rounded-t-lg">
+              {/* Buffer track */}
+              <div className="absolute inset-0 h-full w-full bg-accent/30" />
+
+              {/* Primary bar */}
+              <div className="absolute inset-x-0 h-full bg-primary animate-progress-query" />
+
+              {/* Primary active indicator */}
+              <div className="absolute inset-x-0 h-full bg-primary/80 animate-progress-active" />
+
+              {/* Secondary bar */}
+              <div className="absolute inset-x-0 h-full bg-primary/40 animate-progress-secondary-query" />
+
+              {/* Secondary active indicator */}
+              <div className="absolute inset-x-0 h-full bg-primary/40 animate-progress-secondary-active" />
             </div>
+          )}
+          <div className="min-w-0 rounded-lg border divide-y">
+          {!query.trim() ? (
+            topFilesView
           ) : results.length ? (
             results.map((r: CodebaseHit, i: number) => (
               <div key={`${r.projectRoot}-${r.path}-${r.startLine}-${i}`} className="p-3 text-sm">
@@ -754,11 +785,10 @@ export function CodebaseList() {
               </div>
             ))
           ) : (
-            <div className="p-4 text-sm text-muted-foreground">
-              No results for this query.
-            </div>
+            topFilesView
           )}
         </div>
+      </div>
       </div>
       {/* Wide screens dock the viewer as this row's right-hand column; narrow
           ones keep the centered modal. The same selectedFile drives both, so

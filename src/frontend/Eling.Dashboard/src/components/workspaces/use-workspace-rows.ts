@@ -13,21 +13,34 @@ import { fetchRuntimes, workspaceRowsOf, type WorkspaceRow } from "./runtime-row
  * what the mount fetch wants. All state writes land after the first await,
  * so calling from an effect or a callback never cascades extra renders.
  */
+// Module-level stale cache so a remount (e.g. navigating between dashboard
+// pages that share this hook) can paint the last known rows synchronously
+// instead of flashing an empty list while the fetch is in flight. Reads and
+// writes happen here only; consumers stay drop-in compatible. Refresh still
+// runs in the background, so rows never go stale for long.
+let cachedRows: WorkspaceRow[] | null = null
+let cachedError: string | null = null
+
 export function useWorkspaceRows(): {
   rows: WorkspaceRow[]
   error: string | null
   reload: (opts?: { silent?: boolean }) => Promise<void>
 } {
-  const [rows, setRows] = useState<WorkspaceRow[]>([])
-  const [error, setError] = useState<string | null>(null)
+  const [rows, setRows] = useState<WorkspaceRow[]>(() => cachedRows ?? [])
+  const [error, setError] = useState<string | null>(() => cachedError)
 
   const reload = useCallback(async (opts?: { silent?: boolean }) => {
     try {
-      setRows(workspaceRowsOf(await fetchRuntimes()))
+      const next = workspaceRowsOf(await fetchRuntimes())
+      cachedRows = next
+      cachedError = null
+      setRows(next)
       setError(null)
     } catch (e) {
       if (opts?.silent) return
-      setError(e instanceof Error ? e.message : "Failed to load workspaces")
+      const msg = e instanceof Error ? e.message : "Failed to load workspaces"
+      cachedError = msg
+      setError(msg)
     }
   }, [])
 
@@ -35,11 +48,23 @@ export function useWorkspaceRows(): {
     let isMounted = true
     void fetchRuntimes()
       .then((runtimes) => {
-        if (isMounted) setRows(workspaceRowsOf(runtimes))
+        if (!isMounted) return
+        const next = workspaceRowsOf(runtimes)
+        cachedRows = next
+        cachedError = null
+        setRows(next)
+        setError(null)
       })
       .catch((e: unknown) => {
-        if (isMounted)
-          setError(e instanceof Error ? e.message : "Failed to load workspaces")
+        if (!isMounted) return
+        const msg =
+          e instanceof Error ? e.message : "Failed to load workspaces"
+        // Don't clobber a previously cached good list with an error on a
+        // background refresh.
+        if (cachedRows === null) {
+          cachedError = msg
+          setError(msg)
+        }
       })
     return () => {
       isMounted = false

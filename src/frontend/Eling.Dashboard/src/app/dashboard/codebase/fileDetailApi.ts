@@ -4,6 +4,10 @@
 export type SelectedFile = {
   projectRoot: string
   path: string
+  // Optional: the line a search hit landed on, so the viewer can open straight
+  // to it instead of the first chunk. Undefined for top-files / non-search opens.
+  startLine?: number
+  endLine?: number
 }
 
 type FileDetail = {

@@ -12,11 +12,14 @@ import { cn } from "@/lib/utils"
 export function CodeViewer({
   content,
   startLine = 1,
+  highlightLine,
   className,
 }: {
   content: string
   /** Line number of the first line in `content`. */
   startLine?: number
+  /** When set, the line with this absolute number gets a highlight background. */
+  highlightLine?: number
   className?: string
 }) {
   const lines = content.split("\n")
@@ -43,7 +46,24 @@ export function CodeViewer({
           ))}
         </div>
         <pre className="min-w-0 flex-1 px-3 py-3 font-mono">
-          <code>{lines.join("\n")}</code>
+          <code>
+            {lines.map((line, i) => {
+              const absoluteLine = startLine + i
+              return (
+                <div
+                  key={i}
+                  className={cn(
+                    "whitespace-pre break-all text-foreground",
+                    highlightLine !== undefined && absoluteLine === highlightLine
+                      ? "bg-blue-500/20 border-l-4 border-blue-500 pl-2"
+                      : ""
+                  )}
+                >
+                  {line}
+                </div>
+              )
+            })}
+          </code>
         </pre>
       </div>
     </div>

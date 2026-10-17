@@ -225,7 +225,7 @@ export function FileDetailContents({
           docked panel far past its share of the row. */}
       <div className="flex min-h-0 min-w-0 flex-1 gap-2">
         {tab === "chunks" ? (
-          <ChunksPanel state={detail} file={file} />
+          <ChunksPanel state={detail} file={file} targetLine={file.startLine} />
         ) : (
           <FilePanel state={content} />
         )}
@@ -269,18 +269,35 @@ function TabButton({
  * numbers visibly jump backwards — which reads as a bug in the indexer rather
  * than what it actually is. The rail is also the honest navigation for a long
  * file: scrolling 2500 lines to find the third chunk is worse than picking it.
+ *
+ * When `targetLine` is provided (opened from a search hit), the chunk that
+ * contains it is selected instead of the remembered/first chunk.
  */
 function ChunksPanel({
   state,
   file,
+  targetLine,
 }: {
   state: State<DetailView>
   file: SelectedFile
+  targetLine?: number
 }) {
   // Read once per mount. The body above is keyed on the file, so switching
   // files remounts this and re-reads the right entry.
   const id = fileId(file.projectRoot, file.path)
-  const [active, setActiveState] = useState(() => readChunkIndex(id) ?? 0)
+  const [active, setActiveState] = useState(() => {
+    // If the viewer was opened straight to a search hit's line, find the chunk
+    // that contains it. Otherwise fall back to the remembered chunk index.
+    if (targetLine !== undefined) {
+      const hit = state.status === "ready"
+        ? state.value.chunks.findIndex(
+            (c) => c.startLine <= targetLine && targetLine <= c.endLine
+          )
+        : -1
+      return hit >= 0 ? hit : readChunkIndex(id) ?? 0
+    }
+    return readChunkIndex(id) ?? 0
+  })
 
   const setActive = useCallback(
     (next: number) => {
@@ -354,7 +371,11 @@ function ChunksPanel({
             </span>
           )}
         </div>
-        <CodeViewer content={chunk.content} startLine={chunk.startLine} />
+        <CodeViewer
+          content={chunk.content}
+          startLine={chunk.startLine}
+          highlightLine={targetLine !== undefined ? targetLine : undefined}
+        />
       </div>
     </>
   )
