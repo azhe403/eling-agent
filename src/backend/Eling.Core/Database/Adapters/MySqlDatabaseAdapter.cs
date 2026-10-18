@@ -18,6 +18,22 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
     private readonly DatabaseConnection _connection;
     private readonly ILogger<MySqlDatabaseAdapter>? _logger;
 
+    // MySqlConnector maps CHAR(36) columns to System.Guid by default and throws
+    // when the stored value is not a valid GUID. Read them as strings instead so
+    // arbitrary CHAR(36) data (e.g. "A") does not break queries/schema reads.
+    private string ConnectionString
+    {
+        get
+        {
+            var builder = new MySqlConnectionStringBuilder(_connection.ConnectionString);
+            if (!builder.ConnectionString.Contains("GuidFormat", StringComparison.OrdinalIgnoreCase))
+            {
+                builder.GuidFormat = MySqlGuidFormat.None;
+            }
+            return builder.ConnectionString;
+        }
+    }
+
     public MySqlDatabaseAdapter(
         DatabaseConnection connection,
         ILogger<MySqlDatabaseAdapter>? logger = null)
@@ -31,7 +47,7 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            await using var conn = new MySqlConnection(_connection.ConnectionString);
+            await using var conn = new MySqlConnection(ConnectionString);
             await conn.OpenAsync(ct);
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT 1;";
@@ -50,7 +66,7 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
 
     public async Task<QueryResult> QueryAsync(string sql, int maxRows, CancellationToken ct = default)
     {
-        await using var conn = new MySqlConnection(_connection.ConnectionString);
+        await using var conn = new MySqlConnection(ConnectionString);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
@@ -89,7 +105,7 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
     public async Task<DatabaseSchemaInfo> GetSchemaAsync(CancellationToken ct = default)
     {
         var tables = new List<TableSchema>();
-        await using var conn = new MySqlConnection(_connection.ConnectionString);
+        await using var conn = new MySqlConnection(ConnectionString);
         await conn.OpenAsync(ct);
 
         var tableNames = new List<TableInfo>();
