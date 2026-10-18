@@ -28,7 +28,7 @@ public sealed class DatabaseListConnectionsTool
         _audit = audit;
     }
 
-    [McpServerTool(Name = "db_list_connections"), Description("List registered database connections (identity only, no credentials) PLUS any connections found in appsettings.json that are not yet registered (Unimported). Run db_import_connections for the approved unimported keys to register them. Detect is read-only and runs automatically here so unimported connections are never missed.")]
+    [McpServerTool(Name = "db_list_connections"), Description("List registered database connections (identity only, no credentials) PLUS any connections found in appsettings.json that are not yet registered (Unimported). Run db_import_connections for the approved unimported keys to register them. Detect is read-only and runs automatically here so unimported connections are never missed. When Unimported is non-empty, offer the user options (import all / selected / skip) before importing; never auto-import.")]
     public async Task<McpConnectionsOverview> ListAsync(CancellationToken cancellationToken = default)
     {
         var sw = Stopwatch.StartNew();

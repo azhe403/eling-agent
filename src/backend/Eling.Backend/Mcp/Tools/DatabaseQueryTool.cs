@@ -117,7 +117,7 @@ public sealed class DatabaseQueryTool
                 .ToList();
 
             if (unimported.Count == 0) return string.Empty;
-            return $"Unimported connections detected in appsettings.json: {string.Join(", ", unimported)}. Run db_detect_connections then db_import_connections for the approved keys before retrying.";
+            return $"Unimported connections detected in appsettings.json: {string.Join(", ", unimported)}. Offer the user options (import all / selected / skip) and run db_import_connections for the approved keys before retrying.";
         }
         catch (Exception ex)
         {
