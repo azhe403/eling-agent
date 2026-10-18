@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using Eling.Backend.Dtos;
+using Eling.Core.Audit;
 using Eling.Core.Database;
 using Eling.Core.Database.Adapters;
 using Microsoft.Extensions.Logging;
@@ -13,15 +15,18 @@ public sealed class DatabaseQueryTool
     private readonly IDatabaseConnectionStore _store;
     private readonly AppSettingsConnectionScanner? _scanner;
     private readonly ILogger<DatabaseQueryTool>? _logger;
+    private readonly IAuditLogger? _audit;
 
     public DatabaseQueryTool(
         IDatabaseConnectionStore store,
         AppSettingsConnectionScanner? scanner = null,
-        ILogger<DatabaseQueryTool>? logger = null)
+        ILogger<DatabaseQueryTool>? logger = null,
+        IAuditLogger? audit = null)
     {
         _store = store;
         _scanner = scanner;
         _logger = logger;
+        _audit = audit;
     }
 
     [McpServerTool(Name = "db_query"), Description("Run a read-only SQL query (SELECT/EXPLAIN/PRAGMA only) against a registered database connection. If the connection is not registered, detect any unimported connections from appsettings.json and report them so they can be imported (with approval) before retrying.")]
@@ -34,8 +39,6 @@ public sealed class DatabaseQueryTool
         var row = await _store.FindAsync(connectionId, cancellationToken);
         if (row is null)
         {
-            // Conditional detect: only when the requested connection is missing,
-            // surface any unimported connections so the agent can import (with approval).
             var hint = await BuildMissingConnectionHintAsync(cancellationToken);
             throw new KeyNotFoundException(string.IsNullOrEmpty(hint)
                 ? "connection not found"
@@ -45,19 +48,54 @@ public sealed class DatabaseQueryTool
         var classification = SqlSafety.Classify(sql);
         if (classification.Verdict != SqlVerdict.ReadOnly)
         {
+            await (_audit?.RecordAsync(new AuditEvent
+            {
+                Trail = AuditTrail.Access,
+                Category = AuditCategory.Database,
+                Action = DatabaseAuditActions.Query,
+                Outcome = AuditOutcome.Denied,
+                Target = connectionId,
+                Query = sql,
+                Verb = classification.MutationVerb
+            }, cancellationToken) ?? ValueTask.CompletedTask);
             throw new InvalidOperationException(classification.Reason ?? "rejected");
         }
 
         var adapter = DatabaseAdapterFactory.CreateAdapter(row);
+        var sw = Stopwatch.StartNew();
         try
         {
             if (maxRows < 1) maxRows = 1;
             if (maxRows > 1000) maxRows = 1000;
-            return await adapter.QueryAsync(sql, maxRows, cancellationToken);
+            var result = await adapter.QueryAsync(sql, maxRows, cancellationToken);
+            sw.Stop();
+            await (_audit?.RecordAsync(new AuditEvent
+            {
+                Trail = AuditTrail.Access,
+                Category = AuditCategory.Database,
+                Action = DatabaseAuditActions.Query,
+                Outcome = AuditOutcome.Success,
+                Target = connectionId,
+                Query = sql,
+                ResultCount = result.Rows.Count,
+                DurationMs = (int)sw.ElapsedMilliseconds
+            }, cancellationToken) ?? ValueTask.CompletedTask);
+            return result;
         }
         catch (Exception ex)
         {
+            sw.Stop();
             _logger?.LogWarning(ex, "Query failed for {Id}", connectionId);
+            await (_audit?.RecordAsync(new AuditEvent
+            {
+                Trail = AuditTrail.Access,
+                Category = AuditCategory.Database,
+                Action = DatabaseAuditActions.Query,
+                Outcome = AuditOutcome.Error,
+                Target = connectionId,
+                Query = sql,
+                DurationMs = (int)sw.ElapsedMilliseconds
+            }, cancellationToken) ?? ValueTask.CompletedTask);
             throw new InvalidOperationException("query failed");
         }
     }

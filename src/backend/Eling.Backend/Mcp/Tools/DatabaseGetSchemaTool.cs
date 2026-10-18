@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Diagnostics;
+using Eling.Core.Audit;
 using Eling.Core.Database;
 using Eling.Core.Database.Adapters;
 using Microsoft.Extensions.Logging;
@@ -11,13 +13,16 @@ public sealed class DatabaseGetSchemaTool
 {
     private readonly IDatabaseConnectionStore _store;
     private readonly ILogger<DatabaseGetSchemaTool>? _logger;
+    private readonly IAuditLogger? _audit;
 
     public DatabaseGetSchemaTool(
         IDatabaseConnectionStore store,
-        ILogger<DatabaseGetSchemaTool>? logger = null)
+        ILogger<DatabaseGetSchemaTool>? logger = null,
+        IAuditLogger? audit = null)
     {
         _store = store;
         _logger = logger;
+        _audit = audit;
     }
 
     [McpServerTool(Name = "db_get_schema"), Description("Get schema (tables/columns/FKs/indexes) for a registered database connection.")]
@@ -33,13 +38,44 @@ public sealed class DatabaseGetSchemaTool
         }
 
         var adapter = DatabaseAdapterFactory.CreateAdapter(row);
-        var schema = await adapter.GetSchemaAsync(cancellationToken);
-        if (!string.IsNullOrWhiteSpace(tableName))
+        var sw = Stopwatch.StartNew();
+        try
         {
-            var filtered = schema.Tables.Where(t =>
-                string.Equals(t.Name, tableName, StringComparison.Ordinal)).ToList();
-            return new DatabaseSchemaInfo(filtered);
+            var schema = await adapter.GetSchemaAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(tableName))
+            {
+                var filtered = schema.Tables.Where(t =>
+                    string.Equals(t.Name, tableName, StringComparison.Ordinal)).ToList();
+                schema = new DatabaseSchemaInfo(filtered);
+            }
+            sw.Stop();
+            await (_audit?.RecordAsync(new AuditEvent
+            {
+                Trail = AuditTrail.Access,
+                Category = AuditCategory.Database,
+                Action = DatabaseAuditActions.GetSchema,
+                Outcome = AuditOutcome.Success,
+                Target = connectionId,
+                Query = tableName,
+                DurationMs = (int)sw.ElapsedMilliseconds
+            }, cancellationToken) ?? ValueTask.CompletedTask);
+            return schema;
         }
-        return schema;
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger?.LogWarning(ex, "Schema failed for {Id}", connectionId);
+            await (_audit?.RecordAsync(new AuditEvent
+            {
+                Trail = AuditTrail.Access,
+                Category = AuditCategory.Database,
+                Action = DatabaseAuditActions.GetSchema,
+                Outcome = AuditOutcome.Error,
+                Target = connectionId,
+                Query = tableName,
+                DurationMs = (int)sw.ElapsedMilliseconds
+            }, cancellationToken) ?? ValueTask.CompletedTask);
+            throw;
+        }
     }
 }

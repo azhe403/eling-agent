@@ -13,18 +13,43 @@ public static class DatabaseEndpoints
     {
         var group = app.MapGroup("/api/databases");
 
-        group.MapGet("/", async (IDatabaseConnectionStore store, CancellationToken ct) =>
+        group.MapGet("/", async (IDatabaseConnectionStore store, IAuditLogger auditLogger, CancellationToken ct) =>
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var rows = await store.ListAsync(ct);
             var views = rows.Select(ToView).ToList();
+            sw.Stop();
+            await auditLogger.RecordAsync(new AuditEvent
+            {
+                Trail = AuditTrail.Access,
+                Category = AuditCategory.Database,
+                Action = DatabaseAuditActions.ListConnections,
+                Actor = "dashboard",
+                Outcome = AuditOutcome.Success,
+                ResultCount = rows.Count,
+                DurationMs = (int)sw.ElapsedMilliseconds
+            }, ct);
             return Results.Ok(views);
         });
 
-        group.MapGet("/{id}", async (string id, IDatabaseConnectionStore store, CancellationToken ct) =>
+        group.MapGet("/{id}", async (string id, IDatabaseConnectionStore store, IAuditLogger auditLogger, CancellationToken ct) =>
         {
             var row = await store.FindAsync(id, ct);
             if (row is null) return Results.NotFound();
-            return Results.Ok(ToView(row));
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var view = ToView(row);
+            sw.Stop();
+            await auditLogger.RecordAsync(new AuditEvent
+            {
+                Trail = AuditTrail.Access,
+                Category = AuditCategory.Database,
+                Action = DatabaseAuditActions.GetConnection,
+                Actor = "dashboard",
+                Target = id,
+                Outcome = AuditOutcome.Success,
+                DurationMs = (int)sw.ElapsedMilliseconds
+            }, ct);
+            return Results.Ok(view);
         });
 
         group.MapPost("/", async (
@@ -174,6 +199,7 @@ public static class DatabaseEndpoints
             string id,
             string? tableName,
             IDatabaseConnectionStore store,
+            IAuditLogger auditLogger,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
@@ -192,6 +218,7 @@ public static class DatabaseEndpoints
                 return Results.BadRequest(ex.Message);
             }
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 var schema = await adapter.GetSchemaAsync(ct);
@@ -201,11 +228,35 @@ public static class DatabaseEndpoints
                         string.Equals(t.Name, tableName, StringComparison.Ordinal)).ToList();
                     schema = new DatabaseSchemaInfo(filtered);
                 }
+                sw.Stop();
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Access,
+                    Category = AuditCategory.Database,
+                    Action = DatabaseAuditActions.GetSchema,
+                    Actor = "dashboard",
+                    Target = id,
+                    Outcome = AuditOutcome.Success,
+                    Query = tableName,
+                    DurationMs = (int)sw.ElapsedMilliseconds
+                }, ct);
                 return Results.Ok(schema);
             }
             catch (Exception ex)
             {
+                sw.Stop();
                 logger.LogWarning(ex, "Schema failed for {Id}", id);
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Access,
+                    Category = AuditCategory.Database,
+                    Action = DatabaseAuditActions.GetSchema,
+                    Actor = "dashboard",
+                    Target = id,
+                    Outcome = AuditOutcome.Error,
+                    Query = tableName,
+                    DurationMs = (int)sw.ElapsedMilliseconds
+                }, ct);
                 return Results.Problem(statusCode: 502, title: "schema failed", detail: ex.Message);
             }
         });
@@ -214,6 +265,7 @@ public static class DatabaseEndpoints
             string id,
             DatabaseQueryRequest req,
             IDatabaseConnectionStore store,
+            IAuditLogger auditLogger,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
@@ -224,6 +276,17 @@ public static class DatabaseEndpoints
             var classification = SqlSafety.Classify(req.Sql);
             if (classification.Verdict != SqlVerdict.ReadOnly)
             {
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Access,
+                    Category = AuditCategory.Database,
+                    Action = DatabaseAuditActions.Query,
+                    Actor = "dashboard",
+                    Target = id,
+                    Outcome = AuditOutcome.Denied,
+                    Query = req.Sql,
+                    Verb = classification.MutationVerb
+                }, ct);
                 return Results.BadRequest(classification.Reason);
             }
 
@@ -242,14 +305,40 @@ public static class DatabaseEndpoints
             if (maxRows < 1) maxRows = 1;
             if (maxRows > 1000) maxRows = 1000;
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 var result = await adapter.QueryAsync(req.Sql, maxRows, ct);
+                sw.Stop();
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Access,
+                    Category = AuditCategory.Database,
+                    Action = DatabaseAuditActions.Query,
+                    Actor = "dashboard",
+                    Target = id,
+                    Outcome = AuditOutcome.Success,
+                    Query = req.Sql,
+                    ResultCount = result.Rows.Count,
+                    DurationMs = (int)sw.ElapsedMilliseconds
+                }, ct);
                 return Results.Ok(result);
             }
             catch (Exception ex)
             {
+                sw.Stop();
                 logger.LogWarning(ex, "Query failed for {Id}", id);
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Access,
+                    Category = AuditCategory.Database,
+                    Action = DatabaseAuditActions.Query,
+                    Actor = "dashboard",
+                    Target = id,
+                    Outcome = AuditOutcome.Error,
+                    Query = req.Sql,
+                    DurationMs = (int)sw.ElapsedMilliseconds
+                }, ct);
                 return Results.Problem(statusCode: 502, title: "query failed", detail: ex.Message);
             }
         });
@@ -356,9 +445,12 @@ public static class DatabaseEndpoints
             }
         });
 
-        group.MapGet("/detect", (
-            AppSettingsConnectionScanner scanner) =>
+        group.MapGet("/detect", async (
+            AppSettingsConnectionScanner scanner,
+            IAuditLogger auditLogger,
+            CancellationToken ct) =>
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var detected = scanner.Scan();
             var dtos = detected.Select(d => new DetectedConnectionDto(
                 d.SettingsKey,
@@ -366,6 +458,17 @@ public static class DatabaseEndpoints
                 d.MaskedConnectionString,
                 d.Provider,
                 d.RejectionReason)).ToList();
+            sw.Stop();
+            await auditLogger.RecordAsync(new AuditEvent
+            {
+                Trail = AuditTrail.Access,
+                Category = AuditCategory.Database,
+                Action = DatabaseAuditActions.DetectConnections,
+                Actor = "dashboard",
+                Outcome = AuditOutcome.Success,
+                ResultCount = detected.Count,
+                DurationMs = (int)sw.ElapsedMilliseconds
+            }, ct);
             return Results.Ok(dtos);
         });
 

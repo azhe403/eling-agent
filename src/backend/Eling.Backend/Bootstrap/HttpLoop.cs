@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using Eling.Backend.Mcp;
 using Eling.Core;
+using Eling.Core.Audit.Storage;
 using Eling.Core.Logging;
 using Eling.Backend.Updates;
 using Microsoft.AspNetCore.Builder;
@@ -52,6 +53,20 @@ public static class HttpLoop
                 }
 
                 app = BuildWebApplication(shared, context, dashboardPort, isDevMode, loggerFactory, enableUpdateCheck: true);
+
+                // The audit index is a rebuildable cache over the JSONL files. Rebuild
+                // on every owner startup so a stale, partial, or deleted index
+                // self-heals from the canonical store (design 6.3). Cheap for
+                // realistic store sizes and idempotent.
+                try
+                {
+                    var auditIndex = app.Services.GetRequiredService<IAuditIndex>();
+                    await auditIndex.RebuildAsync(cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Audit index rebuild failed on startup; continuing with existing cache.");
+                }
 
                 if (isDevMode)
                 {
