@@ -19,7 +19,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { ChevronsUpDownIcon, DatabaseIcon } from "lucide-react"
+import { ChevronsUpDownIcon, MemoryStickIcon } from "lucide-react"
 
 export function TeamSwitcher({
   teams,
@@ -87,7 +87,7 @@ export function TeamSwitcher({
             <DropdownMenuGroup>
               <DropdownMenuItem render={<Link href="/dashboard/memories" />} className="gap-2 p-2">
                 <div className="flex size-6 items-center justify-center rounded-md border bg-transparent">
-                  <DatabaseIcon className="size-3.5" />
+                  <MemoryStickIcon className="size-3.5" />
                 </div>
                 <div className="font-medium text-xs text-muted-foreground">
                   View All Memories

@@ -6,6 +6,7 @@ import {
   Brain,
   LayoutDashboard,
   Database,
+  MemoryStick,
   BookOpen,
   Scale,
   FolderGit2,
@@ -47,7 +48,7 @@ const navMain = [
   {
     title: "Memories",
     url: "/dashboard/memories",
-    icon: <Database className="size-4" />,
+    icon: <MemoryStick className="size-4" />,
   },
   {
     title: "Audit Trail",

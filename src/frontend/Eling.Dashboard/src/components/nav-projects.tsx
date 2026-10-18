@@ -17,7 +17,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { MoreHorizontalIcon, FolderIcon, ArrowRightIcon, DatabaseIcon } from "lucide-react"
+import { MoreHorizontalIcon, FolderIcon, ArrowRightIcon, MemoryStickIcon } from "lucide-react"
 
 export function NavProjects({
   projects,
@@ -66,7 +66,7 @@ export function NavProjects({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem render={<Link href="/dashboard/memories" />}>
-                  <DatabaseIcon />
+                  <MemoryStickIcon />
                   <span>Explore Scope</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
