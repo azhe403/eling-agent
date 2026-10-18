@@ -22,6 +22,10 @@ public sealed class AuditEvent
     // Access-only detail; null for other entries.
     public string? Query { get; init; }
     public int? ResultCount { get; init; }
+    // Database mutation audit detail (spec §4): verb of the executed statement and
+    // whether the affected-row count was capped by maxAffectedRows.
+    public string? Verb { get; init; }
+    public bool? Truncated { get; init; }
     public string? Path { get; init; }
     public int? Matches { get; init; }
     public int? Pid { get; init; }

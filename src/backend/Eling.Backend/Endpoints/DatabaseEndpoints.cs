@@ -274,10 +274,11 @@ public static class DatabaseEndpoints
                     Category = AuditCategory.Database,
                     Action = "db.mutate",
                     Target = row.Id,
+                    Actor = "dashboard",
                     Outcome = AuditOutcome.Denied,
                     Query = req.Sql,
                 }, ct);
-                return Results.Forbid();
+                return Results.Json(new { error = "mutations not allowed on read-only connection" }, statusCode: 403);
             }
 
             var classification = SqlSafety.Classify(req.Sql);
@@ -289,7 +290,9 @@ public static class DatabaseEndpoints
                     Category = AuditCategory.Database,
                     Action = "db.mutate",
                     Target = row.Id,
+                    Actor = "dashboard",
                     Outcome = AuditOutcome.Denied,
+                    Verb = classification.MutationVerb,
                     Query = req.Sql,
                 }, ct);
                 return Results.BadRequest(classification.Reason ?? "not a mutation statement");
@@ -323,9 +326,12 @@ public static class DatabaseEndpoints
                     Category = AuditCategory.Database,
                     Action = "db.mutate",
                     Target = row.Id,
+                    Actor = "dashboard",
                     Outcome = AuditOutcome.Success,
+                    Verb = classification.MutationVerb,
                     Query = req.Sql,
                     ResultCount = affected,
+                    Truncated = truncated,
                     DurationMs = (int)sw.ElapsedMilliseconds,
                 }, ct);
                 return Results.Ok(new DatabaseMutateResponse(affected, truncated));
@@ -340,7 +346,9 @@ public static class DatabaseEndpoints
                     Category = AuditCategory.Database,
                     Action = "db.mutate",
                     Target = row.Id,
+                    Actor = "dashboard",
                     Outcome = AuditOutcome.Error,
+                    Verb = classification.MutationVerb,
                     Query = req.Sql,
                     DurationMs = (int)sw.ElapsedMilliseconds,
                 }, ct);

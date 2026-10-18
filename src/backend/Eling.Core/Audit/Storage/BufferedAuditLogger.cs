@@ -101,6 +101,8 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
             PrevHash = entry.PrevHash,
             Query = entry.Query,
             ResultCount = entry.ResultCount,
+            Verb = entry.Verb,
+            Truncated = entry.Truncated,
             Path = entry.Path,
             Matches = entry.Matches,
             Pid = entry.Pid,

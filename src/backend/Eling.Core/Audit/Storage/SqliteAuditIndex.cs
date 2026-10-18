@@ -45,6 +45,8 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
                 prev_hash    TEXT NULL,
                 query_text   TEXT NULL,
                 result_count INTEGER NULL,
+                verb         TEXT NULL,
+                truncated    INTEGER NULL,
                 path         TEXT NULL,
                 matches      INTEGER NULL,
                 pid          INTEGER NULL,
@@ -72,6 +74,21 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
                 PRIMARY KEY (state_id, ordinal)
             );
             """, cancellationToken);
+
+        // Migration: older audit-index.db files predate the verb/truncated columns.
+        // CREATE TABLE IF NOT EXISTS won't add them, so ALTER (ignoring "duplicate
+        // column name" on already-migrated databases).
+        foreach (var colDecl in new[] { "verb TEXT NULL", "truncated INTEGER NULL" })
+        {
+            try
+            {
+                await ExecuteAsync(connection, $"ALTER TABLE audit_events ADD COLUMN {colDecl};", cancellationToken);
+            }
+            catch (SqliteException)
+            {
+                // Column already exists — nothing to do.
+            }
+        }
     }
 
     public async Task IndexAsync(IReadOnlyList<AuditRecord> records, CancellationToken cancellationToken)
@@ -98,11 +115,11 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
             INSERT INTO audit_events
                 (timestamp, trail, category, action, actor, source, scope, project_root, target,
                  outcome, duration_ms, byte_size, hash, prev_hash,
-                 query_text, result_count, path, matches, pid, file, line)
+                 query_text, result_count, verb, truncated, path, matches, pid, file, line)
             VALUES
                 ($ts, $trail, $cat, $action, $actor, $source, $scope, $root, $target,
                  $outcome, $duration, $size, $hash, $prevhash,
-                 $query, $count, $path, $matches, $pid, $file, $line);
+                 $query, $count, $verb, $truncated, $path, $matches, $pid, $file, $line);
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$ts", e.Timestamp.ToString("O"));
@@ -121,6 +138,8 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
         command.Parameters.AddWithValue("$prevhash", (object?)e.PrevHash ?? DBNull.Value);
         command.Parameters.AddWithValue("$query", (object?)e.Query ?? DBNull.Value);
         command.Parameters.AddWithValue("$count", (object?)e.ResultCount ?? DBNull.Value);
+        command.Parameters.AddWithValue("$verb", (object?)e.Verb ?? DBNull.Value);
+        command.Parameters.AddWithValue("$truncated", (object?)e.Truncated ?? DBNull.Value);
         command.Parameters.AddWithValue("$path", (object?)e.Path ?? DBNull.Value);
         command.Parameters.AddWithValue("$matches", (object?)e.Matches ?? DBNull.Value);
         command.Parameters.AddWithValue("$pid", (object?)e.Pid ?? DBNull.Value);
@@ -206,7 +225,7 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
             command.CommandText = """
                 SELECT id, file, line, timestamp, trail, category, action, actor, source, scope,
                        project_root, target, outcome, duration_ms, byte_size, hash, prev_hash,
-                       query_text, result_count, path, matches, pid
+                       query_text, result_count, verb, truncated, path, matches, pid
                 FROM audit_events
                 WHERE trail = $trail COLLATE NOCASE
                   AND ($action IS NULL OR action = $action)
@@ -254,9 +273,11 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
                         PrevHash = reader.IsDBNull(16) ? null : reader.GetString(16),
                         Query = reader.IsDBNull(17) ? null : reader.GetString(17),
                         ResultCount = reader.IsDBNull(18) ? null : reader.GetInt32(18),
-                        Path = reader.IsDBNull(19) ? null : reader.GetString(19),
-                        Matches = reader.IsDBNull(20) ? null : reader.GetInt32(20),
-                        Pid = reader.IsDBNull(21) ? null : reader.GetInt32(21)
+                        Verb = reader.IsDBNull(19) ? null : reader.GetString(19),
+                        Truncated = reader.IsDBNull(20) ? null : reader.GetInt32(20) != 0,
+                        Path = reader.IsDBNull(21) ? null : reader.GetString(21),
+                        Matches = reader.IsDBNull(22) ? null : reader.GetInt32(22),
+                        Pid = reader.IsDBNull(23) ? null : reader.GetInt32(23)
                     }));
             }
         }
@@ -374,6 +395,8 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
         PrevHash = e.PrevHash,
         Query = e.Query,
         ResultCount = e.ResultCount,
+        Verb = e.Verb,
+        Truncated = e.Truncated,
         Path = e.Path,
         Matches = e.Matches,
         Pid = e.Pid,
