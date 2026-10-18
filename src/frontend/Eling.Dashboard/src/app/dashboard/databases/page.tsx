@@ -3,7 +3,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Play, RefreshCw, Plus } from "lucide-react"
+import { Play, RefreshCw, Plus, AlertCircle, X, CheckCircle2 } from "lucide-react"
 
 import { DashboardHeader } from "@/components/dashboard-header"
 import { Badge } from "@/components/ui/badge"
@@ -16,6 +16,17 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 import {
   Select,
@@ -57,11 +68,94 @@ type Detected = {
 
 const API = "/api/databases"
 
+const parseApiError = (text: string): string => {
+  const trimmed = text.trim()
+  if (!trimmed) return "Request failed."
+  try {
+    const j = JSON.parse(trimmed)
+    const msg = j?.detail || j?.title || j?.message || j?.error
+    if (typeof msg === "string" && msg.length > 0) {
+      // make common backend messages more human-friendly
+      const lower = msg.toLowerCase()
+      if (lower.includes("mutations not allowed on read-only")) {
+        return "This connection is read-only, so data changes are disabled."
+      }
+      if (lower.includes("not a mutation statement")) {
+        return "Only INSERT / UPDATE / DELETE statements are allowed here."
+      }
+      if (lower.includes("no primary key")) {
+        return "This table has no primary key, so rows cannot be edited."
+      }
+      return msg
+    }
+  } catch {
+    // not JSON — fall through to raw text
+  }
+  return trimmed.length > 200 ? trimmed.slice(0, 200) + "…" : trimmed
+}
+
+interface DbNotification {
+  id: number
+  type: "success" | "error"
+  title: string
+  text?: string
+}
+
+const MAX_DB_NOTIFICATIONS = 4
+const DB_NOTIFICATION_TTL_MS = 4000
+let nextDbNotificationId = 0
+
+function DbToastItem({
+  notification,
+  onDismiss,
+}: {
+  notification: DbNotification
+  onDismiss: (id: number) => void
+}) {
+  useEffect(() => {
+    const timer = setTimeout(() => onDismiss(notification.id), DB_NOTIFICATION_TTL_MS)
+    return () => clearTimeout(timer)
+  }, [notification.id, onDismiss])
+
+  return (
+    <div className="pointer-events-auto flex w-80 max-w-[calc(100vw-2rem)] items-start gap-2.5 rounded-lg border bg-background p-3 shadow-lg animate-in fade-in-0 slide-in-from-right-8 duration-300">
+      <span
+        className={
+          notification.type === "error"
+            ? "flex size-7 shrink-0 items-center justify-center rounded-full bg-destructive/15 text-destructive"
+            : "flex size-7 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+        }
+      >
+        {notification.type === "error" ? (
+          <AlertCircle className="size-4" />
+        ) : (
+          <CheckCircle2 className="size-4" />
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">{notification.title}</p>
+        {notification.text ? (
+          <p className="mt-0.5 text-xs break-words text-muted-foreground">{notification.text}</p>
+        ) : null}
+      </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-6 shrink-0"
+        onClick={() => onDismiss(notification.id)}
+        aria-label="Dismiss notification"
+      >
+        <X className="size-3.5" />
+      </Button>
+    </div>
+  )
+}
+
 export default function DatabasesPage() {
   const [conns, setConns] = useState<DbConn[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
+ 
   // create form
   const [showCreate, setShowCreate] = useState(false)
   const [cName, setCName] = useState("")
@@ -92,6 +186,23 @@ export default function DatabasesPage() {
   const [schemaLoading, setSchemaLoading] = useState(false)
   const [browseTable, setBrowseTable] = useState<string | null>(null)
   const [browseResult, setBrowseResult] = useState<QueryResult | null>(null)
+  const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null)
+  const [editValue, setEditValue] = useState("")
+  const [savingCell, setSavingCell] = useState(false)
+  const [newRow, setNewRow] = useState<Record<string, string> | null>(null)
+  const [mutating, setMutating] = useState(false)
+  const [deleteRowTarget, setDeleteRowTarget] = useState<number | null>(null)
+  const [dbNotifications, setDbNotifications] = useState<DbNotification[]>([])
+
+  const dismissDbNotification = useCallback((id: number) => {
+    setDbNotifications((current) => current.filter((item) => item.id !== id))
+  }, [])
+
+  const notifyDb = useCallback((type: DbNotification["type"], title: string, text?: string) => {
+    nextDbNotificationId += 1
+    const id = nextDbNotificationId
+    setDbNotifications((current) => [...current.slice(-(MAX_DB_NOTIFICATIONS - 1)), { id, type, title, text }])
+  }, [])
   const [browseLoading, setBrowseLoading] = useState(false)
   const [editing, setEditing] = useState<DbConn | null>(null)
   const [eName, setEName] = useState("")
@@ -121,18 +232,17 @@ export default function DatabasesPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    setError(null)
     try {
       const res = await fetch(API, { cache: "no-store" })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(parseApiError(await res.text()))
       const data = await res.json()
       setConns(data)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "failed")
+      notifyDb("error", e instanceof Error ? e.message : "failed")
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [notifyDb])
 
   useEffect(() => {
     const id = setTimeout(() => { void load() }, 0)
@@ -293,12 +403,12 @@ export default function DatabasesPage() {
           requireApprovalForMutations: true,
         }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(parseApiError(await res.text()))
       setShowCreate(false)
       setCName(""); setCConnStr(""); setCreateTestResult(null)
       await load()
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "create failed")
+      notifyDb("error", e instanceof Error ? e.message : "create failed")
     }
   }
 
@@ -352,11 +462,11 @@ export default function DatabasesPage() {
           requireApprovalForMutations: eRequire,
         }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(parseApiError(await res.text()))
       setEditing(null)
       await load()
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "update failed")
+      notifyDb("error", e instanceof Error ? e.message : "update failed")
     }
   }
 
@@ -403,7 +513,7 @@ export default function DatabasesPage() {
       setConnSchemas((prev) => ({ ...prev, [id]: data }))
       try { localStorage.setItem(schemaCacheKey(id), JSON.stringify(data)) } catch { /* quota */ }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "schema failed")
+      notifyDb("error", e instanceof Error ? e.message : "schema failed")
     } finally {
       setSchemaLoading(false)
     }
@@ -413,7 +523,7 @@ export default function DatabasesPage() {
 
   const fetchSchema = async (id: string) => {
     const res = await fetch(API + "/" + id + "/schema")
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(parseApiError(await res.text()))
     return await res.json()
   }
 
@@ -510,12 +620,181 @@ export default function DatabasesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql, maxRows: 100 }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(parseApiError(await res.text()))
       setBrowseResult(await res.json())
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "browse failed")
     } finally {
       setBrowseLoading(false)
+    }
+  }
+
+  const activeSchemaTable = () => schemaInfo?.tables?.find((t) => t.name === activeTable?.table)
+
+  const pkColumnNames = () => (activeSchemaTable()?.columns?.filter((c) => c.isPrimaryKey).map((c) => c.name) ?? [])
+
+  const quoteIdent = (name: string) => {
+    const isMySql = conns.find((c) => c.id === selectedId)?.provider === "MySql"
+    const q = isMySql ? "`" : '"'
+    return q + name.replace(new RegExp(q, "g"), q + q) + q
+  }
+
+  const sqlQuote = (v: unknown) => {
+    if (v === null || v === undefined) return "NULL"
+    if (typeof v === "number" && Number.isFinite(v)) return String(v)
+    if (typeof v === "boolean") return v ? "1" : "0"
+    const s = String(v)
+    // keep unquoted for values that are pure integers/floats coming through as strings
+    if (/^-?\d+(\.\d+)?$/.test(s)) return s
+    return "'" + s.replace(/'/g, "''") + "'"
+  }
+
+  const refreshData = async () => {
+    if (!selectedId || !activeTable) return
+    await browseData(selectedId, activeTable.table)
+  }
+
+  const buildWherePk = (row: unknown[]) => {
+    const cols = browseResult?.columns ?? []
+    const pks = pkColumnNames()
+    if (pks.length === 0) return ""
+    return pks.map((pk) => {
+      const idx = cols.indexOf(pk)
+      const v = row[idx]
+      return `${pk} = ${sqlQuote(v)}`
+    }).join(" AND ")
+  }
+
+  const startEdit = (rowIndex: number, colIndex: number, value: unknown) => {
+    if (pkColumnNames().length === 0) return
+    setEditingCell({ row: rowIndex, col: colIndex })
+    setEditValue(String(value ?? ""))
+  }
+
+  const commitEdit = async (overrideValue?: string) => {
+    if (!editingCell || !browseResult || !selectedId || !activeTable) return
+    const { row: ri, col: ci } = editingCell
+    const colName = browseResult.columns[ci]
+    if (pkColumnNames().includes(colName)) {
+      // editing PK not allowed in v1
+      setEditingCell(null)
+      return
+    }
+    const where = buildWherePk(browseResult.rows[ri])
+    if (!where) { setEditingCell(null); return }
+    const val = overrideValue !== undefined ? overrideValue : editValue
+    const sqlStmt = `UPDATE ${quoteIdent(activeTable.table)} SET ${colName} = ${sqlQuote(val)} WHERE ${where}`
+    const prevValue = browseResult.rows[ri][ci]
+    // optimistic apply
+    setBrowseResult((prev) => {
+      if (!prev) return prev
+      const rows = prev.rows.map((r, i) => (i === ri ? r.map((v, j) => (j === ci ? val : v)) : r))
+      return { ...prev, rows }
+    })
+    setEditingCell(null)
+    setSavingCell(true)
+    try {
+      const res = await fetch(API + "/" + selectedId + "/mutate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000 }),
+      })
+      if (!res.ok) throw new Error(parseApiError(await res.text()))
+      await refreshData()
+    } catch (e: unknown) {
+      // revert
+      setBrowseResult((prev) => {
+        if (!prev) return prev
+        const rows = prev.rows.map((r, i) => (i === ri ? r.map((v, j) => (j === ci ? prevValue : v)) : r))
+        return { ...prev, rows }
+      })
+      setError(e instanceof Error ? e.message : "update failed")
+    } finally {
+      setSavingCell(false)
+    }
+  }
+
+  const cancelEdit = () => setEditingCell(null)
+
+  const promptDeleteRow = (rowIndex: number) => {
+    if (!browseResult || !selectedId || !activeTable) return
+    const where = buildWherePk(browseResult.rows[rowIndex])
+    if (!where) { notifyDb("error", "no primary key — cannot delete"); return }
+    setDeleteRowTarget(rowIndex)
+  }
+
+  const confirmDeleteRow = async () => {
+    if (deleteRowTarget === null || !browseResult || !selectedId || !activeTable) return
+    const rowIndex = deleteRowTarget
+    const where = buildWherePk(browseResult.rows[rowIndex])
+    if (!where) { notifyDb("error", "no primary key — cannot delete"); setDeleteRowTarget(null); return }
+    // optimistic removal
+    setBrowseResult((prev) => {
+      if (!prev) return prev
+      return { ...prev, rows: prev.rows.filter((_, i) => i !== rowIndex) }
+    })
+    setDeleteRowTarget(null)
+    setMutating(true)
+    try {
+      const sqlStmt = `DELETE FROM ${quoteIdent(activeTable.table)} WHERE ${where}`
+      const res = await fetch(API + "/" + selectedId + "/mutate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000 }),
+      })
+      if (!res.ok) throw new Error(parseApiError(await res.text()))
+      const data = await res.json().catch(() => ({ affectedRows: 0, truncated: false }))
+      await refreshData()
+      if ((data?.affectedRows ?? 0) === 0) {
+        setError("Nothing was deleted — no matching row.")
+      } else {
+        notifyDb("success", `Deleted ${data.affectedRows} row${data.affectedRows === 1 ? "" : "s"}`)
+      }
+    } catch (e: unknown) {
+      await refreshData()
+      setError(e instanceof Error ? e.message : "delete failed")
+    } finally {
+      setMutating(false)
+      setDeleteRowTarget(null)
+    }
+  }
+
+  const submitNewRow = async () => {
+    if (!newRow || !browseResult || !selectedId || !activeTable) return
+    const cols = browseResult.columns
+    const pks = pkColumnNames()
+    const colList = cols.map((c) => quoteIdent(c)).join(", ")
+    const valList = cols.map((c) => {
+      const v = newRow[c] ?? ""
+      if (pks.includes(c) && v === "") return "NULL"
+      return sqlQuote(v)
+    }).join(", ")
+    const sqlStmt = `INSERT INTO ${quoteIdent(activeTable.table)} (${colList}) VALUES (${valList})`
+    const optimisticRow = cols.map((c) => (newRow[c] ?? ""))
+    // optimistic apply
+    setBrowseResult((prev) => {
+      if (!prev) return prev
+      return { ...prev, rows: [...prev.rows, optimisticRow] }
+    })
+    setMutating(true)
+    try {
+      const res = await fetch(API + "/" + selectedId + "/mutate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000 }),
+      })
+      if (!res.ok) throw new Error(parseApiError(await res.text()))
+      setNewRow(null)
+      await refreshData()
+    } catch (e: unknown) {
+      // revert
+      setBrowseResult((prev) => {
+        if (!prev) return prev
+        return { ...prev, rows: prev.rows.slice(0, -1) }
+      })
+      setError(e instanceof Error ? e.message : "insert failed")
+    } finally {
+      setMutating(false)
     }
   }
 
@@ -548,7 +827,7 @@ export default function DatabasesPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sql: trimmed, maxAffectedRows: 1000 }),
         })
-        if (!res.ok) throw new Error(await res.text())
+        if (!res.ok) throw new Error(parseApiError(await res.text()))
         const data = await res.json()
         setQResult({ columns: ["affectedRows", "truncated"], rows: [[data.affectedRows, data.truncated]], truncated: false })
         return
@@ -562,7 +841,7 @@ export default function DatabasesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: finalSql, maxRows: 100 }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(parseApiError(await res.text()))
       setQResult(await res.json())
     } catch (e: unknown) {
       setQError(e instanceof Error ? e.message : "query failed")
@@ -645,9 +924,10 @@ export default function DatabasesPage() {
         </Button>
       </div>
 
+
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-      {showCreate ? (
+{showCreate ? (
         <Card>
           <CardHeader><CardTitle>Create connection</CardTitle></CardHeader>
           <CardContent className="space-y-3">
@@ -857,20 +1137,115 @@ export default function DatabasesPage() {
           <CardContent>
             {browseLoading ? <p className="text-sm text-muted-foreground">Loading.</p> : null}
             {browseResult ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr>{browseResult.columns.map((col: string) => <th key={col} className="border px-2 py-1 text-left">{col}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {browseResult.rows.map((row, i: number) => (
-                      <tr key={i}>{row.map((v, j: number) => {
-                        const text = String(v ?? "")
-                        return <td key={j} className="border px-2 py-1 whitespace-nowrap" title={text}>{text.length > 60 ? text.slice(0, 60) + "…" : text}</td>
-                      })}</tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setNewRow(Object.fromEntries(browseResult.columns.map((c) => [c, ""])))} title={pkColumnNames().length === 0 ? "no primary key — read only" : undefined} disabled={mutating || pkColumnNames().length === 0}>
+                    + Add row
+                  </Button>
+                  {pkColumnNames().length === 0 ? <span className="text-xs text-muted-foreground">No primary key — read only</span> : null}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr>
+                        {browseResult.columns.map((col) => <th key={col} className="border px-2 py-1 text-left">{col}</th>)}
+                        <th className="border px-2 py-1 text-left w-16 sticky right-0 bg-background z-10">act</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {browseResult.rows.map((row, i: number) => (
+                        <tr key={i}>
+                          {row.map((v, j: number) => {
+                            const colName = browseResult.columns[j]
+                            const isPk = pkColumnNames().includes(colName)
+                            const isEditing = editingCell?.row === i && editingCell?.col === j
+                            if (isEditing) {
+                              const colType = (activeSchemaTable()?.columns?.find((c) => c.name === colName)?.dataType ?? "").toLowerCase()
+                              const isDate = colType.includes("date") || colType.includes("time")
+                              if (isDate) {
+                                return (
+                                  <td key={j} className="border px-1 py-0.5">
+                                    <DatePicker
+                                      value={editValue}
+                                      withTime={colType.includes("time")}
+                                      onChange={(v) => { setEditValue(v); void commitEdit(v) }}
+                                    />
+                                  </td>
+                                )
+                              }
+                              return (
+                                <td key={j} className="border px-1 py-0.5">
+                                  <input
+                                    type="text"
+                                    className="w-full rounded border px-1 py-0.5 text-sm"
+                                    value={editValue}
+                                    autoFocus
+                                    onChange={(e) => setEditValue(e.target.value)}
+                                    onBlur={() => { void commitEdit() }}
+                                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void commitEdit() } if (e.key === "Escape") cancelEdit() }}
+                                    disabled={savingCell}
+                                  />
+                                </td>
+                              )
+                            }
+                            return (
+                              <td
+                                key={j}
+                                className={`border px-2 py-1 whitespace-nowrap ${isPk ? "bg-muted/40" : "cursor-pointer hover:bg-accent/40"}`}
+                                title={String(v ?? "")}
+                                onClick={() => { if (!isPk && pkColumnNames().length > 0) startEdit(i, j, v) }}
+                              >
+                                {String(v ?? "")}
+                              </td>
+                            )
+                          })}
+                          <td className="border px-2 py-1 sticky right-0 bg-background z-10">
+                            <button
+                              className="text-xs text-destructive hover:underline"
+                              onClick={() => { promptDeleteRow(i) }}
+                              title={pkColumnNames().length === 0 ? "no primary key — read only" : undefined}
+                              disabled={mutating || pkColumnNames().length === 0}
+                            >
+                              del
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {newRow ? (
+                        <tr>
+                          {browseResult.columns.map((col) => {
+                            const colType = (activeSchemaTable()?.columns?.find((c) => c.name === col)?.dataType ?? "").toLowerCase()
+                            const isDate = colType.includes("date") || colType.includes("time")
+                            if (isDate) {
+                              return (
+                                <td key={col} className="border px-1 py-0.5">
+                                  <DatePicker
+                                    value={newRow[col] ?? ""}
+                                    withTime={colType.includes("time")}
+                                    onChange={(v) => setNewRow((prev) => prev ? { ...prev, [col]: v } : prev)}
+                                  />
+                                </td>
+                              )
+                            }
+                            return (
+                              <td key={col} className="border px-1 py-0.5">
+                                <input
+                                  className="w-full rounded border px-1 py-0.5 text-sm"
+                                  value={newRow[col] ?? ""}
+                                  onChange={(e) => setNewRow((prev) => prev ? { ...prev, [col]: e.target.value } : prev)}
+                                />
+                              </td>
+                            )
+                          })}
+                          <td className="border px-2 py-1 flex gap-1">
+                            <button className="text-xs text-green-600 hover:underline" onClick={() => { void submitNewRow() }} disabled={mutating}>save</button>
+                            <button className="text-xs text-muted-foreground hover:underline" onClick={() => setNewRow(null)}>cancel</button>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
                 {browseResult.truncated ? <p className="mt-1 text-xs text-muted-foreground">Truncated.</p> : null}
               </div>
             ) : null}
@@ -1072,6 +1447,42 @@ export default function DatabasesPage() {
           </div>
         </div>
       ) : null}
+
+      <AlertDialog
+        open={deleteRowTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteRowTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive">Delete row?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the selected row from{" "}
+              <span className="font-medium">{activeTable?.table}</span>. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={mutating}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                void confirmDeleteRow()
+              }}
+              disabled={mutating}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {mutating ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <div className="pointer-events-none fixed top-4 right-4 z-[100] flex flex-col gap-2">
+        {dbNotifications.map((n) => (
+          <DbToastItem key={n.id} notification={n} onDismiss={dismissDbNotification} />
+        ))}
+      </div>
 
        </div>
      </div>
