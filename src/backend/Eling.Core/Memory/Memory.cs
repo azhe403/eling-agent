@@ -4,7 +4,9 @@ namespace Eling.Core.Memory;
 
 public class Memory
 {
-    private static readonly Regex TagSeparatorRegex = new(@"[\s\-_./\\|]+", RegexOptions.Compiled);
+    // Hyphen is intentionally NOT a separator: tag names commonly use
+    // hyphens (e.g. "my-tag") and users expect them to survive as one tag.
+    private static readonly Regex TagSeparatorRegex = new(@"[\s_./\\|]+", RegexOptions.Compiled);
 
     public MemoryId Id { get; }
     public MemoryType Type { get; }
@@ -39,9 +41,10 @@ public class Memory
 
     /// <summary>
     /// Normalize a tag list for indexability: split on common separators
-    /// (hyphen, underscore, dot, slash, backslash, pipe), lower-case, trim,
-    /// drop tokens shorter than 2 characters and remove duplicates. Used by
-    /// the constructor, the indexer, and the search-side re-normalizer.
+    /// (whitespace, underscore, dot, slash, backslash, pipe) — hyphen is kept
+    /// so names like "my-tag" survive as one tag — lower-case, trim, drop
+    /// tokens shorter than 2 characters and remove duplicates. Used by the
+    /// constructor, the indexer, and the search-side re-normalizer.
     /// </summary>
     public static IReadOnlyCollection<string> NormalizeTags(IEnumerable<string>? tags)
     {

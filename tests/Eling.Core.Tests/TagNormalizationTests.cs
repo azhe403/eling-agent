@@ -6,10 +6,10 @@ namespace Eling.Core.Tests;
 public class TagNormalizationTests
 {
     [Fact]
-    public void NormalizeTags_SplitsOnHyphen()
+    public void NormalizeTags_KeepsHyphenInTag()
     {
         var result = Memory.Memory.NormalizeTags(new[] { "git-hygiene" });
-        Assert.Equal(new[] { "git", "hygiene" }, result);
+        Assert.Equal(new[] { "git-hygiene" }, result);
     }
 
     [Fact]
@@ -37,14 +37,14 @@ public class TagNormalizationTests
     public void NormalizeTags_Lowercases()
     {
         var result = Memory.Memory.NormalizeTags(new[] { "GIT-Hygiene", "CODE_REVIEW" });
-        Assert.Equal(new[] { "git", "hygiene", "code", "review" }, result);
+        Assert.Equal(new[] { "git-hygiene", "code", "review" }, result);
     }
 
     [Fact]
     public void NormalizeTags_DropsTokensShorterThanTwoChars()
     {
         var result = Memory.Memory.NormalizeTags(new[] { "a", "bc", "def-g" });
-        Assert.Equal(new[] { "bc", "def" }, result);
+        Assert.Equal(new[] { "bc", "def-g" }, result);
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public class TagNormalizationTests
     public void NormalizeTags_HandlesMultipleSeparators()
     {
         var result = Memory.Memory.NormalizeTags(new[] { "some_tag-name.with/many" });
-        Assert.Equal(new[] { "some", "tag", "name", "with", "many" }, result);
+        Assert.Equal(new[] { "some", "tag-name", "with", "many" }, result);
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public class TagNormalizationTests
             MemoryType.Fact,
             "Test content",
             tags: new[] { "Git-Hygiene", "CODE_REVIEW", "a" });
-        Assert.Equal(new[] { "git", "hygiene", "code", "review" }, memory.Tags);
+        Assert.Equal(new[] { "git-hygiene", "code", "review" }, memory.Tags);
     }
 
     [Fact]

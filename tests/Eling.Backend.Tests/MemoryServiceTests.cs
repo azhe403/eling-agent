@@ -227,11 +227,10 @@ public class MemoryServiceTests
         var result = await service.UpdateAsync(memory.Id, tags: new[] { "new-tag", "another-tag" });
 
         Assert.NotNull(result);
-        // Tags are normalized: "new-tag" → ["new", "tag"], "another-tag" → ["another", "tag"]
-        // (note "tag" appears twice but dedup happens in NormalizeTags)
-        Assert.Contains("new", result!.Tags);
-        Assert.Contains("tag", result.Tags);
-        Assert.Contains("another", result.Tags);
+        // Tags are normalized: hyphen is kept, so "new-tag" and "another-tag"
+        // each survive as a single tag.
+        Assert.Contains("new-tag", result!.Tags);
+        Assert.Contains("another-tag", result.Tags);
     }
 
     [Fact]
