@@ -71,7 +71,7 @@ function SidebarProvider({
   const isMobile = useIsMobile()
   const pathname = usePathname()
   // The databases page has wide tables; collapse the sidebar earlier there.
-  const compactBreakpoint = pathname?.startsWith("/dashboard/databases") ? 1440 : 1024
+  const compactBreakpoint = pathname?.startsWith("/dashboard/databases") ? 1536 : 1024
   const isCompact = useIsCompact(compactBreakpoint)
   const [openMobile, setOpenMobile] = React.useState(false)
 

@@ -37,7 +37,7 @@ export function getSidebarAttribute(stored: string | null): { name: string; valu
  * out of layout.tsx.
  */
 export function getSidebarInlineScript(): string {
-  return `(function(){try{document.documentElement.classList.add('preload');var s=localStorage.getItem('${SIDEBAR_STORAGE_KEY}');var t=window.location.pathname.indexOf('/dashboard/databases')===0?1440:1024;var compact=window.innerWidth<t;if(compact||${isSidebarCollapsed.toString()}(s)){document.documentElement.setAttribute('data-sidebar-collapsed','true')}else{document.documentElement.removeAttribute('data-sidebar-collapsed')}window.addEventListener('DOMContentLoaded',function(){requestAnimationFrame(function(){requestAnimationFrame(function(){document.documentElement.classList.remove('preload')})})})}catch(e){console.warn('eling sidebar preload failed',e)}})()`
+  return `(function(){try{document.documentElement.classList.add('preload');var s=localStorage.getItem('${SIDEBAR_STORAGE_KEY}');var t=window.location.pathname.indexOf('/dashboard/databases')===0?1536:1024;var compact=window.innerWidth<t;if(compact||${isSidebarCollapsed.toString()}(s)){document.documentElement.setAttribute('data-sidebar-collapsed','true')}else{document.documentElement.removeAttribute('data-sidebar-collapsed')}window.addEventListener('DOMContentLoaded',function(){requestAnimationFrame(function(){requestAnimationFrame(function(){document.documentElement.classList.remove('preload')})})})}catch(e){console.warn('eling sidebar preload failed',e)}})()`
 }
 
 /**
@@ -52,5 +52,5 @@ export function getSidebarInlineScript(): string {
  * On soft navigations the InlineScript wrapper renders it inert (text/plain).
  */
 export function getSidebarBodyScript(): string {
-  return `(function(){try{var s=localStorage.getItem('${SIDEBAR_STORAGE_KEY}');var t=window.location.pathname.indexOf('/dashboard/databases')===0?1440:1024;var compact=window.innerWidth<t;if(compact||${isSidebarCollapsed.toString()}(s)){var el=document.querySelector('[data-slot="sidebar"]');if(el){el.setAttribute('data-state','collapsed');el.setAttribute('data-collapsible','icon')}}}catch(e){console.warn('eling sidebar pre-paint failed',e)}})()`
+  return `(function(){try{var s=localStorage.getItem('${SIDEBAR_STORAGE_KEY}');var t=window.location.pathname.indexOf('/dashboard/databases')===0?1536:1024;var compact=window.innerWidth<t;if(compact||${isSidebarCollapsed.toString()}(s)){var el=document.querySelector('[data-slot="sidebar"]');if(el){el.setAttribute('data-state','collapsed');el.setAttribute('data-collapsible','icon')}}}catch(e){console.warn('eling sidebar pre-paint failed',e)}})()`
 }
