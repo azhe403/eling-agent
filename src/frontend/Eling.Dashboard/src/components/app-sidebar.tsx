@@ -55,6 +55,11 @@ const navMain = [
     icon: <ScrollText className="size-4" />,
   },
   {
+    title: "Databases",
+    url: "/dashboard/databases",
+    icon: <Database className="size-4" />,
+  },
+  {
     title: "Judge",
     url: "/dashboard/judge",
     icon: <Scale className="size-4" />,
