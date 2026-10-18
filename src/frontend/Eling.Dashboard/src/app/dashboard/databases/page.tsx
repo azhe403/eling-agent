@@ -1148,7 +1148,7 @@ export default function DatabasesPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr>
-                        {browseResult.columns.map((col) => <th key={col} className="border px-2 py-1 text-left">{col}</th>)}
+                        {browseResult.columns.map((col) => <th key={col} className={`border px-2 py-1 text-left ${/^id$/i.test(col) ? "w-px whitespace-nowrap" : ""}`}>{col}</th>)}
                         <th className="border px-2 py-1 text-left w-16 sticky right-0 bg-background z-10">act</th>
                       </tr>
                     </thead>
@@ -1191,7 +1191,7 @@ export default function DatabasesPage() {
                             return (
                               <td
                                 key={j}
-                                className={`border px-2 py-1 whitespace-nowrap ${isPk ? "bg-muted/40" : "cursor-pointer hover:bg-accent/40"}`}
+                                className={`border px-2 py-1 whitespace-nowrap ${/^id$/i.test(colName) ? "w-px" : ""} ${isPk ? "bg-muted/40" : "cursor-pointer hover:bg-accent/40"}`}
                                 title={String(v ?? "")}
                                 onClick={() => { if (!isPk && pkColumnNames().length > 0) startEdit(i, j, v) }}
                               >
