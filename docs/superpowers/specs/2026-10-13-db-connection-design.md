@@ -219,11 +219,11 @@ These come from the 2026-09-19 spec but are **deferred — out of scope for this
 
 | Deferred item | Source | Planned phase |
 |---|---|---|
-| Mutation endpoint (`POST /api/databases/{id}/mutate`) | 2026-09-19 §7 Phase 1 | **Phase 3** (with `SqlSafety` mutation classification) |
-| MCP mutation tool `db_execute_mutation` | 2026-09-19 §5.4 | **Phase 3** — the read-only MCP tools ship in Phase 1; only the data-changing tool is deferred to the mutation phase |
-| Human approval gate for agent mutations (`PendingMutationAction` + SSE + GUI approve/reject) | 2026-09-19 §5.4, §4.5 | **Phase 3** (ships together with the mutation tool) |
-| Dashboard UI (`/dashboard/databases`: connection manager, import dialog, schema tree, SQL editor, data viewer) | 2026-09-19 §4 | **Phase 2** — read-only surfaces; the CRUD data grid + approval banner land in Phase 3 with mutations |
-| Desktop UI parity | 2026-09-19 §4 | **Phase 2** (same read-only-first scope) |
+| Mutation endpoint (`POST /api/databases/{id}/mutate`) | 2026-09-19 §7 Phase 1 | **Phase 3** (dashboard-only; see `2026-10-18-db-connection-phase3-mutations.md`) — `SqlSafety` mutation classification, preset enforcement, audit log |
+| MCP mutation tool `db_execute_mutation` | 2026-09-19 §5.4 | **Deferred beyond Phase 3** — MCP mutation + approval gate postponed; Dashboard mutation ships first |
+| Human approval gate for agent mutations (`PendingMutationAction` + SSE + GUI approve/reject) | 2026-09-19 §5.4, §4.5 | **Deferred beyond Phase 3** — ships together with MCP mutation tool |
+| Dashboard UI (`/dashboard/databases`: connection manager, import dialog, schema tree, SQL editor, data viewer) | 2026-09-19 §4 | **Phase 2 — DONE** (read-only surfaces shipped; CRUD data grid lands in Phase 3) |
+| Desktop UI parity | 2026-09-19 §4 | **Deferred** — user decision (skip for now) |
 | PostgreSQL (`Npgsql`) and SQL Server (`Microsoft.Data.SqlClient`) adapters | 2026-09-19 §3.2 | Later — factory already fails cleanly for them |
 | Environment-preset enforcement (GUI write restrictions, MCP read-only per preset) | 2026-09-19 §2 | **Phase 3** — presets are stored and validated only in this phase; enforcement pairs with mutations |
 | Credential encryption at rest (DPAPI/AES) | 2026-09-19 §3.1 | Follow-up hardening |
@@ -263,5 +263,5 @@ These come from the 2026-09-19 spec but are **deferred — out of scope for this
 - MySqlConnector version pinned to latest stable at implementation time (record resolved version in the plan/report).
 - Environment-specific config files (`appsettings.Development.json` chain) not scanned in v1 — single file only.
 - Roadmap for later phases (each gets its own spec → plan cycle):
-  - **Phase 2 (GUI):** `/dashboard/databases` in `Eling.Dashboard` (Next.js) — connection manager, import dialog, schema tree, read-only data viewer, SQL editor — plus Desktop parity.
-  - **Phase 3 (Mutations):** mutation classification (`SqlSafety` extended), `POST /{id}/mutate`, MCP `db_execute_mutation`, approval gate (`PendingMutationAction` + SSE + GUI approve/reject), environment-preset enforcement, audit logging. The GUI's CRUD grid and approval panel land here.
+  - **Phase 2 (GUI):** `/dashboard/databases` in `Eling.Dashboard` (Next.js) — connection manager, import dialog, schema tree, read-only data viewer, SQL editor — **DONE** (Desktop parity deferred).
+  - **Phase 3 (Mutations, dashboard-only):** see `docs/superpowers/specs/2026-10-18-db-connection-phase3-mutations.md` — mutation classification (`SqlSafety` extended), `POST /{id}/mutate`, environment-preset enforcement, audit logging, Dashboard CRUD data grid. MCP mutation + approval gate deferred to a later phase.
