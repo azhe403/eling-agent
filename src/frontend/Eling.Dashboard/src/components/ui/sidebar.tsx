@@ -7,6 +7,8 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useIsCompact } from "@/hooks/use-compact"
+import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
@@ -67,20 +69,61 @@ function SidebarProvider({
   onOpenChange?: (open: boolean) => void
 }) {
   const isMobile = useIsMobile()
+  const pathname = usePathname()
+  // The databases page has wide tables; collapse the sidebar earlier there.
+  const compactBreakpoint = pathname?.startsWith("/dashboard/databases") ? 1440 : 1024
+  const isCompact = useIsCompact(compactBreakpoint)
   const [openMobile, setOpenMobile] = React.useState(false)
+
+  // Auto-collapse override used only while the viewport is compact: the sidebar
+  // starts collapsed (icon strip) but the user can still expand it manually.
+  const [compactExpanded, setCompactExpanded] = React.useState(false)
+
+  // Track the previous compact flag so we can reset the manual override when
+  // leaving the compact range (done during render to avoid cascading renders).
+  const [prevIsCompact, setPrevIsCompact] = React.useState(isCompact)
+  if (isCompact !== prevIsCompact) {
+    setPrevIsCompact(isCompact)
+    if (!isCompact) setCompactExpanded(false)
+  }
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
   const [_open, _setOpen] = React.useState(defaultOpen)
-  const open = openProp ?? _open
+  const persistedOpen = openProp ?? _open
+  // In the compact range the sidebar auto-collapses to its icon strip unless the
+  // user explicitly expanded it; otherwise the persisted preference applies.
+  const open = isCompact ? compactExpanded : persistedOpen
+
+  // Keep the <html> data attribute in sync with the (possibly auto-collapsed)
+  // open state so the CSS that forces the icon width stays correct on resize,
+  // even when setOpen is not called (e.g. entering the compact range).
+  React.useEffect(() => {
+    try {
+      if (open) {
+        document.documentElement.removeAttribute("data-sidebar-collapsed")
+      } else {
+        document.documentElement.setAttribute("data-sidebar-collapsed", "true")
+      }
+    } catch {
+      console.debug("sidebar collapsed attribute sync failed")
+    }
+  }, [open])
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
-      const openState = typeof value === "function" ? value(open) : value
-      if (setOpenProp) {
+      const currentOpen = isCompact ? compactExpanded : persistedOpen
+      const openState = typeof value === "function" ? value(currentOpen) : value
+      if (isCompact) {
+        setCompactExpanded(openState)
+      } else if (setOpenProp) {
         setOpenProp(openState)
       } else {
         _setOpen(openState)
       }
+
+      // Keep the persisted preference in sync so it carries over when leaving
+      // the compact range (and across reloads).
+      if (!setOpenProp) _setOpen(openState)
 
       // This sets the cookie to keep the sidebar state.
       document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
@@ -95,7 +138,7 @@ function SidebarProvider({
         console.debug("sidebar state storage write failed")
       }
     },
-    [setOpenProp, open]
+    [setOpenProp, isCompact, compactExpanded, persistedOpen]
   )
 
   // Helper to toggle the sidebar.
