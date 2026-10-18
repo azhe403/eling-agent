@@ -516,10 +516,13 @@ public sealed class CodebaseIndexService
             foreach (var scope in scopes)
             {
                 var absolute = Path.GetFullPath(Path.Combine(_projectRoot, scope.Replace('/', Path.DirectorySeparatorChar)));
+                var scopeRel = Path.GetRelativePath(_projectRoot, absolute).Replace('\\', '/');
+                // Defense in depth: a scope must never resolve outside the
+                // workspace root, even if normalization missed something.
+                if (scopeRel.StartsWith("..", StringComparison.Ordinal)) continue;
                 if (File.Exists(absolute))
                 {
-                    var rel = Path.GetRelativePath(_projectRoot, absolute).Replace('\\', '/');
-                    if (!ignores.IsIgnored(rel)) yield return absolute;
+                    if (!ignores.IsIgnored(scopeRel)) yield return absolute;
                 }
                 else if (Directory.Exists(absolute)) roots.Add(absolute);
             }
@@ -560,12 +563,18 @@ public sealed class CodebaseIndexService
     private static IReadOnlyList<string>? NormalizeScopes(IReadOnlyList<string>? prefixes)
     {
         if (prefixes is null || prefixes.Count == 0) return null;
-        var cleaned = prefixes
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(p => p.Replace('\\', '/').Trim().Trim('/', '.'))
-            .Where(p => p.Length > 0)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+        var cleaned = new List<string>();
+        foreach (var raw in prefixes)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            var normalized = raw.Replace('\\', '/').Trim().Trim('/');
+            if (normalized.Length == 0) continue;
+            var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Any(s => s == ".." || s == ".")) continue;
+            if (Path.IsPathRooted(normalized)) continue;
+            cleaned.Add(string.Join('/', segments));
+        }
+        cleaned = cleaned.Distinct(StringComparer.Ordinal).ToList();
         return cleaned.Count == 0 ? null : cleaned;
     }
 

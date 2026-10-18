@@ -4,6 +4,8 @@ using Eling.Backend.Dtos;
 using Eling.Core.Audit;
 using Eling.Core.Codebase;
 using Eling.Core.Memory;
+using Eling.Core.Projects;
+using Eling.Core.Scope;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
@@ -23,12 +25,22 @@ public sealed class CodebaseIndexTool
     private readonly IMemoryChangeNotifier _notifier;
     private readonly CodebaseAuditRecorder _audit;
     private readonly ILogger<CodebaseIndexTool>? _logger;
+    private readonly IWorkspacesRegistry? _workspaces;
+    private readonly ILoggerFactory? _loggerFactory;
 
-    public CodebaseIndexTool(CodebaseIndexService svc, ILogger<CodebaseIndexTool>? logger = null, IMemoryChangeNotifier? notifier = null, IAuditLogger? audit = null)
+    public CodebaseIndexTool(
+        CodebaseIndexService svc,
+        ILogger<CodebaseIndexTool>? logger = null,
+        IMemoryChangeNotifier? notifier = null,
+        IWorkspacesRegistry? workspaces = null,
+        ILoggerFactory? loggerFactory = null,
+        IAuditLogger? audit = null)
     {
         _svc = svc;
         _logger = logger;
         _notifier = notifier ?? NullMemoryChangeNotifier.Instance;
+        _workspaces = workspaces;
+        _loggerFactory = loggerFactory;
         _audit = CodebaseAuditRecorder.Create(audit);
     }
 
@@ -36,34 +48,83 @@ public sealed class CodebaseIndexTool
     public async Task<CodebaseIndexResponse> IndexAsync(
         [Description("true = rebuild all chunks, false = incremental by hash (default false).")] bool full = false,
         [Description("Optional scope, e.g. [\"src/backend\"]. Null = whole workspace.")] string[]? paths = null,
+        [Description("Optional absolute directory path to index as an external workspace root. Null = current workspace.")] string? root = null,
         CancellationToken cancellationToken = default)
     {
         var sw = Stopwatch.StartNew();
         try
         {
-            var result = await _svc.IndexAsync(full, paths, cancellationToken);
+            // External root: index into its own dedicated DB so ownership stays
+            // with that folder instead of polluting the current workspace.
+            if (!string.IsNullOrWhiteSpace(root))
+            {
+                var validated = ElingPaths.EnsureCodebaseRootsAllowed(new[] { root! });
+                var normalized = validated.Count > 0
+                    ? validated[0]
+                    : Path.GetFullPath(root!).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                if (!Directory.Exists(normalized))
+                    throw new DirectoryNotFoundException($"Directory not found: '{normalized}'.");
+
+                if (!string.Equals(normalized, _svc.ProjectRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    var dbPath = ElingPaths.ResolveCodebaseDbPath(normalized);
+                    using var index = new SqliteCodebaseIndex(dbPath);
+                    var svc = new CodebaseIndexService(normalized, index, _loggerFactory?.CreateLogger<CodebaseIndexService>());
+                    var result = await svc.IndexAsync(full, paths, cancellationToken);
+                    sw.Stop();
+
+                    if (result.Status is not null)
+                    {
+                        _logger?.LogInformation("codebase_index skipped: a pass is already running (status={Status}).", result.Status);
+                        await _audit.RecordIndexAsync(normalized, (int)sw.ElapsedMilliseconds);
+                        await _notifier.NotifyAsync("codebase", cancellationToken);
+                        return new CodebaseIndexResponse(
+                            result.Files, result.Chunks, result.Skipped, result.Deleted,
+                            sw.ElapsedMilliseconds, false, result.DbPath, result.Status);
+                    }
+
+                    _logger?.LogInformation(
+                        "codebase_index completed files={Files} chunks={Chunks} skipped={Skipped} deleted={Deleted} full={Full} tookMs={TookMs}",
+                        result.Files, result.Chunks, result.Skipped, result.Deleted, full, sw.ElapsedMilliseconds);
+
+                    var now = DateTimeOffset.UtcNow;
+                    _workspaces?.Record(new RegisteredWorkspace(
+                        string.Empty,
+                        normalized,
+                        normalized,
+                        CodebaseEnabled: true,
+                        FirstSeenAt: now,
+                        LastSeenAt: now));
+
+                    await _audit.RecordIndexAsync(normalized, (int)sw.ElapsedMilliseconds);
+                    await _notifier.NotifyAsync("codebase", cancellationToken);
+                    return new CodebaseIndexResponse(result.Files, result.Chunks, result.Skipped, result.Deleted, sw.ElapsedMilliseconds, true, result.DbPath, null);
+                }
+
+                // Same as current workspace: fall through to the default path.
+                root = null;
+            }
+
+            var localResult = await _svc.IndexAsync(full, paths, cancellationToken);
             sw.Stop();
 
-            // A pass was already running: nothing was indexed, so report
-            // fresh=false and surface the status instead of claiming success.
-            // Still an explicit invocation, so it still records — with the
-            // outcome the caller observed.
-            if (result.Status is not null)
+            if (localResult.Status is not null)
             {
-                _logger?.LogInformation("codebase_index skipped: a pass is already running (status={Status}).", result.Status);
+                _logger?.LogInformation("codebase_index skipped: a pass is already running (status={Status}).", localResult.Status);
                 await _audit.RecordIndexAsync(_svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
                 await _notifier.NotifyAsync("codebase", cancellationToken);
                 return new CodebaseIndexResponse(
-                    result.Files, result.Chunks, result.Skipped, result.Deleted,
-                    sw.ElapsedMilliseconds, false, result.DbPath, result.Status);
+                    localResult.Files, localResult.Chunks, localResult.Skipped, localResult.Deleted,
+                    sw.ElapsedMilliseconds, false, localResult.DbPath, localResult.Status);
             }
 
             _logger?.LogInformation(
                 "codebase_index completed files={Files} chunks={Chunks} skipped={Skipped} deleted={Deleted} full={Full} tookMs={TookMs}",
-                result.Files, result.Chunks, result.Skipped, result.Deleted, full, sw.ElapsedMilliseconds);
+                localResult.Files, localResult.Chunks, localResult.Skipped, localResult.Deleted, full, sw.ElapsedMilliseconds);
             await _audit.RecordIndexAsync(_svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
             await _notifier.NotifyAsync("codebase", cancellationToken);
-            return new CodebaseIndexResponse(result.Files, result.Chunks, result.Skipped, result.Deleted, sw.ElapsedMilliseconds, true, result.DbPath, null);
+            return new CodebaseIndexResponse(localResult.Files, localResult.Chunks, localResult.Skipped, localResult.Deleted, sw.ElapsedMilliseconds, true, localResult.DbPath, null);
         }
         catch (Exception ex)
         {
