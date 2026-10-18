@@ -8,3 +8,7 @@ public sealed record McpDetectedCandidate(
     string Name,
     DatabaseProvider? Provider,
     string? RejectionReason);
+
+public sealed record McpConnectionsOverview(
+    IReadOnlyList<DatabaseConnectionView> Registered,
+    IReadOnlyList<McpDetectedCandidate> Unimported);

@@ -10,21 +10,24 @@ namespace Eling.Backend.Mcp.Tools;
 public sealed class DatabaseListConnectionsTool
 {
     private readonly IDatabaseConnectionStore _store;
+    private readonly AppSettingsConnectionScanner? _scanner;
     private readonly ILogger<DatabaseListConnectionsTool>? _logger;
 
     public DatabaseListConnectionsTool(
         IDatabaseConnectionStore store,
+        AppSettingsConnectionScanner? scanner = null,
         ILogger<DatabaseListConnectionsTool>? logger = null)
     {
         _store = store;
+        _scanner = scanner;
         _logger = logger;
     }
 
-    [McpServerTool(Name = "db_list_connections"), Description("List registered database connections (identity only, no credentials).")]
-    public async Task<IReadOnlyList<DatabaseConnectionView>> ListAsync(CancellationToken cancellationToken = default)
+    [McpServerTool(Name = "db_list_connections"), Description("List registered database connections (identity only, no credentials) PLUS any connections found in appsettings.json that are not yet registered (Unimported). Run db_import_connections for the approved unimported keys to register them. Detect is read-only and runs automatically here so unimported connections are never missed.")]
+    public async Task<McpConnectionsOverview> ListAsync(CancellationToken cancellationToken = default)
     {
         var rows = await _store.ListAsync(cancellationToken);
-        return rows.Select(c => new DatabaseConnectionView(
+        var registered = rows.Select(c => new DatabaseConnectionView(
             c.Id,
             c.Name,
             c.Provider,
@@ -34,5 +37,32 @@ public sealed class DatabaseListConnectionsTool
             c.RequireApprovalForMutations,
             c.CreatedAt,
             c.LastConnectedAt)).ToList();
+
+        var unimported = new List<McpDetectedCandidate>();
+        if (_scanner is not null)
+        {
+            try
+            {
+                var detected = _scanner.Scan();
+                var registeredNames = new HashSet<string>(rows.Select(r => r.Name), StringComparer.OrdinalIgnoreCase);
+                for (var i = 0; i < detected.Count; i++)
+                {
+                    var d = detected[i];
+                    if (registeredNames.Contains(d.Name)) continue;
+                    unimported.Add(new McpDetectedCandidate(
+                        i + 1,
+                        d.SettingsKey,
+                        d.Name,
+                        d.Provider,
+                        d.RejectionReason));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Detect failed while listing connections");
+            }
+        }
+
+        return new McpConnectionsOverview(registered, unimported);
     }
 }

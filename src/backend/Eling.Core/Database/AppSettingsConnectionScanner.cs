@@ -21,21 +21,47 @@ public sealed class AppSettingsConnectionScanner
     public IReadOnlyList<DetectedConnection> Scan()
     {
         var results = new List<DetectedConnection>();
-        if (!File.Exists(_filePath))
+
+        var files = ResolveFiles();
+        foreach (var file in files)
         {
-            return results;
+            ScanFile(file, results);
         }
 
+        return results;
+    }
+
+    private IEnumerable<string> ResolveFiles()
+    {
+        if (Directory.Exists(_filePath))
+        {
+            // Scan every appsettings*.json in the directory (appsettings.json,
+            // appsettings.Development.json, appsettings.Staging.json, ...).
+            return Directory.EnumerateFiles(_filePath, "appsettings*.json")
+                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        if (File.Exists(_filePath))
+        {
+            return new[] { _filePath };
+        }
+
+        return Array.Empty<string>();
+    }
+
+    private void ScanFile(string filePath, List<DetectedConnection> results)
+    {
         JsonDocument doc;
         try
         {
-            var json = File.ReadAllText(_filePath);
-            doc = JsonDocument.Parse(json);
+            var json = File.ReadAllText(filePath);
+            doc = JsonDocument.Parse(json, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Failed to parse appsettings at {Path}.", _filePath);
-            return results;
+            _logger?.LogWarning(ex, "Failed to parse appsettings at {Path}.", filePath);
+            return;
         }
 
         using (doc)
@@ -46,18 +72,18 @@ public sealed class AppSettingsConnectionScanner
             {
                 foreach (var prop in cs.EnumerateObject())
                 {
+                    // Skip duplicates already added from another appsettings file.
+                    if (results.Any(r => string.Equals(r.SettingsKey, prop.Name, StringComparison.Ordinal)))
+                    {
+                        continue;
+                    }
                     AddCandidate(results, prop.Name, prop.Value);
                 }
             }
 
-            // Nested connection-string objects at any depth, e.g.
-            // { "DatabaseSettings": { "ConnectionString": "Server=...", "Version": "1" } }
-            // or { "Foo": { "Bar": { "ConnectionString": "..." } } }.
-            // Root-level "ConnectionStrings" section is handled above and skipped here.
+            // Nested connection-string objects at any depth.
             ScanNested(doc.RootElement, results, string.Empty);
         }
-
-        return results;
     }
 
     private static void ScanNested(JsonElement element, List<DetectedConnection> results, string path)

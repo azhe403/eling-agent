@@ -95,7 +95,7 @@ public static class DashboardServices
 
         services.AddSingleton(sp => new AppSettingsConnectionScanner(
             Environment.GetEnvironmentVariable("ELING_DATABASE_DETECT_SOURCE")
-                ?? Path.Combine(sp.GetRequiredService<IHostEnvironment>().ContentRootPath, "appsettings.json"),
+                ?? ResolveAppSettingsDirectory(sp.GetRequiredService<IHostEnvironment>().ContentRootPath),
             sp.GetRequiredService<ILogger<AppSettingsConnectionScanner>>()));
 
         services.AddSingleton<DatabaseConnectionImporter>();
@@ -153,5 +153,23 @@ public static class DashboardServices
         {
             mvc.AddApplicationPart(typeof(GitIdentityService).Assembly);
         }
+    }
+
+    /// <summary>
+    /// Resolve the directory scanned by the connection scanner. Prefer the current
+    /// working directory (the project/workspace eling is launched in) when it
+    /// contains any appsettings*.json, falling back to the host content root.
+    /// ELING_DATABASE_DETECT_SOURCE always wins (handled by the caller) and may
+    /// point at a single file or a directory.
+    /// </summary>
+    private static string ResolveAppSettingsDirectory(string contentRootPath)
+    {
+        var cwdDir = Environment.CurrentDirectory;
+        if (Directory.Exists(cwdDir) &&
+            Directory.EnumerateFiles(cwdDir, "appsettings*.json").Any())
+        {
+            return cwdDir;
+        }
+        return contentRootPath;
     }
 }
