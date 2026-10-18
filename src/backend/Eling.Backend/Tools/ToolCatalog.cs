@@ -27,7 +27,6 @@ public static class ToolCatalog
         new("memory_copy_to_project", MemoryGroup, "Copy a memory to the current project scope."),
         new("memory_promote_to_global", MemoryGroup, "Promote a project memory to global scope."),
         new("tools_policy", MemoryGroup, "Inspect or modify the enabled state of MCP tools in real time."),
-        new("codebase_status", CodebaseGroup, "Report codebase index stats: files, chunks, watcher state."),
         new("codebase_search", CodebaseGroup, "Search the codebase index and return path, lines, and snippet."),
         new("codebase_index", CodebaseGroup, "Build or refresh the codebase search index."),
         new("workspace_root", FilesystemGroup, "Return the absolute sandbox root of this server."),

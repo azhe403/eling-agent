@@ -12,7 +12,10 @@ namespace Eling.Backend.Mcp.Tools;
 /// Reports codebase index stats. Pure read — never creates anything on disk.
 /// Each call records one <c>codebase_status</c> access entry (amendment B).
 /// </summary>
-[McpServerToolType]
+// NOTE: intentionally NOT an [McpServerToolType] anymore. Codebase status is
+// now carried by memory_recall's `codebase` field, so exposing it as a
+// standalone MCP tool only invited redundant calls. The class and method are
+// retained for direct (in-process / test) use.
 public sealed class CodebaseStatusTool
 {
     private readonly CodebaseIndexService _svc;
@@ -32,7 +35,7 @@ public sealed class CodebaseStatusTool
         _logger = logger;
     }
 
-    [McpServerTool(Name = "codebase_status"), Description("Report codebase index stats: file/chunk counts, last indexed time, watcher state, and DB path.")]
+    [Description("Report codebase index stats: file/chunk counts, last indexed time, watcher state, and DB path. (Internal/fallback only — not exposed as an MCP tool; status is carried by memory_recall's `codebase` field.)")]
     public async Task<CodebaseStatusResponse> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         try
