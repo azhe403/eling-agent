@@ -87,6 +87,7 @@ export default function DatabasesPage() {
   const connSchemasRef = useRef<Record<string, SchemaInfo>>({})
   const schemaConnIdRef = useRef<string | null>(null)
   const schemaRetryRef = useRef<Record<string, number>>({})
+  const autoScrollPendingRef = useRef(false)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; connId: string; table?: string } | null>(null)
   const [schemaLoading, setSchemaLoading] = useState(false)
   const [browseTable, setBrowseTable] = useState<string | null>(null)
@@ -171,6 +172,7 @@ export default function DatabasesPage() {
 
       const table = urlTable || st?.activeTable?.table
       if (connId && table) {
+        autoScrollPendingRef.current = true
         setActiveTable({ connId, table })
         setBrowseTable(table)
         void (async () => {
@@ -203,6 +205,8 @@ export default function DatabasesPage() {
   // table is scrolled into view after restore, not only on fresh selection.
   useEffect(() => {
     if (!activeTable) return
+    // Only auto-scroll on restore, not on manual selection
+    if (!autoScrollPendingRef.current) return
     const key = `${activeTable.connId}:${activeTable.table}`
     let cancelled = false
     const scroll = () => {
@@ -223,6 +227,7 @@ export default function DatabasesPage() {
             const offset = elRect.top - asideRect.top + aside2.scrollTop
             const target = offset - aside2.clientHeight / 2 + el2.clientHeight / 2
             aside2.scrollTo({ top: Math.max(0, target), behavior: "smooth" })
+            autoScrollPendingRef.current = false
           }
         })
       } else if (el) {
@@ -463,6 +468,7 @@ export default function DatabasesPage() {
   }
 
   const selectTreeTable = async (connId: string, table: string) => {
+    autoScrollPendingRef.current = false
     setActiveTable({ connId, table })
     setSelectedId(connId)
     setSchemaConnId(connId)
