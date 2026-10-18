@@ -37,6 +37,14 @@ public sealed record DatabaseQueryRequest(
     string Sql,
     int MaxRows = 100);
 
+public sealed record DatabaseMutateRequest(
+    string Sql,
+    int MaxAffectedRows = 1000);
+
+public sealed record DatabaseMutateResponse(
+    int AffectedRows,
+    bool Truncated);
+
 public sealed record DetectedConnectionDto(
     string SettingsKey,
     string Name,

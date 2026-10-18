@@ -88,22 +88,31 @@ public static class SqlSafety
             first = tokens[0].TrimStart('(', '[', '{', '"', '\\');
         }
 
-        if (!string.Equals(first, "select", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(first, "explain", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(first, "pragma", StringComparison.OrdinalIgnoreCase))
+        var firstLower = first.ToLowerInvariant();
+
+        // Mutation statements: classified as Mutation (not executed by /query).
+        if (MutationKeywords.Contains(firstLower))
         {
-            return new SqlClassification(SqlVerdict.Rejected, "only SELECT/EXPLAIN/PRAGMA statements are allowed");
+            return new SqlClassification(SqlVerdict.Mutation, null, first.ToUpperInvariant());
         }
 
-        foreach (var token in tokens)
+        // Read-only statements.
+        if (string.Equals(firstLower, "select", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(firstLower, "explain", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(firstLower, "pragma", StringComparison.OrdinalIgnoreCase))
         {
-            var t = token.TrimEnd(')', ']', '}', ';', ',', '.');
-            if (MutationKeywords.Contains(t))
+            // Secondary scan: reject mixed statements (e.g. SELECT ...; DROP ...).
+            foreach (var token in tokens)
             {
-                return new SqlClassification(SqlVerdict.Rejected, $"statement contains mutation keyword '{t.ToLowerInvariant()}'");
+                var t = token.TrimEnd(')', ']', '}', ';', ',', '.');
+                if (MutationKeywords.Contains(t))
+                {
+                    return new SqlClassification(SqlVerdict.Rejected, $"statement contains mutation keyword '{t.ToLowerInvariant()}'");
+                }
             }
+            return new SqlClassification(SqlVerdict.ReadOnly, null);
         }
 
-        return new SqlClassification(SqlVerdict.ReadOnly, null);
+        return new SqlClassification(SqlVerdict.Rejected, "statement is not a recognized read or mutation command");
     }
 }

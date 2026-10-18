@@ -102,6 +102,16 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
         return new QueryResult(columns, rows, truncated);
     }
 
+    public async Task<int> ExecuteAsync(string sql, CancellationToken ct = default)
+    {
+        await using var conn = new MySqlConnection(ConnectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.CommandTimeout = 30;
+        return await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<DatabaseSchemaInfo> GetSchemaAsync(CancellationToken ct = default)
     {
         var tables = new List<TableSchema>();

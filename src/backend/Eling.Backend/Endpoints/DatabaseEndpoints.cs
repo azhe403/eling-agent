@@ -1,5 +1,6 @@
 using Eling.Backend.Database;
 using Eling.Backend.Dtos;
+using Eling.Core.Audit;
 using Eling.Core.Database;
 using Eling.Core.Database.Adapters;
 using Microsoft.AspNetCore.Http;
@@ -250,6 +251,100 @@ public static class DatabaseEndpoints
             {
                 logger.LogWarning(ex, "Query failed for {Id}", id);
                 return Results.Problem(statusCode: 502, title: "query failed", detail: ex.Message);
+            }
+        });
+
+        group.MapPost("/{id}/mutate", async (
+            string id,
+            DatabaseMutateRequest req,
+            IDatabaseConnectionStore store,
+            ILoggerFactory loggerFactory,
+            IAuditLogger auditLogger,
+            CancellationToken ct) =>
+        {
+            var logger = loggerFactory.CreateLogger("Database");
+            var row = await store.FindAsync(id, ct);
+            if (row is null) return Results.NotFound();
+
+            if (row.Environment == DatabaseEnvironment.ReadOnly)
+            {
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Change,
+                    Category = AuditCategory.Database,
+                    Action = "db.mutate",
+                    Target = row.Id,
+                    Outcome = AuditOutcome.Denied,
+                    Query = req.Sql,
+                }, ct);
+                return Results.Forbid();
+            }
+
+            var classification = SqlSafety.Classify(req.Sql);
+            if (classification.Verdict != SqlVerdict.Mutation)
+            {
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Change,
+                    Category = AuditCategory.Database,
+                    Action = "db.mutate",
+                    Target = row.Id,
+                    Outcome = AuditOutcome.Denied,
+                    Query = req.Sql,
+                }, ct);
+                return Results.BadRequest(classification.Reason ?? "not a mutation statement");
+            }
+
+            IDatabaseAdapter adapter;
+            try
+            {
+                adapter = DatabaseAdapterFactory.CreateAdapter(row);
+            }
+            catch (NotSupportedException ex)
+            {
+                logger.LogWarning(ex, "Database adapter not supported for {Id}", id);
+                return Results.BadRequest(ex.Message);
+            }
+
+            var maxAffected = req.MaxAffectedRows;
+            if (maxAffected < 1) maxAffected = 1;
+            if (maxAffected > 10000) maxAffected = 10000;
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                var affected = await adapter.ExecuteAsync(req.Sql, ct);
+                var truncated = affected > maxAffected;
+                if (truncated) affected = maxAffected;
+                sw.Stop();
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Change,
+                    Category = AuditCategory.Database,
+                    Action = "db.mutate",
+                    Target = row.Id,
+                    Outcome = AuditOutcome.Success,
+                    Query = req.Sql,
+                    ResultCount = affected,
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                }, ct);
+                return Results.Ok(new DatabaseMutateResponse(affected, truncated));
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                logger.LogWarning(ex, "Mutate failed for {Id}", id);
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Change,
+                    Category = AuditCategory.Database,
+                    Action = "db.mutate",
+                    Target = row.Id,
+                    Outcome = AuditOutcome.Error,
+                    Query = req.Sql,
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                }, ct);
+                return Results.Problem(statusCode: 502, title: "mutate failed", detail: ex.Message);
             }
         });
 
