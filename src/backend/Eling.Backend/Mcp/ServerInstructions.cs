@@ -47,6 +47,9 @@ public static class ServerInstructions
         "Codebase Search (HARD RULE): When searching code, symbols, implementations, or text across the workspace, ALWAYS call `codebase_search` first. DO NOT use native `grep`, `file_search`, or shell commands as the primary lookup tool — bypassing `codebase_search` when an index exists is a DIRECT RULE VIOLATION. `codebase_search` provides ranked BM25 + trigram snippets with line ranges that save tokens and search latency. Native `grep` is strictly a secondary fallback, permitted ONLY when: (1) `codebase_search` explicitly returns 0 hits, (2) the query requires complex regex unsupported by SQLite FTS, or (3) codebase index creation was denied by the user.",
 
         "Codebase Index Notes: The index is a rebuildable cache (deleting the DB loses nothing — just re-run `codebase_index`); a debounced background watcher keeps it fresh on the dashboard owner, so after edits made outside the agent's own writes, allow a moment for the batch to drain or re-run `codebase_index`, and check the `codebase` field's freshness (from the `memory_recall` response, or `codebase_status` only if that field is absent). `.gitignore` rules are honored on top of the built-in excluded dirs. `codebase_search` never throws on a missing index — it returns empty hits with a hint to index first.",
+
+
+        "Database connections: five read-only tools — db_list_connections, db_get_schema, db_query, db_detect_connections, db_import_connections. db_query only runs SELECT/EXPLAIN/PRAGMA; mutations are rejected. db_detect_connections previews connection strings from the backend appsettings.json with passwords masked; db_import_connections registers only the keys the user explicitly approves, as read-only connections. Never import without explicit approval.",
     ];
 
     /// <summary>

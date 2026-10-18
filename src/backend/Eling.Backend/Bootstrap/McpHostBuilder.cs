@@ -1,5 +1,7 @@
+using Eling.Backend.Database;
 using Eling.Backend.Mcp;
 using Eling.Core;
+using Eling.Core.Database;
 using Eling.Core.Memory;
 using Eling.Core.Scope;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,6 +39,18 @@ public static class McpHostBuilder
             // registered inside AddElingCoreServices.
             services.AddElingAuditTrail();
             services.AddElingMcpServerStdio();
+
+            // Database connection registry (needed by the db_* MCP tools even in
+            // MCP-only/peer hosts; DashboardServices.Register covers the HTTP host).
+            var globalAgentDir = CentralAgentDirectory.Resolve();
+            services.AddSingleton<IDatabaseConnectionStore>(sp => new JsonDatabaseConnectionStore(
+                Path.Combine(globalAgentDir, "databases.json"),
+                sp.GetRequiredService<ILogger<JsonDatabaseConnectionStore>>()));
+            services.AddSingleton(sp => new AppSettingsConnectionScanner(
+                Environment.GetEnvironmentVariable("ELING_DATABASE_DETECT_SOURCE")
+                    ?? Path.Combine(sp.GetRequiredService<IHostEnvironment>().ContentRootPath, "appsettings.json"),
+                sp.GetRequiredService<ILogger<AppSettingsConnectionScanner>>()));
+            services.AddSingleton<DatabaseConnectionImporter>();
 
             services.AddSingleton(shared.Registry);
             services.AddSingleton(shared.Broadcaster);
