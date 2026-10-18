@@ -17,15 +17,26 @@ public class CodebaseChunkerTests
     }
 
     [Fact]
-    public void Chunk_ContentShorterThanOneChunk_ReturnsASingleChunk()
+    public void Chunk_SingleMethodFile_ReturnsASingleChunk()
     {
-        var content = CsClassWithMethods(3, 4);
+        var content = CsClassWithMethods(1, 4);
 
         var chunks = CodebaseChunker.Chunk("Sample.cs", content);
 
         var chunk = Assert.Single(chunks);
         Assert.Equal(1, chunk.StartLine);
         Assert.Equal(content.Split('\n').Length, chunk.EndLine);
+    }
+
+    [Fact]
+    public void Chunk_MultiMethodFile_ReturnsOneChunkPerMethod()
+    {
+        var content = CsClassWithMethods(3, 4);
+
+        var chunks = CodebaseChunker.Chunk("Sample.cs", content);
+
+        Assert.Equal(3, chunks.Count);
+        Assert.All(chunks, c => Assert.True(c.EndLine - c.StartLine + 1 <= CodebaseChunker.MaxChunkLines));
     }
 
     [Fact]

@@ -4,24 +4,28 @@ namespace Eling.Core.Codebase;
 /// Splits a file into retrieval chunks that do not cut a declaration in half.
 /// </summary>
 /// <remarks>
-/// Chunks pack whole members up to <see cref="TargetLines"/>. A member larger
-/// than <see cref="MaxChunkLines"/> cannot be kept whole, so it is split and the
-/// tail is repeated as overlap — the one case where chunks are not a partition
-/// of the file. A file with no detectable declarations (JSON, a shell script, a
-/// source file whose braces do not balance) falls back to fixed windows.
+/// For brace-delimited languages, chunk boundaries are taken from
+/// <see cref="DeclarationScanner"/>: every member (method, property, ...) becomes
+/// its own chunk, with the file preamble (usings, namespace, class header)
+/// attached to the first member. A member larger than
+/// <see cref="MaxChunkLines"/> cannot stay whole, so it is split and the tail is
+/// repeated as overlap — the one case where chunks are not a partition of the
+/// file. Files with no detectable declarations (unbalanced braces, non-brace
+/// languages, prose) fall back to the packed-window strategy (or fixed windows
+/// when no boundaries exist).
 /// </remarks>
 public static class CodebaseChunker
 {
-    /// <summary>Line count a chunk aims for before it looks for a boundary.</summary>
+    /// <summary>Line count a chunk aims for before it looks for a boundary (packed mode).</summary>
     public const int TargetLines = 280;
 
     /// <summary>Hard cap. A forced cut never produces a chunk longer than this.</summary>
     public const int MaxChunkLines = 420;
 
-    /// <summary>No chunk is shorter than this, so a boundary is never taken too eagerly.</summary>
+    /// <summary>No chunk is shorter than this, so a boundary is never taken too eagerly (packed mode).</summary>
     public const int MinChunkLines = 140;
 
-    /// <summary>Stop this far short of the target, so a boundary sits inside the chunk.</summary>
+    /// <summary>Stop this far short of the target, so a boundary sits inside the chunk (packed mode).</summary>
     public const int HeadroomLines = 25;
 
     /// <summary>Lines repeated when a member had to be split across chunks.</summary>
@@ -37,10 +41,71 @@ public static class CodebaseChunker
         if (string.IsNullOrEmpty(content)) return [];
 
         var lines = content.Split('\n');
-        var boundaries = BraceLanguages.Contains(Path.GetExtension(filePath))
-            ? DeclarationScanner.FindMemberBoundaries(lines)
-            : FindProseBoundaries(lines);
+        var ext = Path.GetExtension(filePath);
 
+        if (BraceLanguages.Contains(ext))
+        {
+            var raw = DeclarationScanner.FindMemberBoundaries(lines);
+            // Drop container declarations (class/struct/interface/record/enum/namespace):
+            // they are not members and must not become their own tiny chunk; their
+            // header travels as the preamble of the first real member.
+            var boundaries = raw.Where(b => !IsContainerDeclaration(lines[b])).ToArray();
+            if (boundaries.Length == 0)
+            {
+                return PackedChunks(lines, filePath, []);
+            }
+            return MemberChunks(lines, filePath, boundaries);
+        }
+
+        var proseBoundaries = FindProseBoundaries(lines);
+        return PackedChunks(lines, filePath, proseBoundaries);
+    }
+
+    /// <summary>
+    /// One chunk per member. The preamble (everything before the first member)
+    /// travels with the first member so imports/context stay attached.
+    /// </summary>
+    private static List<CodebaseChunk> MemberChunks(string[] lines, string filePath, int[] boundaries)
+    {
+        var chunks = new List<CodebaseChunk>();
+        for (var i = 0; i < boundaries.Length; i++)
+        {
+            var memberStart = boundaries[i];
+            var memberEnd = (i + 1 < boundaries.Length) ? boundaries[i + 1] : lines.Length;
+            // Attach the file preamble to the first member only.
+            var chunkStart = (i == 0) ? 0 : memberStart;
+            var span = memberEnd - chunkStart;
+
+            if (span <= MaxChunkLines)
+            {
+                chunks.Add(Slice(lines, filePath, chunkStart, memberEnd));
+                continue;
+            }
+
+            // Oversized member: split with tail overlap.
+            var cursor = chunkStart;
+            while (cursor < memberEnd)
+            {
+                var cut = Math.Min(cursor + MaxChunkLines, memberEnd);
+                if (cut >= memberEnd)
+                {
+                    chunks.Add(Slice(lines, filePath, cursor, memberEnd));
+                    break;
+                }
+                chunks.Add(Slice(lines, filePath, cursor, cut));
+                cursor = Math.Max(cursor + 1, cut - OverlapLines);
+            }
+        }
+        return chunks;
+    }
+
+    /// <summary>
+    /// Packed-window strategy: pack whole members until <see cref="TargetLines"/>,
+    /// cutting at the last reachable boundary. Used for prose and as the fallback
+    /// for unbalanced/non-brace sources.
+    /// </summary>
+    private static List<CodebaseChunk> PackedChunks(string[] lines, string filePath, int[] boundaries)
+    {
         var chunks = new List<CodebaseChunk>();
         var cursor = 0;
         while (cursor < lines.Length)
@@ -60,8 +125,6 @@ public static class CodebaseChunker
                 continue;
             }
 
-            // Nothing in reach: this member is bigger than a chunk. Cut at the cap
-            // and repeat the tail so its continuation is reachable from either side.
             var forced = cut < 0;
             if (forced) cut = Math.Min(goal, cursor + MaxChunkLines);
             chunks.Add(Slice(lines, filePath, cursor, cut));
@@ -99,6 +162,24 @@ public static class CodebaseChunker
             if (lines[i].TrimStart().StartsWith('#')) boundaries.Add(i);
         }
         return [.. boundaries];
+    }
+
+    private static bool IsContainerDeclaration(string line)
+    {
+        var trimmed = line.TrimStart();
+        // Strip leading modifiers to reach the type keyword.
+        var words = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var w in words)
+        {
+            if (w is "class" or "struct" or "interface" or "record" or "enum" or "namespace")
+                return true;
+            // Stop scanning modifiers once we hit a non-modifier token.
+            if (w is not ("public" or "private" or "protected" or "internal" or "static"
+                or "sealed" or "abstract" or "partial" or "readonly" or "unsafe"
+                or "file" or "ref"))
+                break;
+        }
+        return false;
     }
 
     private static CodebaseChunk Slice(string[] lines, string filePath, int start, int end)

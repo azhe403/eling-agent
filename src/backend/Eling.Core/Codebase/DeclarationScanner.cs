@@ -138,7 +138,39 @@ public static class DeclarationScanner
         if (trimmed.StartsWith("//", StringComparison.Ordinal)
             || trimmed.StartsWith("/*", StringComparison.Ordinal)
             || trimmed.StartsWith('*')) return false;
-        return !ControlFlowOpeners.Contains(FirstWord(trimmed));
+
+        var first = FirstWord(trimmed);
+        // Statements and member-access calls are never declarations, even when
+        // they contain parentheses (e.g. Assert.Equal(...), _svc.Foo(...)).
+        if (first is "var" or "let" or "const" or "new" or "return" or "await"
+            or "throw" or "yield") return false;
+
+        var starters = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "public", "private", "protected", "internal", "static", "async",
+            "virtual", "override", "sealed", "abstract", "partial", "readonly",
+            "unsafe", "file", "ref", "extern",
+            "class", "struct", "interface", "record", "enum", "namespace",
+            "void", "function", "func", "fn",
+        };
+        if (!starters.Contains(first)) return false;
+
+        // Reject member-access calls: the part before the first '(' must not
+        // contain a '.' (e.g. "Assert.Equal(...)", "_svc.TryRoute(...)").
+        var paren = trimmed.IndexOf('(');
+        if (paren >= 0)
+        {
+            var beforeParen = trimmed[..paren];
+            if (beforeParen.Contains('.')) return false;
+            if (trimmed.Contains('=')) return false;
+        }
+        else
+        {
+            if (first is not ("class" or "struct" or "interface" or "record"
+                or "enum" or "namespace") && !trimmed.EndsWith('{')) return false;
+        }
+
+        return !ControlFlowOpeners.Contains(first);
     }
 
     /// <summary>Attributes and doc comments belonging to the member that follows.</summary>
