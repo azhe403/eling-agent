@@ -205,7 +205,7 @@ public static class DatabaseEndpoints
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Schema failed for {Id}", id);
-                return Results.Problem(statusCode: 502, title: "schema failed");
+                return Results.Problem(statusCode: 502, title: "schema failed", detail: ex.Message);
             }
         });
 
@@ -249,7 +249,7 @@ public static class DatabaseEndpoints
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Query failed for {Id}", id);
-                return Results.Problem(statusCode: 502, title: "query failed");
+                return Results.Problem(statusCode: 502, title: "query failed", detail: ex.Message);
             }
         });
 
