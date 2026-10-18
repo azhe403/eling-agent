@@ -469,6 +469,7 @@ export default function DatabasesPage() {
 
   const selectTreeTable = async (connId: string, table: string) => {
     autoScrollPendingRef.current = false
+    setError(null)
     setActiveTable({ connId, table })
     setSelectedId(connId)
     setSchemaConnId(connId)
@@ -494,6 +495,7 @@ export default function DatabasesPage() {
   }
 
   const browseData = async (id: string, table: string) => {
+    setError(null)
     setBrowseTable(table)
     setBrowseLoading(true)
     setBrowseResult(null)
