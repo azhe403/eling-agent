@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { LoadingBar } from "@/components/ui/loading-bar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import type { SseTopic } from "@/hooks/use-memories-sse"
@@ -718,6 +719,7 @@ export function CodebaseList() {
               selection={selection}
               onSelectAll={() => applySelection(selectAll())}
               onSelectOnly={(root) => applySelection(selectOnly(root))}
+              onToggleRoot={(root) => applySelection(toggleRoot(selection, root, allRoots))}
             />
           </div>
           <Button
@@ -741,24 +743,7 @@ export function CodebaseList() {
         )}
 
         <div className="relative min-w-0">
-          {searching && (
-            <div className="absolute top-0 left-0 right-0 h-1 z-10 overflow-hidden rounded-t-lg">
-              {/* Buffer track */}
-              <div className="absolute inset-0 h-full w-full bg-accent/30" />
-
-              {/* Primary bar */}
-              <div className="absolute inset-x-0 h-full bg-primary animate-progress-query" />
-
-              {/* Primary active indicator */}
-              <div className="absolute inset-x-0 h-full bg-primary/80 animate-progress-active" />
-
-              {/* Secondary bar */}
-              <div className="absolute inset-x-0 h-full bg-primary/40 animate-progress-secondary-query" />
-
-              {/* Secondary active indicator */}
-              <div className="absolute inset-x-0 h-full bg-primary/40 animate-progress-secondary-active" />
-            </div>
-          )}
+          <LoadingBar loading={searching} />
           <div className="min-w-0 rounded-lg border divide-y">
           {!query.trim() ? (
             topFilesView

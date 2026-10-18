@@ -10,8 +10,6 @@ import type { Memory } from "@/lib/types"
 export type MemoryCardProps = {
   memory: Memory
   copiedId: string | null
-  /** Whether any scope can currently be written to, which is what "↓ Project" does. */
-  canCopyToProject: boolean
   onCopy: (text: string, id: string) => void
   onEdit: (id: string) => void
   onDelete: (m: Memory) => void
@@ -23,7 +21,6 @@ export type MemoryCardProps = {
 export function MemoryCard({
   memory: m,
   copiedId,
-  canCopyToProject,
   onCopy,
   onEdit,
   onDelete,
@@ -47,23 +44,22 @@ export function MemoryCard({
               {m.status}
             </span>
           )}
-          <span
-            className={
-              m.scope === "global"
-                ? "rounded-md bg-blue-500/10 px-2 py-0.5 font-medium text-blue-600"
-                : m.scope === "project-local"
-                  ? "rounded-md bg-violet-500/10 px-2 py-0.5 font-medium text-violet-600"
-                  : "rounded-md bg-amber-500/10 px-2 py-0.5 font-medium text-amber-600"
-            }
-          >
-            {m.scope === "global"
-              ? "🌐 Global"
-              : m.scope === "project-local"
-                ? (m.project ? `💻 ${m.project.id} - Local` : "💻 Local")
-                : m.project
-                ? `📁 ${m.project.id}`
-                : "📁 Project"}
-          </span>
+          {m.scope === "global" ? (
+            <span className="rounded-md bg-blue-500/10 px-2 py-0.5 font-medium text-blue-600">
+              🌐 Global
+            </span>
+          ) : (
+            <>
+              <span className="rounded-md bg-amber-500/10 px-2 py-0.5 font-medium text-amber-600">
+                📁 {m.project ? m.project.id : "Project"}
+              </span>
+              {m.scope === "project-local" && (
+                <span className="rounded-md bg-violet-500/10 px-2 py-0.5 font-medium text-violet-600">
+                  💻 Local
+                </span>
+              )}
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-1">
@@ -103,7 +99,7 @@ export function MemoryCard({
               📁 Shared
             </Button>
           )}
-          {m.scope === "global" && canCopyToProject && (
+          {(m.scope === "global" || (m.scope === "project" && m.project?.root)) && (
             <Button
               variant="ghost"
               size="sm"

@@ -31,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { LoadingBar } from "@/components/ui/loading-bar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import { utcToLocal } from "@/lib/date-utils"
@@ -89,7 +90,7 @@ async function loadProjectScopes(): Promise<ProjectScope[]> {
 }
 
 function scopeTileLabel(selection: MemoryScope): string {
-  if (selection.kind === "all") return "🌐 All projects"
+  if (selection.kind === "all") return "🌐 All workspaces"
   if (selection.roots.length === 0) return "🌐 Global Scope"
   return (
     "📁 " +
@@ -101,7 +102,7 @@ function scopeTileLabel(selection: MemoryScope): string {
 export function MemoriesList() {
   const router = useRouter()
   const pathname = usePathname()
-
+  const searchParams = useSearchParams()
   // Server + initial client renders always assume desktop/loaded; the real value
   // is applied right after hydration, avoiding a server/client mismatch.
   const mounted = useSyncExternalStore(
@@ -119,6 +120,9 @@ export function MemoriesList() {
   // counts it, the Showing tile just shows it.
   const [matching, setMatching] = useState(0)
   const [loading, setLoading] = useState(true)
+  // Skeletons are only appropriate for the very first load; later refreshes
+  // keep the previous values visible and signal progress with a spinner.
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Error banner auto-dismisses so a stale failure (e.g. a transient 404)
   // never sticks around after the next successful load.
@@ -127,8 +131,8 @@ export function MemoriesList() {
     const t = setTimeout(() => setError(null), 5000)
     return () => clearTimeout(t)
   }, [error])
-  const [type, setType] = useState("All")
-  const [query, setQuery] = useState("")
+  const [type, setType] = useState(() => searchParams.get("type") ?? "All")
+  const [query, setQuery] = useState(() => searchParams.get("q") ?? "")
   // The search box types faster than a request should go out: 500ms of quiet
   // (the same debounce the codebase page uses) before the query reaches the
   // backend, where the filtering and counting now happen.
@@ -137,13 +141,32 @@ export function MemoriesList() {
     const timer = setTimeout(() => setDebouncedQuery(query), 500)
     return () => clearTimeout(timer)
   }, [query])
+
+  // Persist the (debounced) text search in the URL so reloads and shared
+  // links keep the box's contents. Skipped on the first run so an incoming
+  // `q` param from the URL is not clobbered before the user types.
+  const urlSyncReady = useRef(false)
+  useEffect(() => {
+    if (!urlSyncReady.current) {
+      urlSyncReady.current = true
+      return
+    }
+    const params = new URLSearchParams(searchParams.toString())
+    if (debouncedQuery.trim()) params.set("q", debouncedQuery.trim())
+    else params.delete("q")
+    if (type && type !== "All") params.set("type", type)
+    else params.delete("type")
+    const qs = params.toString()
+    if (qs !== searchParams.toString()) {
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    }
+  }, [type, debouncedQuery, pathname, router, searchParams])
   const [editingId, setEditingId] = useState<string | null>(null)
   const editingIdRef = useRef<string | null>(null)
   useEffect(() => {
     editingIdRef.current = editingId
   }, [editingId])
 
-  const searchParams = useSearchParams()
   // The URL query is the selection's source of truth: no project params means
   // "all", `global=1` the global scope, otherwise the explicit workspace list,
   // so reload, back/forward and shared links all land on the same scope the
@@ -172,11 +195,13 @@ export function MemoriesList() {
     (next: MemoryScope, nextTier?: MemoryTier) => {
       const t = nextTier ?? tier
       const parts = [selectionQuery(next), tierQuery(next, t)].filter(Boolean)
+      if (query.trim()) parts.push(`q=${encodeURIComponent(query.trim())}`)
+      if (type && type !== "All") parts.push(`type=${encodeURIComponent(type)}`)
       const qs = parts.join("&")
-      saveLastSelection(qs)
+      saveLastSelection(selectionQuery(next) + (tierQuery(next, t) ? `&${tierQuery(next, t)}` : ""))
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
     },
-    [pathname, router, tier]
+    [pathname, router, tier, query, type]
   )
   // A bare visit resumes the last position this browser left off at. Any
   // selection param in the URL wins — shared links, reloads of an explicit
@@ -215,8 +240,11 @@ export function MemoriesList() {
   const [copyProjectRoot, setCopyProjectRoot] = useState<string>("")
   const [deleteTarget, setDeleteTarget] = useState<Memory | null>(null)
   const [scopes, setScopes] = useState<ProjectScope[]>([])
-  // Copy targets are the scopes this workspace may actually write to.
-  const copyTargets = scopes.filter((s) => s.writable)
+  // All reachable scopes are listed in the copy dropdown (same set as the
+  // sidebar selector), but only the writable ones can actually be written to
+  // — non-writable entries are disabled so the two lists stay consistent
+  // while the write rule is still enforced.
+  const copyTargets = scopes
 
   const copyToClipboard = useCallback((text: string, id: string) => {
     navigator.clipboard.writeText(text).catch(() => {
@@ -226,7 +254,6 @@ export function MemoriesList() {
     setCopiedId(id)
     setTimeout(() => setCopiedId(null), 1500)
   }, [])
-
   const scrollToTop = useCallback(() => {
     if (typeof window !== "undefined") {
       window.scrollTo({ top: 0, behavior: "smooth" })
@@ -298,6 +325,7 @@ export function MemoriesList() {
         setError(e instanceof Error ? e.message : "Failed to load memories")
       } finally {
         setLoading(false)
+        setHasLoadedOnce(true)
       }
     },
     [selection, tier, type, debouncedQuery]
@@ -345,7 +373,7 @@ export function MemoriesList() {
     else if (m.scope === "project-local" && m.project?.root)
       url = `/api/project/memories/${m.id}?projectRoot=${encodeURIComponent(m.project.root)}&tier=project-local`
     else if (selection.kind === "selection" && selection.roots.length === 1)
-      url = `/api/project/memories/${m.id}?projectRoot=${encodeURIComponent(selection.roots[0])}${tier === "project-local" ? "&tier=project-local" : ""}`
+      url = `/api/memories/${m.id}?projectRoot=${encodeURIComponent(selection.roots[0])}${tier === "project-local" ? "&tier=project-local" : ""}`
     const res = await fetch(url, { method: "DELETE" })
     if (res.ok || res.status === 404) {
       setMemories((x) => x.filter((y) => y.id !== m.id))
@@ -354,7 +382,7 @@ export function MemoriesList() {
 
   async function save(
     id: string,
-    body: { content: string; type: string; status: string }
+    body: { content: string; type: string; status: string; tags?: string[] }
   ) {
     const target = memories.find((x) => x.id === id)
     let url = `/api/memories/${id}`
@@ -526,7 +554,7 @@ export function MemoriesList() {
           )}
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {loading ? (
+            {loading && !hasLoadedOnce ? (
               Array.from({ length: 3 }).map((_, i) => (
                 <Skeleton key={i} className="h-20 rounded-lg" />
               ))
@@ -555,15 +583,10 @@ export function MemoriesList() {
                             ...(selection.global ? ["🌐 Global Scope"] : []),
                             ...selection.roots,
                           ].join("\n")
-                        : "All projects (aggregated)"
+                        : "All workspaces (aggregated)"
                     }
                   >
                     {scopeTileLabel(selection)}
-                    {tierApplies(selection) && tier !== "project"
-                      ? tier === "all"
-                        ? " · 🗂 All tiers"
-                        : " · 💻 Local"
-                      : ""}
                   </div>
                 </div>
               </>
@@ -590,6 +613,14 @@ export function MemoriesList() {
                   onSelectAll={() => applySelection(selectAllProjects())}
                   onSelectOnly={(root) =>
                     applySelection(selectWorkspaces([root], globalOn(selection)))
+                  }
+                  onToggleRoot={(root) =>
+                    applySelection(
+                      fromWorkspaceSelection(
+                        toggleRoot(workspaceSelection, root, allRoots),
+                        globalOn(selection),
+                      )
+                    )
                   }
                   label={
                     selection.kind === "selection" && selection.roots.length === 0
@@ -662,12 +693,15 @@ export function MemoriesList() {
               {TYPES.map((t) => (
                 <button
                   key={t}
-                  onClick={() => setType(t)}
+                  onClick={() => {
+                    setLoading(true)
+                    setType(t)
+                  }}
                   className={
                     (type === t
                       ? "rounded-md bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm"
                       : "rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground") +
-                      " whitespace-nowrap"
+                    " whitespace-nowrap"
                   }
                 >
                   {t}
@@ -677,49 +711,50 @@ export function MemoriesList() {
             </div>
           </div>
 
-          {loading ? (
-            <div className="flex flex-col gap-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-20 w-full rounded-xl" />
-              ))}
-            </div>
-          ) : memories.length === 0 ? (
-            <div className="flex min-h-[200px] items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
-              {total > 0
-                ? "No memories match this filter."
-                : "No memories found."}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
-              {memories.map((m) =>
-                editingId === m.id ? (
-                  <MemoryEditor
-                    key={m.id}
-                    memory={m}
-                    onCancel={() => setEditingId(null)}
-                    onSave={(body) => save(m.id, body)}
-                  />
-                ) : (
-                  <MemoryCard
-                    key={m.id}
-                    memory={m}
-                    copiedId={copiedId}
-                    canCopyToProject={copyTargets.length > 0}
-                    onCopy={copyToClipboard}
-                    onEdit={(id) => setEditingId(id)}
-                    onDelete={(target) => setDeleteTarget(target)}
-                    onPromote={(target) => setPromoteTarget(target)}
-                    onMoveTier={(target, tier) => void moveTier(target, tier)}
-                    onCopyToProject={(m, root) => {
-                      setCopyTarget(m)
-                      setCopyProjectRoot(root)
-                      setCopyAsMove(false)
-                    }}
-                  />
-                )
-              )}
-            </div>
-          )}
+          <div className="relative min-w-0">
+            <LoadingBar loading={loading} />
+            {memories.length === 0 && !loading ? (
+              <div className="flex min-h-[200px] items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
+                {total > 0
+                  ? "No memories match this filter."
+                  : "No memories found."}
+              </div>
+            ) : memories.length > 0 ? (
+              <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
+                {memories.map((m) =>
+                  editingId === m.id ? (
+                    <MemoryEditor
+                      key={m.id}
+                      memory={m}
+                      onCancel={() => setEditingId(null)}
+                      onSave={(body) => save(m.id, body)}
+                    />
+                  ) : (
+                    <MemoryCard
+                      key={m.id}
+                      memory={m}
+                      copiedId={copiedId}
+                      onCopy={copyToClipboard}
+                      onEdit={(id) => setEditingId(id)}
+                      onDelete={(target) => setDeleteTarget(target)}
+                      onPromote={(target) => setPromoteTarget(target)}
+                      onMoveTier={(target, tier) => void moveTier(target, tier)}
+                      onCopyToProject={(m, root) => {
+                        setCopyTarget(m)
+                        setCopyAsMove(false)
+                        const currentRoot =
+                          root ||
+                          (selection.kind === "selection" && selection.roots.length > 0
+                            ? selection.roots[0]
+                            : "")
+                        setCopyProjectRoot(currentRoot)
+                      }}
+                    />
+                  )
+                )}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -855,11 +890,26 @@ export function MemoriesList() {
                 <SelectValue placeholder="Select a project..." />
               </SelectTrigger>
               <SelectContent>
-                {copyTargets.map((s) => (
-                  <SelectItem key={s.root.toLowerCase()} value={s.root}>
-                    📁 {s.name}
-                  </SelectItem>
-                ))}
+                {copyTargets.map((s) => {
+                  const isSource =
+                    copyTarget?.scope === "project" &&
+                    !!copyTarget.project?.root &&
+                    s.root.toLowerCase() === copyTarget.project.root.toLowerCase()
+                  return (
+                    <SelectItem
+                      key={s.root.toLowerCase()}
+                      value={s.root}
+                      disabled={isSource}
+                    >
+                      📁 {s.name}
+                      {!s.hasLiveRuntime
+                        ? " (offline)"
+                        : isSource
+                          ? " (source)"
+                          : ""}
+                    </SelectItem>
+                  )
+                })}
               </SelectContent>
             </Select>
           </div>
@@ -922,6 +972,7 @@ export function MemoriesList() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
+              disabled={!copyProjectRoot}
               className={
                 copyAsMove ? "bg-amber-600 hover:bg-amber-700 text-white" : ""
               }
