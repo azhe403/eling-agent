@@ -541,7 +541,19 @@ export default function DatabasesPage() {
     if (!selectedId) return
     setQLoading(true); setQError(null); setQResult(null)
     try {
-      let finalSql = sql.trim()
+      const trimmed = sql.trim()
+      if (/^\s*(insert|update|delete|create|alter|drop|truncate|replace)\b/i.test(trimmed)) {
+        const res = await fetch(API + "/" + selectedId + "/mutate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sql: trimmed, maxAffectedRows: 1000 }),
+        })
+        if (!res.ok) throw new Error(await res.text())
+        const data = await res.json()
+        setQResult({ columns: ["affectedRows", "truncated"], rows: [[data.affectedRows, data.truncated]], truncated: false })
+        return
+      }
+      let finalSql = trimmed
       if (!/\blimit\b/i.test(finalSql)) {
         finalSql = finalSql.replace(/;?\s*$/, "") + " LIMIT 100"
       }
