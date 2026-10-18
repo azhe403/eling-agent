@@ -580,7 +580,23 @@ public static class ScopedMemoryEndpoints
         if (sourceMemory is null) return TypedResults.NotFound();
 
         var targetService = registry.TryResolveMemoryServiceByScopeRoot(request.TargetProjectRoot);
-        if (targetService is null) return TypedResults.BadRequest($"Target project '{request.TargetProjectRoot}' not alive");
+        if (targetService is null)
+        {
+            // Offline (not running) projects that still carry a `.eling` scope on
+            // disk are valid copy targets: resolve a service straight from that
+            // scope instead of requiring a live runtime. Never auto-create the
+            // directory — only memory_init_project may do that.
+            var dataDir = request.TargetProjectRoot.EndsWith(ProjectScope.DataDirectoryName, StringComparison.OrdinalIgnoreCase)
+                ? request.TargetProjectRoot
+                : Path.Combine(request.TargetProjectRoot, ProjectScope.DataDirectoryName);
+            if (!Directory.Exists(dataDir))
+            {
+                return TypedResults.BadRequest($"Target project '{request.TargetProjectRoot}' not alive");
+            }
+            targetService = new MemoryService(
+                new Eling.Core.Memory.Storage.FileSystemMemoryStorage(dataDir),
+                new Eling.Core.Memory.Storage.SqliteMemoryIndex(Path.Combine(dataDir, "memory.db")));
+        }
 
         var copy = request.Move
             ? new Memory(sourceMemory.Type, sourceMemory.Content, sourceMemory.Tags, sourceMemory.Source, sourceMemory.Status, sourceMemory.Id, sourceMemory.CreatedAt, DateTimeOffset.UtcNow)
