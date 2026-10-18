@@ -8,7 +8,7 @@ public sealed class FileWriteAgentTool(FileSystemTools tool) : IAgentTool
 {
     public string Name => "file_write";
 
-    public string Description => "Write a UTF-8 text file under the project root, creating parent directories on demand.";
+    public string Description => "Write a UTF-8 text file under the project root, creating parent directories on demand. Preferred for new files; overwriting an existing file is allowed only when truly necessary, otherwise modify with file_edit (surgical).";
 
     public string ParametersJsonSchema => """
     {

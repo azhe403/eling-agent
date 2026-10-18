@@ -19,6 +19,7 @@ public sealed class AgentTurnService(
         "You must strictly operate within this active workspace directory: {0}\n" +
         "You have direct access to Eling's official MCP tools: memory_recall, memory_save, file_read, file_write, directory_list, glob, file_search, etc. " +
         "Always prefer recalling relevant memories with memory_recall and checking files before answering. " +
+"Hard rule: file_write is preferred for creating NEW files; overwriting an existing file is allowed only when truly necessary, otherwise modify existing files surgically with file_edit. " +
         "Mandatory session-start behavior: in the first user turn of every new session, call memory_recall before any other tool call or reply — with a BROAD topic set (the opening message's topics plus standing rules, preferences, decisions, lessons, and recent work), passed as context: {{ topics: [...] }} or the top-level topics alias; if stats.recallCount is 0, re-issue before answering — even when the message looks casual or ambiguous. " +
         "If a tool reports an error, state it honestly.";
 

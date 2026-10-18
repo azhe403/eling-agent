@@ -130,7 +130,9 @@ public sealed class FileSystemTools
         }
     }
 
-    [McpServerTool(Name = "file_write"), Description("Write a UTF-8 text file under the project root, creating parent directories on demand. Without overwrite=true an existing file is left untouched and reported as an error. Preferred for in-workspace writes (audited via telemetry).")]
+    [McpServerTool(Name = "file_write"), Description("Write a UTF-8 text file under the project root, creating parent directories on demand. Preferred for creating NEW files. Overwriting an existing file is allowed only when truly necessary; otherwise modify existing files surgically with file_edit. Without overwrite=true an existing file is left untouched and reported as an error. Preferred for in-workspace writes (audited via telemetry).")]
+
+
     public string WriteFile(
         [Description("Absolute or project-relative file path.")] string path,
         [Description("File content (UTF-8).")] string content,

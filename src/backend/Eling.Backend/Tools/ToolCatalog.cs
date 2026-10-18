@@ -37,7 +37,7 @@ public static class ToolCatalog
         new("glob", FilesystemGroup, "Find files and directories matching a glob pattern."),
         new("file_read", FilesystemGroup, "Read a text file under the project root."),
         new("file_read_any", FilesystemGroup, "Read any file on disk with no sandbox restriction."),
-        new("file_write", FilesystemGroup, "Write a UTF-8 text file under the project root."),
+        new("file_write", FilesystemGroup, "Write a UTF-8 text file under the project root (preferred for new files; overwrite only if truly necessary)."),
         new("file_delete", FilesystemGroup, "Permanently delete a file under the project root."),
         new("directory_delete", FilesystemGroup, "Permanently delete a directory under the project root."),
         new("file_move", FilesystemGroup, "Move or rename a file under the project root."),
