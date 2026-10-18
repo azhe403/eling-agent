@@ -1,6 +1,9 @@
 using Eling.Backend.Agent.Ports;
 using Eling.Backend.Dtos;
+using Eling.Core.Codebase;
+using Eling.Core.MemoryRecall;
 using Microsoft.Extensions.Logging;
+using System.Text;
 
 namespace Eling.Backend.Agent.Services;
 
@@ -9,6 +12,8 @@ public sealed class AgentTurnService(
     IEnumerable<IAgentTool> tools,
     BackendChatStore chats,
     ProviderStore provider,
+    IMemoryRecallService recall,
+    CodebaseIndexService codebase,
     ILogger<AgentTurnService> logger)
 {
     private const int HistoryCap = 40;
@@ -36,11 +41,74 @@ public sealed class AgentTurnService(
         Task Emit(TurnStreamEvent ev) => onEvent?.Invoke(ev) ?? Task.CompletedTask;
 
         var chat = chats.GetOrCreate(workspace, chatId);
+        var isFirstTurn = chat.Messages.Count == 0;
         chats.Append(chat, new AgentMessage(AgentRole.User, message));
         await Emit(new TurnStarted(chat.Id));
 
         var toolList = tools.ToList();
         var systemPrompt = string.Format(SystemPromptTemplate, workspace);
+
+        // Server-side auto-recall on the first turn of a new chat: do not rely
+        // on the model remembering to call memory_recall. Hydrate context here
+        // and inject it into the system prompt so recall and codebase status are
+        // guaranteed to happen (instead of being intermittent).
+        if (isFirstTurn)
+        {
+            try
+            {
+                var topics = new List<string> { message, "standing rules", "preferences", "decisions", "lessons", "recent work", "conventions", "recently touched work" };
+                var recallResult = await recall.RecallAsync(
+                    new MemoryRecallContext(topics, null, workspace), 10, 10, "merged", ct);
+
+                var sb = new StringBuilder();
+                sb.AppendLine();
+                sb.AppendLine("=== AUTO-RECALLED CONTEXT (server-side, first turn) ===");
+                if (recallResult.RecallMemories.Count > 0)
+                {
+                    sb.AppendLine("Recalled memories:");
+                    foreach (var m in recallResult.RecallMemories)
+                    {
+                        sb.AppendLine($"- [{m.Memory.Type}] {Truncate(m.Memory.Content, 200)}");
+                    }
+                }
+                if (recallResult.StandingMemories is { Count: > 0 })
+                {
+                    sb.AppendLine("Standing (rules/preferences/decisions/lessons):");
+                    foreach (var m in recallResult.StandingMemories)
+                    {
+                        sb.AppendLine($"- [{m.Memory.Type}] {Truncate(m.Memory.Content, 200)}");
+                    }
+                }
+                if (recallResult.RecentMemories.Count > 0)
+                {
+                    sb.AppendLine("Recent:");
+                    foreach (var m in recallResult.RecentMemories.Take(5))
+                    {
+                        sb.AppendLine($"- [{m.Memory.Type}] {Truncate(m.Memory.Content, 200)}");
+                    }
+                }
+                try
+                {
+                    var stats = await codebase.GetStatsAsync(ct);
+                    sb.AppendLine($"Codebase index: files={stats.FileCount}, chunks={stats.ChunkCount}, lastIndexed={stats.LastIndexedAt}, db={stats.DbPath}");
+                    if (stats.FileCount == 0)
+                    {
+                        sb.AppendLine("No codebase index yet. ASK the user for approval before running codebase_index.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Codebase status failed during auto-recall");
+                }
+                sb.AppendLine("=== END AUTO-RECALLED CONTEXT ===");
+                systemPrompt = systemPrompt + "\n" + sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Auto-recall failed on first turn");
+            }
+        }
+
         var executedCalls = new List<ToolCallDto>();
         string finalText = string.Empty;
         const int MaxHops = 25;
@@ -223,6 +291,12 @@ public sealed class AgentTurnService(
                 throw new IOException("Provider chat request timed out.");
             }
         }
+    }
+
+    private static string Truncate(string content, int max)
+    {
+        if (string.IsNullOrEmpty(content) || content.Length <= max) return content;
+        return content[..max] + "...";
     }
 
     private string ResolveModel()

@@ -1,7 +1,9 @@
 using Eling.Backend.Agent.Ports;
 using Eling.Backend.Agent.Services;
 using Eling.Backend.FileSystem;
+using Eling.Core.Codebase;
 using Eling.Core.FileSystem;
+using Eling.Core.Scope;
 using Eling.Core.Memory;
 using Eling.Core.Memory.Serialization;
 using Eling.Core.MemoryRecall;
@@ -121,8 +123,11 @@ public class AgentChatStreamTests : IDisposable
         services.AddScoped<IMemoryRecallService, MemoryRecallService>();
         var sp = services.BuildServiceProvider();
 
+        var recall = sp.GetRequiredService<IMemoryRecallService>();
+        var codebase = new CodebaseIndexService(_workspace, new SqliteCodebaseIndex(Eling.Core.Scope.ElingPaths.ResolveCodebaseDbPath(_workspace)));
+
         var tools = Array.Empty<IAgentTool>();
-        var turns = new AgentTurnService(gateway, tools, chats, provider, NullLogger<AgentTurnService>.Instance);
+        var turns = new AgentTurnService(gateway, tools, chats, provider, recall, codebase, NullLogger<AgentTurnService>.Instance);
         return new Harness(registry, turns, gateway);
     }
 
