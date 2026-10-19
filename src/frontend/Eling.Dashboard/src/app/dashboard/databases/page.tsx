@@ -1148,7 +1148,13 @@ export default function DatabasesPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr>
-                        {browseResult.columns.map((col) => <th key={col} className={`border px-2 py-1 text-left ${/^id$/i.test(col) ? "w-px whitespace-nowrap" : ""}`}>{col}</th>)}
+                        {browseResult.columns.map((col) => {
+  const isIdCol = /^id$/i.test(col)
+  const colSchema = activeSchemaTable()?.columns?.find((c) => c.name === col)
+  const dt = (colSchema?.dataType ?? "").toLowerCase()
+  const isInt = isIdCol && (dt ? /int|serial|bigint|smallint/.test(dt) : (browseResult.rows.length > 0 && browseResult.rows.every((r) => { const v = r[browseResult.columns.indexOf(col)]; return v === null || v === undefined || v === "" || /^-?\d+$/.test(String(v)) })))
+  return <th key={col} className={`border px-2 py-1 text-left ${isIdCol ? "w-px whitespace-nowrap" : ""} ${isInt ? "sticky left-0 bg-background z-10" : ""}`}>{col}</th>
+})}
                         <th className="border px-2 py-1 text-left w-16 sticky right-0 bg-background z-10">act</th>
                       </tr>
                     </thead>
@@ -1159,6 +1165,10 @@ export default function DatabasesPage() {
                             const colName = browseResult.columns[j]
                             const isPk = pkColumnNames().includes(colName)
                             const isEditing = editingCell?.row === i && editingCell?.col === j
+                            const isIdCol = /^id$/i.test(colName)
+                            const idColSchema = activeSchemaTable()?.columns?.find((c) => c.name === colName)
+                            const idColType = (idColSchema?.dataType ?? "").toLowerCase()
+                            const isIdInt = isIdCol && (idColType ? /int|serial|bigint|smallint/.test(idColType) : (browseResult.rows.length > 0 && browseResult.rows.every((r) => { const v = r[j]; return v === null || v === undefined || v === "" || /^-?\d+$/.test(String(v)) })))
                             if (isEditing) {
                               const colType = (activeSchemaTable()?.columns?.find((c) => c.name === colName)?.dataType ?? "").toLowerCase()
                               const isDate = colType.includes("date") || colType.includes("time")
@@ -1191,7 +1201,7 @@ export default function DatabasesPage() {
                             return (
                               <td
                                 key={j}
-                                className={`border px-2 py-1 whitespace-nowrap ${/^id$/i.test(colName) ? "w-px" : ""} ${isPk ? "bg-muted/40" : "cursor-pointer hover:bg-accent/40"}`}
+                                className={`border px-2 py-1 whitespace-nowrap ${/^id$/i.test(colName) ? "w-px" : ""} ${isPk && !isIdInt ? "bg-muted/40" : ""} ${!isPk ? "cursor-pointer hover:bg-accent/40" : ""} ${isIdInt ? `sticky left-0 z-10 ${isPk ? "bg-muted" : "bg-background"}` : ""}`}
                                 title={String(v ?? "")}
                                 onClick={() => { if (!isPk && pkColumnNames().length > 0) startEdit(i, j, v) }}
                               >
