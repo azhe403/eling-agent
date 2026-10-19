@@ -219,6 +219,13 @@ export default function DatabasesPage() {
   const [qError, setQError] = useState<string | null>(null)
   const [qLoading, setQLoading] = useState(false)
 
+  // True when the currently selected connection is read-only. In that case we
+  // must NOT hit the mutate endpoint at all (avoids pointless network spam /
+  // 403 round-trips) — surface the restriction locally instead.
+  const selectedConn = conns.find((c) => c.id === selectedId)
+  const selectedIsReadOnly = selectedConn?.environment === "ReadOnly"
+
+
   // detect/import
   const [detected, setDetected] = useState<Detected[]>([])
   const [selectedKeys, setSelectedKeys] = useState<string[]>([])
@@ -606,6 +613,7 @@ export default function DatabasesPage() {
 
   const browseData = async (id: string, table: string) => {
     setError(null)
+    setEditingCell(null)
     setBrowseTable(table)
     setBrowseLoading(true)
     setBrowseResult(null)
@@ -673,6 +681,7 @@ export default function DatabasesPage() {
 
   const commitEdit = async (overrideValue?: string) => {
     if (!editingCell || !browseResult || !selectedId || !activeTable) return
+    if (selectedIsReadOnly) { setEditingCell(null); return }
     const { row: ri, col: ci } = editingCell
     const colName = browseResult.columns[ci]
     if (pkColumnNames().includes(colName)) {
@@ -717,6 +726,7 @@ export default function DatabasesPage() {
   const cancelEdit = () => setEditingCell(null)
 
   const promptDeleteRow = (rowIndex: number) => {
+    if (selectedIsReadOnly) return
     if (!browseResult || !selectedId || !activeTable) return
     const where = buildWherePk(browseResult.rows[rowIndex])
     if (!where) { notifyDb("error", "no primary key — cannot delete"); return }
@@ -725,6 +735,7 @@ export default function DatabasesPage() {
 
   const confirmDeleteRow = async () => {
     if (deleteRowTarget === null || !browseResult || !selectedId || !activeTable) return
+    if (selectedIsReadOnly) { setDeleteRowTarget(null); return }
     const rowIndex = deleteRowTarget
     const where = buildWherePk(browseResult.rows[rowIndex])
     if (!where) { notifyDb("error", "no primary key — cannot delete"); setDeleteRowTarget(null); return }
@@ -761,6 +772,7 @@ export default function DatabasesPage() {
 
   const submitNewRow = async () => {
     if (!newRow || !browseResult || !selectedId || !activeTable) return
+    if (selectedIsReadOnly) { return }
     const cols = browseResult.columns
     const pks = pkColumnNames()
     const colList = cols.map((c) => quoteIdent(c)).join(", ")
@@ -822,6 +834,7 @@ export default function DatabasesPage() {
     try {
       const trimmed = sql.trim()
       if (/^\s*(insert|update|delete|create|alter|drop|truncate|replace)\b/i.test(trimmed)) {
+        if (selectedIsReadOnly) { setQError("This connection is read-only, so data changes are disabled."); setQLoading(false); return }
         const res = await fetch(API + "/" + selectedId + "/mutate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1138,8 +1151,9 @@ export default function DatabasesPage() {
             {browseLoading ? <p className="text-sm text-muted-foreground">Loading.</p> : null}
             {browseResult ? (
               <div className="space-y-2">
+                {selectedIsReadOnly ? <p className="text-xs text-muted-foreground">Read-only connection — cells can be edited, but never persisted.</p> : null}
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" onClick={() => setNewRow(Object.fromEntries(browseResult.columns.map((c) => [c, ""])))} title={pkColumnNames().length === 0 ? "no primary key — read only" : undefined} disabled={mutating || pkColumnNames().length === 0}>
+                  <Button size="sm" variant="outline" onClick={() => setNewRow(Object.fromEntries(browseResult.columns.map((c) => [c, ""])))} title={selectedIsReadOnly ? "read-only connection — editing disabled" : (pkColumnNames().length === 0 ? "no primary key — read only" : undefined)} disabled={mutating || pkColumnNames().length === 0 || selectedIsReadOnly}>
                     + Add row
                   </Button>
                   {pkColumnNames().length === 0 ? <span className="text-xs text-muted-foreground">No primary key — read only</span> : null}
@@ -1172,7 +1186,7 @@ export default function DatabasesPage() {
                             if (isEditing) {
                               const colType = (activeSchemaTable()?.columns?.find((c) => c.name === colName)?.dataType ?? "").toLowerCase()
                               const isDate = colType.includes("date") || colType.includes("time")
-                              if (isDate) {
+                              if (isDate && !selectedIsReadOnly) {
                                 return (
                                   <td key={j} className="border px-1 py-0.5">
                                     <DatePicker
@@ -1194,6 +1208,7 @@ export default function DatabasesPage() {
                                     onBlur={() => { void commitEdit() }}
                                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void commitEdit() } if (e.key === "Escape") cancelEdit() }}
                                     disabled={savingCell}
+                                    readOnly={selectedIsReadOnly}
                                   />
                                 </td>
                               )
@@ -1213,8 +1228,8 @@ export default function DatabasesPage() {
                             <button
                               className="text-xs text-destructive hover:underline"
                               onClick={() => { promptDeleteRow(i) }}
-                              title={pkColumnNames().length === 0 ? "no primary key — read only" : undefined}
-                              disabled={mutating || pkColumnNames().length === 0}
+                              title={selectedIsReadOnly ? "read-only connection — editing disabled" : (pkColumnNames().length === 0 ? "no primary key — read only" : undefined)}
+                              disabled={mutating || pkColumnNames().length === 0 || selectedIsReadOnly}
                             >
                               del
                             </button>
