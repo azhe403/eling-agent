@@ -7,10 +7,22 @@
 #   manual runs, MCP hosts, and concurrent hooks
 # - after the checks pass, publish a Release build into ~/.local/bin
 # Bypass: SKIP_HOOK=1 git push --no-verify  or  FULL_CHECK=1 git push
+# Tests skipped by default (already covered by pre-commit). Re-enable: SKIP_TESTS=0 git push or RUN_TESTS=1 git push
 
 if [ "$SKIP_HOOK" = "1" ]; then
   echo "→ SKIP_HOOK=1: skipping pre-push checks"
   exit 0
+fi
+
+# Tests in pre-push are skipped by DEFAULT (already covered by the pre-commit
+# hook). Publish + smoke test still run, so a broken build is still caught.
+# Re-enable tests with: SKIP_TESTS=0 git push   (or RUN_TESTS=1 git push)
+SKIP_TESTS_RUN=0
+if [ "$SKIP_TESTS" = "0" ] || [ "$SKIP_TESTS" = "false" ] || [ "$RUN_TESTS" = "1" ] || [ "$RUN_TESTS" = "true" ]; then
+  echo "→ running test/build checks in pre-push (SKIP_TESTS=0/RUN_TESTS=1)"
+  SKIP_TESTS_RUN=1
+else
+  echo "→ skipping test/build checks in pre-push (publish + smoke still run)"
 fi
 
 # Anti-lock: every dotnet invocation below builds/tests under a disposable
@@ -69,13 +81,17 @@ run_publish() {
 
 if [ "$FULL_CHECK" = "1" ]; then
   echo "→ FULL_CHECK=1: running full build and tests (isolated output $HOOK_ROOT)"
-  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet build Eling.slnx || exit 1
-  run_core_tests || exit 1
-  echo "→ api layer: test:backend:api"
-  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests || exit 1
-  echo "→ desktop layer: test:backend:desktop"
-  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Desktop.Tests/Eling.Desktop.Tests.csproj || exit 1
-  pnpm build:frontend || exit 1
+  if [ "$SKIP_TESTS_RUN" = "1" ]; then
+    ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet build Eling.slnx || exit 1
+    run_core_tests || exit 1
+    echo "→ api layer: test:backend:api"
+    ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests || exit 1
+    echo "→ desktop layer: test:backend:desktop"
+    ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Desktop.Tests/Eling.Desktop.Tests.csproj || exit 1
+    pnpm build:frontend || exit 1
+  else
+    echo "→ SKIP_TESTS=1: skipping build/test checks (FULL_CHECK partially honored)"
+  fi
   run_publish || exit 1
   exit 0
 fi
@@ -140,24 +156,28 @@ if [ "$NEED_FRONTEND" = "0" ] && [ "$NEED_CORE" = "0" ] && [ "$NEED_API" = "0" ]
   exit 0
 fi
 
-if [ "$NEED_CORE" = "1" ]; then
-  run_core_tests || exit 1
-fi
+if [ "$SKIP_TESTS_RUN" = "1" ]; then
+  if [ "$NEED_CORE" = "1" ]; then
+    run_core_tests || exit 1
+  fi
 
-if [ "$NEED_API" = "1" ]; then
-  echo "→ api layer: building backend + test:backend:api (isolated output $HOOK_ROOT)"
-  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet build Eling.slnx || exit 1
-  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests || exit 1
-fi
+  if [ "$NEED_API" = "1" ]; then
+    echo "→ api layer: building backend + test:backend:api (isolated output $HOOK_ROOT)"
+    ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet build Eling.slnx || exit 1
+    ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests || exit 1
+  fi
 
-if [ "$NEED_DESKTOP" = "1" ]; then
-  echo "→ desktop layer: test:backend:desktop (isolated output $HOOK_ROOT)"
-  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Desktop.Tests/Eling.Desktop.Tests.csproj || exit 1
-fi
+  if [ "$NEED_DESKTOP" = "1" ]; then
+    echo "→ desktop layer: test:backend:desktop (isolated output $HOOK_ROOT)"
+    ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Desktop.Tests/Eling.Desktop.Tests.csproj || exit 1
+  fi
 
-if [ "$NEED_FRONTEND" = "1" ]; then
-  echo "→ frontend changed: building dashboard"
-  pnpm build:frontend || exit 1
+  if [ "$NEED_FRONTEND" = "1" ]; then
+    echo "→ frontend changed: building dashboard"
+    pnpm build:frontend || exit 1
+  fi
+else
+  echo "→ SKIP_TESTS=1: skipping test/build checks (publish + smoke still run)"
 fi
 
 run_publish || exit 1
