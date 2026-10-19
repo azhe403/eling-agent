@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table"
 import { DatePicker } from "@/components/ui/date-picker"
 import {
   AlertDialog,
@@ -186,12 +187,14 @@ export default function DatabasesPage() {
   const [schemaLoading, setSchemaLoading] = useState(false)
   const [browseTable, setBrowseTable] = useState<string | null>(null)
   const [browseResult, setBrowseResult] = useState<QueryResult | null>(null)
+  const [browseTotal, setBrowseTotal] = useState<number | null>(null)
   const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null)
   const [editValue, setEditValue] = useState("")
   const [savingCell, setSavingCell] = useState(false)
   const [newRow, setNewRow] = useState<Record<string, string> | null>(null)
   const [mutating, setMutating] = useState(false)
   const [deleteRowTarget, setDeleteRowTarget] = useState<number | null>(null)
+  const [showReadOnlyDeleteDialog, setShowReadOnlyDeleteDialog] = useState(false)
   const [dbNotifications, setDbNotifications] = useState<DbNotification[]>([])
 
   const dismissDbNotification = useCallback((id: number) => {
@@ -514,6 +517,7 @@ export default function DatabasesPage() {
     setSchemaInfo(null)
     setBrowseTable(null)
     setBrowseResult(null)
+    setBrowseTotal(null)
     try {
       const data = await fetchSchema(id)
       setSchemaInfo(data)
@@ -617,19 +621,34 @@ export default function DatabasesPage() {
     setBrowseTable(table)
     setBrowseLoading(true)
     setBrowseResult(null)
+    setBrowseTotal(null)
     try {
       const conn = conns.find((c) => c.id === id)
       const isMySql = conn?.provider === "MySql"
       const quote = isMySql ? "`" : '"'
       const escaped = table.replace(new RegExp(quote, "g"), quote + quote)
       const sql = "SELECT * FROM " + quote + escaped + quote + " LIMIT 100"
-      const res = await fetch(API + "/" + id + "/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql, maxRows: 100 }),
-      })
-      if (!res.ok) throw new Error(parseApiError(await res.text()))
-      setBrowseResult(await res.json())
+      const [dataRes, countRes] = await Promise.all([
+        fetch(API + "/" + id + "/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sql, maxRows: 100 }),
+        }),
+        fetch(API + "/" + id + "/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sql: "SELECT COUNT(*) FROM " + quote + escaped + quote, maxRows: 1 }),
+        }),
+      ])
+      if (!dataRes.ok) throw new Error(parseApiError(await dataRes.text()))
+      setBrowseResult(await dataRes.json())
+      if (countRes.ok) {
+        const cd = await countRes.json()
+        const v = cd?.rows?.[0]?.[0]
+        if (v === null || v === undefined) return
+        const n = typeof v === "number" ? v : Number(v)
+        if (Number.isFinite(n)) setBrowseTotal(n)
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "browse failed")
     } finally {
@@ -1061,7 +1080,7 @@ export default function DatabasesPage() {
       </Card>
 
         </aside>
-        <main className="flex-1 min-h-0 space-y-4 overflow-y-auto">
+        <main className="flex-1 min-h-0 space-y-4 overflow-y-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}>
       <div className="flex gap-2 border-b pb-2">
         <Button size="sm" variant={rightTab === "data" ? "default" : "outline"} onClick={() => setRightTab("data")}>Data</Button>
         <Button size="sm" variant={rightTab === "schema" ? "default" : "outline"} onClick={() => setRightTab("schema")}>Schema</Button>
@@ -1143,10 +1162,11 @@ export default function DatabasesPage() {
         <p className="text-sm text-muted-foreground">Select a table from the tree to view its data.</p>
       ) : null}
       {rightTab === "data" && activeTable ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Data - {activeTable.table}</CardTitle>
-          </CardHeader>
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Data - {activeTable.table}</CardTitle>
+            </CardHeader>
           <CardContent>
             {browseLoading ? <p className="text-sm text-muted-foreground">Loading.</p> : null}
             {browseResult ? (
@@ -1158,23 +1178,22 @@ export default function DatabasesPage() {
                   </Button>
                   {pkColumnNames().length === 0 ? <span className="text-xs text-muted-foreground">No primary key — read only</span> : null}
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr>
+                <Table className="text-sm" containerClassName="max-h-[calc(100vh-260px)] min-h-[320px] rounded-md border">
+                  <TableHeader>
+                      <TableRow className="sticky top-0 z-20 bg-background">
                         {browseResult.columns.map((col) => {
   const isIdCol = /^id$/i.test(col)
   const colSchema = activeSchemaTable()?.columns?.find((c) => c.name === col)
   const dt = (colSchema?.dataType ?? "").toLowerCase()
   const isInt = isIdCol && (dt ? /int|serial|bigint|smallint/.test(dt) : (browseResult.rows.length > 0 && browseResult.rows.every((r) => { const v = r[browseResult.columns.indexOf(col)]; return v === null || v === undefined || v === "" || /^-?\d+$/.test(String(v)) })))
-  return <th key={col} className={`border px-2 py-1 text-left ${isIdCol ? "w-px whitespace-nowrap" : ""} ${isInt ? "sticky left-0 bg-background z-10" : ""}`}>{col}</th>
+  return <TableHead key={col} className={`border px-2 py-1 text-left ${isIdCol ? "w-px whitespace-nowrap" : ""} ${isInt ? "sticky left-0 bg-background z-40 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.15)]" : ""}`}>{col}</TableHead>
 })}
-                        <th className="border px-2 py-1 text-left w-16 sticky right-0 bg-background z-10">act</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                        <TableHead className="border px-2 py-1 text-left w-16 sticky right-0 bg-background z-40">act</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {browseResult.rows.map((row, i: number) => (
-                        <tr key={i}>
+                        <TableRow key={i}>
                           {row.map((v, j: number) => {
                             const colName = browseResult.columns[j]
                             const isPk = pkColumnNames().includes(colName)
@@ -1188,17 +1207,17 @@ export default function DatabasesPage() {
                               const isDate = colType.includes("date") || colType.includes("time")
                               if (isDate && !selectedIsReadOnly) {
                                 return (
-                                  <td key={j} className="border px-1 py-0.5">
+                                  <TableCell key={j} className="border px-1 py-0.5">
                                     <DatePicker
                                       value={editValue}
                                       withTime={colType.includes("time")}
                                       onChange={(v) => { setEditValue(v); void commitEdit(v) }}
                                     />
-                                  </td>
+                                  </TableCell>
                                 )
                               }
                               return (
-                                <td key={j} className="border px-1 py-0.5">
+                                <TableCell key={j} className="border px-1 py-0.5">
                                   <input
                                     type="text"
                                     className="w-full rounded border px-1 py-0.5 text-sm"
@@ -1210,72 +1229,79 @@ export default function DatabasesPage() {
                                     disabled={savingCell}
                                     readOnly={selectedIsReadOnly}
                                   />
-                                </td>
+                                </TableCell>
                               )
                             }
                             return (
-                              <td
+                              <TableCell
                                 key={j}
-                                className={`border px-2 py-1 whitespace-nowrap ${/^id$/i.test(colName) ? "w-px" : ""} ${isPk && !isIdInt ? "bg-muted/40" : ""} ${!isPk ? "cursor-pointer hover:bg-accent/40" : ""} ${isIdInt ? `sticky left-0 z-10 ${isPk ? "bg-muted" : "bg-background"}` : ""}`}
+                                className={`border px-2 py-1 whitespace-nowrap ${/^id$/i.test(colName) ? "w-px" : ""} ${isPk && !isIdInt ? "bg-muted/40" : ""} ${!isPk ? "cursor-pointer hover:bg-accent/40" : ""} ${isIdInt ? `sticky left-0 z-10 ${isPk ? "bg-muted" : "bg-background"} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.15)]` : ""}`}
                                 title={String(v ?? "")}
                                 onClick={() => { if (!isPk && pkColumnNames().length > 0) startEdit(i, j, v) }}
                               >
                                 {String(v ?? "")}
-                              </td>
+                              </TableCell>
                             )
                           })}
-                          <td className="border px-2 py-1 sticky right-0 bg-background z-10">
+                          <TableCell className="border px-2 py-1 sticky right-0 bg-background z-10">
                             <button
                               className="text-xs text-destructive hover:underline"
-                              onClick={() => { promptDeleteRow(i) }}
-                              title={selectedIsReadOnly ? "read-only connection — editing disabled" : (pkColumnNames().length === 0 ? "no primary key — read only" : undefined)}
-                              disabled={mutating || pkColumnNames().length === 0 || selectedIsReadOnly}
+                              onClick={() => { if (selectedIsReadOnly) setShowReadOnlyDeleteDialog(true); else promptDeleteRow(i) }}
+                              title={selectedIsReadOnly ? "read-only connection - delete disabled" : (pkColumnNames().length === 0 ? "no primary key - read only" : undefined)}
+                              disabled={mutating || pkColumnNames().length === 0}
                             >
                               del
                             </button>
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       ))}
                       {newRow ? (
-                        <tr>
+                        <TableRow>
                           {browseResult.columns.map((col) => {
                             const colType = (activeSchemaTable()?.columns?.find((c) => c.name === col)?.dataType ?? "").toLowerCase()
                             const isDate = colType.includes("date") || colType.includes("time")
                             if (isDate) {
                               return (
-                                <td key={col} className="border px-1 py-0.5">
+                                <TableCell key={col} className="border px-1 py-0.5">
                                   <DatePicker
                                     value={newRow[col] ?? ""}
                                     withTime={colType.includes("time")}
                                     onChange={(v) => setNewRow((prev) => prev ? { ...prev, [col]: v } : prev)}
                                   />
-                                </td>
+                                </TableCell>
                               )
                             }
                             return (
-                              <td key={col} className="border px-1 py-0.5">
+                              <TableCell key={col} className="border px-1 py-0.5">
                                 <input
                                   className="w-full rounded border px-1 py-0.5 text-sm"
                                   value={newRow[col] ?? ""}
                                   onChange={(e) => setNewRow((prev) => prev ? { ...prev, [col]: e.target.value } : prev)}
                                 />
-                              </td>
+                              </TableCell>
                             )
                           })}
-                          <td className="border px-2 py-1 flex gap-1">
+                          <TableCell className="border px-2 py-1 flex gap-1">
                             <button className="text-xs text-green-600 hover:underline" onClick={() => { void submitNewRow() }} disabled={mutating}>save</button>
                             <button className="text-xs text-muted-foreground hover:underline" onClick={() => setNewRow(null)}>cancel</button>
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       ) : null}
-                    </tbody>
-                  </table>
-                </div>
+                    </TableBody>
+                </Table>
                 {browseResult.truncated ? <p className="mt-1 text-xs text-muted-foreground">Truncated.</p> : null}
               </div>
             ) : null}
           </CardContent>
         </Card>
+        {browseResult ? (
+          <div className="sticky bottom-0 z-20 flex items-center gap-2 rounded-md bg-muted/80 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur">
+            {browseTotal !== null
+              ? `Total rows: ${browseTotal} (showing ${browseResult.rows.length}${browseResult.truncated ? ", truncated" : ""})`
+              : `Total rows: ${browseResult.rows.length}`}
+          </div>
+        ) : null}
+        </>
       ) : null}
       {rightTab === "sql" && selectedId ? (
         <Card>
@@ -1472,6 +1498,27 @@ export default function DatabasesPage() {
           </div>
         </div>
       ) : null}
+
+      <AlertDialog
+        open={showReadOnlyDeleteDialog}
+        onOpenChange={(open) => {
+          if (!open) setShowReadOnlyDeleteDialog(false)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Read-only connection</AlertDialogTitle>
+            <AlertDialogDescription>
+              This connection is read-only, so rows cannot be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setShowReadOnlyDeleteDialog(false)}>
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={deleteRowTarget !== null}
