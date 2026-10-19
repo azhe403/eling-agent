@@ -1,7 +1,8 @@
 # Build outputs
 bin/
 obj/
-.artifacts*.bin*
+.artifacts*
+.bin*
 .mybin/
 .vs/
 .idea/
