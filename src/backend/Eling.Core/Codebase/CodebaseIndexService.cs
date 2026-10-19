@@ -223,10 +223,17 @@ public sealed class CodebaseIndexService
 
             // Sweep stale rows: only when indexing everything, or scoped to the same prefixes.
             // Gitignored rows are always purged: ignored content must not stay searchable.
+            // Reload ignore rules right before the sweep: a .gitignore that was
+            // updated (or only became visible) after enumeration started must
+            // still drive purging. The `ignores` used during enumeration can be
+            // stale, leaving now-ignored paths in `seen`.
+            ignores = GitignoreFilter.Load(_projectRoot, _logger);
+
             var indexed = await _index.ListPathsAsync(ct);
             foreach (var dbPath in indexed)
             {
-                if (seen.Contains(dbPath)) continue;
+                // Gitignored rows are always purged first, even when a stale
+                // ignore filter let them into `seen` during enumeration.
                 if (ignores.IsIgnored(dbPath))
                 {
                     _logger.LogDebug("Purging ignored file {Path} from codebase index.", dbPath);
@@ -234,6 +241,9 @@ public sealed class CodebaseIndexService
                     deleted++;
                     continue;
                 }
+                // Files still present in this pass are kept (hash-skip handles
+                // unchanged content); `seen` is the proof of presence.
+                if (seen.Contains(dbPath)) continue;
                 if (scopes is not null && !InScope(dbPath, scopes)) continue;
                 var absolute = Path.GetFullPath(Path.Combine(_projectRoot, dbPath.Replace('/', Path.DirectorySeparatorChar)));
                 // Deleting a row is only safe once the file is proven gone.

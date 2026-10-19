@@ -93,6 +93,24 @@ public sealed class GitignoreFilter
         rel = rel.TrimStart('/');
         if (rel.Length == 0 || rel == ".." || rel.StartsWith("../", StringComparison.Ordinal)) return false;
 
+        // Git semantics: if any parent directory is ignored, all of its
+        // contents are ignored too (and cannot be re-included by a negation
+        // on a child). Check ancestors first.
+        var parts = rel.Split('/');
+        for (var i = 1; i < parts.Length; i++)
+        {
+            var parent = string.Join("/", parts, 0, i);
+            if (EvaluateSelf(parent)) return true;
+        }
+
+        return EvaluateSelf(rel);
+    }
+
+    /// <summary>
+    /// Applies the loaded rules to a single path (no ancestor propagation).
+    /// </summary>
+    private bool EvaluateSelf(string rel)
+    {
         var ignored = false;
         foreach (var rule in _rules)
         {
