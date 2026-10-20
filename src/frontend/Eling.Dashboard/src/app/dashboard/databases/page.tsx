@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { copyText } from "@/lib/clipboard"
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table"
 import { DatePicker } from "@/components/ui/date-picker"
 import {
@@ -68,6 +69,10 @@ type Detected = {
 }
 
 const API = "/api/databases"
+
+/** A value short enough to sit next to its column name in a toast. */
+const shortValue = (value: string): string =>
+  value.length > 120 ? `${value.slice(0, 120)}…` : value
 
 const parseApiError = (text: string): string => {
   const trimmed = text.trim()
@@ -1318,7 +1323,7 @@ export default function DatabasesPage() {
                                   e.stopPropagation()
                                   // keep the menu inside the viewport
                                   const menuW = 200
-                                  const menuH = 160
+                                  const menuH = 200
                                   const x = Math.min(e.clientX, window.innerWidth - menuW - 8)
                                   const y = Math.min(e.clientY, window.innerHeight - menuH - 8)
                                   setCellCtxMenu({ x: Math.max(8, x), y: Math.max(8, y), row: i, col: j })
@@ -1475,6 +1480,29 @@ export default function DatabasesPage() {
             <p className="px-2 py-1 text-xs text-muted-foreground">
               {browseResult?.columns[cellCtxMenu.col] ?? ""}
             </p>
+            <button
+              className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent"
+              title="Copy this cell's value to the clipboard"
+              onClick={() => {
+                const { row, col } = cellCtxMenu
+                setCellCtxMenu(null)
+                const column = browseResult?.columns[col] ?? ""
+                const raw = browseResult?.rows[row]?.[col]
+                // Copy what the cell shows, so what lands on the clipboard is
+                // what the reader saw - a null cell copies as "null".
+                const text = raw === null || raw === undefined ? "null" : String(raw)
+                void copyText(text).then((ok) => {
+                  if (ok) {
+                    notifyDb("success", "Copied", `${column}: ${shortValue(text)}`)
+                  } else {
+                    notifyDb("error", "Copy failed", "The browser blocked clipboard access.")
+                  }
+                })
+              }}
+            >
+              Copy value
+            </button>
+            <div className="my-1 h-px bg-border" />
             {isDateTimeColumn(browseResult?.columns[cellCtxMenu.col] ?? "") ? (
               <button
                 className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
