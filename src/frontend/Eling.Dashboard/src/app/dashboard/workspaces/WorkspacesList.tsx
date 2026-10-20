@@ -311,22 +311,57 @@ export function WorkspacesList() {
             ))
           ) : (
             <>
-              <div className="rounded-lg border p-3 text-sm">
-                <div className="text-muted-foreground">Registered Workspaces</div>
-                <div className="text-xl font-medium">{groups.length}</div>
+              {/*
+                Each tile is one announcement, not three loose text nodes: the
+                label, the number and the qualifier are grouped and named as a
+                sentence, and the visible children are hidden from assistive
+                tech so the same words are not read twice. The visible layout
+                is untouched.
+              */}
+              <div
+                className="rounded-lg border p-3 text-sm"
+                role="group"
+                aria-label={`Registered workspaces: ${groups.length}`}
+              >
+                <div className="text-muted-foreground" aria-hidden="true">
+                  Registered Workspaces
+                </div>
+                <div className="text-xl font-medium" aria-hidden="true">
+                  {groups.length}
+                </div>
               </div>
-              <div className="rounded-lg border p-3 text-sm">
-                <div className="text-muted-foreground">Active Instances</div>
-                <div className="text-xl font-medium text-emerald-600 dark:text-emerald-400">
+              <div
+                className="rounded-lg border p-3 text-sm"
+                role="group"
+                aria-label={`Active instances: ${totalInstances} across ${activeWorkspaces} active workspaces`}
+              >
+                <div className="text-muted-foreground" aria-hidden="true">
+                  Active Instances
+                </div>
+                <div
+                  className="text-xl font-medium text-emerald-600 dark:text-emerald-400"
+                  aria-hidden="true"
+                >
                   {totalInstances}
                 </div>
-                <div className="text-[11px] text-muted-foreground">
-                  di {activeWorkspaces} workspace aktif
+                <div
+                  className="text-[11px] text-muted-foreground"
+                  aria-hidden="true"
+                >
+                  across {activeWorkspaces} active workspaces
                 </div>
               </div>
-              <div className="rounded-lg border p-3 text-sm">
-                <div className="text-muted-foreground">Total Indexed Files</div>
-                <div className="text-xl font-medium">{totalFiles}</div>
+              <div
+                className="rounded-lg border p-3 text-sm"
+                role="group"
+                aria-label={`Total indexed files: ${totalFiles.toLocaleString()}`}
+              >
+                <div className="text-muted-foreground" aria-hidden="true">
+                  Total Indexed Files
+                </div>
+                <div className="text-xl font-medium" aria-hidden="true">
+                  {totalFiles}
+                </div>
               </div>
             </>
           )}
@@ -342,6 +377,7 @@ export function WorkspacesList() {
         <div className="sticky top-16 z-10 flex flex-col gap-2 bg-background pb-2 pt-1">
           <Input
             placeholder="Search workspace name, path, or PID..."
+            aria-label="Search workspaces"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="min-w-0 flex-1"
@@ -550,7 +586,13 @@ export function WorkspacesList() {
                       Re-index
                     </Button>
 
-                    <Button variant="outline" size="sm" className="justify-start" render={<Link href="/dashboard/codebase" />}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="justify-start"
+                      nativeButton={false}
+                      render={<Link href="/dashboard/codebase" />}
+                    >
                       <BookOpen className="size-3.5 mr-1" />
                       View Codebase
                     </Button>
