@@ -75,6 +75,42 @@ out of scope as major bumps: `Microsoft.Data.Sqlite`, `Microsoft.Extensions.Logg
 
 ## Last run
 
+**2026-10-20** — check ran (due since 2026-10-17). Prerelease/RC ignored per scope.
+Applied 7 package bumps (9 `PackageReference` lines across 5 project files), restore
+clean (no NU1603), build succeeded with 0 errors:
+
+| Project | Package | From | To |
+| --- | --- | --- | --- |
+| `Eling.Core` | `Microsoft.Data.Sqlite` | 10.0.12 | 10.0.13 |
+| `Eling.Core` | `Microsoft.Extensions.Logging.Abstractions` | 10.0.12 | 10.0.13 |
+| `Eling.Core` | `MySqlConnector` | 2.6.1 | 2.6.2 |
+| `Eling.Desktop` | `Microsoft.Extensions.Logging` | 10.0.12 | 10.0.13 |
+| `Eling.Desktop` | `Microsoft.Extensions.DependencyInjection` | 10.0.12 | 10.0.13 |
+| `Eling.Backend.Tests` | `Microsoft.AspNetCore.Mvc.Testing` | 10.0.12 | 10.0.13 |
+| `Eling.Core.Tests` | `Microsoft.NET.Test.Sdk` | 18.10.1 | 18.11.0 |
+| `Eling.Backend.Tests` | `Microsoft.NET.Test.Sdk` | 18.10.1 | 18.11.0 |
+| `Eling.Desktop.Tests` | `Microsoft.NET.Test.Sdk` | 18.10.1 | 18.11.0 |
+
+Verified: Core.Tests 363/363, Backend.Tests 723/723 (api layer, `DashboardLifecycleTests`
+excluded per the pre-commit filter), Desktop.Tests 95/95 — all under an isolated
+`.bin-test-<random>` output root.
+
+**Left alone, and why:** the .NET 11 `11.0.0-rc.2.26504.105` previews for
+`Microsoft.Data.Sqlite`, `Microsoft.Extensions.Logging`, `Microsoft.Extensions.Logging.Abstractions`,
+`Microsoft.Extensions.DependencyInjection` and `Microsoft.AspNetCore.Mvc.Testing` (major +
+RC — out of scope), plus `Serilog` 4.4.1-dev-02447 and `Serilog.Sinks.File`
+8.0.0-nblumhardt-02322 (CI/dev builds, not stable releases).
+
+**Lesson confirmed again 2026-10-20:** `--include-prerelease` alone showed only
+`11.0.0-rc` for the Microsoft.* packages and hid the stable `10.0.13` servicing
+line entirely. The stable-only run (`dotnet list package --outdated`, no flag) is
+what surfaced the five `10.0.13` bumps plus `MySqlConnector` 2.6.2 and
+`Microsoft.NET.Test.Sdk` 18.11.0. Keep running BOTH scans every time.
+
+**Next check due on or after 2026-10-27.**
+
+---
+
 **2026-10-10** — check ran (due since 2026-10-06). Prerelease/RC ignored per scope.
 Applied 22 changes, build succeeded with 0 errors:
 
