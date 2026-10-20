@@ -184,6 +184,7 @@ export default function DatabasesPage() {
   const schemaRetryRef = useRef<Record<string, number>>({})
   const autoScrollPendingRef = useRef(false)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; connId: string; table?: string } | null>(null)
+  const [cellCtxMenu, setCellCtxMenu] = useState<{ x: number; y: number; row: number; col: number } | null>(null)
   const [schemaLoading, setSchemaLoading] = useState(false)
   const [browseTable, setBrowseTable] = useState<string | null>(null)
   const [browseResult, setBrowseResult] = useState<QueryResult | null>(null)
@@ -618,10 +619,13 @@ export default function DatabasesPage() {
   const browseData = async (id: string, table: string) => {
     setError(null)
     setEditingCell(null)
+    const isNewTable = browseTable !== table
     setBrowseTable(table)
     setBrowseLoading(true)
-    setBrowseResult(null)
-    setBrowseTotal(null)
+    if (isNewTable) {
+      setBrowseResult(null)
+      setBrowseTotal(null)
+    }
     try {
       const conn = conns.find((c) => c.id === id)
       const isMySql = conn?.provider === "MySql"
@@ -743,6 +747,71 @@ export default function DatabasesPage() {
   }
 
   const cancelEdit = () => setEditingCell(null)
+
+  // A column is "date-like" when its declared type mentions date/time. The
+  // schema drives the DatePicker in the grid, so the context menu follows the
+  // same rule for the "Set now" action.
+  const isDateTimeColumn = (colName: string): boolean => {
+    const dt = (activeSchemaTable()?.columns?.find((c) => c.name === colName)?.dataType ?? "").toLowerCase()
+    return dt.includes("date") || dt.includes("time")
+  }
+
+  // Set a single cell to NULL, empty string, or "now" (date/time columns) via
+  // the mutate endpoint. Uses the row's primary key as the WHERE clause, so it
+  // targets exactly one row.
+  const setCellValue = async (rowIndex: number, colIndex: number, value: null | "" | "now") => {
+    if (!browseResult || !selectedId || !activeTable) return
+    if (selectedIsReadOnly) { notifyDb("error", "This connection is read-only, so data changes are disabled."); return }
+    const colName = browseResult.columns[colIndex]
+    if (pkColumnNames().includes(colName)) { notifyDb("error", "Primary key columns cannot be changed here."); return }
+    const colSchema = activeSchemaTable()?.columns?.find((c) => c.name === colName)
+    if (value === null && colSchema && !colSchema.isNullable) { notifyDb("error", `Column ${colName} is NOT NULL.`); return }
+    const where = buildWherePk(browseResult.rows[rowIndex])
+    if (!where) { notifyDb("error", "no primary key — cannot update"); return }
+
+    // Build the SQL literal plus the value shown optimistically in the grid.
+    let literal: string
+    let display: unknown
+    if (value === null) {
+      literal = "NULL"
+      display = null
+    } else if (value === "") {
+      literal = "''"
+      display = ""
+    } else {
+      const now = new Date()
+      const pad = (n: number) => String(n).padStart(2, "0")
+      const datePart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+      const timePart = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+      const withTime = (colSchema?.dataType ?? "").toLowerCase().includes("time")
+      display = withTime ? `${datePart}T${timePart}` : datePart
+      literal = sqlQuote(display)
+    }
+
+    const sqlStmt = `UPDATE ${quoteIdent(activeTable.table)} SET ${quoteIdent(colName)} = ${literal} WHERE ${where}`
+    // optimistic apply
+    setBrowseResult((prev) => {
+      if (!prev) return prev
+      const rows = prev.rows.map((r, i) => (i === rowIndex ? r.map((v, j) => (j === colIndex ? display : v)) : r))
+      return { ...prev, rows }
+    })
+    setMutating(true)
+    try {
+      const res = await fetch(API + "/" + selectedId + "/mutate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000 }),
+      })
+      if (!res.ok) throw new Error(parseApiError(await res.text()))
+      await refreshData()
+      notifyDb("success", value === null ? `Set ${colName} to null` : value === "" ? `Cleared ${colName}` : `Set ${colName} to now`)
+    } catch (e: unknown) {
+      await refreshData()
+      setError(e instanceof Error ? e.message : "update failed")
+    } finally {
+      setMutating(false)
+    }
+  }
 
   const promptDeleteRow = (rowIndex: number) => {
     if (selectedIsReadOnly) return
@@ -1168,11 +1237,15 @@ export default function DatabasesPage() {
               <CardTitle>Data - {activeTable.table}</CardTitle>
             </CardHeader>
           <CardContent>
-            {browseLoading ? <p className="text-sm text-muted-foreground">Loading.</p> : null}
+            {browseLoading && !browseResult ? <p className="text-sm text-muted-foreground">Loading.</p> : null}
             {browseResult ? (
               <div className="space-y-2">
                 {selectedIsReadOnly ? <p className="text-xs text-muted-foreground">Read-only connection — cells can be edited, but never persisted.</p> : null}
                 <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => { void refreshData() }} disabled={browseLoading || mutating} title="Refresh table data">
+                    <RefreshCw className={browseLoading ? "size-4 animate-spin" : "size-4"} />
+                    <span className="ml-1">Refresh</span>
+                  </Button>
                   <Button size="sm" variant="outline" onClick={() => setNewRow(Object.fromEntries(browseResult.columns.map((c) => [c, ""])))} title={selectedIsReadOnly ? "read-only connection — editing disabled" : (pkColumnNames().length === 0 ? "no primary key — read only" : undefined)} disabled={mutating || pkColumnNames().length === 0 || selectedIsReadOnly}>
                     + Add row
                   </Button>
@@ -1211,24 +1284,26 @@ export default function DatabasesPage() {
                                     <DatePicker
                                       value={editValue}
                                       withTime={colType.includes("time")}
-                                      onChange={(v) => { setEditValue(v); void commitEdit(v) }}
+                                      onChange={(v) => { setEditValue(v) }}
                                     />
                                   </TableCell>
                                 )
                               }
                               return (
                                 <TableCell key={j} className="border px-1 py-0.5">
-                                  <input
-                                    type="text"
-                                    className="w-full rounded border px-1 py-0.5 text-sm"
-                                    value={editValue}
-                                    autoFocus
-                                    onChange={(e) => setEditValue(e.target.value)}
-                                    onBlur={() => { void commitEdit() }}
-                                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void commitEdit() } if (e.key === "Escape") cancelEdit() }}
-                                    disabled={savingCell}
-                                    readOnly={selectedIsReadOnly}
-                                  />
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="text"
+                                      className="w-full rounded border px-1 py-0.5 text-sm"
+                                      value={editValue}
+                                      autoFocus
+                                      onChange={(e) => setEditValue(e.target.value)}
+                                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void commitEdit() } if (e.key === "Escape") cancelEdit() }}
+                                      disabled={savingCell}
+                                      readOnly={selectedIsReadOnly}
+                                    />
+                                    <button type="button" className="shrink-0 rounded border px-1.5 py-0.5 text-xs text-green-600 hover:bg-accent" onClick={() => { void commitEdit() }} disabled={savingCell || mutating} title="Apply edit">Apply</button>
+                                  </div>
                                 </TableCell>
                               )
                             }
@@ -1236,22 +1311,55 @@ export default function DatabasesPage() {
                               <TableCell
                                 key={j}
                                 className={`border px-2 py-1 whitespace-nowrap ${/^id$/i.test(colName) ? "w-px" : ""} ${isPk && !isIdInt ? "bg-muted/40" : ""} ${!isPk ? "cursor-pointer hover:bg-accent/40" : ""} ${isIdInt ? `sticky left-0 z-10 ${isPk ? "bg-muted" : "bg-background"} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.15)]` : ""}`}
-                                title={String(v ?? "")}
+                                title={v === null || v === undefined ? "null" : String(v)}
                                 onClick={() => { if (!isPk && pkColumnNames().length > 0) startEdit(i, j, v) }}
+                                onContextMenu={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  // keep the menu inside the viewport
+                                  const menuW = 200
+                                  const menuH = 160
+                                  const x = Math.min(e.clientX, window.innerWidth - menuW - 8)
+                                  const y = Math.min(e.clientY, window.innerHeight - menuH - 8)
+                                  setCellCtxMenu({ x: Math.max(8, x), y: Math.max(8, y), row: i, col: j })
+                                }}
                               >
-                                {String(v ?? "")}
+                                {v === null || v === undefined ? (
+                                  <span className="text-muted-foreground/70 italic">null</span>
+                                ) : (
+                                  String(v)
+                                )}
                               </TableCell>
                             )
                           })}
                           <TableCell className="border px-2 py-1 sticky right-0 bg-background z-10">
-                            <button
-                              className="text-xs text-destructive hover:underline"
-                              onClick={() => { if (selectedIsReadOnly) setShowReadOnlyDeleteDialog(true); else promptDeleteRow(i) }}
-                              title={selectedIsReadOnly ? "read-only connection - delete disabled" : (pkColumnNames().length === 0 ? "no primary key - read only" : undefined)}
-                              disabled={mutating || pkColumnNames().length === 0}
-                            >
-                              del
-                            </button>
+                            {editingCell?.row === i ? (
+                              <div className="flex gap-1">
+                                <button
+                                  className="text-xs text-green-600 hover:underline"
+                                  onClick={() => { void commitEdit() }}
+                                  disabled={savingCell || mutating}
+                                >
+                                  apply
+                                </button>
+                                <button
+                                  className="text-xs text-muted-foreground hover:underline"
+                                  onClick={() => cancelEdit()}
+                                  disabled={savingCell}
+                                >
+                                  cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                className="text-xs text-destructive hover:underline"
+                                onClick={() => { if (selectedIsReadOnly) setShowReadOnlyDeleteDialog(true); else promptDeleteRow(i) }}
+                                title={selectedIsReadOnly ? "read-only connection - delete disabled" : (pkColumnNames().length === 0 ? "no primary key - read only" : undefined)}
+                                disabled={mutating || pkColumnNames().length === 0}
+                              >
+                                del
+                              </button>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -1349,6 +1457,49 @@ export default function DatabasesPage() {
             <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent" onClick={() => { const c = conns.find((x) => x.id === ctxMenu.connId); if (c) openEdit(c); setCtxMenu(null) }}>Edit connection</button>
             <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent" onClick={() => { loadSchema(ctxMenu.connId); setCtxMenu(null) }}>Refresh schema</button>
             <button className="block w-full rounded px-2 py-1 text-left text-sm text-destructive hover:bg-accent" onClick={() => { setDeletingId(ctxMenu.connId); setCtxMenu(null) }}>Delete connection</button>
+          </div>
+        </div>
+      ) : null}
+
+      {cellCtxMenu ? (
+        <div
+          className="fixed inset-0 z-50"
+          onClick={() => setCellCtxMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setCellCtxMenu(null) }}
+        >
+          <div
+            className="absolute min-w-[160px] rounded-md border border-border bg-popover p-1 shadow-md"
+            style={{ left: cellCtxMenu.x, top: cellCtxMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="px-2 py-1 text-xs text-muted-foreground">
+              {browseResult?.columns[cellCtxMenu.col] ?? ""}
+            </p>
+            {isDateTimeColumn(browseResult?.columns[cellCtxMenu.col] ?? "") ? (
+              <button
+                className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
+                disabled={mutating || selectedIsReadOnly || pkColumnNames().includes(browseResult?.columns[cellCtxMenu.col] ?? "")}
+                title={selectedIsReadOnly ? "read-only connection — changes are disabled" : undefined}
+                onClick={() => { const { row, col } = cellCtxMenu; setCellCtxMenu(null); void setCellValue(row, col, "now") }}
+              >
+                Set now
+              </button>
+            ) : null}
+            <button
+              className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
+              disabled={mutating || selectedIsReadOnly || pkColumnNames().includes(browseResult?.columns[cellCtxMenu.col] ?? "")}
+              title={selectedIsReadOnly ? "read-only connection — changes are disabled" : undefined}
+              onClick={() => { const { row, col } = cellCtxMenu; setCellCtxMenu(null); void setCellValue(row, col, null) }}
+            >
+              Set null
+            </button>
+            <button
+              className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
+              disabled={mutating || selectedIsReadOnly || pkColumnNames().includes(browseResult?.columns[cellCtxMenu.col] ?? "")}
+              onClick={() => { const { row, col } = cellCtxMenu; setCellCtxMenu(null); void setCellValue(row, col, "") }}
+            >
+              Set empty string
+            </button>
           </div>
         </div>
       ) : null}
