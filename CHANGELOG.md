@@ -9,6 +9,7 @@ All notable changes to Eling are documented here. Follows [Keep a Changelog](htt
 
 ### Changed
 - **Weekly NuGet dependency bump (2026-10-20) — backend and test layers**: `Microsoft.Data.Sqlite` and `Microsoft.Extensions.Logging.Abstractions` 10.0.12 -> 10.0.13 in `Eling.Core`; `MySqlConnector` 2.6.1 -> 2.6.2 in `Eling.Core`; `Microsoft.AspNetCore.Mvc.Testing` 10.0.12 -> 10.0.13 in `Eling.Backend.Tests`; `Microsoft.NET.Test.Sdk` 18.10.1 -> 18.11.0 in `Eling.Core.Tests` and `Eling.Backend.Tests`. Every target version was verified present and non-prerelease on nuget.org before the edit. Deliberately left alone: the .NET 11 `11.0.0-rc.2` previews (major + RC), `Serilog` 4.4.1-dev-02447 and `Serilog.Sinks.File` 8.0.0-nblumhardt-02322 (CI/dev builds, not release versions). Verified: restore clean with no NU1603, full solution build 0 errors, Core.Tests 363/363, Backend.Tests 723/723.
+- **Weekly NuGet dependency bump (2026-10-20) — desktop layer**: `Microsoft.Extensions.Logging` and `Microsoft.Extensions.DependencyInjection` 10.0.12 -> 10.0.13 in `Eling.Desktop`; `Microsoft.NET.Test.Sdk` 18.10.1 -> 18.11.0 in `Eling.Desktop.Tests`. Same scope and verification as the backend/test bump in the same change set: restore clean with no NU1603, full solution build 0 errors, Desktop.Tests 95/95.
 - **Pre-commit one-layer-per-commit has no bypass**: the `ALLOW_MIXED=1` escape hatch is removed — mixed-layer commits now always fail with the split instruction. `SKIP_HOOK=1` / `--no-verify` remain for test-bypass emergencies only.
 
 ### Added
