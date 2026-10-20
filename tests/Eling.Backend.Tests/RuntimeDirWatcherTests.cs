@@ -16,6 +16,7 @@ public sealed class RuntimeDirWatcherTests : IDisposable
     {
         using var watcher = new RuntimeDirWatcher(_dir, _broadcaster);
         watcher.Start();
+        await WaitUntilArmedAsync();
 
         File.WriteAllText(Path.Combine(_dir, "1001.json"), "{}");
 
@@ -30,6 +31,7 @@ public sealed class RuntimeDirWatcherTests : IDisposable
 
         using var watcher = new RuntimeDirWatcher(_dir, _broadcaster);
         watcher.Start();
+        await WaitUntilArmedAsync();
 
         File.Delete(path);
 
@@ -44,6 +46,7 @@ public sealed class RuntimeDirWatcherTests : IDisposable
 
         using var watcher = new RuntimeDirWatcher(_dir, _broadcaster);
         watcher.Start();
+        await WaitUntilArmedAsync();
 
         File.Move(source, Path.Combine(_dir, "1004.json"));
 
@@ -74,6 +77,31 @@ public sealed class RuntimeDirWatcherTests : IDisposable
         File.WriteAllText(Path.Combine(_dir, "1006.json"), "{}");
 
         Assert.Null(await NextEventAsync(TimeSpan.FromSeconds(1.5)));
+    }
+
+    /// <summary>
+    /// Wait until the watcher is really observing the directory.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="FileSystemWatcher"/> is not armed the instant
+    /// <c>EnableRaisingEvents</c> returns - the OS thread that reads the
+    /// directory starts afterwards - so a change made right after
+    /// <c>Start()</c> can be missed entirely, and a missed event is gone for
+    /// good. Under load that window widens, which is what made these tests
+    /// fail intermittently in a full parallel run while passing every time
+    /// on their own.
+    /// <para>
+    /// A probe file settles it: the watcher notifies for it like any other
+    /// file, so receiving that notification proves the watcher is armed. The
+    /// probe is written and its event consumed <em>before</em> the operation
+    /// under test runs, so the assertion still belongs to that operation.
+    /// </para>
+    /// </remarks>
+    private async Task WaitUntilArmedAsync()
+    {
+        var probe = Path.Combine(_dir, $"probe-{Guid.NewGuid():N}.json");
+        File.WriteAllText(probe, "{}");
+        Assert.Equal("runtimes", await NextEventAsync(TimeSpan.FromSeconds(5)));
     }
 
     private async Task<string?> NextEventAsync(TimeSpan timeout)
