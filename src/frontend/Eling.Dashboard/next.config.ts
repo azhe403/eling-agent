@@ -20,6 +20,14 @@ const nextConfig: NextConfig = {
         output: "export",
         trailingSlash: true,
       }),
+  experimental: isDev
+    ? {
+        // Reclaim in-memory Turbopack cache after persisting to disk
+        turbopackMemoryEviction: "full",
+        // GC unreachable work in memory + persistent cache (16.4.0+)
+        turbopackGc: true,
+      }
+    : {},
 };
 
 export default nextConfig;
