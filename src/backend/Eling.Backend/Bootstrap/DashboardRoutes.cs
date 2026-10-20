@@ -47,11 +47,17 @@ public static class DashboardRoutes
         app.Services.GetService<CodebaseDirWatcher>()?.Start();
         app.Services.GetService<AuditDirWatcher>()?.Start();
 
-        app.MapGet("/health", () => Results.Ok(new { status = "Healthy", pid = Environment.ProcessId }));
+        app.MapGet("/health", () => Results.Ok(HealthPayload()));
+        // The same probe under /api, because that is the only prefix the
+        // dashboard's dev proxy forwards to the backend - a dashboard read of
+        // "/health" would hit the frontend server in dev and never reach
+        // the API. One handler, two paths, so the two cannot drift.
+        app.MapGet("/api/health", () => Results.Ok(HealthPayload()));
         app.MapSseEvents();
         app.MapCoordinatorEndpoints();
         app.MapMemoryRoutes();
         app.MapScopedMemoryRoutes();
+        app.MapStatsRoutes();
         app.MapMemoryMaintenanceEndpoints();
         app.MapJudgeEndpoints();
         app.MapToolsEndpoints();
@@ -65,6 +71,11 @@ public static class DashboardRoutes
         app.MapControllers();
         app.MapFallbackToFile("index.html");
     }
+
+    /// <summary>
+    /// The liveness payload both health routes answer with.
+    /// </summary>
+    private static object HealthPayload() => new { status = "Healthy", pid = Environment.ProcessId };
 
     internal static void MapSseEvents(this WebApplication app)
     {
