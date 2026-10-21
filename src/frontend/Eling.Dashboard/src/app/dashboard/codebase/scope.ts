@@ -18,6 +18,7 @@ import { selectAll } from "@/components/workspaces/selection"
 
 const PROJECT_PARAM = "project"
 const SEARCH_PARAM = "search"
+const QUERY_PARAM = "q"
 
 /**
  * What a codebase search matches the query against.
@@ -82,6 +83,20 @@ export function selectionQuery(sel: WorkspaceSelection): string {
   return sel.kind === "all"
     ? ""
     : sel.roots.map((r) => `${PROJECT_PARAM}=${encodeURIComponent(r)}`).join("&")
+}
+
+/**
+ * The text in the query box, as the URL carries it. Trimmed, because the
+ * search treats a blank box as no query at all.
+ */
+export function queryFromParams(params: URLSearchParams): string {
+  return params.get(QUERY_PARAM)?.trim() ?? ""
+}
+
+/** The query as a URL param. An empty query adds no param at all. */
+export function queryParam(query: string): string {
+  const trimmed = query.trim()
+  return trimmed ? `${QUERY_PARAM}=${encodeURIComponent(trimmed)}` : ""
 }
 
 /** The search scope in the URL. The default stays out of it, like the tier on the memories page. */

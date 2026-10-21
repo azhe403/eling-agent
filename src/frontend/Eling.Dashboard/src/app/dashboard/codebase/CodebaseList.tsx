@@ -36,9 +36,12 @@ import {
   type FileResult,
 } from "./FileResultList"
 import type { SelectedFile } from "./fileDetailApi"
+import { readQuery, rememberQuery } from "./searchPrefs"
 import { SearchScopeToggle } from "./SearchScopeToggle"
 import {
   rebuildUrl,
+  queryFromParams,
+  queryParam,
   searchScopeFromParams,
   searchScopeQuery,
   searchUrl,
@@ -130,7 +133,6 @@ export function CodebaseList() {
   const [results, setResults] = useState<CodebaseHit[]>([])
   const [fileResults, setFileResults] = useState<FileResult[]>([])
   const [searchError, setSearchError] = useState<string | null>(null)
-  const [query, setQuery] = useState("")
   // The URL query is the selection's source of truth: no project params means
   // "all", otherwise the explicit root list, so reload, back/forward and shared
   // links all land on the same scope the tiles and rebuild describe.
@@ -149,6 +151,20 @@ export function CodebaseList() {
     () => searchScopeFromParams(searchParams),
     [searchParams]
   )
+  // The query comes from the URL, and a bare address — a fresh visit, or the
+  // sidebar link — falls back to the last query this browser ran, so the box
+  // is not empty every time. Read during the first render, like the
+  // selection and the scope: the page sits behind a Suspense boundary, so
+  // this subtree is client-rendered and the server never produced a
+  // different box to disagree with.
+  const [query, setQuery] = useState(
+    () => queryFromParams(searchParams) || readQuery()
+  )
+  // The query as it was when the last search went out. The URL carries this
+  // one, not the raw text: a request only goes out once the reader pauses,
+  // so the address bar should settle on the value that was actually
+  // searched.
+  const [issuedQuery, setIssuedQuery] = useState("")
   const { rows, error: runtimesError, reload } = useWorkspaceRows()
   const allRoots = useMemo(() => rows.map((r) => r.root), [rows])
   // The open file is URL state, same as the scope: reload, back/forward and
@@ -159,19 +175,21 @@ export function CodebaseList() {
     () => fileFromParams(searchParams),
     [searchParams]
   )
-  // One writer for both kinds of state on this page so changing one never
-  // drops the other: a scope change keeps the open file, closing the file
-  // keeps the scope.
+  // One writer for all of this page's URL state, so changing one piece never
+  // drops another: a scope change keeps the query and the open file, closing
+  // the file keeps the scope, and a new query keeps the scope.
   const writeUrl = useCallback(
-    (
-      nextSelection: WorkspaceSelection,
-      file: SelectedFile | null,
-      nextScope: SearchScope,
-    ) => {
+    (next: {
+      selection: WorkspaceSelection
+      scope: SearchScope
+      query: string
+      file: SelectedFile | null
+    }) => {
       const parts = [
-        selectionQuery(nextSelection),
-        searchScopeQuery(nextScope),
-        file ? fileQuery(file) : "",
+        selectionQuery(next.selection),
+        searchScopeQuery(next.scope),
+        queryParam(next.query),
+        next.file ? fileQuery(next.file) : "",
       ].filter(Boolean)
       const qs = parts.join("&")
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
@@ -183,19 +201,24 @@ export function CodebaseList() {
   const applySelection = useCallback(
     (next: WorkspaceSelection) => {
       setStatusLoading(true)
-      writeUrl(next, selectedFile, searchScope)
+      writeUrl({
+        selection: next,
+        scope: searchScope,
+        query,
+        file: selectedFile,
+      })
     },
-    [writeUrl, selectedFile, searchScope]
+    [writeUrl, searchScope, query, selectedFile]
   )
   const openFile = useCallback(
-    (file: SelectedFile) => writeUrl(selection, file, searchScope),
-    [writeUrl, selection, searchScope]
+    (file: SelectedFile) =>
+      writeUrl({ selection, scope: searchScope, query, file }),
+    [writeUrl, selection, searchScope, query]
   )
-  const closeFile = useCallback(() => writeUrl(selection, null, searchScope), [
-    writeUrl,
-    selection,
-    searchScope,
-  ])
+  const closeFile = useCallback(
+    () => writeUrl({ selection, scope: searchScope, query, file: null }),
+    [writeUrl, selection, searchScope, query]
+  )
   // Wide screens get the docked file panel; narrow ones keep the centered
   // dialog. Mirrors Tailwind's xl breakpoint, which FileDetailPanel's own
   // `xl:flex` class also encodes, so the JS gate and CSS agree by construction.
@@ -356,9 +379,9 @@ export function CodebaseList() {
       if (next === searchScope) return
       setResults([])
       setFileResults([])
-      writeUrl(selection, selectedFile, next)
+      writeUrl({ selection, scope: next, query, file: selectedFile })
     },
-    [searchScope, selection, selectedFile, writeUrl]
+    [searchScope, selection, query, selectedFile, writeUrl]
   )
 
   // Clearing the box resets the list immediately (in the event handler,
@@ -366,10 +389,18 @@ export function CodebaseList() {
   const handleQueryChange = useCallback(
     (value: string) => {
       setQuery(value)
+      // Remembered on every keystroke, not on the debounce: the point is to
+      // have the text back when the reader comes back, and coming back can
+      // happen before the debounce ever fired.
+      rememberQuery(value)
       if (!value.trim()) {
         if (debounceTimer.current) clearTimeout(debounceTimer.current)
         searchSeq.current++
+        // The issued query goes with it, so the URL drops the `q` too —
+        // otherwise a reload would bring the cleared query back.
+        setIssuedQuery("")
         setResults([])
+        setFileResults([])
         setSearchError(null)
         setSearching(false)
       }
@@ -419,12 +450,31 @@ export function CodebaseList() {
     shownScope.current = searchScope
     if (!query.trim()) return
     debounceTimer.current = setTimeout(() => {
+      setIssuedQuery(query)
       void doSearch(query, searchScope)
     }, scopeChanged ? 0 : SEARCH_DEBOUNCE_MS)
     return () => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current)
     }
   }, [query, searchScope, doSearch])
+
+  // The URL carries the text the last search used, so a reload or a shared
+  // link brings the same query back. Skipped on the first run, so a `q` that
+  // arrived in the URL is not clobbered before the reader types.
+  const urlSyncReady = useRef(false)
+  useEffect(() => {
+    if (!urlSyncReady.current) {
+      urlSyncReady.current = true
+      return
+    }
+    if (queryFromParams(searchParams) === issuedQuery) return
+    writeUrl({
+      selection,
+      scope: searchScope,
+      query: issuedQuery,
+      file: selectedFile,
+    })
+  }, [issuedQuery, searchParams, selection, searchScope, selectedFile, writeUrl])
 
   // Live refresh via SSE: the backend broadcasts "codebase" on every index
   // rebuild (button, MCP call, or background watcher, any process) and
