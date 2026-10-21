@@ -444,6 +444,70 @@ public sealed class CodebaseIndexService
     }
 
     /// <summary>
+    /// Indexed files whose path — or file name — contains the needle, across
+    /// the given project roots (or this project when null). This is the file
+    /// half of the dashboard's codebase search: the query is matched against
+    /// the indexed paths instead of the indexed contents, and the answer is a
+    /// list of files rather than a list of snippets.
+    ///
+    /// The needle is a case-insensitive substring, never a glob — the user
+    /// types a fragment they remember, and a folder name is as valid a
+    /// fragment as a file name. Read-only, never throws for missing indexes.
+    /// </summary>
+    public async Task<IReadOnlyList<CodebaseFileSummary>> SearchFilesAsync(
+        string needle,
+        int limit = 20,
+        CodebaseFileMatch match = CodebaseFileMatch.Path,
+        IEnumerable<string>? projectRoots = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(needle)) return Array.Empty<CodebaseFileSummary>();
+        var roots = NormalizeRoots(projectRoots);
+        var capped = Math.Min(Math.Max(limit, 1), 100);
+
+        var all = new List<CodebaseFileSummary>();
+        foreach (var root in roots)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                IReadOnlyList<CodebaseFileEntry> files;
+                if (string.Equals(root, _projectRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    files = await _index.SearchFilesAsync(needle, capped, match, ct);
+                }
+                else
+                {
+                    var dbPath = Scope.ElingPaths.ResolveCodebaseDbPath(root);
+                    if (!File.Exists(dbPath)) continue;
+                    using var index = new SqliteCodebaseIndex(dbPath, readOnly: true);
+                    files = await index.SearchFilesAsync(needle, capped, match, ct);
+                }
+                all.AddRange(files.Select(f => new CodebaseFileSummary(root, f.Path, f.ChunkCount, f.LastIndexedAt)));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Stale, locked, or corrupt sibling index: skip, never throw —
+                // but say so, or that workspace's files silently vanish.
+                // Cancellation is excluded on purpose: these calls take the
+                // caller's token, so swallowing it would keep walking every
+                // remaining root after the caller already asked to stop.
+                _logger.LogWarning(ex, "Skipped unreadable sibling index at {Root} while searching files.", root);
+                continue;
+            }
+        }
+
+        // Path order, then workspace: a file search is a list to scan, and the
+        // same relative path can exist in two workspaces — the root breaks
+        // the tie so the order stays total.
+        return all
+            .OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f.ProjectRoot, StringComparer.Ordinal)
+            .Take(capped)
+            .ToList();
+    }
+
+    /// <summary>
     /// One indexed file with all of its chunks, resolved across the given
     /// project roots (or this project when null). Null when no root in scope
     /// carries the path.

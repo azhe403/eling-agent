@@ -188,7 +188,37 @@ public static class CodebaseEndpoints
         return new CodebaseRebuildRequest(resolved.EffectiveScope, targets, skipped, full);
     }
 
-    private static async Task<IResult> SearchAsync(CodebaseIndexService svc, RuntimeRegistry registry, ILoggerFactory loggerFactory, HttpContext context, string? q, int? limit, string? pathPrefix = null, string? scope = null, string[]? project = null, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// The three scopes a codebase search can run in. <c>content</c> is the
+    /// original full-text search over file contents; <c>path</c> and
+    /// <c>file</c> match the query against the indexed file paths instead
+    /// and answer with file rows.
+    /// </summary>
+    private enum SearchScope
+    {
+        Content,
+        Path,
+        File,
+    }
+
+    /// <summary>
+    /// The search-scope selector, distinct from the workspace <c>scope</c>
+    /// parameter beside it: <c>scope</c> picks which workspaces are read,
+    /// <c>search</c> picks what the query is matched against. An unknown
+    /// value is rejected rather than quietly treated as the default, so a
+    /// typo in a shared link fails loudly instead of searching something
+    /// else.
+    /// </summary>
+    private static SearchScope ParseSearchScope(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        null or "" => SearchScope.Content,
+        "content" => SearchScope.Content,
+        "path" => SearchScope.Path,
+        "file" => SearchScope.File,
+        _ => throw new ArgumentException($"Invalid search scope '{value}'. Valid: content, path, file."),
+    };
+
+    private static async Task<IResult> SearchAsync(CodebaseIndexService svc, RuntimeRegistry registry, ILoggerFactory loggerFactory, HttpContext context, string? q, int? limit, string? pathPrefix = null, string? scope = null, string? search = null, string[]? project = null, CancellationToken cancellationToken = default)
     {
         using var _actor = AuditActorContext.Begin(DashboardActor());
         var audit = AuditFor(context);
@@ -198,6 +228,7 @@ public static class CodebaseEndpoints
         var sw = Stopwatch.StartNew();
         try
         {
+            var searchScope = ParseSearchScope(search);
             var resolved = await ResolveScopeAsync(svc, registry, scope, project, cancellationToken);
             var roots = resolved.Roots;
             var effectiveScope = resolved.EffectiveScope;
@@ -209,6 +240,18 @@ public static class CodebaseEndpoints
             {
                 var files = await svc.GetRecentFilesAsync(limit ?? 20, roots);
                 return TypedResults.Ok(new { query = q, limit = limit, scope = effectiveScope, mode = "top", results = files.Select(f => new { f.ProjectRoot, f.Path, f.ChunkCount, f.LastIndexedAt }) });
+            }
+
+            // The path and file scopes match the query against the indexed
+            // file paths instead of the indexed contents, and answer with
+            // file rows — the same shape the top-files listing uses, so the
+            // dashboard renders one kind of row for both.
+            if (searchScope != SearchScope.Content)
+            {
+                var match = searchScope == SearchScope.Path ? CodebaseFileMatch.Path : CodebaseFileMatch.FileName;
+                var matched = await svc.SearchFilesAsync(q, limit ?? 20, match, roots);
+                await audit.RecordSearchAsync(q, matched.Count, svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
+                return TypedResults.Ok(new { query = q, limit = limit, scope = effectiveScope, mode = "files", results = matched.Select(f => new { f.ProjectRoot, f.Path, f.ChunkCount, f.LastIndexedAt }) });
             }
 
             IReadOnlyList<ScopedCodebaseHit> hits;
@@ -227,7 +270,7 @@ public static class CodebaseEndpoints
         }
         catch (ArgumentException ex)
         {
-            logger.LogWarning("Rejected codebase search scope: {Reason}", ex.Message);
+            logger.LogWarning("Rejected codebase search request: {Reason}", ex.Message);
             if (!string.IsNullOrWhiteSpace(q))
             {
                 await audit.RecordSearchAsync(q, 0, svc.ProjectRoot, (int)sw.ElapsedMilliseconds, AuditOutcome.Error);

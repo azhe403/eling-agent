@@ -11,6 +11,7 @@ public interface ICodebaseIndex
     Task<CodebaseStats> GetStatsAsync(CancellationToken ct = default);
     Task<IReadOnlyList<string>> ListPathsAsync(CancellationToken ct = default);
     Task<IReadOnlyList<CodebaseFileEntry>> ListRecentFilesAsync(int limit, CancellationToken ct = default);
+    Task<IReadOnlyList<CodebaseFileEntry>> SearchFilesAsync(string needle, int limit, CodebaseFileMatch match, CancellationToken ct = default);
     Task<IReadOnlyList<CodebaseChunk>> ListChunksAsync(string path, CancellationToken ct = default);
     string DbPath { get; }
 }

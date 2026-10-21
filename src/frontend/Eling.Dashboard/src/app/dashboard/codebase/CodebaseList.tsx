@@ -29,13 +29,24 @@ import { XL_BREAKPOINT } from "@/lib/constants"
 import { cn } from "@/lib/utils"
 import { FileDetailDialog } from "./FileDetailDialog"
 import { FileDetailPanel } from "./FileDetailPanel"
+import {
+  FilePathLink,
+  FileResultList,
+  WorkspaceBadge,
+  type FileResult,
+} from "./FileResultList"
 import type { SelectedFile } from "./fileDetailApi"
+import { SearchScopeToggle } from "./SearchScopeToggle"
 import {
   rebuildUrl,
+  searchScopeFromParams,
+  searchScopeQuery,
   searchUrl,
   selectionFromParams,
   selectionQuery,
   statusUrl,
+  SEARCH_SCOPE_COPY,
+  type SearchScope,
 } from "./scope"
 import {
   selectAll,
@@ -66,33 +77,6 @@ type CodebaseHit = {
   endLine: number
   content: string
   score: number
-}
-
-type CodebaseTopFile = {
-  projectRoot: string
-  path: string
-  chunkCount: number
-  lastIndexedAt: string
-}
-
-/** A file name in either list, rendered as the button that opens the viewer. */
-function FileName({
-  file,
-  onOpen,
-}: {
-  file: SelectedFile
-  onOpen: (file: SelectedFile) => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen(file)}
-      title={`Open ${file.path}`}
-      className="text-left font-medium break-all underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xs"
-    >
-      {file.path}
-    </button>
-  )
 }
 
 type RebuildMode = "incremental" | "full"
@@ -144,6 +128,7 @@ export function CodebaseList() {
   const [status, setStatus] = useState<CodebaseStatus | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
   const [results, setResults] = useState<CodebaseHit[]>([])
+  const [fileResults, setFileResults] = useState<FileResult[]>([])
   const [searchError, setSearchError] = useState<string | null>(null)
   const [query, setQuery] = useState("")
   // The URL query is the selection's source of truth: no project params means
@@ -154,6 +139,14 @@ export function CodebaseList() {
   const pathname = usePathname()
   const selection = useMemo(
     () => selectionFromParams(searchParams),
+    [searchParams]
+  )
+  // The search scope is the second piece of URL state on this page. It
+  // answers a different question: not which workspaces are read, but what
+  // the query is matched against — the file contents, the file's path, or
+  // the file's name.
+  const searchScope = useMemo(
+    () => searchScopeFromParams(searchParams),
     [searchParams]
   )
   const { rows, error: runtimesError, reload } = useWorkspaceRows()
@@ -170,9 +163,14 @@ export function CodebaseList() {
   // drops the other: a scope change keeps the open file, closing the file
   // keeps the scope.
   const writeUrl = useCallback(
-    (nextSelection: WorkspaceSelection, file: SelectedFile | null) => {
+    (
+      nextSelection: WorkspaceSelection,
+      file: SelectedFile | null,
+      nextScope: SearchScope,
+    ) => {
       const parts = [
         selectionQuery(nextSelection),
+        searchScopeQuery(nextScope),
         file ? fileQuery(file) : "",
       ].filter(Boolean)
       const qs = parts.join("&")
@@ -185,23 +183,24 @@ export function CodebaseList() {
   const applySelection = useCallback(
     (next: WorkspaceSelection) => {
       setStatusLoading(true)
-      writeUrl(next, selectedFile)
+      writeUrl(next, selectedFile, searchScope)
     },
-    [writeUrl, selectedFile]
+    [writeUrl, selectedFile, searchScope]
   )
   const openFile = useCallback(
-    (file: SelectedFile) => writeUrl(selection, file),
-    [writeUrl, selection]
+    (file: SelectedFile) => writeUrl(selection, file, searchScope),
+    [writeUrl, selection, searchScope]
   )
-  const closeFile = useCallback(() => writeUrl(selection, null), [
+  const closeFile = useCallback(() => writeUrl(selection, null, searchScope), [
     writeUrl,
     selection,
+    searchScope,
   ])
   // Wide screens get the docked file panel; narrow ones keep the centered
   // dialog. Mirrors Tailwind's xl breakpoint, which FileDetailPanel's own
   // `xl:flex` class also encodes, so the JS gate and CSS agree by construction.
   const wide = useMediaQuery(`(min-width: ${XL_BREAKPOINT}px)`)
-  const [topFiles, setTopFiles] = useState<CodebaseTopFile[]>([])
+  const [topFiles, setTopFiles] = useState<FileResult[]>([])
   const [topLoading, setTopLoading] = useState(true)
   // With the panel docked, the list column is the fixed-width one and the
   // panel takes the rest — the list keeps its width whether the panel is open
@@ -220,6 +219,10 @@ export function CodebaseList() {
   // so a slow earlier response can never overwrite a newer one.
   const searchSeq = useRef(0)
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The scope the results on screen belong to. A scope change is an explicit
+  // action rather than a keystroke, so it searches at once instead of
+  // waiting out the debounce a typed character gets.
+  const shownScope = useRef(searchScope)
   // Last seen index timestamp — a change means someone rebuilt the index.
   const lastIndexedAtRef = useRef<string | null>(null)
 
@@ -245,7 +248,9 @@ export function CodebaseList() {
   const loadTop = useCallback(async (silent: boolean) => {
     if (!silent) setTopLoading(true)
     try {
-      const res = await fetch(searchUrl("", selection), { cache: "no-store" })
+      const res = await fetch(searchUrl("", selection, searchScope), {
+        cache: "no-store",
+      })
       if (!res.ok) throw new Error(`API returned ${res.status}`)
       const data = await res.json()
       setTopFiles(Array.isArray(data.results) ? data.results : [])
@@ -254,7 +259,7 @@ export function CodebaseList() {
     } finally {
       if (!silent) setTopLoading(false)
     }
-  }, [selection])
+  }, [selection, searchScope])
 
   // Starts a rebuild over the selected scope/mode. The 202 body is already a
   // progress snapshot, so the UI has something to render before the first SSE
@@ -294,11 +299,15 @@ export function CodebaseList() {
   // does not resubscribe the stream when the scope changes.
   useCodebaseRebuildSse(handleRebuildProgress)
 
-  const doSearch = useCallback(async (q: string, opts?: { silent?: boolean }) => {
+  // The scope travels with the query rather than being read from the
+  // callback's closure: every request states which scope it is for, so a
+  // response can never be filed under the wrong one.
+  const doSearch = useCallback(async (q: string, scope: SearchScope, opts?: { silent?: boolean }) => {
     const trimmed = q.trim()
     const seq = ++searchSeq.current
     if (!trimmed) {
       setResults([])
+      setFileResults([])
       setSearchError(null)
       setSearching(false)
       return
@@ -307,17 +316,25 @@ export function CodebaseList() {
     if (!silent) setSearching(true)
     setSearchError(null)
     try {
-      const res = await fetch(searchUrl(trimmed, selection), {
+      const res = await fetch(searchUrl(trimmed, selection, scope), {
         cache: "no-store",
       })
       if (!res.ok) throw new Error(`API returned ${res.status}`)
       const data = await res.json()
       if (searchSeq.current !== seq) return
-      setResults(data.results || [])
+      // Each scope has its own row shape and only one of them is ever on
+      // screen, so they live in separate lists instead of one list the
+      // renderer has to inspect.
+      if (scope === "content") {
+        setResults(data.results || [])
+      } else {
+        setFileResults(data.results || [])
+      }
     } catch (e) {
       if (searchSeq.current !== seq) return
       if (!silent) {
         setResults([])
+        setFileResults([])
         setSearchError(e instanceof Error ? e.message : "Search failed")
       }
     } finally {
@@ -328,6 +345,21 @@ export function CodebaseList() {
       if (searchSeq.current === seq) setSearching(false)
     }
   }, [selection])
+
+  // Switching the scope drops the rows on screen and puts the new scope in
+  // the URL; the search that follows belongs to the debounce effect, which
+  // sees the changed scope. The rows go right away — they belong to the
+  // scope that was just left, and showing them under the new scope would
+  // read as if the search had been ignored.
+  const applySearchScope = useCallback(
+    (next: SearchScope) => {
+      if (next === searchScope) return
+      setResults([])
+      setFileResults([])
+      writeUrl(selection, selectedFile, next)
+    },
+    [searchScope, selection, selectedFile, writeUrl]
+  )
 
   // Clearing the box resets the list immediately (in the event handler,
   // not in an effect, to avoid cascading renders).
@@ -380,16 +412,19 @@ export function CodebaseList() {
     void fetchTop()
   }, [query, loadTop])
   // Search-as-you-type: debounce keystrokes so a request goes out only
-  // after the user pauses.
+  // after the user pauses. A scope change skips the wait — the user asked
+  // for something different, not for the same thing again.
   useEffect(() => {
+    const scopeChanged = shownScope.current !== searchScope
+    shownScope.current = searchScope
     if (!query.trim()) return
     debounceTimer.current = setTimeout(() => {
-      void doSearch(query)
-    }, SEARCH_DEBOUNCE_MS)
+      void doSearch(query, searchScope)
+    }, scopeChanged ? 0 : SEARCH_DEBOUNCE_MS)
     return () => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current)
     }
-  }, [query, doSearch])
+  }, [query, searchScope, doSearch])
 
   // Live refresh via SSE: the backend broadcasts "codebase" on every index
   // rebuild (button, MCP call, or background watcher, any process) and
@@ -404,9 +439,9 @@ export function CodebaseList() {
     } catch {
       // Transient failure: keep the last known status.
     }
-    if (query.trim()) void doSearch(query, { silent: true })
+    if (query.trim()) void doSearch(query, searchScope, { silent: true })
     else void loadTop(true)
-  }, [selection, query, doSearch, loadTop])
+  }, [selection, query, searchScope, doSearch, loadTop])
 
   const handleRuntimesEvent = useCallback(async () => {
     // Silent refresh: a failed background reload keeps the last known rows.
@@ -437,6 +472,10 @@ export function CodebaseList() {
     rebuildProgress !== null &&
     (rebuildProgress.total > 0 || rebuildProgress.skippedRoots.length > 0)
 
+  // The workspace badge is only worth the space when the scope covers more
+  // than one workspace — with a single one, every row would repeat it.
+  const showWorkspace = selection.kind === "all" || selection.roots.length > 1
+
   // Top-files listing shown when the query box is empty, and also while the
   // first search is in flight (no previous results to keep visible yet).
   const topFilesView = (
@@ -446,24 +485,11 @@ export function CodebaseList() {
           Loading recent files…
         </div>
       ) : topFiles.length ? (
-        topFiles.map((f) => (
-          <div key={`${f.projectRoot}-${f.path}`} className="p-3 text-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <FileName file={f} onOpen={openFile} />
-              {(selection.kind === "all" || selection.roots.length > 1) && (
-                <span
-                  className="rounded-full border border-border/50 bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                  title={f.projectRoot}
-                >
-                  📁 {workspaceName(f.projectRoot)}
-                </span>
-              )}
-            </div>
-            <div className="text-muted-foreground text-xs">
-              {f.chunkCount} {f.chunkCount === 1 ? "chunk" : "chunks"} · indexed {utcToLocal(f.lastIndexedAt)}
-            </div>
-          </div>
-        ))
+        <FileResultList
+          files={topFiles}
+          showWorkspace={showWorkspace}
+          onOpen={openFile}
+        />
       ) : (
         <div className="p-4 text-sm text-muted-foreground">
           Index is empty. Rebuild to populate.
@@ -471,6 +497,45 @@ export function CodebaseList() {
       )}
     </>
   )
+
+  // A content hit: the snippet that matched, and the line range it sits in.
+  const hitRows = results.map((r: CodebaseHit, i: number) => (
+    <div key={`${r.projectRoot}-${r.path}-${r.startLine}-${i}`} className="p-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <FilePathLink file={r} onOpen={openFile} />
+        {showWorkspace && <WorkspaceBadge root={r.projectRoot} />}
+      </div>
+      <div className="text-muted-foreground text-xs">
+        line {r.startLine}–{r.endLine} · score {r.score?.toFixed(2)}
+      </div>
+      <div className="mt-1 whitespace-pre-wrap break-all line-clamp-6 text-xs text-foreground/80">
+        {r.content}
+      </div>
+    </div>
+  ))
+
+  // A content search with no hits falls back to the recent-files listing —
+  // that is how the page has always answered. A file search does not: the
+  // answer is "no file matches this", and unrelated files under that heading
+  // would read as if the search had been ignored.
+  const noFileMatch = (
+    <div className="p-4 text-sm text-muted-foreground">
+      No file matches “{query.trim()}”.
+    </div>
+  )
+
+  const contentView = results.length > 0 ? hitRows : topFilesView
+  const fileView =
+    fileResults.length > 0 ? (
+      <FileResultList
+        files={fileResults}
+        showWorkspace={showWorkspace}
+        onOpen={openFile}
+      />
+    ) : (
+      noFileMatch
+    )
+  const resultsView = searchScope === "content" ? contentView : fileView
   return (
     <div className="flex w-full flex-col">
       <DashboardHeader label="Codebase">
@@ -697,20 +762,24 @@ export function CodebaseList() {
         </div>
 
         <form
-          className="sticky top-16 z-10 flex gap-2 bg-background py-1"
+          className="sticky top-16 z-10 flex flex-wrap gap-2 bg-background py-1"
           onSubmit={(e) => {
             e.preventDefault()
             // Enter searches immediately instead of waiting for the debounce.
             if (debounceTimer.current) clearTimeout(debounceTimer.current)
-            void doSearch(query)
+            void doSearch(query, searchScope)
           }}
         >
+          <SearchScopeToggle
+            scope={searchScope}
+            onChange={applySearchScope}
+          />
           <Input
-            placeholder="Type to search…"
+            placeholder={SEARCH_SCOPE_COPY[searchScope].placeholder}
             aria-label="Codebase search query"
             value={query}
             onChange={(e) => handleQueryChange(e.target.value)}
-            className="min-w-0"
+            className="min-w-0 flex-1"
           />
           {/* Narrow screens keep the dropdown; the panel covers wide ones. */}
           <div className="lg:hidden">
@@ -732,8 +801,7 @@ export function CodebaseList() {
           </Button>
         </form>
         <p className="-mt-2 text-xs text-muted-foreground">
-          Empty box shows recently indexed files · search runs as you type ·
-          list refreshes live when any process rebuilds the index.
+          {SEARCH_SCOPE_COPY[searchScope].hint}
         </p>
 
         {searchError && (
@@ -747,30 +815,8 @@ export function CodebaseList() {
           <div className="min-w-0 rounded-lg border divide-y">
           {!query.trim() ? (
             topFilesView
-          ) : results.length ? (
-            results.map((r: CodebaseHit, i: number) => (
-              <div key={`${r.projectRoot}-${r.path}-${r.startLine}-${i}`} className="p-3 text-sm">
-                <div className="flex flex-wrap items-center gap-2">
-                  <FileName file={r} onOpen={openFile} />
-                  {(selection.kind === "all" || selection.roots.length > 1) && (
-                    <span
-                      className="rounded-full border border-border/50 bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                      title={r.projectRoot}
-                    >
-                      📁 {workspaceName(r.projectRoot)}
-                    </span>
-                  )}
-                </div>
-                <div className="text-muted-foreground text-xs">
-                  line {r.startLine}–{r.endLine} · score {r.score?.toFixed(2)}
-                </div>
-                <div className="mt-1 whitespace-pre-wrap break-all line-clamp-6 text-xs text-foreground/80">
-                  {r.content}
-                </div>
-              </div>
-            ))
           ) : (
-            topFilesView
+            resultsView
           )}
         </div>
       </div>

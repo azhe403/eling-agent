@@ -42,6 +42,18 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
         );
         """;
 
+    /// <summary>
+    /// The file name of an indexed path: the segment after the last '/'.
+    /// SQLite has no reverse() and no regex, so the split is done with the
+    /// rtrim idiom: trimming the path of every character it contains (minus
+    /// the slashes) stops exactly at the last slash, and what is left is the
+    /// directory. The name starts one character after that. A path with no
+    /// slash trims away entirely, which lands the offset at 0 and keeps the
+    /// whole path as the name.
+    /// </summary>
+    private const string FileNameExpression =
+        "substr(f.path, length(rtrim(f.path, replace(f.path, '/', ''))) + 1)";
+
     private readonly string _dbPath;
     private readonly string _connectionString;
     private readonly ILogger<SqliteCodebaseIndex>? _logger;
@@ -286,6 +298,55 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
         catch (SqliteException ex) when (IsMissingSchema(ex))
         {
             _logger?.LogDebug(ex, "ListRecentFilesAsync reported empty: index at {DbPath} has no schema.", _dbPath);
+            return Array.Empty<CodebaseFileEntry>();
+        }
+    }
+
+    /// <summary>
+    /// Indexed files whose path — or file name — contains the needle.
+    ///
+    /// The match is a case-insensitive substring, not a glob: the needle is
+    /// a fragment the user remembers, not a pattern. <c>instr</c> gives the
+    /// position of the first occurrence, so the filter is a containment test
+    /// and the needle itself is bound as a parameter — the only interpolated
+    /// part of the statement is the target expression, which is one of two
+    /// compile-time constants.
+    ///
+    /// <c>lower()</c> is SQLite's ASCII-only fold, so the match ignores case
+    /// for ASCII letters and stays case-sensitive beyond them. A path with
+    /// non-ASCII characters still matches, just case-sensitively.
+    /// </summary>
+    public async Task<IReadOnlyList<CodebaseFileEntry>> SearchFilesAsync(
+        string needle,
+        int limit,
+        CodebaseFileMatch match,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(needle)) return Array.Empty<CodebaseFileEntry>();
+        if (!File.Exists(_dbPath)) return Array.Empty<CodebaseFileEntry>();
+        var target = match == CodebaseFileMatch.FileName ? FileNameExpression : "f.path";
+        try
+        {
+            await using var c = await OpenAsync(ct);
+            await using var cmd = c.CreateCommand();
+            cmd.CommandText = $"""
+                SELECT f.path, COUNT(c.id), f.last_indexed_at
+                FROM codebase_files f LEFT JOIN codebase_chunks c ON c.file_path = f.path
+                WHERE instr(lower({target}), lower($needle)) > 0
+                GROUP BY f.path
+                ORDER BY f.path COLLATE NOCASE, f.path
+                LIMIT $lim;
+                """;
+            Add(cmd, "$needle", needle.Trim());
+            Add(cmd, "$lim", Math.Min(Math.Max(limit, 1), 100));
+            var rows = new List<CodebaseFileEntry>();
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct)) rows.Add(new CodebaseFileEntry(r.GetString(0), r.GetInt32(1), r.GetString(2)));
+            return rows;
+        }
+        catch (SqliteException ex) when (IsMissingSchema(ex))
+        {
+            _logger?.LogDebug(ex, "SearchFilesAsync reported empty for needle '{Needle}': index at {DbPath} has no schema.", needle, _dbPath);
             return Array.Empty<CodebaseFileEntry>();
         }
     }
