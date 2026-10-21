@@ -8,6 +8,7 @@ import { cn } from "cn"
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useIsCompact } from "@/hooks/use-compact"
+import { isCollapsedRoute } from "@/lib/sidebar-state"
 import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -70,30 +71,39 @@ function SidebarProvider({
 }) {
   const isMobile = useIsMobile()
   const pathname = usePathname()
-  // The databases page has wide tables; collapse the sidebar earlier there.
-  const compactBreakpoint = pathname?.startsWith("/dashboard/databases") ? 1536 : 1024
-  const isCompact = useIsCompact(compactBreakpoint)
+  // The databases page renders wide tables, so its sidebar always starts
+  // collapsed, at any viewport width. A narrow viewport collapses it on every
+  // page instead.
+  const routeCollapsed = pathname ? isCollapsedRoute(pathname) : false
+  const isCompact = useIsCompact()
+  const startsCollapsed = routeCollapsed || isCompact
   const [openMobile, setOpenMobile] = React.useState(false)
 
-  // Auto-collapse override used only while the viewport is compact: the sidebar
-  // starts collapsed (icon strip) but the user can still expand it manually.
-  const [compactExpanded, setCompactExpanded] = React.useState(false)
+  // Auto-collapse override used only while the sidebar starts collapsed: the
+  // sidebar shows the icon strip but the user can still expand it manually.
+  const [overrideExpanded, setOverrideExpanded] = React.useState(false)
 
-  // Track the previous compact flag so we can reset the manual override when
-  // leaving the compact range (done during render to avoid cascading renders).
+  // Track what changed so the manual override is dropped once it no longer
+  // applies: another page, or the viewport leaving the compact range. Done
+  // during render to avoid cascading renders.
+  const [prevPathname, setPrevPathname] = React.useState(pathname)
+  if (pathname !== prevPathname) {
+    setPrevPathname(pathname)
+    setOverrideExpanded(false)
+  }
   const [prevIsCompact, setPrevIsCompact] = React.useState(isCompact)
   if (isCompact !== prevIsCompact) {
     setPrevIsCompact(isCompact)
-    if (!isCompact) setCompactExpanded(false)
+    if (!isCompact) setOverrideExpanded(false)
   }
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
   const [_open, _setOpen] = React.useState(defaultOpen)
   const persistedOpen = openProp ?? _open
-  // In the compact range the sidebar auto-collapses to its icon strip unless the
-  // user explicitly expanded it; otherwise the persisted preference applies.
-  const open = isCompact ? compactExpanded : persistedOpen
+  // While the sidebar starts collapsed it stays an icon strip unless the user
+  // expanded it manually; otherwise the persisted preference applies.
+  const open = startsCollapsed ? overrideExpanded : persistedOpen
 
   // Keep the <html> data attribute in sync with the (possibly auto-collapsed)
   // open state so the CSS that forces the icon width stays correct on resize,
@@ -111,10 +121,10 @@ function SidebarProvider({
   }, [open])
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
-      const currentOpen = isCompact ? compactExpanded : persistedOpen
+      const currentOpen = startsCollapsed ? overrideExpanded : persistedOpen
       const openState = typeof value === "function" ? value(currentOpen) : value
-      if (isCompact) {
-        setCompactExpanded(openState)
+      if (startsCollapsed) {
+        setOverrideExpanded(openState)
       } else if (setOpenProp) {
         setOpenProp(openState)
       } else {
@@ -122,7 +132,7 @@ function SidebarProvider({
       }
 
       // Keep the persisted preference in sync so it carries over when leaving
-      // the compact range (and across reloads).
+      // the collapsed context (and across reloads).
       if (!setOpenProp) _setOpen(openState)
 
       // This sets the cookie to keep the sidebar state.
@@ -138,7 +148,7 @@ function SidebarProvider({
         console.debug("sidebar state storage write failed")
       }
     },
-    [setOpenProp, isCompact, compactExpanded, persistedOpen]
+    [setOpenProp, startsCollapsed, overrideExpanded, persistedOpen]
   )
 
   // Helper to toggle the sidebar.
