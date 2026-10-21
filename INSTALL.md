@@ -100,9 +100,10 @@ git clone https://github.com/<org>/eling && cd eling
 
 # Backend + UI (single binary: MCP + REST + UI on 4317/4417)
 dotnet build Eling.slnx
-# Isolated test artifacts (one project at a time per Eling convention)
-dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj --artifacts-path .bin-test
-dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --artifacts-path .bin-test
+# Tests (one project at a time per Eling convention). Each run builds into a
+# disposable output root that is deleted when the run ends.
+pnpm test:backend:core
+pnpm test:backend:api
 
 # Frontend dev (optional, for UI work)
 pnpm --prefix src/frontend/Eling.Dashboard install
@@ -112,8 +113,9 @@ pnpm dev    # concurrently: backend 4417 + frontend 4427 (0.0.0.0)
 ```
 
 Build outputs:
-- `dotnet run` → `.bin/Debug/net10.0/eling-backend.dll` (shared `.bin`, flat layout)
-- `dotnet test --artifacts-path .bin-test` → isolated `.bin-test/`
+- `dotnet run` → `.bin/` (shared dev root, flat layout)
+- `pnpm test:backend:*` → a disposable `.bin-test-<id>/`, deleted when the run ends
+- `pwsh scripts/clean-bin.ps1` → reclaims any output root left behind
 
 ## Option C — Publish to staging from source (local install)
 
@@ -200,7 +202,7 @@ eling_install:
 ## Troubleshooting
 
 - `address already in use 127.0.0.1:4317/4417` → another `eling-backend` owns it. Probe first: `Test-NetConnection 127.0.0.1 -Port 4317` or `ss -tlnp | grep 4317`. Second instance skips Kestrel and runs MCP-only.
-- `pnpm dev` fails with `ELING_OUTPUT_ROOT` mismatch → use `.bin-test` for tests, `.bin` for dev. Never share `.bin/` between test and dev.
+- `pnpm dev` fails with `ELING_OUTPUT_ROOT` mismatch → use the test scripts for tests, `.bin` for dev. Never share `.bin/` between test and dev.
 - `dotnet watch` slow → set `ELING_SKIP_DASHBOARD=true` to skip `pnpm build` in watch loop.
 - `UserScope` showing in dashboard → fixed in `RuntimeRegistry.Alive()` (single `Dtos/` folder). Pull latest.
 

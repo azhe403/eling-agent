@@ -11,11 +11,12 @@
     "typecheck:frontend": "pnpm --prefix src/frontend/Eling.Dashboard exec tsc --noEmit",
     "validate:backend": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet restore Eling.slnx",
     "build:backend": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet build Eling.slnx",
-    "test:backend": "pnpm run test:backend:core && pnpm run test:backend:api && pnpm run test:backend:desktop",
-    "test:backend:full": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test Eling.slnx",
-    "test:backend:core": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj",
-    "test:backend:api": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests",
-    "test:backend:desktop": "cross-env ELING_OUTPUT_ROOT=.bin-test dotnet test tests/Eling.Desktop.Tests/Eling.Desktop.Tests.csproj",
+    "test:backend": "pwsh -NoProfile -File scripts/test-backend.ps1 -Layer all",
+    "test:backend:full": "pwsh -NoProfile -File scripts/test-backend.ps1 -Layer full",
+    "test:backend:core": "pwsh -NoProfile -File scripts/test-backend.ps1 -Layer core",
+    "test:backend:api": "pwsh -NoProfile -File scripts/test-backend.ps1 -Layer api",
+    "test:backend:desktop": "pwsh -NoProfile -File scripts/test-backend.ps1 -Layer desktop",
+    "clean:bin": "pwsh -NoProfile -File scripts/clean-bin.ps1",
     "build:frontend": "pnpm --prefix src/frontend/Eling.Dashboard build"
   },
   "devDependencies": {

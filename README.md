@@ -86,9 +86,13 @@ See [INSTALL.md](INSTALL.md) for binary + MCP setup and [CHANGELOG.md](CHANGELOG
 dotnet build Eling.slnx
 dotnet build src/backend/Eling.Backend/Eling.Backend.csproj -p:ElingSkipDashboard=true  # fast, skip pnpm
 
-# Run tests (one project at a time, isolated .bin-test/ per AGENTS.md)
-dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj --artifacts-path .bin-test
-dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --artifacts-path .bin-test
+# Run tests (one project at a time). Each run builds into a disposable
+# output root that is deleted when the run ends.
+pnpm test:backend:core
+pnpm test:backend:api
+pnpm test:backend:desktop
+# Reclaim any build output root left behind by an earlier run
+pwsh scripts/clean-bin.ps1
 ```
 
 ### Frontend

@@ -27,14 +27,52 @@ $ErrorActionPreference = "Stop"
 # auto-load System.Net.Http, so pull it in explicitly.
 Add-Type -AssemblyName System.Net.Http
 $root = Split-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) -Parent
+. (Join-Path $PSScriptRoot "lib/output-root.ps1")
+
+# The build and the runtime phases have to agree on ONE output root. Without
+# this the build honours the default (.bin) while the lookup below expects the
+# binary in .bin-test, and the runtime phases end up spawning a path that was
+# never produced. ELING_OUTPUT_ROOT wins when the caller set it.
 $elingOutputRoot = if ($env:ELING_OUTPUT_ROOT) { $env:ELING_OUTPUT_ROOT } else { ".bin-test" }
-$exe = Join-Path $root "$elingOutputRoot/eling-backend.exe"
-if (-not (Test-Path $exe)) {
-    $exe = Join-Path $root ".bin-test/eling-backend.exe"
+$env:ELING_OUTPUT_ROOT = $elingOutputRoot
+$elingOutputRootPath = if ([System.IO.Path]::IsPathRooted($elingOutputRoot)) {
+    $elingOutputRoot
 }
-if (-not (Test-Path $exe)) {
-    $exe = Join-Path $root ".bin-test/eling.exe"
+else {
+    Join-Path $root $elingOutputRoot
 }
+
+function Resolve-ElingBackendExe {
+    <#
+    .SYNOPSIS
+        Locate the backend binary the runtime phases have to spawn.
+    .DESCRIPTION
+        The output root this validation built into comes first; .bin is the
+        fallback for a build that landed in the default dev root.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$OutputRootPath
+    )
+
+    $candidates = @(
+        (Join-Path $OutputRootPath "eling-backend.exe"),
+        (Join-Path $OutputRootPath "eling.exe"),
+        (Join-Path $Root ".bin/eling-backend.exe"),
+        (Join-Path $Root ".bin/eling.exe")
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+    return $candidates[0]
+}
+
+$exe = Resolve-ElingBackendExe -Root $root -OutputRootPath $elingOutputRootPath
+
+# Claim the output root for the duration of the validation: a sweep running
+# while this script still uses the folder has to leave it alone.
+New-OutputRootClaim -Root $elingOutputRootPath
+
 $results = @()
 $failed = 0
 
@@ -257,6 +295,7 @@ Test-Phase "Stdio MCP mode" {
 }
 
 # --- Summary ---
+Remove-OutputRootClaim -Root $elingOutputRootPath
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "VALIDATION SUMMARY" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
