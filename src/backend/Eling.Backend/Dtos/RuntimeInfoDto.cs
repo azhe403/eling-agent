@@ -36,6 +36,12 @@ namespace Eling.Backend.Dtos;
 /// Port the owner binds (<c>4317</c> staging, <c>4417</c> when <c>ELING_DASHBOARD_PORT</c> is set).
 /// Only set when <see cref="IsDashboardOwner"/> is true; otherwise <c>null</c>.
 /// </param>
+/// <param name="RepositoryRoot">
+/// The main worktree root of the git repository the workspace belongs to, or
+/// <c>null</c> when the workspace is not inside a git repository. Every linked
+/// worktree of one repository reports the same value, so a client can group
+/// the checkouts of a repository under it.
+/// </param>
 public sealed record RuntimeInfoDto(
     int ProcessId,
     string HeadScopeRoot,
@@ -50,7 +56,8 @@ public sealed record RuntimeInfoDto(
     long? MemoryBytes = null,
     double? CpuPercent = null,
     bool IsDashboardOwner = false,
-    int? DashboardPort = null)
+    int? DashboardPort = null,
+    string? RepositoryRoot = null)
 {
     public static RuntimeInfoDto From(RuntimeInfo runtime) => new(
         runtime.ProcessId,

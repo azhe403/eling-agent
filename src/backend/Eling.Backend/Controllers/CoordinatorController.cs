@@ -1,6 +1,8 @@
 using Eling.Backend.Bootstrap;
 using Eling.Backend.Dtos;
 using Eling.Backend.Services;
+using Eling.Core.Git;
+using Eling.Core.Runtime;
 using Eling.Core.Scope;
 using Microsoft.AspNetCore.Mvc;
 
@@ -72,6 +74,7 @@ public sealed class CoordinatorController(
             {
                 IsDashboardOwner = isOwner,
                 DashboardPort = isOwner ? DashboardPort.Resolve() : null,
+                RepositoryRoot = ResolveRepositoryRoot(r),
             };
             if (r.IsAlive && r.ProcessId > 0 && metricsTracker is not null)
             {
@@ -89,6 +92,24 @@ public sealed class CoordinatorController(
         }).ToList();
 
         return Ok(dtos);
+    }
+
+    /// <summary>
+    /// The main worktree root of the repository a runtime works in, or null when
+    /// the workspace is not inside a git repository.
+    /// </summary>
+    /// <remarks>
+    /// Read from the working copy's own metadata rather than by running git: the
+    /// runtime list is fetched on every dashboard page load, and one process per
+    /// workspace would cost more than the answer is worth. The user-home
+    /// sentinel is not a path, so it resolves to nothing.
+    /// </remarks>
+    private static string? ResolveRepositoryRoot(RuntimeInfo runtime)
+    {
+        var root = runtime.CodebaseRoot();
+        if (string.IsNullOrWhiteSpace(root) || root == "UserScope") return null;
+
+        return GitRepositoryResolver.ResolveRepositoryRoot(root);
     }
 
     /// <summary>
