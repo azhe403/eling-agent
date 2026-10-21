@@ -6,4 +6,5 @@ public sealed record DetectedConnection(
     string ConnectionString,
     string MaskedConnectionString,
     DatabaseProvider? Provider,
-    string? RejectionReason);
+    string? RejectionReason,
+    string? SourceFile = null);

@@ -197,5 +197,4 @@ No Roslyn NuGet dependency (external process). Backend stays light.
 
 ## 7. Decision
 
-Awaiting user approval. If approved, start with **Phase 1 (LSP client + Roslyn server for C#)**, then evaluate whether to add more languages (Phase 2).<|end|><|start|>write to=assistant<|channel|>analysis <|constrain|>xml<|message|><rfl:parameter name="path">
-C:\Projexts\AZ\eling-agent\docs\superpowers\specs\2026-10-18-lsp-indexing-design.md
+Awaiting user approval. If approved, start with **Phase 1 (LSP client + Roslyn server for C#)**, then evaluate whether to add more languages (Phase 2).

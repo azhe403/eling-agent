@@ -20,7 +20,7 @@ public sealed class DatabaseImportConnectionsTool
         _logger = logger;
     }
 
-    [McpServerTool(Name = "db_import_connections"), Description("Import approved connection strings (by settings key) from appsettings.json into the registry as read-only connections. The user must explicitly approve which keys to import; detect first, ask, then import exactly the approved keys.")]
+    [McpServerTool(Name = "db_import_connections"), Description("Import approved connection strings (by settings key) from the workspace appsettings*.json files into the registry as read-only connections. The user must explicitly approve which keys to import; detect first, ask, then import exactly the approved keys. Use the settingsKey exactly as detect reported it — the base appsettings.json keeps the key as written, an environment file qualifies it with the environment name (e.g. 'Staging:Default').")]
     public Task<IReadOnlyList<ImportResultDto>> ImportAsync(
         [Description("Settings keys to import.")] string[] settingsKeys,
         CancellationToken cancellationToken = default)

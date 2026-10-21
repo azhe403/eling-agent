@@ -33,8 +33,7 @@ public sealed class DatabaseConnectionImporter
 
         foreach (var key in settingsKeys)
         {
-            var candidate = candidates.FirstOrDefault(c =>
-                string.Equals(c.SettingsKey, key, StringComparison.Ordinal));
+            var candidate = FindCandidate(candidates, key);
 
             if (candidate is null)
             {
@@ -77,5 +76,20 @@ public sealed class DatabaseConnectionImporter
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// The candidate a handle names. The exact handle wins; a case-insensitive
+    /// match is the fallback, because configuration keys are case-insensitive in
+    /// ASP.NET Core and a user naming "default" means the same key as "Default".
+    /// </summary>
+    private static DetectedConnection? FindCandidate(
+        IReadOnlyList<DetectedConnection> candidates,
+        string key)
+    {
+        return candidates.FirstOrDefault(c =>
+                   string.Equals(c.SettingsKey, key, StringComparison.Ordinal))
+            ?? candidates.FirstOrDefault(c =>
+                   string.Equals(c.SettingsKey, key, StringComparison.OrdinalIgnoreCase));
     }
 }

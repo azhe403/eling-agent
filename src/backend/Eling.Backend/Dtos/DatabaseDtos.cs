@@ -50,7 +50,8 @@ public sealed record DetectedConnectionDto(
     string Name,
     string MaskedConnectionString,
     DatabaseProvider? Provider,
-    string? RejectionReason);
+    string? RejectionReason,
+    string? SourceFile = null);
 
 public sealed record ImportRequest(string[] SettingsKeys);
 

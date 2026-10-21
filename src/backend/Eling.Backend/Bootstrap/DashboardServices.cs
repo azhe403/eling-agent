@@ -94,8 +94,7 @@ public static class DashboardServices
             sp.GetRequiredService<ILogger<JsonDatabaseConnectionStore>>()));
 
         services.AddSingleton(sp => new AppSettingsConnectionScanner(
-            Environment.GetEnvironmentVariable("ELING_DATABASE_DETECT_SOURCE")
-                ?? ResolveAppSettingsDirectory(sp.GetRequiredService<IHostEnvironment>().ContentRootPath),
+            AppSettingsSourceResolver.Resolve(sp.GetRequiredService<IHostEnvironment>().ContentRootPath),
             sp.GetRequiredService<ILogger<AppSettingsConnectionScanner>>()));
 
         services.AddSingleton<DatabaseConnectionImporter>();
@@ -128,6 +127,15 @@ public static class DashboardServices
                 sp.GetRequiredService<MemoryChangeBroadcaster>(),
                 sp.GetRequiredService<ILogger<CodebaseDirWatcher>>()));
 
+            // The database registry is one shared file that every eling process
+            // writes, so a connection added by the agent (db_import_connections),
+            // by another browser tab, or by a peer has to reach the dashboard
+            // without waiting for somebody to press Refresh.
+            services.AddSingleton(sp => new DatabaseRegistryWatcher(
+                CentralAgentDirectory.Resolve(),
+                sp.GetRequiredService<MemoryChangeBroadcaster>(),
+                sp.GetRequiredService<ILogger<DatabaseRegistryWatcher>>()));
+
             services.AddSingleton<Services.RuntimeMetricsSampler>();
             services.AddSingleton(sp => new Services.RuntimeMetricsBroadcaster(
                 sp.GetRequiredService<Services.RuntimeMetricsSampler>(),
@@ -153,23 +161,5 @@ public static class DashboardServices
         {
             mvc.AddApplicationPart(typeof(GitIdentityService).Assembly);
         }
-    }
-
-    /// <summary>
-    /// Resolve the directory scanned by the connection scanner. Prefer the current
-    /// working directory (the project/workspace eling is launched in) when it
-    /// contains any appsettings*.json, falling back to the host content root.
-    /// ELING_DATABASE_DETECT_SOURCE always wins (handled by the caller) and may
-    /// point at a single file or a directory.
-    /// </summary>
-    private static string ResolveAppSettingsDirectory(string contentRootPath)
-    {
-        var cwdDir = Environment.CurrentDirectory;
-        if (Directory.Exists(cwdDir) &&
-            Directory.EnumerateFiles(cwdDir, "appsettings*.json").Any())
-        {
-            return cwdDir;
-        }
-        return contentRootPath;
     }
 }

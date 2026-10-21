@@ -42,10 +42,12 @@ public static class DashboardRoutes
         // Registered only in owner mode (see DashboardServices); start watching
         // the shared runtime dir so cross-process membership changes push SSE
         // "runtimes" events to connected subscribers. Same for the shared
-        // codebase dir ("codebase" events on any index rebuild).
+        // codebase dir ("codebase" events on any index rebuild) and the shared
+        // database registry ("databases" events on any connection change).
         app.Services.GetService<RuntimeDirWatcher>()?.Start();
         app.Services.GetService<CodebaseDirWatcher>()?.Start();
         app.Services.GetService<AuditDirWatcher>()?.Start();
+        app.Services.GetService<DatabaseRegistryWatcher>()?.Start();
 
         app.MapGet("/health", () => Results.Ok(HealthPayload()));
         // The same probe under /api, because that is the only prefix the

@@ -7,7 +7,8 @@ public sealed record McpDetectedCandidate(
     string SettingsKey,
     string Name,
     DatabaseProvider? Provider,
-    string? RejectionReason);
+    string? RejectionReason,
+    string? SourceFile = null);
 
 public sealed record McpConnectionsOverview(
     IReadOnlyList<DatabaseConnectionView> Registered,

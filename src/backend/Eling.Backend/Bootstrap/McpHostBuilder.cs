@@ -46,9 +46,13 @@ public static class McpHostBuilder
             services.AddSingleton<IDatabaseConnectionStore>(sp => new JsonDatabaseConnectionStore(
                 Path.Combine(globalAgentDir, "databases.json"),
                 sp.GetRequiredService<ILogger<JsonDatabaseConnectionStore>>()));
+            // The resolver hands back the workspace directory when it holds any
+            // appsettings file, so the scanner sees appsettings.json AND the
+            // environment files next to it. It used to point at appsettings.json
+            // alone, which is why an appsettings.Staging.json never showed up as
+            // unimported here while the dashboard's REST detect already listed it.
             services.AddSingleton(sp => new AppSettingsConnectionScanner(
-                Environment.GetEnvironmentVariable("ELING_DATABASE_DETECT_SOURCE")
-                    ?? Path.Combine(sp.GetRequiredService<IHostEnvironment>().ContentRootPath, "appsettings.json"),
+                AppSettingsSourceResolver.Resolve(sp.GetRequiredService<IHostEnvironment>().ContentRootPath),
                 sp.GetRequiredService<ILogger<AppSettingsConnectionScanner>>()));
             services.AddSingleton<DatabaseConnectionImporter>();
 

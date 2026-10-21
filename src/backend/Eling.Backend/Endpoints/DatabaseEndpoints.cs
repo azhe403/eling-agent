@@ -457,7 +457,8 @@ public static class DatabaseEndpoints
                 d.Name,
                 d.MaskedConnectionString,
                 d.Provider,
-                d.RejectionReason)).ToList();
+                d.RejectionReason,
+                d.SourceFile)).ToList();
             sw.Stop();
             await auditLogger.RecordAsync(new AuditEvent
             {

@@ -7,6 +7,8 @@ namespace Eling.Core.Database;
 
 public sealed class AppSettingsConnectionScanner
 {
+    private const string BaseFileName = "appsettings.json";
+
     private readonly string _filePath;
     private readonly ILogger<AppSettingsConnectionScanner>? _logger;
 
@@ -21,11 +23,14 @@ public sealed class AppSettingsConnectionScanner
     public IReadOnlyList<DetectedConnection> Scan()
     {
         var results = new List<DetectedConnection>();
+        var handles = new HashSet<string>(StringComparer.Ordinal);
 
-        var files = ResolveFiles();
-        foreach (var file in files)
+        foreach (var file in ResolveFiles())
         {
-            ScanFile(file, results);
+            foreach (var candidate in ScanFile(file))
+            {
+                results.Add(WithHandle(candidate, file, handles));
+            }
         }
 
         return results;
@@ -37,9 +42,7 @@ public sealed class AppSettingsConnectionScanner
         {
             // Scan every appsettings*.json in the directory (appsettings.json,
             // appsettings.Development.json, appsettings.Staging.json, ...).
-            return Directory.EnumerateFiles(_filePath, "appsettings*.json")
-                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            return OrderFiles(Directory.EnumerateFiles(_filePath, AppSettingsSourceResolver.FilePattern));
         }
 
         if (File.Exists(_filePath))
@@ -50,8 +53,87 @@ public sealed class AppSettingsConnectionScanner
         return Array.Empty<string>();
     }
 
-    private void ScanFile(string filePath, List<DetectedConnection> results)
+    /// <summary>
+    /// The base file first, then the environment files in a stable order, so the
+    /// list a user reads starts with the configuration that is always present.
+    /// </summary>
+    private static IReadOnlyList<string> OrderFiles(IEnumerable<string> files)
     {
+        return files
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(f => IsBaseFile(Path.GetFileName(f)) ? 0 : 1)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Gives the candidate the handle the importer matches on and the file it
+    /// came from. The handle is unique per file and key, so the same key in two
+    /// appsettings files stays two candidates a user can tell apart.
+    /// </summary>
+    private static DetectedConnection WithHandle(
+        DetectedConnection candidate,
+        string filePath,
+        ISet<string> taken)
+    {
+        var fileName = Path.GetFileName(filePath);
+        return candidate with
+        {
+            SettingsKey = BuildHandle(fileName, candidate.SettingsKey, taken),
+            SourceFile = fileName
+        };
+    }
+
+    /// <summary>
+    /// The base file keeps the key as written ("Default"); an environment file
+    /// qualifies it with the environment name ("Staging:Default") so the same
+    /// key in two files never collapses into one candidate. A handle that is
+    /// already taken falls back to the file name, which is unique per file.
+    /// </summary>
+    private static string BuildHandle(string fileName, string key, ISet<string> taken)
+    {
+        var handle = IsBaseFile(fileName) ? key : $"{EnvironmentName(fileName)}:{key}";
+        if (taken.Add(handle))
+        {
+            return handle;
+        }
+
+        handle = $"{fileName}:{key}";
+        if (taken.Add(handle))
+        {
+            return handle;
+        }
+
+        var suffix = 2;
+        while (!taken.Add($"{handle}#{suffix}"))
+        {
+            suffix++;
+        }
+
+        return $"{handle}#{suffix}";
+    }
+
+    private static bool IsBaseFile(string fileName)
+        => string.Equals(fileName, BaseFileName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The environment name a file carries: everything between "appsettings." and
+    /// ".json" (appsettings.Staging.json gives Staging). A file that does not
+    /// follow the convention contributes its own name, so its handle still says
+    /// where it came from.
+    /// </summary>
+    private static string EnvironmentName(string fileName)
+    {
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        const string prefix = "appsettings.";
+        return stem.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? stem[prefix.Length..]
+            : stem;
+    }
+
+    private IReadOnlyList<DetectedConnection> ScanFile(string filePath)
+    {
+        var results = new List<DetectedConnection>();
+
         JsonDocument doc;
         try
         {
@@ -61,7 +143,7 @@ public sealed class AppSettingsConnectionScanner
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Failed to parse appsettings at {Path}.", filePath);
-            return;
+            return results;
         }
 
         using (doc)
@@ -72,7 +154,7 @@ public sealed class AppSettingsConnectionScanner
             {
                 foreach (var prop in cs.EnumerateObject())
                 {
-                    // Skip duplicates already added from another appsettings file.
+                    // Skip duplicates already found in this same file.
                     if (results.Any(r => string.Equals(r.SettingsKey, prop.Name, StringComparison.Ordinal)))
                     {
                         continue;
@@ -84,6 +166,8 @@ public sealed class AppSettingsConnectionScanner
             // Nested connection-string objects at any depth.
             ScanNested(doc.RootElement, results, string.Empty);
         }
+
+        return results;
     }
 
     private static void ScanNested(JsonElement element, List<DetectedConnection> results, string path)

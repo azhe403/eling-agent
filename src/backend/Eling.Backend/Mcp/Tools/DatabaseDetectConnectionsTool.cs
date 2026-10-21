@@ -25,7 +25,7 @@ public sealed class DatabaseDetectConnectionsTool
         _audit = audit;
     }
 
-    [McpServerTool(Name = "db_detect_connections"), Description("Preview database connection strings found in the backend appsettings.json (passwords masked). Writes nothing.")]
+    [McpServerTool(Name = "db_detect_connections"), Description("Preview database connection strings found in the workspace appsettings*.json files (passwords masked). Writes nothing. The settingsKey is the handle to import with: the base appsettings.json keeps the key as written, an environment file qualifies it with the environment name (e.g. 'Staging:Default'), so the same key in two files stays two candidates.")]
     public async Task<IReadOnlyList<McpDetectedCandidate>> DetectAsync(CancellationToken cancellationToken = default)
     {
         var sw = Stopwatch.StartNew();
@@ -37,7 +37,8 @@ public sealed class DatabaseDetectConnectionsTool
                 d.SettingsKey,
                 d.Name,
                 d.Provider,
-                d.RejectionReason)).ToList();
+                d.RejectionReason,
+                d.SourceFile)).ToList();
             sw.Stop();
             await (_audit?.RecordAsync(new AuditEvent
             {
