@@ -1,6 +1,12 @@
+import type { Metadata } from "next"
 import { Suspense } from "react"
 import { AuditTrailList } from "./AuditTrailList"
 import { Skeleton } from "@/components/ui/skeleton"
+import { pageTitle } from "@/lib/page-title"
+
+export const metadata: Metadata = {
+  title: pageTitle("Audit Trail"),
+}
 
 function AuditTrailLoading() {
   return (

@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { InlineScript } from "@/components/inline-script";
 import { ThemeProvider } from "@/components/theme-provider";
 import { getSidebarInlineScript } from "@/lib/sidebar-state";
+import { APP_TITLE } from "@/lib/page-title";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -16,7 +17,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Eling Dashboard",
+  // Default for the routes that name no page of their own (the "/" redirect
+  // and the 404). Every page below /dashboard sets its own title.
+  title: APP_TITLE,
   description: "Eling platform dashboard",
 };
 

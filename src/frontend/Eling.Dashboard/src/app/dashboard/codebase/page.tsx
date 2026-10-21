@@ -1,6 +1,12 @@
+import type { Metadata } from "next"
 import { Suspense } from "react"
 import { CodebaseList } from "./CodebaseList"
 import { Skeleton } from "@/components/ui/skeleton"
+import { pageTitle } from "@/lib/page-title"
+
+export const metadata: Metadata = {
+  title: pageTitle("Codebase"),
+}
 
 function Loading() {
   return (

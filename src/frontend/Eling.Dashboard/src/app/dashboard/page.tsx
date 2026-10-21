@@ -1,7 +1,13 @@
+import type { Metadata } from "next"
 import { Suspense } from "react"
 
 import { Skeleton } from "@/components/ui/skeleton"
+import { pageTitle } from "@/lib/page-title"
 import { DashboardHome } from "./DashboardHome"
+
+export const metadata: Metadata = {
+  title: pageTitle("Dashboard"),
+}
 
 /**
  * The dashboard's home page.

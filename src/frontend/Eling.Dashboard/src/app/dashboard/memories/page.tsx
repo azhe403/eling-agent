@@ -1,6 +1,12 @@
+import type { Metadata } from "next"
 import { Suspense } from "react"
 import { MemoriesList } from "./MemoriesList"
 import { Skeleton } from "@/components/ui/skeleton"
+import { pageTitle } from "@/lib/page-title"
+
+export const metadata: Metadata = {
+  title: pageTitle("Memories"),
+}
 
 function MemoriesLoading() {
   return (
