@@ -76,6 +76,53 @@ New-OutputRootClaim -Root $elingOutputRootPath
 $results = @()
 $failed = 0
 
+# One scratch scope for the whole run. Every spawned runtime writes its
+# workspace catalogue, its heartbeat files, its codebase index and its test
+# memories inside it, so a validation run leaves nothing in the developer's
+# real Eling stores. Without this the spawned runtime registers its throwaway
+# temp folder in the real catalogue (~/.local/share/eling/agent-workspaces.json)
+# and writes its test memories into the real global memory store. The
+# directory is removed when the script ends.
+$script:validationScope = Join-Path ([System.IO.Path]::GetTempPath()) "eling-validate-$(Get-Random)"
+New-Item -ItemType Directory -Path $script:validationScope -Force | Out-Null
+
+# The throwaway workspaces the runtime phases ran in. Tracked so the summary
+# can retry a directory that was still locked when its phase ended.
+$script:tempDirs = @()
+
+function Remove-ValidationTempDir {
+    <#
+    .SYNOPSIS
+        Best-effort removal of a throwaway workspace.
+    .DESCRIPTION
+        A locked directory is retried rather than given up on. The spawned
+        process had it as its working directory, and Windows holds that handle
+        until the process is completely gone -- a kill returns before the
+        handle is released, so the first attempt fails even though the process
+        is already dying. The last attempt gives up quietly: the summary
+        sweep retries everything once more when every process is dead.
+    #>
+    param(
+        [string]$Dir,
+        [int]$Attempts = 5
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Dir)) { return }
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        if (-not (Test-Path -LiteralPath $Dir)) { return }
+        try {
+            Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop
+            return
+        } catch {
+            if ($attempt -eq $Attempts) {
+                Write-Host "  (temp dir still locked, will retry at the end: $Dir -- $($_.Exception.Message))"
+                return
+            }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
+
 function Get-FreePort {
     # A free loopback port in a high range so validation never collides with a
     # real dashboard owned by a live eling session on 4317.
@@ -101,7 +148,8 @@ function Start-ElingProcess {
         [string]$WorkingDirectory,
         [string[]]$Arguments,
         [int]$Port,
-        [switch]$DisableDashboard
+        [switch]$DisableDashboard,
+        [switch]$DrainStdout
     )
     $argsList = $Arguments
     if ($DisableDashboard) { $argsList += "--no-dashboard" }
@@ -115,9 +163,37 @@ function Start-ElingProcess {
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.Environment["ELING_DASHBOARD_PORT"] = $Port.ToString()
+    # The validation run must not touch the developer's real Eling stores.
+    # ELING_USER_SCOPE relocates the config and data roots, ELING_CONFIG_DIR
+    # and ELING_DATA_DIR cover the paths that are resolved directly, and
+    # ELING_AGENT_DATA_DIR is what the workspace catalogue
+    # (agent-workspaces.json) and the provider/chat stores follow. Without
+    # them the spawned runtime registers its throwaway temp folder in the real
+    # catalogue and writes its test memories into the real global memory
+    # store -- both of which outlive the run.
+    $psi.Environment["ELING_USER_SCOPE"] = $script:validationScope
+    $psi.Environment["ELING_CONFIG_DIR"] = $script:validationScope
+    $psi.Environment["ELING_DATA_DIR"] = $script:validationScope
+    $psi.Environment["ELING_AGENT_DATA_DIR"] = $script:validationScope
     $proc = [System.Diagnostics.Process]::new()
     $proc.StartInfo = $psi
     $proc.Start() | Out-Null
+
+    # Drain the redirected streams in the background, or do not drain them at
+    # all.
+    #
+    # A pipe nobody reads fills up - Windows gives an anonymous pipe a 4 KB
+    # buffer - and the backend then blocks on its own log write. That is not
+    # a slow start: the backend never gets as far as Kestrel's bind, so
+    # /health never answers and the phase hangs until it times out. The
+    # stdio phase reads stdout line by line itself, so only that phase's
+    # stdout is left alone; every other stream is drained here.
+    #
+    # The captured text is printed when the phase fails, because a hang that
+    # says nothing is the hardest kind to diagnose.
+    $script:phaseStderr = $proc.StandardError.ReadToEndAsync()
+    if ($DrainStdout) { $script:phaseStdout = $proc.StandardOutput.ReadToEndAsync() }
+
     return $proc
 }
 
@@ -160,8 +236,15 @@ function Invoke-McpCall {
 function Test-Phase {
     param([string]$Name, [scriptblock]$Block)
     Write-Host "`n=== $Name ===" -ForegroundColor Cyan
-    $proc = $null
-    $client = $null
+    # The phase block publishes what it spawned into the script scope; these
+    # locals are the phase's own state and are reset so a phase that spawns
+    # nothing never inherits the previous phase's process.
+    $script:phaseProc = $null
+    $script:phaseClient = $null
+    $script:tempDir = $null
+    $script:phaseStderr = $null
+    $script:phaseStdout = $null
+    $phaseOk = $false
     try {
         $result = & $Block
         if ($result -eq $false) {
@@ -169,6 +252,7 @@ function Test-Phase {
             $script:failed++
             $script:results += [PSCustomObject]@{ Phase = $Name; Status = "FAIL" }
         } else {
+            $phaseOk = $true
             Write-Host "  PASS" -ForegroundColor Green
             $script:results += [PSCustomObject]@{ Phase = $Name; Status = "PASS" }
         }
@@ -177,11 +261,65 @@ function Test-Phase {
         $script:failed++
         $script:results += [PSCustomObject]@{ Phase = $Name; Status = "ERROR: $_" }
     } finally {
-        if ($null -ne $client) { try { $client.Dispose() } catch {} }
-        if ($null -ne $proc -and !$proc.HasExited) {
-            try { $proc.Kill($true); $proc.WaitForExit(3000) } catch {}
+        if ($null -ne $script:phaseClient) { try { $script:phaseClient.Dispose() } catch {} }
+        # The process the phase spawned has to die here. It is not optional:
+        # a survivor keeps the throwaway workspace as its working directory,
+        # which is what locks the folder against deletion, and it stays
+        # registered in the workspace catalogue as a LIVE runtime, so the
+        # dashboard lists a workspace that is not going away. Reading the
+        # script scope is what makes this cleanup happen at all -- a local
+        # $proc here is always null and the process is never touched.
+        if ($null -ne $script:phaseProc) {
+            if (-not $script:phaseProc.HasExited) {
+                # Kill and wait are separate calls on purpose. A kill returns
+                # while the process is still dying, and Windows holds the
+                # working directory handle until it is completely gone -- so
+                # the wait is what lets the temp dir be removed a moment
+                # later.
+                try { $script:phaseProc.Kill($true) } catch {
+                    Write-Host "  (kill failed: $($_.Exception.Message))" -ForegroundColor DarkGray
+                }
+                try { $script:phaseProc.WaitForExit(5000) } catch {}
+
+                # A survivor holds the throwaway workspace as its working
+                # directory, which locks the folder against deletion, and it
+                # stays registered as a LIVE runtime. A kill that did not
+                # take is not something to swallow: fall back to the shell's
+                # own kill, and say so if the process is still there.
+                if (-not $script:phaseProc.HasExited) {
+                    try { Stop-Process -Id $script:phaseProc.Id -Force -ErrorAction Stop } catch {}
+                    try { $script:phaseProc.WaitForExit(5000) } catch {}
+                }
+                if (-not $script:phaseProc.HasExited) {
+                    Write-Host "  (process $($script:phaseProc.Id) is still alive - its workspace folder cannot be removed)" -ForegroundColor Red
+                }
+            }
+            # A failed phase says nothing about WHY, and the reason is usually
+            # in the backend's own log. The process is dead by now, so the
+            # drained stream is complete -- but the wait is bounded, because
+            # a survivor that never died would otherwise turn a failed phase
+            # into a hung script.
+            if (-not $phaseOk -and $null -ne $script:phaseStderr) {
+                try {
+                    if ($script:phaseStderr.Wait(3000)) {
+                        $text = $script:phaseStderr.Result
+                        if (-not [string]::IsNullOrWhiteSpace($text)) {
+                            Write-Host "  --- backend stderr (last 20 lines) ---" -ForegroundColor DarkGray
+                            ($text -split "`r?`n" | Where-Object { $_ -ne "" } | Select-Object -Last 20) |
+                                ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+                        }
+                    }
+                } catch { }
+            }
+            try { $script:phaseProc.Dispose() } catch {}
         }
-        if ($null -ne $proc) { try { $proc.Dispose() } catch {} }
+        # The throwaway workspace must not outlive the phase. A folder that
+        # stays on disk keeps its row in the workspace catalogue: the
+        # catalogue prunes a row only when its folder is GONE -- a dead
+        # process never removes one -- so leaving the folder behind is
+        # exactly what makes the dashboard list a workspace that no longer
+        # exists.
+        Remove-ValidationTempDir -Dir $script:tempDir
     }
 }
 
@@ -206,20 +344,22 @@ Test-Phase "Dashboard HTTP API" {
     $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "eling-dash-$(Get-Random)"
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
     $script:tempDir = $tempDir
+    $script:tempDirs += $tempDir
     $port = Get-FreePort
 
     # Host spawns + registers the shared dashboard on an isolated port.
-    $script:proc = Start-ElingProcess -WorkingDirectory $tempDir -Port $port
+    # Nothing reads this phase's stdout, so it is drained too.
+    $script:phaseProc = Start-ElingProcess -WorkingDirectory $tempDir -Port $port -DrainStdout
 
-    $script:client = [System.Net.Http.HttpClient]::new()
-    $script:client.Timeout = [TimeSpan]::FromSeconds(5)
+    $script:phaseClient = [System.Net.Http.HttpClient]::new()
+    $script:phaseClient.Timeout = [TimeSpan]::FromSeconds(5)
     $base = "http://127.0.0.1:$port"
 
     # Wait for the dashboard to become healthy.
     $healthy = $false
     for ($attempt = 0; $attempt -lt 40; $attempt++) {
         try {
-            $r = $script:client.GetAsync("$base/health").Result
+            $r = $script:phaseClient.GetAsync("$base/health").Result
             if ($r.StatusCode -eq 200) { $healthy = $true; break }
         } catch { }
         Start-Sleep -Milliseconds 250
@@ -228,26 +368,26 @@ Test-Phase "Dashboard HTTP API" {
     Write-Host "  /health -> 200"
 
     # GET /api/memories
-    $r = $script:client.GetAsync("$base/api/memories").Result
+    $r = $script:phaseClient.GetAsync("$base/api/memories").Result
     if ($r.StatusCode -ne 200) { Write-Host "  GET /api/memories returned $($r.StatusCode)"; return $false }
     Write-Host "  GET /api/memories -> 200"
 
     # POST /api/memories
     $body = '{"content":"dash-validation-test"}'
     $content = [System.Net.Http.StringContent]::new($body, [System.Text.Encoding]::UTF8, "application/json")
-    $r = $script:client.PostAsync("$base/api/memories", $content).Result
+    $r = $script:phaseClient.PostAsync("$base/api/memories", $content).Result
     if ($r.StatusCode -ne 201) { Write-Host "  POST /api/memories returned $($r.StatusCode)"; return $false }
     $json = $r.Content.ReadAsStringAsync().Result | ConvertFrom-Json
     $id = $json.id
     Write-Host "  POST /api/memories -> 201 (id=$id)"
 
     # GET /api/memories/$id
-    $r = $script:client.GetAsync("$base/api/memories/$id").Result
+    $r = $script:phaseClient.GetAsync("$base/api/memories/$id").Result
     if ($r.StatusCode -ne 200) { Write-Host "  GET /api/memories/$id returned $($r.StatusCode)"; return $false }
     Write-Host "  GET /api/memories/$id -> 200"
 
     # DELETE /api/memories/$id
-    $r = $script:client.DeleteAsync("$base/api/memories/$id").Result
+    $r = $script:phaseClient.DeleteAsync("$base/api/memories/$id").Result
     if ($r.StatusCode -ne [System.Net.HttpStatusCode]::NoContent -and $r.StatusCode -ne 200) {
         Write-Host "  DELETE returned $($r.StatusCode)"; return $false
     }
@@ -261,33 +401,34 @@ Test-Phase "Stdio MCP mode" {
     $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "eling-stdio-$(Get-Random)"
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
     $script:tempDir = $tempDir
+    $script:tempDirs += $tempDir
     $port = Get-FreePort
 
     # Dashboard disabled: keep stdout purely JSON for the MCP protocol.
-    $script:proc = Start-ElingProcess -WorkingDirectory $tempDir -Port $port -DisableDashboard
+    $script:phaseProc = Start-ElingProcess -WorkingDirectory $tempDir -Port $port -DisableDashboard
 
     # Initialize
-    $initJson = Invoke-McpCall -Process $script:proc -Request '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"stdio-validation","version":"1.0"}}}' -Id 1
+    $initJson = Invoke-McpCall -Process $script:phaseProc -Request '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"stdio-validation","version":"1.0"}}}' -Id 1
     if ($null -eq $initJson) { Write-Host "  No response to initialize"; return $false }
     Write-Host "  initialize -> server=$($initJson.result.serverInfo.name)"
 
     # notifications/initialized (fire and forget, no response expected)
-    $script:proc.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
-    $script:proc.StandardInput.Flush()
+    $script:phaseProc.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
+    $script:phaseProc.StandardInput.Flush()
     Start-Sleep -Milliseconds 200
 
     # tools/list
-    $toolsJson = Invoke-McpCall -Process $script:proc -Request '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' -Id 2
+    $toolsJson = Invoke-McpCall -Process $script:phaseProc -Request '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' -Id 2
     if ($null -eq $toolsJson) { Write-Host "  No response to tools/list"; return $false }
     Write-Host "  tools/list -> $($toolsJson.result.tools.Count) tools"
 
     # memory_save
-    $saveJson = Invoke-McpCall -Process $script:proc -Request '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory_save","arguments":{"content":"stdio-validation-test","type":"fact","tags":["test"]}}}' -Id 3
+    $saveJson = Invoke-McpCall -Process $script:phaseProc -Request '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory_save","arguments":{"content":"stdio-validation-test","type":"fact","tags":["test"]}}}' -Id 3
     if ($null -eq $saveJson) { Write-Host "  No response to memory_save"; return $false }
     Write-Host "  memory_save -> OK"
 
     # memory_search
-    $searchJson = Invoke-McpCall -Process $script:proc -Request '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memory_search","arguments":{"query":"stdio-validation"}}}' -Id 4
+    $searchJson = Invoke-McpCall -Process $script:phaseProc -Request '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memory_search","arguments":{"query":"stdio-validation"}}}' -Id 4
     if ($null -eq $searchJson) { Write-Host "  No response to memory_search"; return $false }
     Write-Host "  memory_search -> OK"
 
@@ -295,6 +436,13 @@ Test-Phase "Stdio MCP mode" {
 }
 
 # --- Summary ---
+# Every spawned process is dead by now, so a temp dir that was locked during
+# its phase can finally go -- and with it the scratch scope holding the
+# catalogue, the heartbeat files and the test memories this run produced.
+foreach ($dir in $script:tempDirs) { Remove-ValidationTempDir -Dir $dir -Attempts 3 }
+if (Test-Path -LiteralPath $script:validationScope) {
+    try { Remove-Item -LiteralPath $script:validationScope -Recurse -Force -ErrorAction Stop } catch {}
+}
 Remove-OutputRootClaim -Root $elingOutputRootPath
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "VALIDATION SUMMARY" -ForegroundColor Cyan

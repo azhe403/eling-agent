@@ -17,11 +17,30 @@ public sealed class CodebaseExclusionTests : IDisposable
     private readonly string _tempDir;
     private readonly string? _originalExclude;
 
+    /// <summary>
+    /// The throwaway folders the tests created under the OS temp directory.
+    /// They are real directories, and a leftover one is exactly the litter
+    /// the catalogue's scratch rule exists to stop — so they are removed
+    /// with the rest of the fixture.
+    /// </summary>
+    private readonly List<string> _scratchDirs = [];
+
     public CodebaseExclusionTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), "eling-excl-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_tempDir);
         _originalExclude = Environment.GetEnvironmentVariable(ExcludeEnv);
+    }
+
+    /// <summary>
+    /// A throwaway folder under the OS temp directory, registered for cleanup.
+    /// </summary>
+    private string NewScratchDir(string prefix)
+    {
+        var path = Path.Combine(Path.GetTempPath(), prefix + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(path);
+        _scratchDirs.Add(path);
+        return path;
     }
 
     [Fact]
@@ -108,6 +127,34 @@ public sealed class CodebaseExclusionTests : IDisposable
         Assert.True(reg.CodebaseEnabled);
     }
 
+    /// <summary>
+    /// The product's own throwaway workspaces live in the OS temp directory.
+    /// They are not projects, so they are excluded the way a chat session is:
+    /// no index, no catalogue row, no entry in the dashboard's workspace list.
+    /// </summary>
+    [Fact]
+    public void IsCodebaseExcluded_TransientWorkspace_IsExcludedWithoutEnv()
+    {
+        Environment.SetEnvironmentVariable(ExcludeEnv, null);
+        var transient = NewScratchDir("eling-dash-");
+
+        Assert.True(ElingPaths.IsCodebaseExcluded(transient));
+    }
+
+    /// <summary>
+    /// Only the product's own prefixes are transient. A plain folder in the
+    /// temp directory is somebody's scratch space, and excluding every temp
+    /// folder would silently drop real workspaces.
+    /// </summary>
+    [Fact]
+    public void IsCodebaseExcluded_PlainTempFolder_IsNotExcluded()
+    {
+        Environment.SetEnvironmentVariable(ExcludeEnv, null);
+        var plain = NewScratchDir("scratch-");
+
+        Assert.False(ElingPaths.IsCodebaseExcluded(plain));
+    }
+
     [Fact]
     public void IsCodebaseExcluded_MalformedEntry_ThrowsInsteadOfSkipping()
     {
@@ -130,6 +177,12 @@ public sealed class CodebaseExclusionTests : IDisposable
         // Best-effort teardown: a leftover temp dir must never fail an otherwise
         // passing run. A locked or still-in-use file is the only realistic
         // failure, and there is nothing useful to report once the test is over.
+        foreach (var dir in _scratchDirs)
+        {
+            try { Directory.Delete(dir, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
         try { Directory.Delete(_tempDir, recursive: true); }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }

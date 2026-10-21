@@ -18,6 +18,49 @@ public sealed class ElingPathsTests
     }
 
     [Fact]
+    public void IsTemporaryPath_InsideTheTempArea_IsScratch()
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), "eling-scratch-" + Guid.NewGuid().ToString("N")[..8]);
+
+        Assert.True(ElingPaths.IsTemporaryPath(scratch));
+    }
+
+    [Fact]
+    public void IsTemporaryPath_UnderTheTempArea_AtAnyDepth_IsScratch()
+    {
+        var nested = Path.Combine(Path.GetTempPath(), "eling-scratch", "child", "grandchild");
+
+        Assert.True(ElingPaths.IsTemporaryPath(nested));
+    }
+
+    [Fact]
+    public void IsTemporaryPath_SiblingWithASimilarName_IsNotScratch()
+    {
+        // "TempX" beside "Temp" is a different folder. The comparison is
+        // path-bounded on purpose: a bare name prefix would call it scratch.
+        var sibling = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar) + "X";
+
+        Assert.False(ElingPaths.IsTemporaryPath(sibling));
+    }
+
+    [Fact]
+    public void IsTemporaryPath_AProjectElsewhere_IsNotScratch()
+    {
+        var project = Path.Combine(
+            Path.GetPathRoot(Environment.CurrentDirectory) ?? "C:",
+            "work",
+            "project");
+
+        Assert.False(ElingPaths.IsTemporaryPath(project));
+    }
+
+    [Fact]
+    public void IsTemporaryPath_EmptyPath_IsNotScratch()
+    {
+        Assert.False(ElingPaths.IsTemporaryPath(string.Empty));
+    }
+
+    [Fact]
     public void ResolveCodebaseDbPath_UsesProjectFolderName_NotElingPrefix()
     {
         var result = ElingPaths.ResolveCodebaseDbPath("/work/hello-world", "/xdg/data", userHome: null, elingDataDir: null);

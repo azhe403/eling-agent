@@ -18,6 +18,13 @@ public sealed class RuntimeRegistryWorkspaceRecordingTests : IDisposable
 {
     private readonly string _dir;
 
+    /// <summary>
+    /// The throwaway folders the tests created under the OS temp directory.
+    /// A leftover one is the litter the catalogue's scratch rule exists to
+    /// stop, so the fixture removes them.
+    /// </summary>
+    private readonly List<string> _scratchDirs = [];
+
     public RuntimeRegistryWorkspaceRecordingTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "eling-ws-record-" + Guid.NewGuid().ToString("N")[..8]);
@@ -71,6 +78,28 @@ public sealed class RuntimeRegistryWorkspaceRecordingTests : IDisposable
         Assert.Equal(workspace, row.HeadScopeRoot);
     }
 
+    /// <summary>
+    /// A workspace under one of the product's own throwaway prefixes never
+    /// enters the catalogue at all. A validation or smoke-test folder is not
+    /// a project: it owns no codebase index and no memories, so a row for it
+    /// would only ever be a listing entry for a folder nobody can open.
+    /// </summary>
+    [Fact]
+    public async Task Register_TransientWorkspace_RecordsNoRow()
+    {
+        var transient = Path.Combine(Path.GetTempPath(), "eling-dash-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(transient);
+        _scratchDirs.Add(transient);
+
+        using var workspaces = new JsonWorkspaceRegistry(Path.Combine(_dir, "agent-workspaces.json"));
+        using var registry = NewRegistry(workspaces);
+
+        registry.Register(Registration(headScopeRoot: transient, workspaceRoot: transient, dataDirectory: Path.Combine(transient, ".eling")));
+
+        var rows = await workspaces.ListAsync();
+        Assert.Empty(rows);
+    }
+
     private RuntimeRegistry NewRegistry(JsonWorkspaceRegistry workspaces) => new(
         NullLogger<RuntimeRegistry>.Instance,
         UserScope.Resolve(Path.Combine(_dir, "user-scope")),
@@ -91,6 +120,13 @@ public sealed class RuntimeRegistryWorkspaceRecordingTests : IDisposable
 
     public void Dispose()
     {
+        foreach (var dir in _scratchDirs)
+        {
+            try { Directory.Delete(dir, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
         try
         {
             if (Directory.Exists(_dir))

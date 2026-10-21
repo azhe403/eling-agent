@@ -967,12 +967,83 @@ public sealed class RuntimeRegistry : IDisposable
     }
 
     /// <summary>
-    /// Drops catalogue rows whose workspace folder no longer exists, so a
-    /// deleted project or a cleaned-up temp dir cannot leave a listing entry
-    /// pointing at nothing. Rows whose folder is still there are kept even
-    /// when their process is dead — that survival is the catalogue's whole
-    /// point.
+    /// Drops catalogue rows for scratch workspaces -- folders under the OS
+    /// temp directory -- whose process is gone.
     /// </summary>
+    /// <remarks>
+    /// The catalogue's own rule is that a row survives its process: a codebase
+    /// index stays readable long after its owner exits, which is the reason
+    /// the catalogue exists. A scratch folder has no index and no memories,
+    /// so that reasoning does not apply to it -- a validation run, a smoke
+    /// test or a test fixture makes a folder there, the folder outlives the
+    /// process that made it, and the row would then sit in the dashboard's
+    /// workspace list for good. The rule is about the whole temp area, not
+    /// about a name: a prefix list would only postpone the next leak.
+    /// <para>
+    /// A scratch workspace whose process is still running keeps its row. It
+    /// is a real workspace while it lasts, and the runtime re-records it
+    /// anyway -- dropping it would only make it come back on the next
+    /// heartbeat.
+    /// </para>
+    /// </remarks>
+    private async Task<int> PruneScratchWorkspacesAsync()
+    {
+        if (_workspaces is null) return 0;
+
+        // Peer runtimes live in the shared runtime directory, not in this
+        // process's own list. Syncing first is what keeps a peer that owns
+        // a scratch workspace from looking dead here: without it the row is
+        // deleted while its process is still running, and the owner puts it
+        // back on the next heartbeat -- the row flickers in and out.
+        SyncFromDisk();
+
+        var rows = await _workspaces.ListAsync().ConfigureAwait(false);
+        if (rows.Count == 0) return 0;
+
+        HashSet<string> liveRoots;
+        lock (_lock)
+        {
+            // CodebaseRoot() is the identity the catalogue is keyed by: the
+            // workspace folder, falling back to the head scope for a
+            // registration that carries no workspaceRoot. Using the raw
+            // WorkspaceRoot instead would miss exactly those runtimes and
+            // delete the row of a process that is still running.
+            liveRoots = _runtimes
+                .Where(r => r.IsAlive)
+                .Select(r => r.CodebaseRoot())
+                .Where(root => !string.IsNullOrWhiteSpace(root))
+                .Select(NormalizeRoot)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var removed = 0;
+        foreach (var row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.WorkspaceRoot)) continue;
+            if (!ElingPaths.IsTemporaryPath(row.WorkspaceRoot)) continue;
+            if (liveRoots.Contains(NormalizeRoot(row.WorkspaceRoot))) continue;
+            if (await _workspaces.DeleteByRootAsync(row.WorkspaceRoot).ConfigureAwait(false))
+            {
+                removed++;
+            }
+        }
+
+        return removed;
+    }
+
+    /// <summary>
+    /// Drops catalogue rows whose workspace folder no longer exists, and rows
+    /// for scratch workspaces whose process is gone, so a deleted project or
+    /// a cleaned-up temp dir cannot leave a listing entry pointing at
+    /// nothing.
+    /// </summary>
+    /// <remarks>
+    /// A row whose folder is still there survives its process — that survival
+    /// is the catalogue's whole point, because a codebase index stays readable
+    /// long after the process that wrote it is gone. The one exception is a
+    /// scratch workspace: it owns no index and no memories, so its row is
+    /// garbage the moment its process ends, whatever its folder is doing.
+    /// </remarks>
     internal async Task PruneMissingWorkspacesAsync()
     {
         if (_workspaces is null) return;
@@ -983,11 +1054,21 @@ public sealed class RuntimeRegistry : IDisposable
 
         try
         {
-            var removed = await _workspaces.DeleteMissingRootsAsync().ConfigureAwait(false);
-            if (removed > 0)
+            // Two reasons, two counts, two messages: a row whose folder is
+            // gone and a scratch row whose process is gone are different
+            // facts, and a single count would have to describe both in one
+            // sentence that fits neither.
+            var missing = await _workspaces.DeleteMissingRootsAsync().ConfigureAwait(false);
+            var scratch = await PruneScratchWorkspacesAsync().ConfigureAwait(false);
+            if (missing > 0)
             {
                 _logger.LogInformation(
-                    "Pruned {Count} workspace row(s) whose folder no longer exists.", removed);
+                    "Pruned {Count} workspace row(s) whose folder no longer exists.", missing);
+            }
+            if (scratch > 0)
+            {
+                _logger.LogInformation(
+                    "Pruned {Count} scratch workspace row(s) whose process is gone.", scratch);
             }
         }
         catch (Exception ex)

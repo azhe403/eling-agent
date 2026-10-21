@@ -164,7 +164,9 @@ public static class ElingPaths
     /// no DB, no watcher, no dropdown or federation entry. Excluded when at
     /// or under the built-in temporal root (<c>.config/openchamber/chats</c>
     /// under the user home — chat sessions are temporal checkouts, never
-    /// indexed) or any root listed in <c>ELING_CODEBASE_EXCLUDE</c> (a
+    /// indexed), when it is one of the product's own transient workspaces
+    /// under the OS temp directory, or any root listed in
+    /// <c>ELING_CODEBASE_EXCLUDE</c> (a
     /// <see cref="Path.PathSeparator"/>-separated list for other temporal
     /// roots). Pure: only computes, never touches disk or the process
     /// environment beyond reading the variable. Changing the variable needs
@@ -251,6 +253,79 @@ public static class ElingPaths
         return accepted;
     }
 
+    /// <summary>
+    /// Prefixes of the throwaway workspaces the product creates under the OS
+    /// temp directory.
+    /// </summary>
+    /// <remarks>
+    /// This list is about INDEXING, and only about indexing: a workspace
+    /// matching one of these prefixes gets no codebase index, runs no
+    /// watcher, and never appears in the codebase dropdown. An index for a
+    /// throwaway is a file nobody will ever read again, in a global store
+    /// that nothing ever cleans.
+    /// <para>
+    /// The catalogue is a separate concern with a wider rule: a scratch
+    /// workspace is any folder under the temp area, and it is
+    /// <see cref="IsTemporaryPath"/> that says so. The prefixes here are the
+    /// narrow set the product names itself; the catalogue's rule is the area.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] TransientWorkspacePrefixes =
+    [
+        "eling-smoke-",
+        "eling-dash-",
+        "eling-stdio-",
+        "eling-validate-",
+    ];
+
+    /// <summary>
+    /// True when the path lives under the OS temp directory.
+    /// </summary>
+    /// <remarks>
+    /// The temp directory is a scratch area, not a place projects live: a
+    /// validation run, a smoke test, a test fixture and a scratch checkout
+    /// all make folders there. A workspace in that area is a throwaway, and a
+    /// throwaway must not become a catalogue row - the catalogue prunes a row
+    /// only when its folder is GONE, so a scratch folder that outlives the
+    /// process that made it would keep its row, and its place in the
+    /// dashboard's workspace list, for good.
+    /// <para>
+    /// The rule is about the area, not about a name: a prefix list would
+    /// leave the next throwaway to leak, and the leak is what accumulates.
+    /// The prefix list in <see cref="DefaultExcludedRoots"/> is a different
+    /// concern - it keeps the product's own throwaways out of the codebase
+    /// index.
+    /// </para>
+    /// </remarks>
+    public static bool IsTemporaryPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        string full;
+        try
+        {
+            full = Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+
+        // The comparison is spelled out here rather than delegated to
+        // IsAtOrUnder: that helper's third check is a StartsWith without a
+        // path boundary, so it only holds because Path.GetTempPath() happens
+        // to end with a separator. Spell it out and the guarantee does not
+        // depend on that accident -- a sibling folder whose name merely
+        // starts with the temp folder's name ("TempX" beside "Temp") is a
+        // different folder, and must not count as scratch.
+        var temp = Path.GetFullPath(Path.GetTempPath())
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (temp.Length == 0) return false;
+
+        return string.Equals(full, temp, StringComparison.OrdinalIgnoreCase)
+            || full.StartsWith(temp + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || full.StartsWith(temp + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static IEnumerable<string> DefaultExcludedRoots(string? userHome)
     {
         var home = string.IsNullOrWhiteSpace(userHome)
@@ -259,7 +334,10 @@ public static class ElingPaths
         yield return Path.Combine(home, ".config", "openchamber", "chats");
         yield return Path.Combine(home, ".config", "opencode");
         yield return Path.Combine(home, ".config", "openchamber");
-        yield return Path.Combine(Path.GetTempPath(), "eling-smoke-");
+        foreach (var prefix in TransientWorkspacePrefixes)
+        {
+            yield return Path.Combine(Path.GetTempPath(), prefix);
+        }
     }
 
     private static bool IsAtOrUnder(string cwd, string root)
