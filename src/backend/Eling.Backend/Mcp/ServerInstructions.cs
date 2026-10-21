@@ -10,9 +10,9 @@ public static class ServerInstructions
     /// </summary>
     public static readonly string[] Sections =
     [
-        "Eling is a durable markdown-backed memory system. Memory Markdown files under '.eling/memories/' are the canonical source of truth and MUST be tracked in Git.",
+        "Eling is a durable markdown-backed memory system. Memory Markdown files under '.eling/memories/' are the canonical source of truth, and they are NOT tracked in git: leave '.eling/memories/' ignored, and never commit a memory file - or change '.gitignore' to start tracking them - unless the user explicitly asks for it.",
 
-        "Generated runtime files MUST be added to '.gitignore': logs, the runtime directory '.eling/runtime/', and every SQLite database plus its sidecars. Sidecars are always '<name>.db-<suffix>' — '-journal', '-wal', '-shm', '-wal2' — so prefer the patterns '*.db' and '*.db-*' over naming each suffix; that stays complete as SQLite adds more and does not over-match unrelated names like '*.dbf'. When running in a project workspace, always check that '.gitignore' ignores these runtime files while keeping '.eling/memories/' tracked; prompt the user for confirmation to fix '.gitignore' if needed.",
+        "Generated runtime files MUST be added to '.gitignore': logs, the runtime directory '.eling/runtime/', and every SQLite database plus its sidecars. Sidecars are always '<name>.db-<suffix>' — '-journal', '-wal', '-shm', '-wal2' — so prefer the patterns '*.db' and '*.db-*' over naming each suffix; that stays complete as SQLite adds more and does not over-match unrelated names like '*.dbf'. When running in a project workspace, always check that '.gitignore' ignores these runtime files; if a generated runtime file is not ignored yet, prompt the user for confirmation before changing '.gitignore'.",
 
         "'Eling <something>' (Javanese for 'remember <something>') is a recall instruction: retrieve the memory previously stored in Eling (e.g. 'eling build steps' recalls the build steps saved in memories).",
 
