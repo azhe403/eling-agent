@@ -319,9 +319,20 @@ public sealed class RuntimeRegistry : IDisposable
     /// </summary>
     private void RefreshWorkspaceRow(RuntimeInfo runtime)
     {
+        // The same exclusion RecordProject applies. Without it a workspace
+        // that registration refused to record is written back here on the
+        // next heartbeat - so a throwaway folder's row came back every
+        // sweep, right after the prune had dropped it, and the list could
+        // never stay clean.
+        var workspace = string.IsNullOrWhiteSpace(runtime.WorkspaceRoot)
+            ? runtime.HeadScopeRoot
+            : runtime.WorkspaceRoot;
+        if (string.IsNullOrWhiteSpace(workspace)) return;
+        if (ElingPaths.IsCodebaseExcluded(workspace)) return;
+
         _workspaces?.Record(new RegisteredWorkspace(
             string.Empty,
-            string.IsNullOrWhiteSpace(runtime.WorkspaceRoot) ? runtime.HeadScopeRoot : runtime.WorkspaceRoot,
+            workspace,
             runtime.HeadScopeRoot,
             runtime.CodebaseEnabled,
             runtime.StartTime,
@@ -1008,8 +1019,15 @@ public sealed class RuntimeRegistry : IDisposable
             // registration that carries no workspaceRoot. Using the raw
             // WorkspaceRoot instead would miss exactly those runtimes and
             // delete the row of a process that is still running.
+            //
+            // Liveness is the OS's answer, not the heartbeat's. A heartbeat
+            // stays fresh for the whole stale window, so a scratch workspace
+            // whose process exited a second ago still counts as live here and
+            // its row survives the prune - the list would stay dirty for
+            // minutes after the run that created it. The process is either
+            // there or it is not.
             liveRoots = _runtimes
-                .Where(r => r.IsAlive)
+                .Where(r => r.IsAlive && IsProcessAlive(r.ProcessId))
                 .Select(r => r.CodebaseRoot())
                 .Where(root => !string.IsNullOrWhiteSpace(root))
                 .Select(NormalizeRoot)
@@ -1069,6 +1087,17 @@ public sealed class RuntimeRegistry : IDisposable
             {
                 _logger.LogInformation(
                     "Pruned {Count} scratch workspace row(s) whose process is gone.", scratch);
+            }
+
+            // Tell the dashboard. A row that was deleted here is still on the
+            // screen of every open list until something else announces a
+            // runtime change - and "the list is clean" is the whole point of
+            // pruning it. The topic is the same one the sweeper uses for a
+            // stale runtime, because that is exactly what the list has to
+            // re-read.
+            if (missing + scratch > 0)
+            {
+                _broadcaster?.Notify("runtimes");
             }
         }
         catch (Exception ex)

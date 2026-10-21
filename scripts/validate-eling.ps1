@@ -197,6 +197,26 @@ function Start-ElingProcess {
     return $proc
 }
 
+function Write-StreamTail {
+    # Prints the tail of a drained stream. A phase that fails silently is the
+    # hardest kind to diagnose, and the backend's own log is the only thing
+    # that says why.
+    param(
+        [string]$Label,
+        $Task
+    )
+
+    if ($null -eq $Task) { return }
+    try {
+        if (-not $Task.Wait(2000)) { return }
+        $text = $Task.Result
+        if ([string]::IsNullOrWhiteSpace($text)) { return }
+        Write-Host "  --- $Label (last 20 lines) ---" -ForegroundColor DarkGray
+        ($text -split "`r?`n" | Where-Object { $_ -ne "" } | Select-Object -Last 20) |
+            ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+    } catch { }
+}
+
 function Invoke-McpCall {
     # Writes a JSON-RPC request and reads stdout lines until the response with
     # the requested id arrives (or the timeout elapses). Non-matching or
@@ -296,20 +316,12 @@ function Test-Phase {
             }
             # A failed phase says nothing about WHY, and the reason is usually
             # in the backend's own log. The process is dead by now, so the
-            # drained stream is complete -- but the wait is bounded, because
+            # drained streams are complete -- and the wait is bounded, because
             # a survivor that never died would otherwise turn a failed phase
             # into a hung script.
-            if (-not $phaseOk -and $null -ne $script:phaseStderr) {
-                try {
-                    if ($script:phaseStderr.Wait(3000)) {
-                        $text = $script:phaseStderr.Result
-                        if (-not [string]::IsNullOrWhiteSpace($text)) {
-                            Write-Host "  --- backend stderr (last 20 lines) ---" -ForegroundColor DarkGray
-                            ($text -split "`r?`n" | Where-Object { $_ -ne "" } | Select-Object -Last 20) |
-                                ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
-                        }
-                    }
-                } catch { }
+            if (-not $phaseOk) {
+                Write-StreamTail -Label "backend stderr" -Task $script:phaseStderr
+                Write-StreamTail -Label "backend stdout" -Task $script:phaseStdout
             }
             try { $script:phaseProc.Dispose() } catch {}
         }
@@ -323,6 +335,12 @@ function Test-Phase {
     }
 }
 
+# The phases below run inside a try whose finally does the cleanup: a crash
+# between the first phase and the summary would otherwise leave the scratch
+# scope AND the output-root claim behind, which is the same kind of leak this
+# script was fixed for.
+$leftovers = @()
+try {
 # --- Phase 1: Build (skipped with -RuntimeOnly) ---
 if (-not $RuntimeOnly) {
     Test-Phase "Build backend" {
@@ -439,11 +457,24 @@ Test-Phase "Stdio MCP mode" {
 # Every spawned process is dead by now, so a temp dir that was locked during
 # its phase can finally go -- and with it the scratch scope holding the
 # catalogue, the heartbeat files and the test memories this run produced.
-foreach ($dir in $script:tempDirs) { Remove-ValidationTempDir -Dir $dir -Attempts 3 }
+foreach ($dir in $script:tempDirs) {
+    Remove-ValidationTempDir -Dir $dir -Attempts 3
+    if (Test-Path -LiteralPath $dir) { $leftovers += $dir }
+}
 if (Test-Path -LiteralPath $script:validationScope) {
     try { Remove-Item -LiteralPath $script:validationScope -Recurse -Force -ErrorAction Stop } catch {}
 }
-Remove-OutputRootClaim -Root $elingOutputRootPath
+}
+finally {
+    Remove-OutputRootClaim -Root $elingOutputRootPath
+}
+# A folder that could not be removed is worth saying out loud: it is still
+# holding a workspace the next run will not find.
+if ($leftovers.Count -gt 0) {
+    Write-Host "`nLeftover temp folders:" -ForegroundColor Yellow
+    $leftovers | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+}
+
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "VALIDATION SUMMARY" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
