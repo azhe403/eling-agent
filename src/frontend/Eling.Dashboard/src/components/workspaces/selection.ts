@@ -59,6 +59,28 @@ function fromIncluded(
   }
 }
 
+/**
+ * Checkbox semantics for a GROUP of rows — the checkouts of one repository.
+ * The group acts as one: unchecking removes every member, checking adds every
+ * member. A group that is only partly included becomes fully included on the
+ * next click, so one press never leaves the selection half applied.
+ */
+export function toggleRoots(
+  current: WorkspaceSelection,
+  roots: readonly string[],
+  allRoots: readonly string[],
+): WorkspaceSelection {
+  if (roots.length === 0) return current
+  const included =
+    current.kind === "all" ? new Set(allRoots) : new Set(current.roots)
+  const allPresent = roots.every((r) => included.has(r))
+  for (const root of roots) {
+    if (allPresent) included.delete(root)
+    else included.add(root)
+  }
+  return fromIncluded(included, allRoots)
+}
+
 /** Human label for pickers and summaries: all, one name, or a count. */
 export function selectionSummary(selection: WorkspaceSelection): string {
   if (selection.kind === "all") return "All workspaces"

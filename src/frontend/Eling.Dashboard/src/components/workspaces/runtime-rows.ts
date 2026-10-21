@@ -18,12 +18,17 @@ export type RuntimeEntry = {
   // Present when the coordinator tracks heartbeats; absent on older payloads,
   // where a registered runtime is treated as indexed-but-unknown.
   isAlive?: boolean
+  // The main worktree root of the git repository the workspace belongs to, or
+  // null when it is not inside one. Every linked worktree of a repository
+  // reports the same value, so the checkouts of a repository can be grouped.
+  repositoryRoot?: string | null
 }
 
 /** One row in a workspace list. */
 export type WorkspaceRow = {
   readonly root: string
   readonly alive: boolean
+  readonly repositoryRoot?: string | null
 }
 
 // includeRegistered: a codebase index is a read-only file in a global store
@@ -67,7 +72,11 @@ export function workspaceRowsOf(
     const key = root.toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)
-    out.push({ root, alive: r.isAlive === true })
+    out.push({
+      root,
+      alive: r.isAlive === true,
+      repositoryRoot: r.repositoryRoot ?? null,
+    })
   }
   return out
 }

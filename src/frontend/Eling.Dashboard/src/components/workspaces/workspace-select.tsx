@@ -13,30 +13,33 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { FolderGit2, Layers } from "lucide-react"
+import { Layers } from "lucide-react"
 import { cn } from "cn"
+import { WorkspaceGroupToggle } from "./workspace-group-toggle"
+import { WorkspaceTree } from "./workspace-tree"
+import { useWorkspaceGroupMode } from "./use-workspace-group-mode"
 import { workspaceName, type WorkspaceRow } from "./runtime-rows"
 import { selectionSummary, type WorkspaceSelection } from "./selection"
 
 /**
- * Narrow-screen fallback for `WorkspaceScopePanel`. When `onToggleRoot` is
- * provided it renders a checkbox list (multi-select) inside a popover, so the
- * narrow view keeps the same include/exclude affordance as the side panel.
- * Otherwise it falls back to the single-select shadcn Select.
+ * Narrow-screen fallback for `WorkspaceScopePanel`. When `onToggleRoots` is
+ * provided it renders the same checkbox tree inside a popover, so the narrow
+ * view keeps the include/exclude affordance and the grouping of the side
+ * panel. Otherwise it falls back to the single-select shadcn Select.
  */
 export function WorkspaceSelect({
   rows,
   selection,
   onSelectAll,
   onSelectOnly,
-  onToggleRoot,
+  onToggleRoots,
   label,
 }: {
   rows: readonly WorkspaceRow[]
   selection: WorkspaceSelection
   onSelectAll: () => void
   onSelectOnly: (root: string) => void
-  onToggleRoot?: (root: string) => void
+  onToggleRoots?: (roots: readonly string[]) => void
   label?: string
 }) {
   const [open, setOpen] = useState(false)
@@ -48,17 +51,13 @@ export function WorkspaceSelect({
     () => window.innerWidth < 1024,
     () => true,
   )
+  const { mode, setMode } = useWorkspaceGroupMode()
 
   if (!isNarrow) return null
 
-  if (!onToggleRoot) {
+  if (!onToggleRoots) {
     return <SingleSelect rows={rows} selection={selection} onSelectAll={onSelectAll} onSelectOnly={onSelectOnly} label={label} open={open} onOpenChange={setOpen} />
   }
-
-  const included =
-    selection.kind === "all"
-      ? new Set(rows.map((r) => r.root))
-      : new Set(selection.roots)
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -70,7 +69,7 @@ export function WorkspaceSelect({
           ? "🌐 All workspaces"
           : (label ?? `📁 ${selectionSummary(selection)}`)}
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 max-h-[60vh] overflow-y-auto p-2">
+      <PopoverContent align="start" className="w-80 max-h-[70vh] overflow-y-auto p-2">
         <div className="flex flex-col gap-1">
           <button
             type="button"
@@ -86,44 +85,17 @@ export function WorkspaceSelect({
             <Layers className="size-4 shrink-0" />
             All workspaces
           </button>
-          <ul className="flex flex-col gap-0.5">
-            {rows.map(({ root, alive }) => {
-              const name = workspaceName(root)
-              return (
-                <li key={root} className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-accent/60">
-                  <input
-                    type="checkbox"
-                    className="accent-primary"
-                    checked={included.has(root)}
-                    onChange={() => onToggleRoot(root)}
-                    aria-label={`Include ${name}`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onSelectOnly(root)
-                      setOpen(false)
-                    }}
-                    title={root}
-                    className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm"
-                  >
-                    <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{name}</span>
-                  </button>
-                  <span
-                    className={cn(
-                      "size-2 shrink-0 rounded-full",
-                      alive ? "bg-emerald-500" : "bg-muted-foreground/40",
-                    )}
-                    title={alive ? "Runtime is live" : "Offline"}
-                  />
-                </li>
-              )
-            })}
-            {rows.length === 0 && (
-              <li className="p-2 text-sm text-muted-foreground">No indexed workspaces.</li>
-            )}
-          </ul>
+          <WorkspaceGroupToggle mode={mode} onChange={setMode} />
+          <WorkspaceTree
+            rows={rows}
+            selection={selection}
+            mode={mode}
+            onSelectOnly={(root) => {
+              onSelectOnly(root)
+              setOpen(false)
+            }}
+            onToggleRoots={onToggleRoots}
+          />
         </div>
       </PopoverContent>
     </Popover>

@@ -39,7 +39,7 @@ import { TYPES } from "@/lib/types"
 import type { Memory } from "@/lib/types"
 import {
   selectionSummary,
-  toggleRoot,
+  toggleRoots,
 } from "@/components/workspaces/selection"
 import { useWorkspaceRows } from "@/components/workspaces/use-workspace-rows"
 import { WorkspaceScopePanel } from "@/components/workspaces/workspace-scope-panel"
@@ -537,10 +537,10 @@ export function MemoriesList() {
           onSelectOnly={(root) =>
             applySelection(selectWorkspaces([root], globalOn(selection)))
           }
-          onToggleRoot={(root) =>
+          onToggleRoots={(roots) =>
             applySelection(
               fromWorkspaceSelection(
-                toggleRoot(workspaceSelection, root, allRoots),
+                toggleRoots(workspaceSelection, roots, allRoots),
                 globalOn(selection),
               )
             )
@@ -614,10 +614,10 @@ export function MemoriesList() {
                   onSelectOnly={(root) =>
                     applySelection(selectWorkspaces([root], globalOn(selection)))
                   }
-                  onToggleRoot={(root) =>
+                  onToggleRoots={(roots) =>
                     applySelection(
                       fromWorkspaceSelection(
-                        toggleRoot(workspaceSelection, root, allRoots),
+                        toggleRoots(workspaceSelection, roots, allRoots),
                         globalOn(selection),
                       )
                     )

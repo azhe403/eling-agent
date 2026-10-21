@@ -54,7 +54,7 @@ import {
 import {
   selectAll,
   selectOnly,
-  toggleRoot,
+  toggleRoots,
   type WorkspaceSelection,
 } from "@/components/workspaces/selection"
 import { useWorkspaceRows } from "@/components/workspaces/use-workspace-rows"
@@ -652,8 +652,8 @@ export function CodebaseList() {
           selection={selection}
           onSelectAll={() => applySelection(selectAll())}
           onSelectOnly={(root) => applySelection(selectOnly(root))}
-          onToggleRoot={(root) =>
-            applySelection(toggleRoot(selection, root, allRoots))
+          onToggleRoots={(roots) =>
+            applySelection(toggleRoots(selection, roots, allRoots))
           }
         />
         <div
@@ -838,7 +838,9 @@ export function CodebaseList() {
               selection={selection}
               onSelectAll={() => applySelection(selectAll())}
               onSelectOnly={(root) => applySelection(selectOnly(root))}
-              onToggleRoot={(root) => applySelection(toggleRoot(selection, root, allRoots))}
+              onToggleRoots={(roots) =>
+                applySelection(toggleRoots(selection, roots, allRoots))
+              }
             />
           </div>
           <Button
