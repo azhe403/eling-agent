@@ -204,19 +204,8 @@ public sealed class RuntimeRegistry : IDisposable
     {
         if (_workspaces is null) return;
 
-        // Registrations written by older binaries have no workspaceRoot. Falling
-        // back to HeadScopeRoot mirrors RuntimeInfo.CodebaseRoot() and, more
-        // importantly, avoids resolving an empty string to this backend's own
-        // working directory — which would attribute the wrong workspace.
-        var workspace = registration.WorkspaceRoot;
-        if (string.IsNullOrWhiteSpace(workspace)) workspace = registration.HeadScopeRoot;
-        if (string.IsNullOrWhiteSpace(workspace)) return;
-        if (string.Equals(workspace, "UserScope", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(registration.HeadScopeRoot, "UserScope", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-        if (ElingPaths.IsCodebaseExcluded(workspace)) return;
+        var workspace = RecordableWorkspaceRoot(registration.WorkspaceRoot, registration.HeadScopeRoot);
+        if (workspace is null) return;
 
         var now = DateTimeOffset.UtcNow;
         _workspaces.Record(new RegisteredWorkspace(
@@ -226,6 +215,36 @@ public sealed class RuntimeRegistry : IDisposable
             registration.CodebaseEnabled,
             now,
             now));
+    }
+
+    /// <summary>
+    /// The folder the catalogue is keyed by for a runtime, or null when that
+    /// runtime must not be recorded at all.
+    /// </summary>
+    /// <remarks>
+    /// One place, because the answer is used twice - on registration and on
+    /// every heartbeat - and the two answers have to agree. When they did not,
+    /// a workspace registration had refused to record was written back on the
+    /// next heartbeat, so the row the prune had just dropped came straight
+    /// back. The "UserScope" sentinel is part of the same rule: a runtime
+    /// running at user home has no folder, and recording the sentinel would
+    /// put a row in the catalogue that points at nothing.
+    /// </remarks>
+    private static string? RecordableWorkspaceRoot(string? workspaceRoot, string? headScopeRoot)
+    {
+        // Registrations written by older binaries have no workspaceRoot. Falling
+        // back to HeadScopeRoot mirrors RuntimeInfo.CodebaseRoot() and, more
+        // importantly, avoids resolving an empty string to this backend's own
+        // working directory — which would attribute the wrong workspace.
+        var workspace = string.IsNullOrWhiteSpace(workspaceRoot) ? headScopeRoot : workspaceRoot;
+        if (string.IsNullOrWhiteSpace(workspace)) return null;
+        if (string.Equals(workspace, "UserScope", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(headScopeRoot, "UserScope", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        if (ElingPaths.IsCodebaseExcluded(workspace)) return null;
+        return workspace;
     }
 
     /// <summary>
@@ -319,16 +338,13 @@ public sealed class RuntimeRegistry : IDisposable
     /// </summary>
     private void RefreshWorkspaceRow(RuntimeInfo runtime)
     {
-        // The same exclusion RecordProject applies. Without it a workspace
-        // that registration refused to record is written back here on the
-        // next heartbeat - so a throwaway folder's row came back every
-        // sweep, right after the prune had dropped it, and the list could
-        // never stay clean.
-        var workspace = string.IsNullOrWhiteSpace(runtime.WorkspaceRoot)
-            ? runtime.HeadScopeRoot
-            : runtime.WorkspaceRoot;
-        if (string.IsNullOrWhiteSpace(workspace)) return;
-        if (ElingPaths.IsCodebaseExcluded(workspace)) return;
+        // The same answer RecordProject gives. Without it a workspace that
+        // registration refused to record is written back here on the next
+        // heartbeat - so a throwaway folder's row came back every sweep,
+        // right after the prune had dropped it, and the list could never stay
+        // clean.
+        var workspace = RecordableWorkspaceRoot(runtime.WorkspaceRoot, runtime.HeadScopeRoot);
+        if (workspace is null) return;
 
         _workspaces?.Record(new RegisteredWorkspace(
             string.Empty,
@@ -1011,28 +1027,38 @@ public sealed class RuntimeRegistry : IDisposable
         var rows = await _workspaces.ListAsync().ConfigureAwait(false);
         if (rows.Count == 0) return 0;
 
-        HashSet<string> liveRoots;
+        // Snapshot under the lock, judge liveness outside it. The lock is
+        // what Register, Heartbeat and Unregister serialize on, and asking
+        // the OS about a process is a syscall - doing that per runtime while
+        // holding it stalls every registration behind the slowest one.
+        Dictionary<int, string> candidates;
         lock (_lock)
         {
-            // CodebaseRoot() is the identity the catalogue is keyed by: the
-            // workspace folder, falling back to the head scope for a
-            // registration that carries no workspaceRoot. Using the raw
-            // WorkspaceRoot instead would miss exactly those runtimes and
-            // delete the row of a process that is still running.
-            //
-            // Liveness is the OS's answer, not the heartbeat's. A heartbeat
-            // stays fresh for the whole stale window, so a scratch workspace
-            // whose process exited a second ago still counts as live here and
-            // its row survives the prune - the list would stay dirty for
-            // minutes after the run that created it. The process is either
-            // there or it is not.
-            liveRoots = _runtimes
-                .Where(r => r.IsAlive && IsProcessAlive(r.ProcessId))
-                .Select(r => r.CodebaseRoot())
-                .Where(root => !string.IsNullOrWhiteSpace(root))
-                .Select(NormalizeRoot)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            candidates = new Dictionary<int, string>();
+            foreach (var runtime in _runtimes)
+            {
+                if (!runtime.IsAlive) continue;
+                // CodebaseRoot() is the identity the catalogue is keyed by: the
+                // workspace folder, falling back to the head scope for a
+                // registration that carries no workspaceRoot. Using the raw
+                // WorkspaceRoot instead would miss exactly those runtimes and
+                // delete the row of a process that is still running.
+                var root = runtime.CodebaseRoot();
+                if (string.IsNullOrWhiteSpace(root)) continue;
+                candidates[runtime.ProcessId] = root;
+            }
         }
+
+        // Liveness is the OS's answer, not the heartbeat's. A heartbeat stays
+        // fresh for the whole stale window, so a scratch workspace whose
+        // process exited a second ago still counts as live here and its row
+        // survives the prune - the list would stay dirty for minutes after
+        // the run that created it. The process is either there or it is not.
+        var liveRoots = candidates
+            .Where(candidate => IsProcessAlive(candidate.Key))
+            .Select(candidate => NormalizeRoot(candidate.Value))
+            .Where(root => !string.IsNullOrWhiteSpace(root))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var removed = 0;
         foreach (var row in rows)

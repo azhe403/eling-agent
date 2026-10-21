@@ -69,9 +69,8 @@ function Resolve-ElingBackendExe {
 
 $exe = Resolve-ElingBackendExe -Root $root -OutputRootPath $elingOutputRootPath
 
-# Claim the output root for the duration of the validation: a sweep running
-# while this script still uses the folder has to leave it alone.
-New-OutputRootClaim -Root $elingOutputRootPath
+# The output root is claimed further down, inside the try that releases it:
+# a claim taken here would outlive a crash before the phases start.
 
 $results = @()
 $failed = 0
@@ -198,9 +197,15 @@ function Start-ElingProcess {
 }
 
 function Write-StreamTail {
-    # Prints the tail of a drained stream. A phase that fails silently is the
-    # hardest kind to diagnose, and the backend's own log is the only thing
-    # that says why.
+    <#
+    .SYNOPSIS
+        Prints the tail of a drained child-process stream.
+    .DESCRIPTION
+        A phase that fails silently is the hardest kind to diagnose, and the
+        backend's own log is the only thing that says why. The wait is
+        bounded: a survivor that never died must not turn a failed phase into
+        a hung script.
+    #>
     param(
         [string]$Label,
         $Task
@@ -208,7 +213,7 @@ function Write-StreamTail {
 
     if ($null -eq $Task) { return }
     try {
-        if (-not $Task.Wait(2000)) { return }
+        if (-not $Task.Wait(3000)) { return }
         $text = $Task.Result
         if ([string]::IsNullOrWhiteSpace($text)) { return }
         Write-Host "  --- $Label (last 20 lines) ---" -ForegroundColor DarkGray
@@ -335,12 +340,17 @@ function Test-Phase {
     }
 }
 
-# The phases below run inside a try whose finally does the cleanup: a crash
-# between the first phase and the summary would otherwise leave the scratch
-# scope AND the output-root claim behind, which is the same kind of leak this
-# script was fixed for.
+# The phases below run inside a try whose finally does ALL the cleanup: a
+# crash between the first phase and the summary would otherwise leave the
+# scratch scope AND the output-root claim behind, which is the same kind of
+# leak this script was fixed for.
 $leftovers = @()
 try {
+# The output-root claim is taken here rather than at the top of the script,
+# so it is inside the try: anything that throws between the script's start
+# and here would otherwise leave a claim nobody releases.
+New-OutputRootClaim -Root $elingOutputRootPath
+
 # --- Phase 1: Build (skipped with -RuntimeOnly) ---
 if (-not $RuntimeOnly) {
     Test-Phase "Build backend" {
@@ -457,22 +467,28 @@ Test-Phase "Stdio MCP mode" {
 # Every spawned process is dead by now, so a temp dir that was locked during
 # its phase can finally go -- and with it the scratch scope holding the
 # catalogue, the heartbeat files and the test memories this run produced.
-foreach ($dir in $script:tempDirs) {
-    Remove-ValidationTempDir -Dir $dir -Attempts 3
-    if (Test-Path -LiteralPath $dir) { $leftovers += $dir }
-}
-if (Test-Path -LiteralPath $script:validationScope) {
-    try { Remove-Item -LiteralPath $script:validationScope -Recurse -Force -ErrorAction Stop } catch {}
-}
+#
+# The cleanup lives in the finally, not here: a crash in a phase would
+# otherwise skip it and leave the scratch scope behind, which is the same
+# leak this script was fixed for.
 }
 finally {
+    foreach ($dir in $script:tempDirs) {
+        Remove-ValidationTempDir -Dir $dir -Attempts 3
+        if (Test-Path -LiteralPath $dir) { $leftovers += $dir }
+    }
+    if (Test-Path -LiteralPath $script:validationScope) {
+        try { Remove-Item -LiteralPath $script:validationScope -Recurse -Force -ErrorAction Stop } catch {}
+    }
     Remove-OutputRootClaim -Root $elingOutputRootPath
-}
-# A folder that could not be removed is worth saying out loud: it is still
-# holding a workspace the next run will not find.
-if ($leftovers.Count -gt 0) {
-    Write-Host "`nLeftover temp folders:" -ForegroundColor Yellow
-    $leftovers | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+
+    # A folder that could not be removed is worth saying out loud: it is
+    # still holding a workspace the next run will not find. Printed here, so
+    # a crash still gets to say it.
+    if ($leftovers.Count -gt 0) {
+        Write-Host "`nLeftover temp folders:" -ForegroundColor Yellow
+        $leftovers | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+    }
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan

@@ -102,9 +102,7 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
             // In a finally, not after the asserts: a failing assert would
             // otherwise leave the scratch folder behind, which is the very
             // litter this rule exists to remove.
-            try { Directory.Delete(scratch, recursive: true); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            TryDelete(scratch);
         }
     }
 
@@ -143,9 +141,7 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
         }
         finally
         {
-            try { Directory.Delete(scratch, recursive: true); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            TryDelete(scratch);
         }
     }
 
@@ -178,9 +174,7 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
         }
         finally
         {
-            try { Directory.Delete(scratch, recursive: true); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            TryDelete(scratch);
         }
     }
 
@@ -189,11 +183,21 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
     /// a heartbeat. Otherwise the throwaway folder's row comes back on every
     /// sweep, right after the prune dropped it, and the list is never clean.
     /// </summary>
+    /// <remarks>
+    /// The positive control matters: without it the test would pass even if
+    /// the heartbeat recorded nothing at all. A heartbeat on an ordinary
+    /// workspace has to produce a row; a heartbeat on an excluded one must
+    /// not.
+    /// </remarks>
     [Fact]
     public async Task Heartbeat_DoesNotReRecordAnExcludedWorkspace()
     {
+        // "eling-dash-" is one of the product's own excluded prefixes;
+        // "eling-prune-" is not, and is what the control below uses.
         var excluded = Path.Combine(Path.GetTempPath(), "eling-dash-" + Guid.NewGuid().ToString("N")[..8]);
+        var ordinary = Path.Combine(_dir, "ordinary");
         Directory.CreateDirectory(excluded);
+        Directory.CreateDirectory(ordinary);
 
         try
         {
@@ -202,17 +206,19 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
 
             const int pid = 999_999_998;
             registry.Register(Registration(excluded, pid));
-            Assert.Empty(await workspaces.ListAsync());
+            registry.Register(Registration(ordinary, pid));
 
+            // Act
             registry.Heartbeat(pid);
 
-            Assert.Empty(await workspaces.ListAsync());
+            // Assert - the ordinary workspace was recorded, the excluded one
+            // was not.
+            var rows = await workspaces.ListAsync();
+            Assert.Equal(ordinary, Assert.Single(rows).WorkspaceRoot);
         }
         finally
         {
-            try { Directory.Delete(excluded, recursive: true); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            TryDelete(excluded);
         }
     }
 
@@ -245,19 +251,20 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
             // when it is first advanced, so the advance is started first and
             // awaited afterwards.
             using var cts = new CancellationTokenSource();
-            var enumerator = broadcaster.SubscribeAsync(cts.Token).GetAsyncEnumerator(cts.Token);
+            await using var enumerator = broadcaster.SubscribeAsync(cts.Token).GetAsyncEnumerator(cts.Token);
             var pending = enumerator.MoveNextAsync();
 
+            // Act
             await registry.PruneMissingWorkspacesAsync();
 
-            Assert.True(await pending);
+            // Assert - bounded, so a regression fails the test instead of
+            // hanging the run.
+            Assert.True(await pending.AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
             Assert.Equal("runtimes", enumerator.Current);
         }
         finally
         {
-            try { Directory.Delete(scratch, recursive: true); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            TryDelete(scratch);
         }
     }
 
@@ -266,6 +273,17 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
         UserScope.Resolve(Path.Combine(_dir, "user-scope")),
         new MemoryChangeBroadcaster(),
         workspaces);
+
+    /// <summary>
+    /// Best-effort removal of a scratch folder. A leftover folder is the
+    /// litter this whole change is about, so the fixture does not add to it.
+    /// </summary>
+    private static void TryDelete(string dir)
+    {
+        try { Directory.Delete(dir, recursive: true); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
 
     private static RuntimeRegistration Registration(string workspace, int pid = 0) => new()
     {
