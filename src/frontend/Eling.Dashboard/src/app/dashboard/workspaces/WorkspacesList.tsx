@@ -519,7 +519,7 @@ export function WorkspacesList() {
 
                     {/* The db file path only means something once an index exists —
                         hiding it for never-indexed workspaces keeps the card scannable. */}
-                    {status?.dbPath && status.lastIndexedAt && (
+                    {status?.dbPath && (status.lastIndexedAt || status.dbSizeBytes > 0) && (
                       <div className="flex min-w-0 items-center gap-2">
                         <PathText
                           prefix="🗄️"
