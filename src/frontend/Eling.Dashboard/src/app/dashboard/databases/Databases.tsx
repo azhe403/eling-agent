@@ -1337,130 +1337,6 @@ export function Databases() {
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-{showCreate ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Create connection</CardTitle>
-            <CardDescription>Type the fields, or paste a connection string. The name follows the fields until you give it one of your own.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Input
-              placeholder="name (auto-filled from database@host)"
-              value={cEffectiveName}
-              onChange={e => { setCName(e.target.value); setCNameEdited(e.target.value.trim() !== "") }}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <Select value={cProvider} onValueChange={onCreateProviderChange}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Sqlite">Sqlite</SelectItem>
-                  <SelectItem value="MySql">MySql</SelectItem>
-                </SelectContent>
-              </Select>
-              <div className="flex rounded-lg border p-0.5">
-                <Button
-                  size="sm"
-                  variant={cMode === "manual" ? "secondary" : "ghost"}
-                  onClick={() => setCMode("manual")}
-                >
-                  Manual
-                </Button>
-                <Button
-                  size="sm"
-                  variant={cMode === "raw" ? "secondary" : "ghost"}
-                  onClick={() => setCMode("raw")}
-                >
-                  Raw string
-                </Button>
-              </div>
-            </div>
-
-            {cMode === "manual" ? (
-              cProvider === "Sqlite" ? (
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="database file"
-                    value={cFilePath}
-                    onChange={e => setCFilePath(e.target.value)}
-                    className="flex-1"
-                  />
-                  <Button type="button" variant="outline" onClick={() => openPicker("create")}>
-                    Browse
-                  </Button>
-                </div>
-              ) : (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Input placeholder="host" value={cHost} onChange={e => setCHost(e.target.value)} />
-                  <Input
-                    placeholder="port (3306)"
-                    value={cPort}
-                    onChange={e => setCPort(e.target.value)}
-                    aria-invalid={cPortInvalid}
-                  />
-                  <Input placeholder="username" value={cUsername} onChange={e => setCUsername(e.target.value)} />
-                  <Input
-                    type="password"
-                    placeholder="password"
-                    value={cPassword}
-                    onChange={e => setCPassword(e.target.value)}
-                  />
-                  {/* Last, because the list it offers comes from the server
-                      these credentials reach. */}
-                  <DatabaseCombobox
-                    value={cDatabase}
-                    onChange={setCDatabase}
-                    loadDatabases={loadCreateDatabases}
-                    placeholder="database (optional - pick or type)"
-                    className="sm:col-span-2"
-                  />
-                </div>
-              )
-            ) : (
-              <div className="flex gap-2">
-                <Input
-                  placeholder={cProvider === "Sqlite" ? "Data Source path or connection string" : "connection string"}
-                  value={cConnStr}
-                  onChange={e => setCConnStr(e.target.value)}
-                  className="flex-1"
-                />
-                {cProvider === "Sqlite" ? (
-                  <Button type="button" variant="outline" onClick={() => openPicker("create")}>
-                    Browse
-                  </Button>
-                ) : null}
-              </div>
-            )}
-            {cPortInvalid ? (
-              <p className="text-xs text-destructive">Port must be a number between 1 and 65535.</p>
-            ) : null}
-            <Select value={cEnv} onValueChange={(val) => { if (val) setCEnv(val) }}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Environment" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Development">Development</SelectItem>
-                <SelectItem value="Staging">Staging</SelectItem>
-                <SelectItem value="Production">Production</SelectItem>
-                <SelectItem value="ReadOnly">ReadOnly</SelectItem>
-              </SelectContent>
-            </Select>
-            <div className="flex gap-2">
-              <Button onClick={create} disabled={!cReady}>Create</Button>
-              <Button variant="outline" onClick={testConnectionCreate} disabled={createTesting || !cReady}>
-                {createTesting ? "Testing…" : "Test"}
-              </Button>
-              <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-            </div>
-            {createTestResult ? (
-              <p className={`text-xs ${createTestResult.ok ? "text-green-600" : "text-destructive"}`}>
-                {createTestResult.ok ? "OK" : "FAIL"} {createTestResult.message} ({createTestResult.latencyMs}ms)
-              </p>
-            ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
 
       {detected.length > 0 ? (
         <Card>
@@ -2103,6 +1979,132 @@ export function Databases() {
               {editTestResult ? (
                 <p className={`text-xs ${editTestResult.ok ? "text-green-600" : "text-destructive"}`}>
                   {editTestResult.ok ? "OK" : "FAIL"} {editTestResult.message} ({editTestResult.latencyMs}ms)
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+{showCreate ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-lg rounded-lg border border-border bg-background p-4 shadow-lg">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="font-medium">New connection</p>
+              <Button variant="ghost" size="sm" onClick={() => setShowCreate(false)}>Close</Button>
+            </div>
+            <div className="space-y-3">
+              <Input
+                placeholder="name (auto-filled from database@host)"
+                value={cEffectiveName}
+                onChange={e => { setCName(e.target.value); setCNameEdited(e.target.value.trim() !== "") }}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={cProvider} onValueChange={onCreateProviderChange}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue placeholder="Provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Sqlite">Sqlite</SelectItem>
+                    <SelectItem value="MySql">MySql</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="flex rounded-lg border p-0.5">
+                  <Button
+                    size="sm"
+                    variant={cMode === "manual" ? "secondary" : "ghost"}
+                    onClick={() => setCMode("manual")}
+                  >
+                    Manual
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={cMode === "raw" ? "secondary" : "ghost"}
+                    onClick={() => setCMode("raw")}
+                  >
+                    Raw string
+                  </Button>
+                </div>
+              </div>
+
+              {cMode === "manual" ? (
+                cProvider === "Sqlite" ? (
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="database file"
+                      value={cFilePath}
+                      onChange={e => setCFilePath(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button type="button" variant="outline" onClick={() => openPicker("create")}>
+                      Browse
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Input placeholder="host" value={cHost} onChange={e => setCHost(e.target.value)} />
+                    <Input
+                      placeholder="port (3306)"
+                      value={cPort}
+                      onChange={e => setCPort(e.target.value)}
+                      aria-invalid={cPortInvalid}
+                    />
+                    <Input placeholder="username" value={cUsername} onChange={e => setCUsername(e.target.value)} />
+                    <Input
+                      type="password"
+                      placeholder="password"
+                      value={cPassword}
+                      onChange={e => setCPassword(e.target.value)}
+                    />
+                    {/* Last, because the list it offers comes from the server
+                        these credentials reach. */}
+                    <DatabaseCombobox
+                      value={cDatabase}
+                      onChange={setCDatabase}
+                      loadDatabases={loadCreateDatabases}
+                      placeholder="database (optional - pick or type)"
+                      className="sm:col-span-2"
+                    />
+                  </div>
+                )
+              ) : (
+                <div className="flex gap-2">
+                  <Input
+                    placeholder={cProvider === "Sqlite" ? "Data Source path or connection string" : "connection string"}
+                    value={cConnStr}
+                    onChange={e => setCConnStr(e.target.value)}
+                    className="flex-1"
+                  />
+                  {cProvider === "Sqlite" ? (
+                    <Button type="button" variant="outline" onClick={() => openPicker("create")}>
+                      Browse
+                    </Button>
+                  ) : null}
+                </div>
+              )}
+              {cPortInvalid ? (
+                <p className="text-xs text-destructive">Port must be a number between 1 and 65535.</p>
+              ) : null}
+              <Select value={cEnv} onValueChange={(val) => { if (val) setCEnv(val) }}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Environment" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Development">Development</SelectItem>
+                  <SelectItem value="Staging">Staging</SelectItem>
+                  <SelectItem value="Production">Production</SelectItem>
+                  <SelectItem value="ReadOnly">ReadOnly</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="flex gap-2">
+                <Button onClick={create} disabled={!cReady}>Create</Button>
+                <Button variant="outline" onClick={testConnectionCreate} disabled={createTesting || !cReady}>
+                  {createTesting ? "Testing…" : "Test"}
+                </Button>
+                <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+              </div>
+              {createTestResult ? (
+                <p className={`text-xs ${createTestResult.ok ? "text-green-600" : "text-destructive"}`}>
+                  {createTestResult.ok ? "OK" : "FAIL"} {createTestResult.message} ({createTestResult.latencyMs}ms)
                 </p>
               ) : null}
             </div>
