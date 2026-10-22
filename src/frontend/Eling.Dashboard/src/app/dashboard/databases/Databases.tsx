@@ -1874,12 +1874,12 @@ export function Databases() {
 
       {editing ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-lg rounded-lg border border-border bg-background p-4 shadow-lg">
-            <div className="mb-3 flex items-center justify-between">
+          <div className="flex h-[30rem] w-full max-w-lg flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
+            <div className="mb-3 flex shrink-0 items-center justify-between">
               <p className="font-medium">Edit connection · {editing.name}</p>
               <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>Close</Button>
             </div>
-            <div className="space-y-3">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
               <Input placeholder="name" value={eName} onChange={e => setEName(e.target.value)} />
               <Input value={eProvider} disabled />
               <div className="flex rounded-lg border p-0.5 w-fit">
@@ -1969,30 +1969,30 @@ export function Databases() {
                 <input type="checkbox" checked={eRequire} onChange={e => setERequire(e.target.checked)} />
                 Require approval for mutations
               </label>
-              <div className="flex gap-2">
-                <Button onClick={saveEdit} disabled={!eReady}>Save</Button>
-                <Button variant="outline" onClick={testConnectionEdit} disabled={editTesting || !eReady}>
-                  {editTesting ? "Testing…" : "Test"}
-                </Button>
-                <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
-              </div>
               {editTestResult ? (
                 <p className={`text-xs ${editTestResult.ok ? "text-green-600" : "text-destructive"}`}>
                   {editTestResult.ok ? "OK" : "FAIL"} {editTestResult.message} ({editTestResult.latencyMs}ms)
                 </p>
               ) : null}
             </div>
+            <div className="mt-3 flex shrink-0 gap-2">
+              <Button onClick={saveEdit} disabled={!eReady}>Save</Button>
+              <Button variant="outline" onClick={testConnectionEdit} disabled={editTesting || !eReady}>
+                {editTesting ? "Testing…" : "Test"}
+              </Button>
+              <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+            </div>
           </div>
         </div>
       ) : null}
 {showCreate ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-lg rounded-lg border border-border bg-background p-4 shadow-lg">
-            <div className="mb-3 flex items-center justify-between">
+          <div className="flex h-[30rem] w-full max-w-lg flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
+            <div className="mb-3 flex shrink-0 items-center justify-between">
               <p className="font-medium">New connection</p>
               <Button variant="ghost" size="sm" onClick={() => setShowCreate(false)}>Close</Button>
             </div>
-            <div className="space-y-3">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
               <Input
                 placeholder="name (auto-filled from database@host)"
                 value={cEffectiveName}
@@ -2095,18 +2095,18 @@ export function Databases() {
                   <SelectItem value="ReadOnly">ReadOnly</SelectItem>
                 </SelectContent>
               </Select>
-              <div className="flex gap-2">
-                <Button onClick={create} disabled={!cReady}>Create</Button>
-                <Button variant="outline" onClick={testConnectionCreate} disabled={createTesting || !cReady}>
-                  {createTesting ? "Testing…" : "Test"}
-                </Button>
-                <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-              </div>
               {createTestResult ? (
                 <p className={`text-xs ${createTestResult.ok ? "text-green-600" : "text-destructive"}`}>
                   {createTestResult.ok ? "OK" : "FAIL"} {createTestResult.message} ({createTestResult.latencyMs}ms)
                 </p>
               ) : null}
+            </div>
+            <div className="mt-3 flex shrink-0 gap-2">
+              <Button onClick={create} disabled={!cReady}>Create</Button>
+              <Button variant="outline" onClick={testConnectionCreate} disabled={createTesting || !cReady}>
+                {createTesting ? "Testing…" : "Test"}
+              </Button>
+              <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
             </div>
           </div>
         </div>
