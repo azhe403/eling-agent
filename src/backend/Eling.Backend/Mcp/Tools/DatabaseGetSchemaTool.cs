@@ -82,7 +82,13 @@ public sealed class DatabaseGetSchemaTool
                 Query = tableName,
                 DurationMs = (int)sw.ElapsedMilliseconds
             }, cancellationToken) ?? ValueTask.CompletedTask);
-            throw;
+
+            // The agent gets the category, never the provider's own words: a
+            // MySQL failure reads "Access denied for user 'root'@'10.0.0.5'" and
+            // names the account. The agent's boundary (the DB connection design
+            // spec, section 4.2) forbids a credential in an error message as
+            // firmly as it forbids one in a result.
+            throw new InvalidOperationException("schema failed");
         }
     }
 

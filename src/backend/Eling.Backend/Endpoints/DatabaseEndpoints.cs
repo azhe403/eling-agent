@@ -421,6 +421,14 @@ public static class DatabaseEndpoints
                 logger.LogWarning(ex, "Database adapter not supported for {Id}", id);
                 return Results.BadRequest(ex.Message);
             }
+            catch (ArgumentException ex)
+            {
+                // The stored connection string cannot be read - a broken
+                // registration rather than a bad request, so it answers like
+                // the provider failures below instead of crashing.
+                logger.LogWarning(ex, "Stored connection string is unreadable for {Id}", id);
+                return Results.Problem(statusCode: 502, title: "query failed", detail: ex.Message);
+            }
 
             var maxRows = req.MaxRows;
             if (maxRows < 1) maxRows = 1;
@@ -517,6 +525,14 @@ public static class DatabaseEndpoints
             {
                 logger.LogWarning(ex, "Database adapter not supported for {Id}", id);
                 return Results.BadRequest(ex.Message);
+            }
+            catch (ArgumentException ex)
+            {
+                // The stored connection string cannot be read - a broken
+                // registration rather than a bad request, so it answers like
+                // the provider failures below instead of crashing.
+                logger.LogWarning(ex, "Stored connection string is unreadable for {Id}", id);
+                return Results.Problem(statusCode: 502, title: "mutate failed", detail: ex.Message);
             }
 
             var maxAffected = req.MaxAffectedRows;

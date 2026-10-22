@@ -5,6 +5,7 @@ All notable changes to Eling are documented here. Follows [Keep a Changelog](htt
 ## [Unreleased] - 2026-10-16
 
 ### Fixed
+- **A failed database call answers with a category, not the provider's own words (backend)**: `db_get_schema` re-threw the provider's exception, so a MySQL failure reached the agent as "Access denied for user 'root'@'10.0.0.5'" - it names the account, and the agent's boundary (the DB connection design spec, section 4.2) forbids a credential in an error message as firmly as it forbids one in a result. The tool now answers "schema failed", the same shape `db_query` already used, and the detail stays in the backend log. The same hole was open on the REST side: a stored connection string the provider cannot read made `Target(...)` throw an `ArgumentException` that no handler caught, so the query and mutate endpoints answered with an unhandled exception instead of a response. They now answer `502` with the reason, like the provider failures beside them. Locked by `DatabaseConnectionErrorTests` - four tests that pin the boundary: the agent gets the category, the dashboard gets a problem response, and neither gets the provider's message.
 - **The dashboard's workspace list no longer keeps throwaway workspaces**: scratch rows (folders under the OS temp area) are now dropped once their process is gone, and `validate-eling.ps1` no longer writes into the developer's real stores or hangs on its own backend.
 
 ### Added
