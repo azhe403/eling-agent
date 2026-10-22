@@ -1817,7 +1817,7 @@ export function Databases() {
       ) : null}
 
       {showPicker ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-2xl rounded-lg border border-border bg-background p-4 shadow-lg">
             <div className="mb-3 flex items-center justify-between">
               <p className="font-medium">Select SQLite database file</p>
@@ -1873,8 +1873,8 @@ export function Databases() {
       ) : null}
 
       {editing ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="flex h-[30rem] w-full max-w-lg flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="flex h-[30rem] w-full max-w-2xl flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
             <div className="mb-3 flex shrink-0 items-center justify-between">
               <p className="font-medium">Edit connection · {editing.name}</p>
               <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>Close</Button>
@@ -1986,8 +1986,8 @@ export function Databases() {
         </div>
       ) : null}
 {showCreate ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="flex h-[30rem] w-full max-w-lg flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="flex h-[30rem] w-full max-w-2xl flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
             <div className="mb-3 flex shrink-0 items-center justify-between">
               <p className="font-medium">New connection</p>
               <Button variant="ghost" size="sm" onClick={() => setShowCreate(false)}>Close</Button>
