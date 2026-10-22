@@ -1874,12 +1874,12 @@ export function Databases() {
 
       {editing ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="flex h-[30rem] w-full max-w-2xl flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
+          <div className="flex h-[38rem] max-h-[85vh] w-full max-w-2xl flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
             <div className="mb-3 flex shrink-0 items-center justify-between">
               <p className="font-medium">Edit connection · {editing.name}</p>
               <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>Close</Button>
             </div>
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
               <Input placeholder="name" value={eName} onChange={e => setEName(e.target.value)} />
               <Input value={eProvider} disabled />
               <div className="flex rounded-lg border p-0.5 w-fit">
@@ -1987,12 +1987,12 @@ export function Databases() {
       ) : null}
 {showCreate ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="flex h-[30rem] w-full max-w-2xl flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
+          <div className="flex h-[38rem] max-h-[85vh] w-full max-w-2xl flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
             <div className="mb-3 flex shrink-0 items-center justify-between">
               <p className="font-medium">New connection</p>
               <Button variant="ghost" size="sm" onClick={() => setShowCreate(false)}>Close</Button>
             </div>
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
               <Input
                 placeholder="name (auto-filled from database@host)"
                 value={cEffectiveName}
