@@ -112,17 +112,57 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
         return await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task<DatabaseSchemaInfo> GetSchemaAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<string>> ListDatabasesAsync(CancellationToken ct = default)
+    {
+        await using var conn = new MySqlConnection(ConnectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        // SHOW DATABASES lists what the account may see, and the system
+        // schemas are noise in a picker.
+        cmd.CommandText = "SHOW DATABASES;";
+        cmd.CommandTimeout = 30;
+
+        var databases = new List<string>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var name = reader.GetString(0);
+            if (IsSystemDatabase(name)) continue;
+            databases.Add(name);
+        }
+
+        return databases;
+    }
+
+    /// <summary>
+    /// MySQL's own bookkeeping schemas - never something a person means when
+    /// they pick a database to browse.
+    /// </summary>
+    private static bool IsSystemDatabase(string name) =>
+        name.Equals("information_schema", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("performance_schema", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("mysql", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("sys", StringComparison.OrdinalIgnoreCase);
+
+    public async Task<DatabaseSchemaInfo> GetSchemaAsync(string? database = null, CancellationToken ct = default)
     {
         var tables = new List<TableSchema>();
         await using var conn = new MySqlConnection(ConnectionString);
         await conn.OpenAsync(ct);
 
+        // A connection without a default database is a server-level
+        // connection: it reaches every database, and the tree lists them
+        // instead of the tables of one of them.
+        var schemaFilter = string.IsNullOrWhiteSpace(database)
+            ? "table_schema = DATABASE()"
+            : "table_schema = @schema";
+
         var tableNames = new List<TableInfo>();
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name;";
+            cmd.CommandText = $"SELECT table_name, table_type FROM information_schema.tables WHERE {schemaFilter} ORDER BY table_name;";
             cmd.CommandTimeout = 30;
+            AddSchemaParameter(cmd, database);
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
             {
@@ -140,8 +180,9 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
             var columns = new List<ColumnSchema>();
             await using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT column_name, data_type, is_nullable, column_key FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = @t ORDER BY ordinal_position;";
+                cmd.CommandText = $"SELECT column_name, data_type, is_nullable, column_key FROM information_schema.columns WHERE {schemaFilter} AND table_name = @t ORDER BY ordinal_position;";
                 cmd.CommandTimeout = 30;
+                AddSchemaParameter(cmd, database);
                 cmd.Parameters.AddWithValue("@t", tname);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
@@ -157,8 +198,9 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
             var fks = new List<ForeignKeySchema>();
             await using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT constraint_name, column_name, referenced_table_name, referenced_column_name FROM information_schema.key_column_usage WHERE table_schema = DATABASE() AND table_name = @t AND referenced_table_name IS NOT NULL;";
+                cmd.CommandText = $"SELECT constraint_name, column_name, referenced_table_name, referenced_column_name FROM information_schema.key_column_usage WHERE {schemaFilter} AND table_name = @t AND referenced_table_name IS NOT NULL;";
                 cmd.CommandTimeout = 30;
+                AddSchemaParameter(cmd, database);
                 cmd.Parameters.AddWithValue("@t", tname);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
@@ -175,8 +217,9 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
             var indexGroups = new Dictionary<string, IndexGroup>(StringComparer.Ordinal);
             await using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT index_name, non_unique, column_name FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @t ORDER BY index_name, seq_in_index;";
+                cmd.CommandText = $"SELECT index_name, non_unique, column_name FROM information_schema.statistics WHERE {schemaFilter} AND table_name = @t ORDER BY index_name, seq_in_index;";
                 cmd.CommandTimeout = 30;
+                AddSchemaParameter(cmd, database);
                 cmd.Parameters.AddWithValue("@t", tname);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
@@ -201,5 +244,18 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
         }
 
         return new DatabaseSchemaInfo(tables);
+    }
+
+    /// <summary>
+    /// Binds the schema the query filters on, when the caller named one. The
+    /// filter itself is a fixed string - never caller input - so only the
+    /// value is parameterised.
+    /// </summary>
+    private static void AddSchemaParameter(MySqlCommand cmd, string? database)
+    {
+        if (!string.IsNullOrWhiteSpace(database))
+        {
+            cmd.Parameters.AddWithValue("@schema", database);
+        }
     }
 }

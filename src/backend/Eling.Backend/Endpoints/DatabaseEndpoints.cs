@@ -61,10 +61,11 @@ public static class DatabaseEndpoints
             var logger = loggerFactory.CreateLogger("Database");
             try
             {
+                var connStr = ResolveConnectionString(req.Provider, req.ConnectionString, req.Manual, null);
                 var conn = DatabaseConnection.Create(
                     req.Name,
                     req.Provider,
-                    req.ConnectionString,
+                    connStr,
                     req.Environment,
                     req.AllowAgentMutations,
                     req.RequireApprovalForMutations);
@@ -91,12 +92,12 @@ public static class DatabaseEndpoints
 
             var name = req.Name ?? existing.Name;
             var env = req.Environment ?? existing.Environment;
-            var connStr = string.IsNullOrWhiteSpace(req.ConnectionString) ? existing.ConnectionString : req.ConnectionString!;
             var allow = req.AllowAgentMutations ?? existing.AllowAgentMutations;
             var require = req.RequireApprovalForMutations ?? existing.RequireApprovalForMutations;
 
             try
             {
+                var connStr = ResolveConnectionString(existing.Provider, req.ConnectionString, req.Manual, existing.ConnectionString);
                 var updated = existing with
                 {
                     Name = name,
@@ -122,6 +123,53 @@ public static class DatabaseEndpoints
             return Results.NoContent();
         });
 
+        group.MapPost("/list-databases", async (
+            CreateDatabaseConnectionRequest req,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            var logger = loggerFactory.CreateLogger("Database");
+            // The credentials are the ones just typed into the form, not a
+            // saved connection: this answers "which databases are on that
+            // server" before anything is registered.
+            DatabaseConnection conn;
+            try
+            {
+                var connStr = ResolveConnectionString(req.Provider, req.ConnectionString, req.Manual, null);
+                conn = DatabaseConnection.Create(
+                    "list@local",
+                    req.Provider,
+                    connStr,
+                    req.Environment,
+                    req.AllowAgentMutations,
+                    req.RequireApprovalForMutations);
+            }
+            catch (ArgumentException ex)
+            {
+                logger.LogWarning(ex, "List databases validation failed");
+                return Results.BadRequest(ex.Message);
+            }
+
+            try
+            {
+                var adapter = DatabaseAdapterFactory.CreateAdapter(conn);
+                var databases = await adapter.ListDatabasesAsync(ct);
+                return Results.Ok(databases);
+            }
+            catch (NotSupportedException ex)
+            {
+                logger.LogWarning(ex, "Database adapter not supported");
+                return Results.BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                // The message names the failure category only - the exception
+                // text can carry the user name and the host.
+                logger.LogWarning(ex, "Listing databases failed");
+                return Results.Problem(statusCode: 502, title: "databases failed", detail: "could not read the databases on this server");
+            }
+        });
+
         group.MapPost("/test-connection", async (
             CreateDatabaseConnectionRequest req,
             ILoggerFactory loggerFactory,
@@ -131,10 +179,11 @@ public static class DatabaseEndpoints
             DatabaseConnection conn;
             try
             {
+                var connStr = ResolveConnectionString(req.Provider, req.ConnectionString, req.Manual, null);
                 conn = DatabaseConnection.Create(
                     string.IsNullOrWhiteSpace(req.Name) ? "test@local" : req.Name,
                     req.Provider,
-                    req.ConnectionString,
+                    connStr,
                     req.Environment,
                     req.AllowAgentMutations,
                     req.RequireApprovalForMutations);
@@ -165,6 +214,7 @@ public static class DatabaseEndpoints
 
         group.MapPost("/{id}/test", async (
             string id,
+            TestDatabaseConnectionRequest? req,
             IDatabaseConnectionStore store,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
@@ -173,9 +223,27 @@ public static class DatabaseEndpoints
             var row = await store.FindAsync(id, ct);
             if (row is null) return Results.NotFound();
 
+            // No body: the stored connection is tested as it is. With a body the
+            // caller is trying out an edit, so the entered fields are layered
+            // over the stored connection - a blank password keeps the stored
+            // one.
+            var connectionString = row.ConnectionString;
+            if (req is not null)
+            {
+                try
+                {
+                    connectionString = ResolveConnectionString(row.Provider, req.ConnectionString, req.Manual, row.ConnectionString);
+                }
+                catch (ArgumentException ex)
+                {
+                    logger.LogWarning(ex, "Test connection validation failed for {Id}", id);
+                    return Results.BadRequest(ex.Message);
+                }
+            }
+
             try
             {
-                var adapter = DatabaseAdapterFactory.CreateAdapter(row);
+                var adapter = DatabaseAdapterFactory.CreateAdapter(row with { ConnectionString = connectionString });
                 var result = await adapter.TestAsync(ct);
                 if (result.Ok)
                 {
@@ -198,6 +266,7 @@ public static class DatabaseEndpoints
         group.MapGet("/{id}/schema", async (
             string id,
             string? tableName,
+            string? database,
             IDatabaseConnectionStore store,
             IAuditLogger auditLogger,
             ILoggerFactory loggerFactory,
@@ -221,12 +290,18 @@ public static class DatabaseEndpoints
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                var schema = await adapter.GetSchemaAsync(ct);
+                // A server-level connection - one registered without a
+                // database - has no default schema, so it lists the databases
+                // on the server instead of the tables of one of them.
+                var schema = string.IsNullOrWhiteSpace(database) && IsServerLevel(row)
+                    ? new DatabaseSchemaInfo([]) { Databases = await adapter.ListDatabasesAsync(ct) }
+                    : await adapter.GetSchemaAsync(database, ct);
+
                 if (!string.IsNullOrWhiteSpace(tableName))
                 {
                     var filtered = schema.Tables.Where(t =>
                         string.Equals(t.Name, tableName, StringComparison.Ordinal)).ToList();
-                    schema = new DatabaseSchemaInfo(filtered);
+                    schema = schema with { Tables = filtered };
                 }
                 sw.Stop();
                 await auditLogger.RecordAsync(new AuditEvent
@@ -258,6 +333,52 @@ public static class DatabaseEndpoints
                     DurationMs = (int)sw.ElapsedMilliseconds
                 }, ct);
                 return Results.Problem(statusCode: 502, title: "schema failed", detail: ex.Message);
+            }
+        });
+
+        group.MapPost("/{id}/databases", async (
+            string id,
+            TestDatabaseConnectionRequest? req,
+            IDatabaseConnectionStore store,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            var logger = loggerFactory.CreateLogger("Database");
+            var row = await store.FindAsync(id, ct);
+            if (row is null) return Results.NotFound();
+
+            // The stored password is not in the form, so the entered fields
+            // are layered over the stored connection - a blank password keeps
+            // the stored one.
+            var connectionString = row.ConnectionString;
+            if (req is not null)
+            {
+                try
+                {
+                    connectionString = ResolveConnectionString(row.Provider, req.ConnectionString, req.Manual, row.ConnectionString);
+                }
+                catch (ArgumentException ex)
+                {
+                    logger.LogWarning(ex, "List databases validation failed for {Id}", id);
+                    return Results.BadRequest(ex.Message);
+                }
+            }
+
+            try
+            {
+                var adapter = DatabaseAdapterFactory.CreateAdapter(row with { ConnectionString = connectionString });
+                var databases = await adapter.ListDatabasesAsync(ct);
+                return Results.Ok(databases);
+            }
+            catch (NotSupportedException ex)
+            {
+                logger.LogWarning(ex, "Database adapter not supported for {Id}", id);
+                return Results.BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Listing databases failed for {Id}", id);
+                return Results.Problem(statusCode: 502, title: "databases failed", detail: "could not read the databases on this server");
             }
         });
 
@@ -293,7 +414,7 @@ public static class DatabaseEndpoints
             IDatabaseAdapter adapter;
             try
             {
-                adapter = DatabaseAdapterFactory.CreateAdapter(row);
+                adapter = DatabaseAdapterFactory.CreateAdapter(Target(row, req.Database));
             }
             catch (NotSupportedException ex)
             {
@@ -390,7 +511,7 @@ public static class DatabaseEndpoints
             IDatabaseAdapter adapter;
             try
             {
-                adapter = DatabaseAdapterFactory.CreateAdapter(row);
+                adapter = DatabaseAdapterFactory.CreateAdapter(Target(row, req.Database));
             }
             catch (NotSupportedException ex)
             {
@@ -494,5 +615,81 @@ public static class DatabaseEndpoints
         c.AllowAgentMutations,
         c.RequireApprovalForMutations,
         c.CreatedAt,
-        c.LastConnectedAt);
+        c.LastConnectedAt,
+        ToDetails(c),
+        IsServerLevel(c));
+
+    /// <summary>
+    /// The stored connection read back into fields so the dashboard can
+    /// pre-fill its form. It carries no password - the credential never
+    /// leaves the backend.
+    /// </summary>
+    private static DatabaseConnectionDetails? ToDetails(DatabaseConnection c)
+    {
+        var fields = DatabaseConnectionStringFactory.Parse(c.Provider, c.ConnectionString);
+        if (fields is null) return null;
+
+        return new DatabaseConnectionDetails(
+            fields.Host,
+            fields.Port,
+            fields.Database,
+            fields.Username,
+            fields.FilePath);
+    }
+
+    /// <summary>
+    /// A connection that names no database reaches every database on the
+    /// server, so the dashboard lists them instead of the tables of one.
+    /// </summary>
+    private static bool IsServerLevel(DatabaseConnection c) =>
+        DatabaseConnectionStringFactory.IsServerLevel(c.Provider, c.ConnectionString);
+
+    /// <summary>
+    /// Points the connection at a database, so an unqualified table name
+    /// resolves. A connection that already has its own database keeps it
+    /// unless the caller names another one.
+    /// </summary>
+    private static DatabaseConnection Target(DatabaseConnection connection, string? database)
+    {
+        if (string.IsNullOrWhiteSpace(database)) return connection;
+
+        return connection with
+        {
+            ConnectionString = DatabaseConnectionStringFactory.WithDatabase(
+                connection.Provider,
+                connection.ConnectionString,
+                database)
+        };
+    }
+
+    /// <summary>
+    /// Works out which connection string to use. An explicit connection string
+    /// wins; otherwise the fields the person typed are built into one, layered
+    /// over what is already stored so a blank password keeps the stored one.
+    /// </summary>
+    private static string ResolveConnectionString(
+        DatabaseProvider provider,
+        string? connectionString,
+        ManualConnectionFields? manual,
+        string? storedConnectionString)
+    {
+        if (!string.IsNullOrWhiteSpace(connectionString))
+        {
+            return connectionString;
+        }
+
+        if (manual is null)
+        {
+            return storedConnectionString ?? string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(storedConnectionString))
+        {
+            // Layered onto the stored string, so the options no field covers
+            // - an SSL mode, a charset - survive the edit.
+            return DatabaseConnectionStringFactory.Update(provider, storedConnectionString, manual);
+        }
+
+        return DatabaseConnectionStringFactory.Build(provider, manual);
+    }
 }

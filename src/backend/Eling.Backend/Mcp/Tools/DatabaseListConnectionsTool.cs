@@ -33,6 +33,9 @@ public sealed class DatabaseListConnectionsTool
     {
         var sw = Stopwatch.StartNew();
         var rows = await _store.ListAsync(cancellationToken);
+        // Details is deliberately left null here: it carries the host and the
+        // user name, and the agent boundary (see the DB connection design
+        // spec, section 4.2) never carries credentials.
         var registered = rows.Select(c => new DatabaseConnectionView(
             c.Id,
             c.Name,
@@ -42,7 +45,8 @@ public sealed class DatabaseListConnectionsTool
             c.AllowAgentMutations,
             c.RequireApprovalForMutations,
             c.CreatedAt,
-            c.LastConnectedAt)).ToList();
+            c.LastConnectedAt,
+            Details: null)).ToList();
 
         var unimported = new List<McpDetectedCandidate>();
         if (_scanner is not null)

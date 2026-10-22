@@ -119,7 +119,13 @@ public sealed class SqliteDatabaseAdapter : IDatabaseAdapter
         return await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task<DatabaseSchemaInfo> GetSchemaAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<string>> ListDatabasesAsync(CancellationToken ct = default)
+    {
+        // A SQLite file IS its database - there is no server holding several.
+        return [];
+    }
+
+    public async Task<DatabaseSchemaInfo> GetSchemaAsync(string? database = null, CancellationToken ct = default)
     {
         var tables = new List<TableSchema>();
         await using var conn = new SqliteConnection(ResolveConnectionString());

@@ -100,7 +100,7 @@ Validation (in a static `DatabaseConnection.Create(...)` factory that throws `Ar
 
 API responses use view DTOs that carry `hasConnectionString: true` (never the string). The raw connection string is accepted only on create (POST) and update (PUT); on PUT an empty/omitted connection string means "keep stored value" (same semantics as `ProviderStore.Update`'s apiKey handling). Logs and error messages never include the connection string.
 
-**Masking everywhere, including detect:** no API or MCP response ever carries a password-bearing connection string. Detect output masks the password (`Password=***`; a string no provider builder recognizes is masked wholesale to `"***"`). Import never takes a connection string at all — it takes the `settingsKeys` the user approved and the backend re-reads its own `appsettings.json` under the hood, so no credential crosses the API/MCP boundary in either direction. The only path that accepts a raw connection string is manual create/update (`POST`/`PUT`), where the user typed it themselves.
+**Masking everywhere, including detect:** no API or MCP response ever carries a password-bearing connection string. Detect output masks the password (`Password=***`; a string no provider builder recognizes is masked wholesale to `"***"`). Import never takes a connection string at all — it takes the `settingsKeys` the user approved and the backend re-reads its own `appsettings.json` under the hood, so no credential crosses the API/MCP boundary in either direction. The only paths that accept a raw connection string are manual create/update (`POST`/`PUT`), where the user typed it themselves, and — since the 2026-10-22 amendment (§4) — the `manual` field block, where the user typed the fields instead. Both are the same user typing their own credentials into the same-host dashboard; neither is reachable from the MCP surface.
 
 **Agent visibility boundary (MCP — see §4.2):** the REST API serves the same-host Dashboard and may show `{db}@{host}` names plus password-masked strings. The MCP surface serves the agent (possibly a cloud LLM) and may show the same identity — `connectionId`, name (`{db}@{host}`, host included), `databaseName`, `provider`, `environment` — because the host of an internal/LAN database is not a secret and the name is the user's own readability convention. It may **never** show credentials: no username, no password, no connection string in any form (raw or masked — even a masked string carries the user id), in outputs *or* error messages.
 
@@ -113,17 +113,81 @@ API responses use view DTOs that carry `hasConnectionString: true` (never the st
 | Method | Route | Request | Response |
 |---|---|---|---|
 | GET | `/api/databases` | — | `200` array of views (masked) |
-| POST | `/api/databases` | create DTO (incl. connection string) | `201` view; `400` validation failure |
+| POST | `/api/databases` | create DTO (connection string **or** `manual` fields) | `201` view; `400` validation failure |
 | GET | `/api/databases/{id}` | — | `200` view / `404` |
 | PUT | `/api/databases/{id}` | update DTO (empty connection string = keep) | `200` view / `404` / `400` |
 | DELETE | `/api/databases/{id}` | — | `204` / `404` |
-| POST | `/api/databases/{id}/test` | — | `200` `{ ok, message, latencyMs }` — probe failures are 200 with `ok:false`, not 5xx |
+| POST | `/api/databases/{id}/test` | optional body (empty = test the stored connection) | `200` `{ ok, message, latencyMs }` — probe failures are 200 with `ok:false`, not 5xx |
 | GET | `/api/databases/{id}/schema` | — | `200` schema info / `404` / `502` on provider error |
 | POST | `/api/databases/{id}/query` | `{ sql, maxRows? }` | `200` `QueryResult`; `400` rejected by `SqlSafety`; `502` provider error |
 | POST | `/api/databases/detect` | — | `200` candidates array with **masked** connection strings — **preview only, nothing persisted**; reads `{content root}/appsettings.json` only (local file, no network, no arbitrary paths) |
 | POST | `/api/databases/import` | `{ settingsKeys: [...] }` — the approved candidate keys | `200` per-candidate result `{ settingsKey, name?, imported, reason? }` |
 
 `maxRows` default 100, hard cap 1000 (response carries `truncated: true` when the cap applies).
+
+> **Amendment (2026-10-22) — a connection can be registered by typing its fields.**
+> The dashboard used to ask for a pasted connection string, which means the person
+> assembling it has to know the provider's key names and get the quoting right.
+> `POST /api/databases`, `PUT /api/databases/{id}` and
+> `POST /api/databases/{id}/test` now also accept a `manual` block:
+> `{ host?, port?, database?, username?, password?, filePath? }`. The **backend**
+> builds the connection string from those fields, using the provider's own builder
+> (`MySqlConnectionStringBuilder` / `SqliteConnectionStringBuilder`), so a password
+> containing `;`, `=` or a quote survives intact. The string is never assembled in
+> the browser.
+>
+> The rules:
+> - A non-blank `connectionString` wins over `manual` — the pasted string stays
+>   the escape hatch for the odd case.
+> - Otherwise the `manual` fields are built into a string. MySQL needs a host and
+>   a database; SQLite needs a file path. A missing field is a `400`.
+> - On **update**, the `manual` fields are layered *over* the stored connection, so
+>   a blank field keeps what was stored — fixing the port does not drop the
+>   password. A blank password keeps the stored password; there is no way to clear
+>   a password by leaving the field empty.
+> - `POST /api/databases/{id}/test` takes the same optional block, so an edit can
+>   be tried out before it is saved. With no body it tests the stored connection.
+>
+> The view answers with a `details` block — `host`, `port`, `database`,
+> `username`, `filePath`, parsed from the stored string — so the dashboard can
+> pre-fill its form. It carries **no password**: the credential never leaves the
+> backend. The MCP surface leaves `details` null (§4.2).
+>
+> The dashboard form therefore has two modes: **Manual** (host, port, database,
+> username, password — or a file path for SQLite) and **Raw string** (the pasted
+> connection). The name follows the fields — `{database}@{host}`, with `:port` when
+> it is not 3306, and `{file}@local` for SQLite — the same convention the import
+> from `appsettings` uses, and it stays editable.
+>
+> **Amendment (2026-10-22) — the database is optional, and a server-level
+> connection lists the databases on the server.**
+>
+> The database field may be left empty. For MySQL that makes the connection a
+> **server-level** connection: it reaches every database on the server instead
+> of one of them. For SQLite the question does not arise — a SQLite file *is*
+> its database, so the form asks for a file path, not a database name.
+>
+> A server-level connection changes three things:
+> - **The tree** grows a level: `{connection} > {database} > {table}`. The
+>   connection's schema is the list of databases on the server (MySQL's own
+>   `information_schema`, `performance_schema`, `mysql` and `sys` are left out
+>   — nobody means those when picking a database to browse); expanding one
+>   fetches that database's tables.
+> - **Queries and mutations** carry the database they belong to
+>   (`database` on the request), and the backend points the connection at it
+>   before running the statement, so an unqualified table name resolves.
+> - **The schema endpoint** answers with the database list when no database is
+>   named, and with that database's tables when one is.
+>
+> The same shape reaches the agent: `db_get_schema` returns the databases for a
+> server-level connection and takes a `database` argument for the tables;
+> `db_query` takes a `database` argument too. Database **names** are identity,
+> not credentials — the §4.2 boundary is unchanged.
+>
+> On **update**, an empty database box means "this connection is server-level",
+> so it clears the stored database. Every other blank field keeps what was
+> stored (the password especially — it is never shown again, so an empty box
+> has to mean "keep", not "erase").
 
 ### 4.2 Agent visibility boundary (MCP)
 
@@ -257,6 +321,15 @@ These come from the 2026-09-19 spec but are **deferred — out of scope for this
 | Detect output | passwords masked (`Password=***`); unparseable → `"***"` | Same reason — tool results pass through the agent's context |
 | MCP tool registration | no edit needed — `WithToolsFromAssembly()` auto-discovers `Mcp/Tools/` classes | Current repo state; only `ServerInstructions` gains an entry |
 | Detect source path | fixed `{contentRoot}/appsettings.json`, DI-injected, no request param | Local-only by design; endpoint must not read arbitrary host paths |
+| Manual connection entry | the dashboard types host / port / database / username / password; the **backend** builds the connection string with the provider's own builder | User request (2026-10-22) — a pasted connection string is error-prone for the person filling it in, and a browser-assembled string breaks on a password containing `;` or `=` |
+| Manual vs. raw | both stay available: a non-blank `connectionString` wins over the `manual` block | The pasted string stays the escape hatch for a case the fields do not cover |
+| Manual update | the fields are layered over the stored connection; a blank field keeps what was stored | Fixing the port must not drop the password |
+| Manual name | auto-filled as `{database}@{host}[:{port}]` (`{file}@local` for SQLite), still editable | Same convention the import uses; the person can override it |
+| `details` in the view | `host`, `port`, `database`, `username`, `filePath` — never the password; MCP leaves it null | The edit form needs the fields back to pre-fill; the credential stays on the host |
+| Optional database | for MySQL the database may be empty: a server-level connection that reaches every database on the server | User request (2026-10-22) — one server often holds several databases, and the person may not know the name up front |
+| Server-level tree | `{connection} > {database} > {table}`; the connection's schema is the database list | A server-level connection has no tables of its own, so the tree lists what it does have |
+| Server-level queries | the request carries `database`; the backend points the connection at it | An unqualified table name needs a default schema to resolve |
+| System databases | MySQL's `information_schema`, `performance_schema`, `mysql`, `sys` are not listed | Nobody picks those to browse data |
 | Import naming | derived `{db}@{host}` (MySQL: `{db}@{server}[:{port}]`; SQLite: `{file}@local`), fallback to settings key | User requirement; readable identity across environments. Manual entries keep free-form names |
 
 ---

@@ -25,10 +25,11 @@ public sealed class DatabaseGetSchemaTool
         _audit = audit;
     }
 
-    [McpServerTool(Name = "db_get_schema"), Description("Get schema (tables/columns/FKs/indexes) for a registered database connection.")]
+    [McpServerTool(Name = "db_get_schema"), Description("Get schema (tables/columns/FKs/indexes) for a registered database connection. A connection registered without a database is server-level: called without a database it returns the list of databases on the server (in Databases), and with a database it returns that database's tables.")]
     public async Task<DatabaseSchemaInfo> GetSchemaAsync(
         [Description("Connection id.")] string connectionId,
         [Description("Optional table name filter.")] string? tableName = null,
+        [Description("Optional database name. Required for a server-level connection (one registered without a database) - call this without it first to see the databases.")] string? database = null,
         CancellationToken cancellationToken = default)
     {
         var row = await _store.FindAsync(connectionId, cancellationToken);
@@ -41,12 +42,18 @@ public sealed class DatabaseGetSchemaTool
         var sw = Stopwatch.StartNew();
         try
         {
-            var schema = await adapter.GetSchemaAsync(cancellationToken);
+            // A server-level connection - one registered without a database -
+            // has no default schema, so it lists the databases on the server
+            // instead. The names are identity, never credentials.
+            var schema = string.IsNullOrWhiteSpace(database) && IsServerLevel(row)
+                ? new DatabaseSchemaInfo([]) { Databases = await adapter.ListDatabasesAsync(cancellationToken) }
+                : await adapter.GetSchemaAsync(database, cancellationToken);
+
             if (!string.IsNullOrWhiteSpace(tableName))
             {
                 var filtered = schema.Tables.Where(t =>
                     string.Equals(t.Name, tableName, StringComparison.Ordinal)).ToList();
-                schema = new DatabaseSchemaInfo(filtered);
+                schema = schema with { Tables = filtered };
             }
             sw.Stop();
             await (_audit?.RecordAsync(new AuditEvent
@@ -78,4 +85,11 @@ public sealed class DatabaseGetSchemaTool
             throw;
         }
     }
+
+    /// <summary>
+    /// True when the connection names no database - a server-level
+    /// connection, which reaches every database on the server.
+    /// </summary>
+    private static bool IsServerLevel(DatabaseConnection connection) =>
+        DatabaseConnectionStringFactory.IsServerLevel(connection.Provider, connection.ConnectionString);
 }

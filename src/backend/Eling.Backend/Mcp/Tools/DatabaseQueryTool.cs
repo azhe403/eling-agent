@@ -34,6 +34,7 @@ public sealed class DatabaseQueryTool
         [Description("Connection id.")] string connectionId,
         [Description("SQL statement.")] string sql,
         [Description("Max rows (default 100).")] int maxRows = 100,
+        [Description("Optional database name, for a server-level connection (one registered without a database).")] string? database = null,
         CancellationToken cancellationToken = default)
     {
         var row = await _store.FindAsync(connectionId, cancellationToken);
@@ -61,7 +62,7 @@ public sealed class DatabaseQueryTool
             throw new InvalidOperationException(classification.Reason ?? "rejected");
         }
 
-        var adapter = DatabaseAdapterFactory.CreateAdapter(row);
+        var adapter = DatabaseAdapterFactory.CreateAdapter(Target(row, database));
         var sw = Stopwatch.StartNew();
         try
         {
@@ -100,8 +101,25 @@ public sealed class DatabaseQueryTool
         }
     }
 
-    private async Task<string> BuildMissingConnectionHintAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Points the connection at a database, so an unqualified table name
+    /// resolves. A connection that already names a database keeps it unless
+    /// the caller names another one.
+    /// </summary>
+    private static DatabaseConnection Target(DatabaseConnection connection, string? database)
     {
+        if (string.IsNullOrWhiteSpace(database)) return connection;
+
+        return connection with
+        {
+            ConnectionString = DatabaseConnectionStringFactory.WithDatabase(
+                connection.Provider,
+                connection.ConnectionString,
+                database)
+        };
+    }
+
+    private async Task<string> BuildMissingConnectionHintAsync(CancellationToken cancellationToken)    {
         if (_scanner is null) return string.Empty;
         try
         {
