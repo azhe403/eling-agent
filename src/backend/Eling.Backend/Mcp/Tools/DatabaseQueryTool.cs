@@ -122,7 +122,8 @@ public sealed class DatabaseQueryTool
         };
     }
 
-    private async Task<string> BuildMissingConnectionHintAsync(CancellationToken cancellationToken)    {
+    private async Task<string> BuildMissingConnectionHintAsync(CancellationToken cancellationToken)
+    {
         if (_scanner is null) return string.Empty;
         try
         {
