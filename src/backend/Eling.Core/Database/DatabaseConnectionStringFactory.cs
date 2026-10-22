@@ -190,7 +190,7 @@ public static class DatabaseConnectionStringFactory
         var builder = new MySqlConnectionStringBuilder
         {
             Server = host,
-            Port = (uint)(fields.Port ?? DefaultMySqlPort),
+            Port = (uint)port,
         };
 
         var database = NullIfBlank(fields.Database);

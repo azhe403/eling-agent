@@ -51,7 +51,7 @@ public sealed class DatabaseDetectConnectionsTool
             }, cancellationToken) ?? ValueTask.CompletedTask);
             return result;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             sw.Stop();
             await (_audit?.RecordAsync(new AuditEvent
