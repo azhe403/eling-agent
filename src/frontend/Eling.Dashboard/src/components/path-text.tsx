@@ -19,10 +19,17 @@ export function PathText({
   path,
   prefix,
   className,
+  title,
 }: {
   path: string
   prefix?: string
   className?: string
+  /**
+   * What the hover tooltip shows. Defaults to the path itself; pass it when
+   * the visible text is a shortened form of something longer — the file name
+   * alone still names the file when the full path is in the tooltip.
+   */
+  title?: string
 }) {
   const ref = useRef<HTMLSpanElement>(null)
 
@@ -67,7 +74,7 @@ export function PathText({
       {prefix ? <span className="shrink-0">{prefix}</span> : null}
       <span
         ref={ref}
-        title={path}
+        title={title ?? path}
         className={cn(
           "min-w-0 flex-1 overflow-hidden whitespace-nowrap",
           className

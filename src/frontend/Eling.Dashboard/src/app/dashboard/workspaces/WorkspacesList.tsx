@@ -61,6 +61,18 @@ function workspaceName(root: string | undefined | null) {
   return parts.length ? parts[parts.length - 1] : root
 }
 
+/**
+ * The file name of a path, without its folder.
+ *
+ * Every index lives in the same global store, so the shared prefix printed on
+ * each card said the same thing 31 times over. The name is what tells one
+ * index from another, and the full path stays one hover away.
+ */
+function fileNameOf(path: string) {
+  const parts = path.split(/[/\\]+/).filter(Boolean)
+  return parts.length ? parts[parts.length - 1] : path
+}
+
 type FilterStatus = "all" | "active" | "offline"
 
 async function fetchWorkspacesAndStatuses() {
@@ -512,7 +524,8 @@ export function WorkspacesList() {
                         <div className="min-w-0 flex-1">
                           <PathText
                             prefix="🗄️"
-                            path={status.dbPath}
+                            path={fileNameOf(status.dbPath)}
+                            title={status.dbPath}
                             className="font-mono text-[11px]"
                           />
                         </div>
