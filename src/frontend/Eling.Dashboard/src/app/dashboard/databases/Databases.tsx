@@ -20,6 +20,7 @@ import { copyText } from "@/lib/clipboard"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table"
 import { DatePicker } from "@/components/ui/date-picker"
+import { DatabaseCombobox } from "./DatabaseCombobox"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,6 +40,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
+type DbConnDetails = {
+  host: string | null
+  port: number | null
+  database: string | null
+  username: string | null
+  filePath: string | null
+}
+
 type DbConn = {
   id: string
   name: string
@@ -49,6 +58,9 @@ type DbConn = {
   requireApprovalForMutations: boolean
   createdAt: string
   lastConnectedAt: string | null
+  details?: DbConnDetails | null
+  /** True when the connection names no database: it reaches every database on the server. */
+  isServerLevel?: boolean
 }
 
 type QueryResult = {
@@ -59,7 +71,7 @@ type QueryResult = {
 
 type ColumnSchema = { name: string; dataType: string; isNullable: boolean; isPrimaryKey: boolean }
 type TableSchema = { name: string; kind: string; columns?: ColumnSchema[]; foreignKeys?: { column: string; referencesTable: string; referencesColumn: string }[] }
-type SchemaInfo = { tables?: TableSchema[] }
+type SchemaInfo = { tables?: TableSchema[]; databases?: string[] }
 
 type Detected = {
   settingsKey: string
@@ -71,6 +83,72 @@ type Detected = {
 }
 
 const API = "/api/databases"
+
+const DEFAULT_MYSQL_PORT = 3306
+
+/** The shape the form is in: type the fields, or paste a connection string. */
+type ConnMode = "manual" | "raw"
+
+/**
+ * The name a connection gets when nobody typed one: `{database}@{host}` for
+ * MySQL (with the port when it is not the default) and `{file}@local` for
+ * SQLite. The same convention the import from appsettings uses.
+ *
+ * A MySQL connection with no database is a server-level connection, so its
+ * name is just the host.
+ */
+const deriveConnectionName = (
+  provider: string,
+  host: string,
+  port: string,
+  database: string,
+  filePath: string,
+): string => {
+  if (provider === "Sqlite") {
+    const file = filePath.trim().split(/[\\/]/).filter(Boolean).pop() ?? ""
+    const base = file.replace(/\.[^.]+$/, "")
+    return base ? `${base}@local` : ""
+  }
+  const h = host.trim()
+  if (!h) return ""
+  const p = port.trim()
+  const portSuffix = p && Number(p) !== DEFAULT_MYSQL_PORT ? `:${p}` : ""
+  const db = database.trim()
+  return db ? `${db}@${h}${portSuffix}` : `${h}${portSuffix}`
+}
+
+/**
+ * The fields a person typed, in the shape the backend builds a string from.
+ * A blank database is a server-level connection: the dashboard then lists
+ * the databases on that server.
+ */
+const manualPayload = (
+  provider: string,
+  host: string,
+  port: string,
+  database: string,
+  username: string,
+  password: string,
+  filePath: string,
+) =>
+  provider === "Sqlite"
+    ? { filePath: filePath.trim() || null }
+    : {
+        host: host.trim() || null,
+        port: port.trim() ? Number(port.trim()) : null,
+        database: database.trim() || null,
+        username: username.trim() || null,
+        password: password.length > 0 ? password : null,
+      }
+
+/** True when the port is a number a socket can actually use. */
+const isValidPort = (port: string): boolean => {
+  const trimmed = port.trim()
+  if (!trimmed) return true
+  if (!/^\d+$/.test(trimmed)) return false
+  const value = Number(trimmed)
+  return value >= 1 && value <= 65535
+}
 
 /** A value short enough to sit next to its column name in a toast. */
 const shortValue = (value: string): string =>
@@ -167,8 +245,16 @@ export function Databases() {
   // create form
   const [showCreate, setShowCreate] = useState(false)
   const [cName, setCName] = useState("")
+  const [cNameEdited, setCNameEdited] = useState(false)
   const [cProvider, setCProvider] = useState("Sqlite")
+  const [cMode, setCMode] = useState<ConnMode>("manual")
   const [cConnStr, setCConnStr] = useState("")
+  const [cHost, setCHost] = useState("")
+  const [cPort, setCPort] = useState("")
+  const [cDatabase, setCDatabase] = useState("")
+  const [cUsername, setCUsername] = useState("")
+  const [cPassword, setCPassword] = useState("")
+  const [cFilePath, setCFilePath] = useState("")
   const [cEnv, setCEnv] = useState("ReadOnly")
   const [createTestResult, setCreateTestResult] = useState<{ ok: boolean; message: string; latencyMs: number } | null>(null)
   const [createTesting, setCreateTesting] = useState(false)
@@ -183,14 +269,17 @@ export function Databases() {
   const [schemaInfo, setSchemaInfo] = useState<SchemaInfo | null>(null)
   const [expandedConns, setExpandedConns] = useState<Set<string>>(new Set())
   const [connSchemas, setConnSchemas] = useState<Record<string, SchemaInfo>>({})
-  const [activeTable, setActiveTable] = useState<{ connId: string; table: string } | null>(null)
+  const [activeTable, setActiveTable] = useState<{ connId: string; table: string; database?: string | null } | null>(null)
+  const [expandedDbs, setExpandedDbs] = useState<Set<string>>(new Set())
+  const [dbSchemas, setDbSchemas] = useState<Record<string, SchemaInfo>>({})
   const treeItemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const asideRef = useRef<HTMLElement | null>(null)
   const connSchemasRef = useRef<Record<string, SchemaInfo>>({})
+  const dbSchemasRef = useRef<Record<string, SchemaInfo>>({})
   const schemaConnIdRef = useRef<string | null>(null)
   const schemaRetryRef = useRef<Record<string, number>>({})
   const autoScrollPendingRef = useRef(false)
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; connId: string; table?: string } | null>(null)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; connId: string; table?: string; database?: string } | null>(null)
   const [cellCtxMenu, setCellCtxMenu] = useState<{ x: number; y: number; row: number; col: number } | null>(null)
   const [schemaLoading, setSchemaLoading] = useState(false)
   const [browseTable, setBrowseTable] = useState<string | null>(null)
@@ -218,7 +307,14 @@ export function Databases() {
   const [editing, setEditing] = useState<DbConn | null>(null)
   const [eName, setEName] = useState("")
   const [eProvider, setEProvider] = useState("Sqlite")
+  const [eMode, setEMode] = useState<ConnMode>("manual")
   const [eConnStr, setEConnStr] = useState("")
+  const [eHost, setEHost] = useState("")
+  const [ePort, setEPort] = useState("")
+  const [eDatabase, setEDatabase] = useState("")
+  const [eUsername, setEUsername] = useState("")
+  const [ePassword, setEPassword] = useState("")
+  const [eFilePath, setEFilePath] = useState("")
   const [eEnv, setEEnv] = useState("ReadOnly")
   const [eAllow, setEAllow] = useState(false)
   const [eRequire, setERequire] = useState(true)
@@ -235,6 +331,25 @@ export function Databases() {
   // 403 round-trips) — surface the restriction locally instead.
   const selectedConn = conns.find((c) => c.id === selectedId)
   const selectedIsReadOnly = selectedConn?.environment === "ReadOnly"
+
+  // The name follows the fields the person typed, until they type a name of
+  // their own.
+  const cEffectiveName = cNameEdited
+    ? cName
+    : deriveConnectionName(cProvider, cHost, cPort, cDatabase, cFilePath)
+  const cPortInvalid = !isValidPort(cPort)
+  const cReady = cMode === "raw"
+    ? cConnStr.trim() !== "" && cEffectiveName.trim() !== ""
+    : cProvider === "Sqlite"
+      ? cFilePath.trim() !== "" && cEffectiveName.trim() !== ""
+      : cHost.trim() !== "" && cEffectiveName.trim() !== ""
+
+  const ePortInvalid = !isValidPort(ePort)
+  const eReady = eMode === "raw"
+    ? true
+    : eProvider === "Sqlite"
+      ? eFilePath.trim() !== ""
+      : eHost.trim() !== ""
 
 
   // detect/import
@@ -308,27 +423,45 @@ export function Databases() {
       setRightTab(tab)
 
       const table = urlTable || st?.activeTable?.table
+      const database = params.get("database") || st?.activeTable?.database || null
       if (connId && table) {
         autoScrollPendingRef.current = true
-        setActiveTable({ connId, table })
+        setActiveTable({ connId, table, database })
         setBrowseTable(table)
+        if (database) {
+          setExpandedDbs((prev) => {
+            const next = new Set(prev)
+            next.add(`${connId}:${database}`)
+            return next
+          })
+        }
         void (async () => {
           // try cache first (localStorage) for instant render
-          let schema: SchemaInfo | null = connSchemasRef.current[connId] ?? null
+          let schema: SchemaInfo | null = database
+            ? dbSchemasRef.current[`${connId}:${database}`] ?? null
+            : connSchemasRef.current[connId] ?? null
           if (!schema) {
             try {
-              const raw = localStorage.getItem(schemaCacheKey(connId))
+              const raw = localStorage.getItem(schemaCacheKey(connId, database))
               if (raw) schema = JSON.parse(raw) as SchemaInfo
             } catch { schema = null }
           }
           if (schema) {
-            setConnSchemas((prev) => (prev[connId] ? prev : { ...prev, [connId]: schema }))
+            if (database) {
+              setDbSchemas((prev) => (prev[`${connId}:${database}`] ? prev : { ...prev, [`${connId}:${database}`]: schema }))
+            } else {
+              setConnSchemas((prev) => (prev[connId] ? prev : { ...prev, [connId]: schema }))
+            }
             setSchemaInfo(schema)
           }
           // background revalidate / fetch
-          void ensureSchema(connId)
+          if (database) {
+            void ensureDbSchema(connId, database)
+          } else {
+            void ensureSchema(connId)
+          }
           if (tab === "data") {
-            void browseData(connId, table)
+            void browseData(connId, table, database)
           }
         })()
       }
@@ -344,7 +477,9 @@ export function Databases() {
     if (!activeTable) return
     // Only auto-scroll on restore, not on manual selection
     if (!autoScrollPendingRef.current) return
-    const key = `${activeTable.connId}:${activeTable.table}`
+    const key = activeTable.database
+      ? `${activeTable.connId}:${activeTable.database}:${activeTable.table}`
+      : `${activeTable.connId}:${activeTable.table}`
     let cancelled = false
     const scroll = () => {
       if (cancelled) return
@@ -384,6 +519,7 @@ export function Databases() {
   }, [activeTable, connSchemas, expandedConns])
 
   useEffect(() => { connSchemasRef.current = connSchemas }, [connSchemas])
+  useEffect(() => { dbSchemasRef.current = dbSchemas }, [dbSchemas])
   useEffect(() => { schemaConnIdRef.current = schemaConnId }, [schemaConnId])
 
   // Auto-load schema for any expanded connection that doesn't have one yet
@@ -408,6 +544,7 @@ export function Databases() {
       const params = new URLSearchParams()
       if (schemaConnId) params.set("connectionId", schemaConnId)
       if (activeTable?.table) params.set("table", activeTable.table)
+      if (activeTable?.database) params.set("database", activeTable.database)
       if (rightTab) params.set("tab", rightTab)
       const qs = params.toString()
       window.history.replaceState(null, "", qs ? "?" + qs : window.location.pathname)
@@ -416,23 +553,107 @@ export function Databases() {
     }
   }, [expandedConns, rightTab, selectedId, schemaConnId, activeTable])
 
+  /** The body the create form and the create test share. */
+  const createPayload = () => {
+    const body: Record<string, unknown> = {
+      name: cEffectiveName.trim(),
+      provider: cProvider,
+      environment: cEnv,
+      allowAgentMutations: false,
+      requireApprovalForMutations: true,
+    }
+    if (cMode === "raw") {
+      body.connectionString = cConnStr
+    } else {
+      body.manual = manualPayload(cProvider, cHost, cPort, cDatabase, cUsername, cPassword, cFilePath)
+    }
+    return body
+  }
+
+  /**
+   * The databases on the server the create form points at. The credentials
+   * are not saved yet, so this asks the backend to read them off the server
+   * with what was just typed.
+   */
+  const loadCreateDatabases = async (): Promise<string[]> => {
+    const res = await fetch(API + "/list-databases", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(createPayload()),
+    })
+    if (!res.ok) throw new Error(parseApiError(await res.text()))
+    const data = await res.json()
+    return Array.isArray(data) ? data : []
+  }
+
+  /**
+   * The databases on the server the edited connection points at. The stored
+   * password is not in the form, so the backend layers the entered fields
+   * over the stored connection.
+   */
+  const loadEditDatabases = async (): Promise<string[]> => {
+    if (!editing) return []
+    const res = await fetch(API + "/" + editing.id + "/databases", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        manual: manualPayload(eProvider, eHost, ePort, eDatabase, eUsername, ePassword, eFilePath),
+      }),
+    })
+    if (!res.ok) throw new Error(parseApiError(await res.text()))
+    const data = await res.json()
+    return Array.isArray(data) ? data : []
+  }
+
+  const resetCreateForm = () => {
+    setCName("")
+    setCNameEdited(false)
+    setCMode("manual")
+    setCConnStr("")
+    setCHost("")
+    setCPort("")
+    setCDatabase("")
+    setCUsername("")
+    setCPassword("")
+    setCFilePath("")
+    setCreateTestResult(null)
+  }
+
+  const openCreate = () => {
+    resetCreateForm()
+    setShowCreate(true)
+  }
+
+  const onCreateProviderChange = (value: string | null) => {
+    if (!value) return
+    // The fields of the provider we are leaving do not apply to the one we
+    // are switching to.
+    if (value === "Sqlite") {
+      setCHost("")
+      setCPort("")
+      setCDatabase("")
+      setCUsername("")
+      setCPassword("")
+    } else {
+      setCFilePath("")
+    }
+    setCProvider(value)
+  }
+
   const create = async () => {
+    if (cPortInvalid) {
+      notifyDb("error", "Port must be a number between 1 and 65535.")
+      return
+    }
     try {
       const res = await fetch(API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: cName,
-          provider: cProvider,
-          connectionString: cConnStr,
-          environment: cEnv,
-          allowAgentMutations: false,
-          requireApprovalForMutations: true,
-        }),
+        body: JSON.stringify(createPayload()),
       })
       if (!res.ok) throw new Error(parseApiError(await res.text()))
       setShowCreate(false)
-      setCName(""); setCConnStr(""); setCreateTestResult(null)
+      resetCreateForm()
       await load()
     } catch (e: unknown) {
       notifyDb("error", e instanceof Error ? e.message : "create failed")
@@ -440,20 +661,17 @@ export function Databases() {
   }
 
   const testConnectionCreate = async () => {
+    if (cPortInvalid) {
+      notifyDb("error", "Port must be a number between 1 and 65535.")
+      return
+    }
     setCreateTesting(true)
     setCreateTestResult(null)
     try {
       const res = await fetch(API + "/test-connection", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: cName || "test@local",
-          provider: cProvider,
-          connectionString: cConnStr,
-          environment: cEnv,
-          allowAgentMutations: false,
-          requireApprovalForMutations: true,
-        }),
+        body: JSON.stringify(createPayload()),
       })
       const data = await res.json()
       setCreateTestResult(data)
@@ -473,21 +691,41 @@ export function Databases() {
     setEAllow(c.allowAgentMutations)
     setERequire(c.requireApprovalForMutations)
     setEditTestResult(null)
+    // The stored connection is read back into fields so the form can be
+    // pre-filled. The password is never part of that answer - it stays
+    // blank, and a blank password keeps the stored one.
+    const details = c.details ?? null
+    setEHost(details?.host ?? "")
+    setEPort(details?.port != null ? String(details.port) : "")
+    setEDatabase(details?.database ?? "")
+    setEUsername(details?.username ?? "")
+    setEPassword("")
+    setEFilePath(details?.filePath ?? "")
+    setEMode(details ? "manual" : "raw")
   }
 
   const saveEdit = async () => {
     if (!editing) return
+    if (ePortInvalid) {
+      notifyDb("error", "Port must be a number between 1 and 65535.")
+      return
+    }
+    const body: Record<string, unknown> = {
+      name: eName,
+      environment: eEnv,
+      allowAgentMutations: eAllow,
+      requireApprovalForMutations: eRequire,
+    }
+    if (eMode === "raw") {
+      if (eConnStr.trim() !== "") body.connectionString = eConnStr
+    } else {
+      body.manual = manualPayload(eProvider, eHost, ePort, eDatabase, eUsername, ePassword, eFilePath)
+    }
     try {
       const res = await fetch(API + "/" + editing.id, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: eName,
-          environment: eEnv,
-          connectionString: eConnStr,
-          allowAgentMutations: eAllow,
-          requireApprovalForMutations: eRequire,
-        }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) throw new Error(parseApiError(await res.text()))
       setEditing(null)
@@ -499,25 +737,41 @@ export function Databases() {
 
   const testConnectionEdit = async () => {
     if (!editing) return
+    if (ePortInvalid) {
+      notifyDb("error", "Port must be a number between 1 and 65535.")
+      return
+    }
     setEditTesting(true)
     setEditTestResult(null)
     try {
       let res: Response
-      if (eConnStr.trim() !== "") {
-        res = await fetch(API + "/test-connection", {
+      if (eMode === "raw") {
+        if (eConnStr.trim() !== "") {
+          res = await fetch(API + "/test-connection", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: eName || editing.name,
+              provider: eProvider,
+              connectionString: eConnStr,
+              environment: eEnv,
+              allowAgentMutations: eAllow,
+              requireApprovalForMutations: eRequire,
+            }),
+          })
+        } else {
+          res = await fetch(API + "/" + editing.id + "/test", { method: "POST" })
+        }
+      } else {
+        // The edited fields are layered over the stored connection on the
+        // server, so a blank password keeps the stored one.
+        res = await fetch(API + "/" + editing.id + "/test", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name: eName || editing.name,
-            provider: eProvider,
-            connectionString: eConnStr,
-            environment: eEnv,
-            allowAgentMutations: eAllow,
-            requireApprovalForMutations: eRequire,
+            manual: manualPayload(eProvider, eHost, ePort, eDatabase, eUsername, ePassword, eFilePath),
           }),
         })
-      } else {
-        res = await fetch(API + "/" + editing.id + "/test", { method: "POST" })
       }
       const data = await res.json()
       setEditTestResult(data)
@@ -547,10 +801,12 @@ export function Databases() {
     }
   }
 
-  const schemaCacheKey = (id: string) => `db.schema.cache.${id}`
+  const schemaCacheKey = (id: string, database?: string | null) =>
+    database ? `db.schema.cache.${id}.${database}` : `db.schema.cache.${id}`
 
-  const fetchSchema = async (id: string) => {
-    const res = await fetch(API + "/" + id + "/schema")
+  const fetchSchema = async (id: string, database?: string | null) => {
+    const qs = database ? "?database=" + encodeURIComponent(database) : ""
+    const res = await fetch(API + "/" + id + "/schema" + qs)
     if (!res.ok) throw new Error(parseApiError(await res.text()))
     return await res.json()
   }
@@ -594,6 +850,21 @@ export function Databases() {
     }
   }, [])
 
+  // The tables of one database on a server-level connection. The database
+  // name is part of the cache key, so two databases never share a schema.
+  const ensureDbSchema = useCallback(async (connId: string, database: string) => {
+    const key = `${connId}:${database}`
+    if (dbSchemasRef.current[key]) return
+
+    try {
+      const fresh = await fetchSchema(connId, database)
+      setDbSchemas((prev) => ({ ...prev, [key]: fresh }))
+      try { localStorage.setItem(schemaCacheKey(connId, database), JSON.stringify(fresh)) } catch { /* quota */ }
+    } catch (e: unknown) {
+      notifyDb("error", e instanceof Error ? e.message : "schema failed")
+    }
+  }, [notifyDb])
+
   const toggleConn = (id: string) => {
     const wasExpanded = expandedConns.has(id)
     setExpandedConns((prev) => {
@@ -605,34 +876,56 @@ export function Databases() {
     if (!wasExpanded) void ensureSchema(id)
   }
 
-  const selectTreeTable = async (connId: string, table: string) => {
+  const toggleDb = (connId: string, database: string) => {
+    const key = `${connId}:${database}`
+    const wasExpanded = expandedDbs.has(key)
+    setExpandedDbs((prev) => {
+      const next = new Set(prev)
+      if (wasExpanded) next.delete(key)
+      else next.add(key)
+      return next
+    })
+    if (!wasExpanded) void ensureDbSchema(connId, database)
+  }
+
+  const selectTreeTable = async (connId: string, table: string, database?: string | null) => {
     autoScrollPendingRef.current = false
     setError(null)
-    setActiveTable({ connId, table })
+    setActiveTable({ connId, table, database: database ?? null })
     setSelectedId(connId)
     setSchemaConnId(connId)
     setBrowseTable(table)
     // preserve current tab instead of forcing "data"
     // schema: use in-memory, then localStorage cache, then fetch
-    let schema: SchemaInfo | null = connSchemasRef.current[connId] ?? null
+    let schema: SchemaInfo | null = database
+      ? dbSchemasRef.current[`${connId}:${database}`] ?? null
+      : connSchemasRef.current[connId] ?? null
     if (!schema) {
       try {
-        const raw = localStorage.getItem(schemaCacheKey(connId))
+        const raw = localStorage.getItem(schemaCacheKey(connId, database))
         if (raw) schema = JSON.parse(raw) as SchemaInfo
       } catch { schema = null }
     }
     if (schema) {
-      setConnSchemas((prev) => (prev[connId] ? prev : { ...prev, [connId]: schema }))
+      if (database) {
+        setDbSchemas((prev) => (prev[`${connId}:${database}`] ? prev : { ...prev, [`${connId}:${database}`]: schema }))
+      } else {
+        setConnSchemas((prev) => (prev[connId] ? prev : { ...prev, [connId]: schema }))
+      }
       setSchemaInfo(schema)
     }
-    void ensureSchema(connId) // background revalidate / fetch
+    if (database) {
+      void ensureDbSchema(connId, database) // background revalidate / fetch
+    } else {
+      void ensureSchema(connId) // background revalidate / fetch
+    }
     // only fetch data if currently on Data tab
     if (rightTabRef.current === "data") {
-      void browseData(connId, table)
+      void browseData(connId, table, database)
     }
   }
 
-  const browseData = async (id: string, table: string) => {
+  const browseData = async (id: string, table: string, database?: string | null) => {
     setError(null)
     setEditingCell(null)
     const isNewTable = browseTable !== table
@@ -652,12 +945,12 @@ export function Databases() {
         fetch(API + "/" + id + "/query", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sql, maxRows: 100 }),
+          body: JSON.stringify({ sql, maxRows: 100, database: database ?? null }),
         }),
         fetch(API + "/" + id + "/query", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sql: "SELECT COUNT(*) FROM " + quote + escaped + quote, maxRows: 1 }),
+          body: JSON.stringify({ sql: "SELECT COUNT(*) FROM " + quote + escaped + quote, maxRows: 1, database: database ?? null }),
         }),
       ])
       if (!dataRes.ok) throw new Error(parseApiError(await dataRes.text()))
@@ -698,7 +991,7 @@ export function Databases() {
 
   const refreshData = async () => {
     if (!selectedId || !activeTable) return
-    await browseData(selectedId, activeTable.table)
+    await browseData(selectedId, activeTable.table, activeTable.database)
   }
 
   const buildWherePk = (row: unknown[]) => {
@@ -745,7 +1038,7 @@ export function Databases() {
       const res = await fetch(API + "/" + selectedId + "/mutate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000 }),
+        body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000, database: activeTable?.database ?? null }),
       })
       if (!res.ok) throw new Error(parseApiError(await res.text()))
       await refreshData()
@@ -816,7 +1109,7 @@ export function Databases() {
       const res = await fetch(API + "/" + selectedId + "/mutate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000 }),
+        body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000, database: activeTable?.database ?? null }),
       })
       if (!res.ok) throw new Error(parseApiError(await res.text()))
       await refreshData()
@@ -855,7 +1148,7 @@ export function Databases() {
       const res = await fetch(API + "/" + selectedId + "/mutate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000 }),
+        body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000, database: activeTable?.database ?? null }),
       })
       if (!res.ok) throw new Error(parseApiError(await res.text()))
       const data = await res.json().catch(() => ({ affectedRows: 0, truncated: false }))
@@ -897,7 +1190,7 @@ export function Databases() {
       const res = await fetch(API + "/" + selectedId + "/mutate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000 }),
+        body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000, database: activeTable?.database ?? null }),
       })
       if (!res.ok) throw new Error(parseApiError(await res.text()))
       setNewRow(null)
@@ -942,7 +1235,7 @@ export function Databases() {
         const res = await fetch(API + "/" + selectedId + "/mutate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sql: trimmed, maxAffectedRows: 1000 }),
+          body: JSON.stringify({ sql: trimmed, maxAffectedRows: 1000, database: activeTable?.database ?? null }),
         })
         if (!res.ok) throw new Error(parseApiError(await res.text()))
         const data = await res.json()
@@ -956,7 +1249,7 @@ export function Databases() {
       const res = await fetch(API + "/" + selectedId + "/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: finalSql, maxRows: 100 }),
+        body: JSON.stringify({ sql: finalSql, maxRows: 100, database: activeTable?.database ?? null }),
       })
       if (!res.ok) throw new Error(parseApiError(await res.text()))
       setQResult(await res.json())
@@ -1032,7 +1325,7 @@ export function Databases() {
        </div>
        <div className="flex-1 flex flex-col min-h-0 overflow-hidden gap-4 p-4 pt-2">
          <div className="flex flex-wrap gap-2 shrink-0">
-        <Button onClick={() => setShowCreate(!showCreate)}>
+        <Button onClick={() => { if (showCreate) { setShowCreate(false) } else { openCreate() } }}>
           <Plus className="mr-2 size-4" /> New connection
         </Button>
 
@@ -1046,31 +1339,100 @@ export function Databases() {
 
 {showCreate ? (
         <Card>
-          <CardHeader><CardTitle>Create connection</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Create connection</CardTitle>
+            <CardDescription>Type the fields, or paste a connection string. The name follows the fields until you give it one of your own.</CardDescription>
+          </CardHeader>
           <CardContent className="space-y-3">
-            <Input placeholder="name (e.g. orders@host)" value={cName} onChange={e => setCName(e.target.value)} />
-            <Select value={cProvider} onValueChange={(val) => { if (val) setCProvider(val) }}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Provider" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Sqlite">Sqlite</SelectItem>
-                <SelectItem value="MySql">MySql</SelectItem>
-              </SelectContent>
-            </Select>
-            <div className="flex gap-2">
-              <Input
-                placeholder={cProvider === "Sqlite" ? "Data Source path or connection string" : "connection string"}
-                value={cConnStr}
-                onChange={e => setCConnStr(e.target.value)}
-                className="flex-1"
-              />
-              {cProvider === "Sqlite" ? (
-                <Button type="button" variant="outline" onClick={() => openPicker("create")}>
-                  Browse
+            <Input
+              placeholder="name (auto-filled from database@host)"
+              value={cEffectiveName}
+              onChange={e => { setCName(e.target.value); setCNameEdited(e.target.value.trim() !== "") }}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={cProvider} onValueChange={onCreateProviderChange}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="Provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Sqlite">Sqlite</SelectItem>
+                  <SelectItem value="MySql">MySql</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="flex rounded-lg border p-0.5">
+                <Button
+                  size="sm"
+                  variant={cMode === "manual" ? "secondary" : "ghost"}
+                  onClick={() => setCMode("manual")}
+                >
+                  Manual
                 </Button>
-              ) : null}
+                <Button
+                  size="sm"
+                  variant={cMode === "raw" ? "secondary" : "ghost"}
+                  onClick={() => setCMode("raw")}
+                >
+                  Raw string
+                </Button>
+              </div>
             </div>
+
+            {cMode === "manual" ? (
+              cProvider === "Sqlite" ? (
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="database file"
+                    value={cFilePath}
+                    onChange={e => setCFilePath(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button type="button" variant="outline" onClick={() => openPicker("create")}>
+                    Browse
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input placeholder="host" value={cHost} onChange={e => setCHost(e.target.value)} />
+                  <Input
+                    placeholder="port (3306)"
+                    value={cPort}
+                    onChange={e => setCPort(e.target.value)}
+                    aria-invalid={cPortInvalid}
+                  />
+                  <DatabaseCombobox
+                    value={cDatabase}
+                    onChange={setCDatabase}
+                    loadDatabases={loadCreateDatabases}
+                    placeholder="database (optional - pick or type)"
+                  />
+                  <Input placeholder="username" value={cUsername} onChange={e => setCUsername(e.target.value)} />
+                  <Input
+                    type="password"
+                    placeholder="password"
+                    value={cPassword}
+                    onChange={e => setCPassword(e.target.value)}
+                    className="sm:col-span-2"
+                  />
+                </div>
+              )
+            ) : (
+              <div className="flex gap-2">
+                <Input
+                  placeholder={cProvider === "Sqlite" ? "Data Source path or connection string" : "connection string"}
+                  value={cConnStr}
+                  onChange={e => setCConnStr(e.target.value)}
+                  className="flex-1"
+                />
+                {cProvider === "Sqlite" ? (
+                  <Button type="button" variant="outline" onClick={() => openPicker("create")}>
+                    Browse
+                  </Button>
+                ) : null}
+              </div>
+            )}
+            {cPortInvalid ? (
+              <p className="text-xs text-destructive">Port must be a number between 1 and 65535.</p>
+            ) : null}
             <Select value={cEnv} onValueChange={(val) => { if (val) setCEnv(val) }}>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Environment" />
@@ -1083,8 +1445,8 @@ export function Databases() {
               </SelectContent>
             </Select>
             <div className="flex gap-2">
-              <Button onClick={create}>Create</Button>
-              <Button variant="outline" onClick={testConnectionCreate} disabled={createTesting || !cConnStr}>
+              <Button onClick={create} disabled={!cReady}>Create</Button>
+              <Button variant="outline" onClick={testConnectionCreate} disabled={createTesting || !cReady}>
                 {createTesting ? "Testing…" : "Test"}
               </Button>
               <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
@@ -1144,18 +1506,50 @@ export function Databases() {
               {expandedConns.has(c.id) ? (
                 <div className="ml-3 space-y-0.5">
                   {!connSchemas[c.id] ? <p className="ml-2 text-xs text-muted-foreground">Loading.</p> : null}
-                  {(connSchemas[c.id]?.tables ?? []).map((t) => (
-                    <button
-                      key={t.name}
-                      ref={(el) => { treeItemRefs.current[`${c.id}:${t.name}`] = el }}
-                      className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs hover:bg-accent ${activeTable?.connId === c.id && activeTable?.table === t.name ? "bg-accent font-medium" : ""}`}
-                      onClick={() => selectTreeTable(c.id, t.name)}
-                      onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, connId: c.id, table: t.name }) }}
-                    >
-                      <span>📄</span>
-                      <span className="truncate">{t.name}</span>
-                    </button>
-                  ))}
+                  {c.isServerLevel ? (
+                    // A server-level connection reaches every database on the
+                    // server, so the tree lists them before the tables.
+                    (connSchemas[c.id]?.databases ?? []).map((db) => (
+                      <div key={`${c.id}:${db}`} className="space-y-0.5">
+                        <button
+                          className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs hover:bg-accent"
+                          onClick={() => toggleDb(c.id, db)}
+                        >
+                          <span className="text-xs">{expandedDbs.has(`${c.id}:${db}`) ? "▾" : "▸"}</span>
+                          <span className="truncate font-medium">{db}</span>
+                        </button>
+                        {expandedDbs.has(`${c.id}:${db}`) ? (
+                          <div className="ml-3 space-y-0.5">
+                            {(dbSchemas[`${c.id}:${db}`]?.tables ?? []).map((t) => (
+                              <button
+                                key={`${c.id}:${db}:${t.name}`}
+                                ref={(el) => { treeItemRefs.current[`${c.id}:${db}:${t.name}`] = el }}
+                                className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs hover:bg-accent ${activeTable?.connId === c.id && activeTable?.table === t.name && activeTable?.database === db ? "bg-accent font-medium" : ""}`}
+                                onClick={() => selectTreeTable(c.id, t.name, db)}
+                                onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, connId: c.id, table: t.name, database: db }) }}
+                              >
+                                <span>📄</span>
+                                <span className="truncate">{t.name}</span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))
+                  ) : (
+                    (connSchemas[c.id]?.tables ?? []).map((t) => (
+                      <button
+                        key={t.name}
+                        ref={(el) => { treeItemRefs.current[`${c.id}:${t.name}`] = el }}
+                        className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs hover:bg-accent ${activeTable?.connId === c.id && activeTable?.table === t.name ? "bg-accent font-medium" : ""}`}
+                        onClick={() => selectTreeTable(c.id, t.name)}
+                        onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, connId: c.id, table: t.name }) }}
+                      >
+                        <span>📄</span>
+                        <span className="truncate">{t.name}</span>
+                      </button>
+                    ))
+                  )}
 
                 </div>
               ) : null}
@@ -1467,7 +1861,7 @@ export function Databases() {
           >
             {ctxMenu.table ? (
               <>
-                <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent" onClick={() => { selectTreeTable(ctxMenu.connId, ctxMenu.table!); setCtxMenu(null) }}>Open data</button>
+                <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent" onClick={() => { selectTreeTable(ctxMenu.connId, ctxMenu.table!, ctxMenu.database); setCtxMenu(null) }}>Open data</button>
                 <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent" onClick={() => { const c = conns.find((x) => x.id === ctxMenu.connId); const q = c?.provider === "MySql" ? "`" : '"'; setSql(`SELECT * FROM ${q}${ctxMenu.table}${q}`); setSelectedId(ctxMenu.connId); setRightTab("sql"); setCtxMenu(null) }}>Query table</button>
               </>
             ) : null}
@@ -1574,26 +1968,14 @@ export function Databases() {
                       if (e.isDirectory) {
                         browse(e.path)
                       } else {
+                        // The manual form takes the path, the raw form takes a
+                        // connection string.
                         if (pickerTarget === "edit") {
-                          setEConnStr("Data Source=" + e.path)
-                          setEName((prev) => {
-                            if (prev.trim() !== "") return prev
-                            const parts = e.path.split(/[\\\\/]/).filter(Boolean)
-                            const file = parts.pop() ?? ""
-                            const folder = parts.pop() ?? "local"
-                            const base = file.replace(/\.[^.]+$/, "")
-                            return `${base}@${folder}`
-                          })
+                          if (eMode === "manual") setEFilePath(e.path)
+                          else setEConnStr("Data Source=" + e.path)
                         } else {
-                          setCConnStr("Data Source=" + e.path)
-                          setCName((prev) => {
-                            if (prev.trim() !== "") return prev
-                            const parts = e.path.split(/[\\\\/]/).filter(Boolean)
-                            const file = parts.pop() ?? ""
-                            const folder = parts.pop() ?? "local"
-                            const base = file.replace(/\.[^.]+$/, "")
-                            return `${base}@${folder}`
-                          })
+                          if (cMode === "manual") setCFilePath(e.path)
+                          else setCConnStr("Data Source=" + e.path)
                         }
                         setShowPicker(false)
                       }
@@ -1622,15 +2004,72 @@ export function Databases() {
             <div className="space-y-3">
               <Input placeholder="name" value={eName} onChange={e => setEName(e.target.value)} />
               <Input value={eProvider} disabled />
-              <div className="flex gap-2">
-                <Input
-                  placeholder="new connection string (leave empty to keep stored)"
-                  value={eConnStr}
-                  onChange={e => setEConnStr(e.target.value)}
-                  className="flex-1"
-                />
-                <Button type="button" variant="outline" onClick={() => openPicker("edit")}>Browse</Button>
+              <div className="flex rounded-lg border p-0.5 w-fit">
+                <Button
+                  size="sm"
+                  variant={eMode === "manual" ? "secondary" : "ghost"}
+                  onClick={() => setEMode("manual")}
+                >
+                  Manual
+                </Button>
+                <Button
+                  size="sm"
+                  variant={eMode === "raw" ? "secondary" : "ghost"}
+                  onClick={() => setEMode("raw")}
+                >
+                  Raw string
+                </Button>
               </div>
+              {eMode === "manual" ? (
+                eProvider === "Sqlite" ? (
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="database file"
+                      value={eFilePath}
+                      onChange={e => setEFilePath(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button type="button" variant="outline" onClick={() => openPicker("edit")}>Browse</Button>
+                  </div>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Input placeholder="host" value={eHost} onChange={e => setEHost(e.target.value)} />
+                    <Input
+                      placeholder="port (3306)"
+                      value={ePort}
+                      onChange={e => setEPort(e.target.value)}
+                      aria-invalid={ePortInvalid}
+                    />
+                    <DatabaseCombobox
+                      value={eDatabase}
+                      onChange={setEDatabase}
+                      loadDatabases={loadEditDatabases}
+                      placeholder="database (optional - pick or type)"
+                    />
+                    <Input placeholder="username" value={eUsername} onChange={e => setEUsername(e.target.value)} />
+                    <Input
+                      type="password"
+                      placeholder="password (leave empty to keep the stored one)"
+                      value={ePassword}
+                      onChange={e => setEPassword(e.target.value)}
+                      className="sm:col-span-2"
+                    />
+                  </div>
+                )
+              ) : (
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="new connection string (leave empty to keep stored)"
+                    value={eConnStr}
+                    onChange={e => setEConnStr(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button type="button" variant="outline" onClick={() => openPicker("edit")}>Browse</Button>
+                </div>
+              )}
+              {ePortInvalid ? (
+                <p className="text-xs text-destructive">Port must be a number between 1 and 65535.</p>
+              ) : null}
               <Select value={eEnv} onValueChange={(val) => { if (val) setEEnv(val) }}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Environment" />
@@ -1651,8 +2090,8 @@ export function Databases() {
                 Require approval for mutations
               </label>
               <div className="flex gap-2">
-                <Button onClick={saveEdit}>Save</Button>
-                <Button variant="outline" onClick={testConnectionEdit} disabled={editTesting}>
+                <Button onClick={saveEdit} disabled={!eReady}>Save</Button>
+                <Button variant="outline" onClick={testConnectionEdit} disabled={editTesting || !eReady}>
                   {editTesting ? "Testing…" : "Test"}
                 </Button>
                 <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
