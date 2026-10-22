@@ -1936,6 +1936,7 @@ export function Databases() {
                       value={eDatabase}
                       onChange={setEDatabase}
                       loadDatabases={loadEditDatabases}
+                      serverKey={`${eProvider}|${eHost}|${ePort}|${eFilePath}|${eUsername}`}
                       placeholder="database (optional - pick or type)"
                       className="sm:col-span-2"
                     />
@@ -2068,6 +2069,7 @@ export function Databases() {
                       value={cDatabase}
                       onChange={setCDatabase}
                       loadDatabases={loadCreateDatabases}
+                      serverKey={`${cProvider}|${cHost}|${cPort}|${cFilePath}|${cUsername}`}
                       placeholder="database (optional - pick or type)"
                       className="sm:col-span-2"
                     />

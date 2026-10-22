@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useState } from "react"
 import { ChevronDown, Loader2 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
@@ -24,6 +24,7 @@ export function DatabaseCombobox({
   value,
   onChange,
   loadDatabases,
+  serverKey,
   placeholder,
   disabled,
   id,
@@ -33,28 +34,40 @@ export function DatabaseCombobox({
   onChange: (value: string) => void
   /** Reads the databases on the server. */
   loadDatabases: () => Promise<string[]>
+  /**
+   * Identifies the server the list belongs to. When it changes the list is
+   * stale - the databases on one server are not the databases on another -
+   * so it is dropped and the next open reads the new one.
+   */
+  serverKey: string
   placeholder?: string
   disabled?: boolean
   id?: string
   className?: string
 }) {
   const [open, setOpen] = useState(false)
-  const [databases, setDatabases] = useState<string[]>([])
+  const [loaded, setLoaded] = useState<{ key: string; databases: string[] } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // The list belongs to the connection it was read from; a change of host
-  // makes it stale.
-  const loadedRef = useRef(false)
+
+  // The list belongs to the server it was read from, so it only counts while
+  // that server is still the one on the form.
+  const isStale = loaded !== null && loaded.key !== serverKey
+  const databases = loaded?.key === serverKey ? loaded.databases : []
 
   const fetchDatabases = async () => {
+    // The key is taken before the read, so a server that changes while the
+    // read is in flight still files the answer under the server it came from.
+    const key = serverKey
     setLoading(true)
     setError(null)
     try {
-      setDatabases(await loadDatabases())
-      loadedRef.current = true
+      setLoaded({ key, databases: await loadDatabases() })
     } catch {
       setError("Could not read the databases on this server.")
-      setDatabases([])
+      // Nothing was read, so nothing is cached: the next open tries again,
+      // which is what lets a corrected password be picked up.
+      setLoaded(null)
     } finally {
       setLoading(false)
     }
@@ -62,9 +75,9 @@ export function DatabaseCombobox({
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next)
-    // Opening the list for the first time reads the server; after that the
-    // list is reused.
-    if (next && !loadedRef.current && !loading) {
+    // Opening the list reads the server unless the list on hand already came
+    // from it; after a change of server the old list no longer counts.
+    if (next && !loading && loaded?.key !== serverKey) {
       void fetchDatabases()
     }
   }
@@ -92,7 +105,12 @@ export function DatabaseCombobox({
           {error ? (
             <p className="px-2 py-1.5 text-xs text-destructive">{error}</p>
           ) : null}
-          {!error && databases.length === 0 && !loading ? (
+          {!error && !loading && isStale ? (
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">
+              The server changed. Close and reopen to read its databases.
+            </p>
+          ) : null}
+          {!error && !isStale && databases.length === 0 && !loading ? (
             <p className="px-2 py-1.5 text-xs text-muted-foreground">
               No databases found. Type a name to use one anyway.
             </p>
