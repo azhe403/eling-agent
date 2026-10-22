@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { relativeTime } from "@/lib/date-utils"
+import { formatMegabytes } from "@/lib/format"
 import { FeedEmpty, FeedError } from "./recent-memories"
 import type { Section, WorkspaceSummary } from "./data"
 
@@ -109,9 +110,4 @@ function metricsOf(workspace: WorkspaceSummary): string {
   if (workspace.cpuPercent !== null) parts.push(`${workspace.cpuPercent}%`)
   if (workspace.memoryBytes !== null) parts.push(formatMegabytes(workspace.memoryBytes))
   return parts.join(" · ")
-}
-
-/** Working set in MB, one decimal. Bytes are what the OS reports. */
-function formatMegabytes(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }

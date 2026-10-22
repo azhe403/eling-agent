@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useMemoriesSse, type SseTopic } from "@/hooks/use-memories-sse"
 import { utcToLocal } from "@/lib/date-utils"
+import { formatMegabytes } from "@/lib/format"
 import { PathText } from "@/components/path-text"
 import { group, uptime, type RuntimeDto, type WorkspaceGroup } from "./aggregate"
 
@@ -56,11 +57,6 @@ function workspaceName(root: string | undefined | null) {
   if (!root) return "—"
   const parts = root.split(/[/\\]+/).filter(Boolean)
   return parts.length ? parts[parts.length - 1] : root
-}
-
-/** Working set in MB, one decimal. Bytes are what the OS reports. */
-function formatMegabytes(bytes: number) {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 type FilterStatus = "all" | "active" | "offline"
