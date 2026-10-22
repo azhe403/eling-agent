@@ -127,6 +127,33 @@ public static class DatabaseConnectionStringFactory
         return fields is not null && string.IsNullOrWhiteSpace(fields.Database);
     }
 
+    /// <summary>
+    /// True when the connection names no database - a server-level connection,
+    /// which reaches every database on the server. Convenience overload for a
+    /// <see cref="DatabaseConnection"/>.
+    /// </summary>
+    public static bool IsServerLevel(DatabaseConnection connection) =>
+        IsServerLevel(connection.Provider, connection.ConnectionString);
+
+    /// <summary>
+    /// Points the connection at a database, so an unqualified table name
+    /// resolves. A connection that already names a database keeps it unless
+    /// the caller names another one. A connection without a database (or a
+    /// blank database) is returned unchanged.
+    /// </summary>
+    public static DatabaseConnection Target(DatabaseConnection connection, string? database)
+    {
+        if (string.IsNullOrWhiteSpace(database)) return connection;
+
+        return connection with
+        {
+            ConnectionString = WithDatabase(
+                connection.Provider,
+                connection.ConnectionString,
+                database)
+        };
+    }
+
     private static ManualConnectionFields? ParseMySql(string connectionString)
     {
         MySqlConnectionStringBuilder builder;

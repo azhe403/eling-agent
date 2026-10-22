@@ -293,7 +293,7 @@ public static class DatabaseEndpoints
                 // A server-level connection - one registered without a
                 // database - has no default schema, so it lists the databases
                 // on the server instead of the tables of one of them.
-                var schema = string.IsNullOrWhiteSpace(database) && IsServerLevel(row)
+                var schema = string.IsNullOrWhiteSpace(database) && DatabaseConnectionStringFactory.IsServerLevel(row)
                     ? new DatabaseSchemaInfo([]) { Databases = await adapter.ListDatabasesAsync(ct) }
                     : await adapter.GetSchemaAsync(database, ct);
 
@@ -414,7 +414,7 @@ public static class DatabaseEndpoints
             IDatabaseAdapter adapter;
             try
             {
-                adapter = DatabaseAdapterFactory.CreateAdapter(Target(row, req.Database));
+                adapter = DatabaseAdapterFactory.CreateAdapter(DatabaseConnectionStringFactory.Target(row, req.Database));
             }
             catch (NotSupportedException ex)
             {
@@ -519,7 +519,7 @@ public static class DatabaseEndpoints
             IDatabaseAdapter adapter;
             try
             {
-                adapter = DatabaseAdapterFactory.CreateAdapter(Target(row, req.Database));
+                adapter = DatabaseAdapterFactory.CreateAdapter(DatabaseConnectionStringFactory.Target(row, req.Database));
             }
             catch (NotSupportedException ex)
             {
@@ -633,7 +633,7 @@ public static class DatabaseEndpoints
         c.CreatedAt,
         c.LastConnectedAt,
         ToDetails(c),
-        IsServerLevel(c));
+        DatabaseConnectionStringFactory.IsServerLevel(c));
 
     /// <summary>
     /// The stored connection read back into fields so the dashboard can
@@ -657,27 +657,6 @@ public static class DatabaseEndpoints
     /// A connection that names no database reaches every database on the
     /// server, so the dashboard lists them instead of the tables of one.
     /// </summary>
-    private static bool IsServerLevel(DatabaseConnection c) =>
-        DatabaseConnectionStringFactory.IsServerLevel(c.Provider, c.ConnectionString);
-
-    /// <summary>
-    /// Points the connection at a database, so an unqualified table name
-    /// resolves. A connection that already has its own database keeps it
-    /// unless the caller names another one.
-    /// </summary>
-    private static DatabaseConnection Target(DatabaseConnection connection, string? database)
-    {
-        if (string.IsNullOrWhiteSpace(database)) return connection;
-
-        return connection with
-        {
-            ConnectionString = DatabaseConnectionStringFactory.WithDatabase(
-                connection.Provider,
-                connection.ConnectionString,
-                database)
-        };
-    }
-
     /// <summary>
     /// Works out which connection string to use. An explicit connection string
     /// wins; otherwise the fields the person typed are built into one, layered

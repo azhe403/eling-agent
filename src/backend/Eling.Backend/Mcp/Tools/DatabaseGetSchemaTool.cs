@@ -45,7 +45,7 @@ public sealed class DatabaseGetSchemaTool
             // A server-level connection - one registered without a database -
             // has no default schema, so it lists the databases on the server
             // instead. The names are identity, never credentials.
-            var schema = string.IsNullOrWhiteSpace(database) && IsServerLevel(row)
+            var schema = string.IsNullOrWhiteSpace(database) && DatabaseConnectionStringFactory.IsServerLevel(row)
                 ? new DatabaseSchemaInfo([]) { Databases = await adapter.ListDatabasesAsync(cancellationToken) }
                 : await adapter.GetSchemaAsync(database, cancellationToken);
 
@@ -92,10 +92,4 @@ public sealed class DatabaseGetSchemaTool
         }
     }
 
-    /// <summary>
-    /// True when the connection names no database - a server-level
-    /// connection, which reaches every database on the server.
-    /// </summary>
-    private static bool IsServerLevel(DatabaseConnection connection) =>
-        DatabaseConnectionStringFactory.IsServerLevel(connection.Provider, connection.ConnectionString);
 }

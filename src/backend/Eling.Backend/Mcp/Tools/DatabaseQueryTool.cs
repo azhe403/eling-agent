@@ -68,7 +68,7 @@ public sealed class DatabaseQueryTool
             // Inside the try, so a stored connection string the provider
             // cannot read answers with the category below rather than the raw
             // failure escaping to the agent.
-            var adapter = DatabaseAdapterFactory.CreateAdapter(Target(row, database));
+            var adapter = DatabaseAdapterFactory.CreateAdapter(DatabaseConnectionStringFactory.Target(row, database));
             if (maxRows < 1) maxRows = 1;
             if (maxRows > 1000) maxRows = 1000;
             var result = await adapter.QueryAsync(sql, maxRows, cancellationToken);
@@ -102,24 +102,6 @@ public sealed class DatabaseQueryTool
             }, cancellationToken) ?? ValueTask.CompletedTask);
             throw new InvalidOperationException("query failed");
         }
-    }
-
-    /// <summary>
-    /// Points the connection at a database, so an unqualified table name
-    /// resolves. A connection that already names a database keeps it unless
-    /// the caller names another one.
-    /// </summary>
-    private static DatabaseConnection Target(DatabaseConnection connection, string? database)
-    {
-        if (string.IsNullOrWhiteSpace(database)) return connection;
-
-        return connection with
-        {
-            ConnectionString = DatabaseConnectionStringFactory.WithDatabase(
-                connection.Provider,
-                connection.ConnectionString,
-                database)
-        };
     }
 
     private async Task<string> BuildMissingConnectionHintAsync(CancellationToken cancellationToken)
