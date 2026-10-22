@@ -34,10 +34,17 @@ public static class GitRepositoryResolver
     /// silently attribute a workspace to whatever repository the process happens
     /// to run in.
     /// </param>
-    public static string? ResolveRepositoryRoot(string? path)
+    public static string? ResolveRepositoryRoot(string? path) => ResolveRepository(path).Root;
+
+    /// <summary>
+    /// The main worktree root of the repository containing <paramref name="path"/>,
+    /// and whether that path sits in a linked worktree rather than in the main
+    /// checkout.
+    /// </summary>
+    public static GitRepositoryLocation ResolveRepository(string? path)
     {
         var start = Normalize(path);
-        if (start is null) return null;
+        if (start is null) return new GitRepositoryLocation(null, false);
 
         var directory = start;
         while (true)
@@ -47,7 +54,7 @@ public static class GitRepositoryResolver
             {
                 // A .git directory marks the main checkout, so the checkout root
                 // is the repository root.
-                return directory;
+                return new GitRepositoryLocation(directory, false);
             }
             if (File.Exists(marker))
             {
@@ -55,11 +62,11 @@ public static class GitRepositoryResolver
                 // only thing worth reporting, and an unreadable pointer leaves the
                 // worktree unplaceable — report nothing rather than guess, so an
                 // unresolvable worktree never gets folded into some other repo.
-                return ResolveWorktreeRepositoryRoot(directory, marker);
+                return new GitRepositoryLocation(ResolveWorktreeRepositoryRoot(directory, marker), true);
             }
 
             var parent = Directory.GetParent(directory);
-            if (parent is null) return null;
+            if (parent is null) return new GitRepositoryLocation(null, false);
             directory = parent.FullName;
         }
     }

@@ -103,6 +103,36 @@ public sealed class CodebaseIndexService
     }
 
     /// <summary>
+    /// True when the index of <paramref name="projectRoot"/> exists on disk and
+    /// holds at least one file — the same rule
+    /// <see cref="IsIndexInitializedAsync"/> applies to this service's own root,
+    /// asked about another root.
+    /// </summary>
+    /// <remarks>
+    /// Read-only, and it never creates anything: a missing database means the
+    /// root was never indexed. A worktree of an indexed repository asks this
+    /// question about the main checkout before it builds its own index, so the
+    /// two roots are answered by one rule rather than two.
+    /// </remarks>
+    public static async Task<bool> IsIndexInitializedAtAsync(string projectRoot, CancellationToken ct = default)
+    {
+        var dbPath = Scope.ElingPaths.ResolveCodebaseDbPath(projectRoot);
+        if (!File.Exists(dbPath)) return false;
+        try
+        {
+            using var index = new SqliteCodebaseIndex(dbPath, readOnly: true);
+            var stats = await index.GetStatsAsync(ct);
+            return stats.FileCount > 0;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // An unreadable index is not an active one. The caller decides what
+            // to do about it; this answer only has to be safe.
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Aggregated stats over the given project roots, or this project when null
     /// — feeds the dashboard tiles so they follow the selected scope. Sums file
     /// and chunk counts, takes the newest <c>LastIndexedAt</c>, and returns the
@@ -621,6 +651,11 @@ public sealed class CodebaseIndexService
             }
             foreach (var f in files)
             {
+                // A worktree's .git is a FILE pointing at the main repository's
+                // worktree directory, so the excluded-directory rule never sees
+                // it. Git's own metadata is not code and never belongs in the
+                // index.
+                if (IsGitMetadataFile(f)) continue;
                 var rel = Path.GetRelativePath(_projectRoot, f).Replace('\\', '/');
                 if (!ignores.IsIgnored(rel)) yield return f;
             }
@@ -633,6 +668,14 @@ public sealed class CodebaseIndexService
             }
         }
     }
+
+    /// <summary>
+    /// True for git's own metadata file: the <c>.git</c> pointer of a linked
+    /// worktree. The main checkout's <c>.git</c> is a directory and is already
+    /// excluded as one.
+    /// </summary>
+    private static bool IsGitMetadataFile(string path) =>
+        string.Equals(Path.GetFileName(path), ".git", StringComparison.Ordinal);
 
     private static IReadOnlyList<string>? NormalizeScopes(IReadOnlyList<string>? prefixes)
     {

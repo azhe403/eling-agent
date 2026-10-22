@@ -85,7 +85,7 @@ public sealed class CodebaseWatcherService : BackgroundService
             {
                 await RunFullIncrementalPassAsync("startup catch-up", stoppingToken);
             }
-            else
+            else if (!await InheritRepositoryIndexAsync(stoppingToken))
             {
                 _logger?.LogInformation(
                     "Codebase index on {Root} is empty or uninitialized; skipping startup catch-up pass pending user consent.",
@@ -269,6 +269,30 @@ public sealed class CodebaseWatcherService : BackgroundService
         {
             _logger?.LogError(ex, "Codebase watcher batch index failed.");
         }
+    }
+
+    /// <summary>
+    /// Builds this workspace's index when it is a linked worktree of a
+    /// repository whose index is already active. Returns true when the
+    /// workspace inherited that state and built its own index.
+    /// </summary>
+    /// <remarks>
+    /// The repository was indexed once, on purpose, and the worktree holds the
+    /// same code — asking again would be a question with only one sensible
+    /// answer. The worktree still gets its own index: one database per
+    /// workspace root, exactly as every other workspace has.
+    /// </remarks>
+    private async Task<bool> InheritRepositoryIndexAsync(CancellationToken ct)
+    {
+        var decision = await WorktreeIndexPolicy.EvaluateAsync(_svc.ProjectRoot, null, ct);
+        if (!decision.Inherits) return false;
+
+        _logger?.LogInformation(
+            "Worktree {Worktree} inherits the active codebase index of {Repository}; building its own index.",
+            _svc.ProjectRoot, decision.RepositoryRoot);
+
+        await RunFullIncrementalPassAsync("worktree index inheritance", ct);
+        return true;
     }
 
     private async Task RunFullIncrementalPassAsync(string reason, CancellationToken ct)
