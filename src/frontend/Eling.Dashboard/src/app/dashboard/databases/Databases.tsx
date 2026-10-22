@@ -1874,29 +1874,34 @@ export function Databases() {
 
       {editing ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="flex h-[38rem] max-h-[85vh] w-full max-w-2xl flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
+          <div className="flex h-[34rem] max-h-[92vh] w-full max-w-2xl flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
             <div className="mb-3 flex shrink-0 items-center justify-between">
               <p className="font-medium">Edit connection · {editing.name}</p>
               <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>Close</Button>
             </div>
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 pt-0.5">
               <Input placeholder="name" value={eName} onChange={e => setEName(e.target.value)} />
-              <Input value={eProvider} disabled />
-              <div className="flex rounded-lg border p-0.5 w-fit">
-                <Button
-                  size="sm"
-                  variant={eMode === "manual" ? "secondary" : "ghost"}
-                  onClick={() => setEMode("manual")}
-                >
-                  Manual
-                </Button>
-                <Button
-                  size="sm"
-                  variant={eMode === "raw" ? "secondary" : "ghost"}
-                  onClick={() => setEMode("raw")}
-                >
-                  Raw string
-                </Button>
+              {/* The provider cannot change on an existing connection, so it
+                  sits beside the mode toggle instead of taking a row of its
+                  own - the form then fits without scrolling. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Input value={eProvider} disabled className="w-32" />
+                <div className="flex rounded-lg border p-0.5 w-fit">
+                  <Button
+                    size="sm"
+                    variant={eMode === "manual" ? "secondary" : "ghost"}
+                    onClick={() => setEMode("manual")}
+                  >
+                    Manual
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={eMode === "raw" ? "secondary" : "ghost"}
+                    onClick={() => setEMode("raw")}
+                  >
+                    Raw string
+                  </Button>
+                </div>
               </div>
               {eMode === "manual" ? (
                 eProvider === "Sqlite" ? (
@@ -1961,14 +1966,16 @@ export function Databases() {
                   <SelectItem value="ReadOnly">ReadOnly</SelectItem>
                 </SelectContent>
               </Select>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={eAllow} onChange={e => setEAllow(e.target.checked)} />
-                Allow agent mutations
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={eRequire} onChange={e => setERequire(e.target.checked)} />
-                Require approval for mutations
-              </label>
+              <div className="flex flex-wrap gap-x-6 gap-y-1">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={eAllow} onChange={e => setEAllow(e.target.checked)} />
+                  Allow agent mutations
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={eRequire} onChange={e => setERequire(e.target.checked)} />
+                  Require approval for mutations
+                </label>
+              </div>
               {editTestResult ? (
                 <p className={`text-xs ${editTestResult.ok ? "text-green-600" : "text-destructive"}`}>
                   {editTestResult.ok ? "OK" : "FAIL"} {editTestResult.message} ({editTestResult.latencyMs}ms)
@@ -1987,12 +1994,12 @@ export function Databases() {
       ) : null}
 {showCreate ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="flex h-[38rem] max-h-[85vh] w-full max-w-2xl flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
+          <div className="flex h-[34rem] max-h-[92vh] w-full max-w-2xl flex-col rounded-lg border border-border bg-background p-4 shadow-lg">
             <div className="mb-3 flex shrink-0 items-center justify-between">
               <p className="font-medium">New connection</p>
               <Button variant="ghost" size="sm" onClick={() => setShowCreate(false)}>Close</Button>
             </div>
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 pt-0.5">
               <Input
                 placeholder="name (auto-filled from database@host)"
                 value={cEffectiveName}
