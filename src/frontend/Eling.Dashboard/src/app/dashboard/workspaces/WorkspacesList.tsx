@@ -521,17 +521,15 @@ export function WorkspacesList() {
                         hiding it for never-indexed workspaces keeps the card scannable. */}
                     {status?.dbPath && status.lastIndexedAt && (
                       <div className="flex min-w-0 items-center gap-2">
-                        <div className="min-w-0 flex-1">
-                          <PathText
-                            prefix="🗄️"
-                            path={fileNameOf(status.dbPath)}
-                            title={status.dbPath}
-                            className="font-mono text-[11px]"
-                          />
-                        </div>
-                        {/* Beside the path it names, not in the metrics row: this
-                            is how big that file is, and the path is what it
-                            refers to. */}
+                        <PathText
+                          prefix="🗄️"
+                          path={fileNameOf(status.dbPath)}
+                          title={status.dbPath}
+                          className="font-mono text-[11px]"
+                        />
+                        {/* Immediately after the name it belongs to, not pushed
+                            to the far edge of the card: the reader is looking
+                            at that file, and the size is a fact about it. */}
                         <span
                           className="shrink-0 font-mono text-[11px] text-muted-foreground"
                           title="Ukuran index di disk: file .db + .db-wal"
