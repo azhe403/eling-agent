@@ -131,9 +131,14 @@ public sealed class CoordinatorController(
             var normalized = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             var dbPath = ElingPaths.ResolveCodebaseDbPath(normalized);
 
+            // The size comes from the file, not from the index: a missing or
+            // corrupt database still occupies disk, and what the number is for
+            // is what the workspace costs on disk.
+            var dbSize = Core.Codebase.CodebaseIndexSize.Measure(dbPath);
+
             if (!System.IO.File.Exists(dbPath))
             {
-                result.Add(new ProjectCodebaseStatusDto(normalized, 0, 0, null, dbPath));
+                result.Add(new ProjectCodebaseStatusDto(normalized, 0, 0, null, dbPath, dbSize));
                 continue;
             }
 
@@ -141,12 +146,12 @@ public sealed class CoordinatorController(
             {
                 using var index = new Core.Codebase.SqliteCodebaseIndex(dbPath, readOnly: true);
                 var stats = await index.GetStatsAsync(cancellationToken);
-                result.Add(new ProjectCodebaseStatusDto(normalized, stats.FileCount, stats.ChunkCount, stats.LastIndexedAt, dbPath));
+                result.Add(new ProjectCodebaseStatusDto(normalized, stats.FileCount, stats.ChunkCount, stats.LastIndexedAt, dbPath, dbSize));
             }
             catch
             {
                 // Unreadable/corrupt index: fall back to zero-count DTO so one bad DB never fails the batch.
-                result.Add(new ProjectCodebaseStatusDto(normalized, 0, 0, null, dbPath));
+                result.Add(new ProjectCodebaseStatusDto(normalized, 0, 0, null, dbPath, dbSize));
             }
         }
 
