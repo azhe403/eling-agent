@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useMemoriesSse, type SseTopic } from "@/hooks/use-memories-sse"
 import { utcToLocal } from "@/lib/date-utils"
-import { formatMegabytes } from "@/lib/format"
+import { formatBytes, formatMegabytes } from "@/lib/format"
 import { PathText } from "@/components/path-text"
 import { group, uptime, type RuntimeDto, type WorkspaceGroup } from "./aggregate"
 
@@ -43,6 +43,7 @@ type CodebaseStatusDto = {
   chunks: number
   lastIndexedAt: string | null
   dbPath?: string
+  dbSizeBytes: number
 }
 
 type WorkspaceCodebaseStatusItem = {
@@ -51,6 +52,7 @@ type WorkspaceCodebaseStatusItem = {
   chunks: number
   lastIndexedAt: string | null
   dbPath: string | null
+  dbSizeBytes: number
 }
 
 function workspaceName(root: string | undefined | null) {
@@ -81,6 +83,7 @@ async function fetchWorkspacesAndStatuses() {
         chunks: item.chunks,
         lastIndexedAt: item.lastIndexedAt,
         dbPath: item.dbPath || undefined,
+        dbSizeBytes: item.dbSizeBytes ?? 0,
       }
     }
   }
@@ -253,6 +256,16 @@ export function WorkspacesList() {
   // count is the honest number for a tile labelled "instances".
   const totalInstances = groups.reduce((sum, g) => sum + g.processes.length, 0)
   const totalFiles = Object.values(statusMap).reduce((acc, s) => acc + (s.files || 0), 0)
+  // The size is summed over the same workspaces the file count is, so the two
+  // tiles can be read against each other.
+  const totalDbSize = Object.values(statusMap).reduce(
+    (acc, s) => acc + (s.dbSizeBytes || 0),
+    0
+  )
+  // Only the workspaces that actually hold an index have a size to add up.
+  const sizedWorkspaces = Object.values(statusMap).filter(
+    (s) => s.dbSizeBytes > 0
+  ).length
 
   return (
     <>
@@ -300,9 +313,9 @@ export function WorkspacesList() {
 
       <div className="flex min-w-0 flex-1 flex-col gap-4 p-4 pt-4">
         {/* Metric tiles */}
-        <div className="grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {loading ? (
-            Array.from({ length: 3 }).map((_, i) => (
+            Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-20 rounded-lg" />
             ))
           ) : (
@@ -357,6 +370,21 @@ export function WorkspacesList() {
                 </div>
                 <div className="text-xl font-medium" aria-hidden="true">
                   {totalFiles}
+                </div>
+              </div>
+              <div
+                className="rounded-lg border p-3 text-sm"
+                role="group"
+                aria-label={`Total index size on disk: ${formatBytes(totalDbSize)} across ${sizedWorkspaces} indexed workspaces`}
+              >
+                <div className="text-muted-foreground" aria-hidden="true">
+                  Total Index Size
+                </div>
+                <div className="text-xl font-medium" aria-hidden="true">
+                  {formatBytes(totalDbSize)}
+                </div>
+                <div className="text-[11px] text-muted-foreground" aria-hidden="true">
+                  across {sizedWorkspaces} indexed workspaces
                 </div>
               </div>
             </>
@@ -480,11 +508,24 @@ export function WorkspacesList() {
                     {/* The db file path only means something once an index exists —
                         hiding it for never-indexed workspaces keeps the card scannable. */}
                     {status?.dbPath && status.lastIndexedAt && (
-                      <PathText
-                        prefix="🗄️"
-                        path={status.dbPath}
-                        className="font-mono text-[11px]"
-                      />
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <PathText
+                            prefix="🗄️"
+                            path={status.dbPath}
+                            className="font-mono text-[11px]"
+                          />
+                        </div>
+                        {/* Beside the path it names, not in the metrics row: this
+                            is how big that file is, and the path is what it
+                            refers to. */}
+                        <span
+                          className="shrink-0 font-mono text-[11px] text-muted-foreground"
+                          title="Ukuran index di disk: file .db + .db-wal"
+                        >
+                          {formatBytes(status.dbSizeBytes)}
+                        </span>
+                      </div>
                     )}
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground mt-1">
