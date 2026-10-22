@@ -532,7 +532,7 @@ export function WorkspacesList() {
                             at that file, and the size is a fact about it. */}
                         <span
                           className="shrink-0 font-mono text-[11px] text-muted-foreground"
-                          title="Ukuran index di disk: file .db + .db-wal"
+                          title="Index size on disk: the .db file plus its .db-wal"
                         >
                           {formatBytes(status.dbSizeBytes)}
                         </span>
