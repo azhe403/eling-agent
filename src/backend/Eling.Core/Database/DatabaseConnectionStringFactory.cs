@@ -181,6 +181,12 @@ public static class DatabaseConnectionStringFactory
         var host = NullIfBlank(fields.Host)
             ?? throw new ArgumentException("host must not be blank.", nameof(fields));
 
+        var port = fields.Port ?? DefaultMySqlPort;
+        if (port < 1 || port > 65535)
+        {
+            throw new ArgumentException("port must be between 1 and 65535.", nameof(fields));
+        }
+
         var builder = new MySqlConnectionStringBuilder
         {
             Server = host,
@@ -237,7 +243,12 @@ public static class DatabaseConnectionStringFactory
 
         if (entered.Port is not null)
         {
-            builder.Port = (uint)entered.Port.Value;
+            var port = entered.Port.Value;
+            if (port < 1 || port > 65535)
+            {
+                throw new ArgumentException("port must be between 1 and 65535.", nameof(entered));
+            }
+            builder.Port = (uint)port;
         }
 
         var database = NullIfBlank(entered.Database);

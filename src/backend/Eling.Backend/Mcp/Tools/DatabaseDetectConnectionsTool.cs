@@ -62,7 +62,7 @@ public sealed class DatabaseDetectConnectionsTool
                 Outcome = AuditOutcome.Error,
                 DurationMs = (int)sw.ElapsedMilliseconds
             }, cancellationToken) ?? ValueTask.CompletedTask);
-            throw new InvalidOperationException($"detect failed: {ex.GetType().Name}: {ex.Message}", ex);
+            throw new InvalidOperationException("detect failed");
         }
     }
 }
