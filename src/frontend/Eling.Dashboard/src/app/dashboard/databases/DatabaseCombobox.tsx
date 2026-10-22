@@ -9,6 +9,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import { cn } from "cn"
 
 /**
  * A database field that offers the databases found on the server as a
@@ -26,6 +27,7 @@ export function DatabaseCombobox({
   placeholder,
   disabled,
   id,
+  className,
 }: {
   value: string
   onChange: (value: string) => void
@@ -34,6 +36,7 @@ export function DatabaseCombobox({
   placeholder?: string
   disabled?: boolean
   id?: string
+  className?: string
 }) {
   const [open, setOpen] = useState(false)
   const [databases, setDatabases] = useState<string[]>([])
@@ -67,7 +70,7 @@ export function DatabaseCombobox({
   }
 
   return (
-    <div className="flex gap-2">
+    <div className={cn("flex gap-2", className)}>
       <Input
         id={id}
         placeholder={placeholder}

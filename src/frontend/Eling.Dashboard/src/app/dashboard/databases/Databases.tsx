@@ -1399,18 +1399,20 @@ export function Databases() {
                     onChange={e => setCPort(e.target.value)}
                     aria-invalid={cPortInvalid}
                   />
-                  <DatabaseCombobox
-                    value={cDatabase}
-                    onChange={setCDatabase}
-                    loadDatabases={loadCreateDatabases}
-                    placeholder="database (optional - pick or type)"
-                  />
                   <Input placeholder="username" value={cUsername} onChange={e => setCUsername(e.target.value)} />
                   <Input
                     type="password"
                     placeholder="password"
                     value={cPassword}
                     onChange={e => setCPassword(e.target.value)}
+                  />
+                  {/* Last, because the list it offers comes from the server
+                      these credentials reach. */}
+                  <DatabaseCombobox
+                    value={cDatabase}
+                    onChange={setCDatabase}
+                    loadDatabases={loadCreateDatabases}
+                    placeholder="database (optional - pick or type)"
                     className="sm:col-span-2"
                   />
                 </div>
@@ -2040,18 +2042,20 @@ export function Databases() {
                       onChange={e => setEPort(e.target.value)}
                       aria-invalid={ePortInvalid}
                     />
-                    <DatabaseCombobox
-                      value={eDatabase}
-                      onChange={setEDatabase}
-                      loadDatabases={loadEditDatabases}
-                      placeholder="database (optional - pick or type)"
-                    />
                     <Input placeholder="username" value={eUsername} onChange={e => setEUsername(e.target.value)} />
                     <Input
                       type="password"
                       placeholder="password (leave empty to keep the stored one)"
                       value={ePassword}
                       onChange={e => setEPassword(e.target.value)}
+                    />
+                    {/* Last, because the list it offers comes from the server
+                        this connection reaches. */}
+                    <DatabaseCombobox
+                      value={eDatabase}
+                      onChange={setEDatabase}
+                      loadDatabases={loadEditDatabases}
+                      placeholder="database (optional - pick or type)"
                       className="sm:col-span-2"
                     />
                   </div>
