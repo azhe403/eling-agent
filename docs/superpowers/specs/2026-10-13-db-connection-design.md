@@ -100,7 +100,7 @@ Validation (in a static `DatabaseConnection.Create(...)` factory that throws `Ar
 
 API responses use view DTOs that carry `hasConnectionString: true` (never the string). The raw connection string is accepted only on create (POST) and update (PUT); on PUT an empty/omitted connection string means "keep stored value" (same semantics as `ProviderStore.Update`'s apiKey handling). Logs and error messages never include the connection string.
 
-**Masking everywhere, including detect:** no API or MCP response ever carries a password-bearing connection string. Detect output masks the password (`Password=***`; a string no provider builder recognizes is masked wholesale to `"***"`). Import never takes a connection string at all — it takes the `settingsKeys` the user approved and the backend re-reads its own `appsettings.json` under the hood, so no credential crosses the API/MCP boundary in either direction. The only paths that accept a raw connection string are manual create/update (`POST`/`PUT`), where the user typed it themselves, and — since the 2026-10-22 amendment (§4) — the `manual` field block, where the user typed the fields instead. Both are the same user typing their own credentials into the same-host dashboard; neither is reachable from the MCP surface.
+**Masking everywhere, including detect:** no API or MCP response ever carries a password-bearing connection string. Detect output masks the password (`Password=***`; a string no provider builder recognizes is masked wholesale to `"***"`). Import never takes a connection string at all — it takes the `settingsKeys` the user approved and the backend re-reads its own `appsettings.json` under the hood, so no credential crosses the API/MCP boundary in either direction. The only paths that accept a raw connection string are: (1) manual create/update (`POST`/`PUT`), where the user typed it themselves; (2) — since the 2026-10-22 amendment (§4) — the `manual` field block, where the user typed the fields instead; and (3) the three test-before-save routes (`POST /api/databases/list-databases`, `POST /api/databases/test-connection`, `POST /api/databases/{id}/databases`), which accept credentials transiently to probe a connection before it is saved and never persist them. All three are the same user typing their own credentials into the same-host dashboard; none is reachable from the MCP surface.
 
 **Agent visibility boundary (MCP — see §4.2):** the REST API serves the same-host Dashboard and may show `{db}@{host}` names plus password-masked strings. The MCP surface serves the agent (possibly a cloud LLM) and may show the same identity — `connectionId`, name (`{db}@{host}`, host included), `databaseName`, `provider`, `environment` — because the host of an internal/LAN database is not a secret and the name is the user's own readability convention. It may **never** show credentials: no username, no password, no connection string in any form (raw or masked — even a masked string carries the user id), in outputs *or* error messages.
 
@@ -118,8 +118,11 @@ API responses use view DTOs that carry `hasConnectionString: true` (never the st
 | PUT | `/api/databases/{id}` | update DTO (empty connection string = keep) | `200` view / `404` / `400` |
 | DELETE | `/api/databases/{id}` | — | `204` / `404` |
 | POST | `/api/databases/{id}/test` | optional body (empty = test the stored connection) | `200` `{ ok, message, latencyMs }` — probe failures are 200 with `ok:false`, not 5xx |
-| GET | `/api/databases/{id}/schema` | — | `200` schema info / `404` / `502` on provider error |
-| POST | `/api/databases/{id}/query` | `{ sql, maxRows? }` | `200` `QueryResult`; `400` rejected by `SqlSafety`; `502` provider error |
+| POST | `/api/databases/list-databases` | create DTO (connection string **or** `manual` fields) | `200` array of database names; `400` validation failure; `502` provider error — tests a connection before it is saved, does not persist |
+| POST | `/api/databases/test-connection` | create DTO (connection string **or** `manual` fields) | `200` `{ ok, message, latencyMs }` — tests a connection before it is saved, does not persist |
+| POST | `/api/databases/{id}/databases` | optional body (empty = use the stored connection) | `200` array of database names; `400` validation failure; `502` provider error — tests an edit before it is saved, does not persist |
+| GET | `/api/databases/{id}/schema` | `?database=` (optional) | `200` schema info / `404` / `502` on provider error |
+| POST | `/api/databases/{id}/query` | `{ sql, maxRows?, database? }` | `200` `QueryResult`; `400` rejected by `SqlSafety`; `502` provider error |
 | POST | `/api/databases/detect` | — | `200` candidates array with **masked** connection strings — **preview only, nothing persisted**; reads `{content root}/appsettings.json` only (local file, no network, no arbitrary paths) |
 | POST | `/api/databases/import` | `{ settingsKeys: [...] }` — the approved candidate keys | `200` per-candidate result `{ settingsKey, name?, imported, reason? }` |
 
@@ -139,8 +142,9 @@ API responses use view DTOs that carry `hasConnectionString: true` (never the st
 > The rules:
 > - A non-blank `connectionString` wins over `manual` — the pasted string stays
 >   the escape hatch for the odd case.
-> - Otherwise the `manual` fields are built into a string. MySQL needs a host and
->   a database; SQLite needs a file path. A missing field is a `400`.
+> - Otherwise the `manual` fields are built into a string. MySQL needs a host;
+>   SQLite needs a file path. The database is optional for MySQL (see the
+>   amendment below). A missing required field is a `400`.
 > - On **update**, the `manual` fields are layered *over* the stored connection, so
 >   a blank field keeps what was stored — fixing the port does not drop the
 >   password. A blank password keeps the stored password; there is no way to clear
