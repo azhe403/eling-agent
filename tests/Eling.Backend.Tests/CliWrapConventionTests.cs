@@ -34,6 +34,7 @@ public sealed class CliWrapConventionTests
     private static readonly HashSet<string> ProcessStartInfoAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
         "src/desktop/Eling.Desktop/Services/BackendSupervisor.cs",
+        "src/desktop/Eling.Desktop/ViewModels/FoldersViewModel.cs",
         "src/backend/Eling.Backend/Bootstrap/FrontendDevSpawner.cs",
         "tests/Eling.Backend.Tests/TestProcesses.cs",
         "tests/Eling.Backend.Tests/MemoryProjectToolsTests.cs",

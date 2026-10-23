@@ -38,7 +38,7 @@ public sealed class ToolsPolicyTool
     public Task<string> RunPolicyAsync(
         [Description("One of: 'list', 'enable', 'disable', 'reset'.")] string action,
         [Description("Tool names to target, e.g. ['file_delete', 'file_edit']. Mutually exclusive with 'group'.")] string[]? tools = null,
-        [Description("Tool group to target: 'memory', 'codebase', or 'filesystem'. Mutually exclusive with 'tools'.")] string? group = null,
+        [Description("Tool group to target: 'memory', 'codebase', 'filesystem', or 'diagnostics'. Mutually exclusive with 'tools'.")] string? group = null,
         CancellationToken cancellationToken = default)
     {
         var normalized = action?.Trim().ToLowerInvariant() ?? string.Empty;
@@ -121,7 +121,7 @@ public sealed class ToolsPolicyTool
             var members = ToolCatalog.MembersOf(trimmedGroup);
             if (members.Count == 0)
             {
-                return $"Unknown tool group '{trimmedGroup}'. Use 'memory', 'codebase', or 'filesystem'.";
+                return $"Unknown tool group '{trimmedGroup}'. Use 'memory', 'codebase', 'filesystem', or 'diagnostics'.";
             }
 
             if (enable)
@@ -142,7 +142,7 @@ public sealed class ToolsPolicyTool
         }
 
         return "Provide 'tools' (a list of tool names) or 'group' (" +
-            $"{ToolCatalog.MemoryGroup}, {ToolCatalog.CodebaseGroup}, or {ToolCatalog.FilesystemGroup}).";
+            $"{ToolCatalog.MemoryGroup}, {ToolCatalog.CodebaseGroup}, {ToolCatalog.FilesystemGroup}, or {ToolCatalog.DiagnosticsGroup}).";
     }
 
     private List<ToolItemDto> ListTools()

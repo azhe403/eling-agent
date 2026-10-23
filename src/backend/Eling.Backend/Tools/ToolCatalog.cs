@@ -10,6 +10,7 @@ public static class ToolCatalog
     public const string MemoryGroup = "memory";
     public const string CodebaseGroup = "codebase";
     public const string FilesystemGroup = "filesystem";
+    public const string DiagnosticsGroup = "diagnostics";
 
     public static readonly IReadOnlyList<ToolDefinition> All = new List<ToolDefinition>
     {
@@ -46,6 +47,8 @@ public static class ToolCatalog
         new("file_edit", FilesystemGroup, "Surgically replace text in a file under the project root."),
         new("file_append", FilesystemGroup, "Append text to the end of a file under the project root."),
         new("file_search", FilesystemGroup, "Search file contents under a base path."),
+        new("log_list", DiagnosticsGroup, "List available Eling log files (active + rotated archives)."),
+        new("log_read", DiagnosticsGroup, "Read recent entries from an Eling log file for diagnosis."),
     }.AsReadOnly();
 
     public static bool Exists(string toolName)
