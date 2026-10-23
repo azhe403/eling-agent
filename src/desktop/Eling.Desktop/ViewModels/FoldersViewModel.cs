@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using CliWrap;
 using Eling.Desktop.Models;
 using Eling.Desktop.Services;
 using Microsoft.Extensions.Logging;
@@ -16,40 +19,85 @@ public class FoldersViewModel : ViewModelBase
     private readonly ILogger<FoldersViewModel> _logger;
 
     private string _selectedRoot = "";
-    private string _currentPath = "";
-    private string _previewText = "";
-    private string _editText = "";
-    private bool _isEditing;
     private string _statusText = "";
     private string _newRootPath = "";
-    private FileListEntryDto? _selectedEntry;
     private bool _showBrowser;
 
+    // Rich workspace view fields matching the web dashboard
+    private string _searchQuery = "";
+    private string _filterStatus = "all"; // "all" | "active" | "offline"
+    private bool _isLoading;
+    private int _registeredCount;
+    private int _activeInstancesCount;
+    private int _activeWorkspacesCount;
+    private int _totalFilesCount;
+    private long _totalDbSizeBytes;
+    private string _totalDbSizeDisplay = "0 B";
+    private WorkspaceItemDto? _deleteTarget;
+
+    // Delete scope flags matching dashboard delete modal
+    private bool _deleteRegistry = true;
+    private bool _deleteCodebaseIndex = true;
+    private bool _deleteDotEling = false;
+
     public string SelectedRoot { get => _selectedRoot; set => this.RaiseAndSetIfChanged(ref _selectedRoot, value); }
-    public string CurrentPath { get => _currentPath; set => this.RaiseAndSetIfChanged(ref _currentPath, value); }
-    public string PreviewText { get => _previewText; set => this.RaiseAndSetIfChanged(ref _previewText, value); }
-    public string EditText { get => _editText; set => this.RaiseAndSetIfChanged(ref _editText, value); }
-    public bool IsEditing { get => _isEditing; set => this.RaiseAndSetIfChanged(ref _isEditing, value); }
     public string StatusText { get => _statusText; set => this.RaiseAndSetIfChanged(ref _statusText, value); }
     public string NewRootPath { get => _newRootPath; set => this.RaiseAndSetIfChanged(ref _newRootPath, value); }
-    public FileListEntryDto? SelectedEntry { get => _selectedEntry; set => this.RaiseAndSetIfChanged(ref _selectedEntry, value); }
     public bool ShowBrowser { get => _showBrowser; set => this.RaiseAndSetIfChanged(ref _showBrowser, value); }
 
-    public ObservableCollection<string> Roots { get; } = [];
-    public ObservableCollection<FileListEntryDto> Entries { get; } = [];
+    public string SearchQuery
+    {
+        get => _searchQuery;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _searchQuery, value);
+            ApplyFilter();
+        }
+    }
 
-    public bool CanGoUp => !string.IsNullOrEmpty(CurrentPath);
+    public string FilterStatus
+    {
+        get => _filterStatus;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _filterStatus, value);
+            ApplyFilter();
+        }
+    }
+
+    public bool IsLoading { get => _isLoading; set => this.RaiseAndSetIfChanged(ref _isLoading, value); }
+    public int RegisteredCount { get => _registeredCount; set => this.RaiseAndSetIfChanged(ref _registeredCount, value); }
+    public int ActiveInstancesCount { get => _activeInstancesCount; set => this.RaiseAndSetIfChanged(ref _activeInstancesCount, value); }
+    public int ActiveWorkspacesCount { get => _activeWorkspacesCount; set => this.RaiseAndSetIfChanged(ref _activeWorkspacesCount, value); }
+    public int TotalFilesCount { get => _totalFilesCount; set => this.RaiseAndSetIfChanged(ref _totalFilesCount, value); }
+    public long TotalDbSizeBytes { get => _totalDbSizeBytes; set => this.RaiseAndSetIfChanged(ref _totalDbSizeBytes, value); }
+    public string TotalDbSizeDisplay { get => _totalDbSizeDisplay; set => this.RaiseAndSetIfChanged(ref _totalDbSizeDisplay, value); }
+    public WorkspaceItemDto? DeleteTarget { get => _deleteTarget; set => this.RaiseAndSetIfChanged(ref _deleteTarget, value); }
+
+    public bool DeleteRegistry { get => _deleteRegistry; set => this.RaiseAndSetIfChanged(ref _deleteRegistry, value); }
+    public bool DeleteCodebaseIndex { get => _deleteCodebaseIndex; set => this.RaiseAndSetIfChanged(ref _deleteCodebaseIndex, value); }
+    public bool DeleteDotEling { get => _deleteDotEling; set => this.RaiseAndSetIfChanged(ref _deleteDotEling, value); }
+
+    // Keep Roots collection for regression test suites and chat picker interop
+    public ObservableCollection<string> Roots { get; } = [];
+
+    // Rich workspaces list matching dashboard
+    private readonly List<WorkspaceItemDto> _allWorkspaces = [];
+    public ObservableCollection<WorkspaceItemDto> Workspaces { get; } = [];
 
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> LoadCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> AddRootCommand { get; }
     public ReactiveCommand<string?, System.Reactive.Unit> RemoveRootCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> RefreshCommand { get; }
-    public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> GoUpCommand { get; }
-    public ReactiveCommand<FileListEntryDto, System.Reactive.Unit> OpenEntryCommand { get; }
     public ReactiveCommand<string, System.Reactive.Unit> SwitchWorkspaceCommand { get; }
-    public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> StartEditCommand { get; }
-    public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> SaveEditCommand { get; }
-    public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> CancelEditCommand { get; }
+
+    public ReactiveCommand<string, System.Reactive.Unit> SetFilterCommand { get; }
+    public ReactiveCommand<WorkspaceItemDto, System.Reactive.Unit> ReindexCommand { get; }
+    public ReactiveCommand<WorkspaceItemDto, System.Reactive.Unit> ViewCodebaseCommand { get; }
+    public ReactiveCommand<WorkspaceItemDto, System.Reactive.Unit> ToggleProcessesCommand { get; }
+    public ReactiveCommand<WorkspaceItemDto, System.Reactive.Unit> PromptDeleteCommand { get; }
+    public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> ConfirmDeleteCommand { get; }
+    public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> CancelDeleteCommand { get; }
 
     public FoldersViewModel(
         ElingApiClient apiClient,
@@ -61,24 +109,44 @@ public class FoldersViewModel : ViewModelBase
         LoadCommand = ReactiveCommand.CreateFromTask(() => LoadAsync());
         AddRootCommand = ReactiveCommand.CreateFromTask(() => AddRootAsync());
         RemoveRootCommand = ReactiveCommand.CreateFromTask<string?>(target => RemoveRootAsync(target));
-        RefreshCommand = ReactiveCommand.CreateFromTask(() => ListCurrentAsync());
-        GoUpCommand = ReactiveCommand.CreateFromTask(() => GoUpAsync());
-        OpenEntryCommand = ReactiveCommand.CreateFromTask<FileListEntryDto>(entry => OpenEntryAsync(entry));
+        RefreshCommand = ReactiveCommand.CreateFromTask(() => LoadAsync());
         SwitchWorkspaceCommand = ReactiveCommand.CreateFromTask<string>(root => SwitchWorkspaceAsync(root));
-        StartEditCommand = ReactiveCommand.Create(() => { IsEditing = true; EditText = PreviewText; });
-        SaveEditCommand = ReactiveCommand.CreateFromTask(() => SaveEditAsync());
-        CancelEditCommand = ReactiveCommand.Create(() => { IsEditing = false; });
+
+        this.WhenAnyValue(x => x.StatusText)
+            .Subscribe(text =>
+            {
+                if (!string.IsNullOrEmpty(text) && Avalonia.Application.Current is App app && app.Services != null)
+                {
+                    var mainVm = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<MainViewModel>(app.Services);
+                    if (mainVm != null)
+                    {
+                        mainVm.StatusText = text;
+                    }
+                }
+            });
+
+        SetFilterCommand = ReactiveCommand.Create<string>(status => FilterStatus = status);
+        ReindexCommand = ReactiveCommand.CreateFromTask<WorkspaceItemDto>(ws => ReindexAsync(ws));
+        ViewCodebaseCommand = ReactiveCommand.Create<WorkspaceItemDto>(ws => OpenCodebaseInBrowser(ws));
+        ToggleProcessesCommand = ReactiveCommand.Create<WorkspaceItemDto>(ws => ws?.ToggleExpanded());
+        PromptDeleteCommand = ReactiveCommand.Create<WorkspaceItemDto>(ws =>
+        {
+            DeleteTarget = ws;
+            DeleteRegistry = true;
+            DeleteCodebaseIndex = true;
+            DeleteDotEling = false;
+        });
+        ConfirmDeleteCommand = ReactiveCommand.CreateFromTask(() => ConfirmDeleteAsync());
+        CancelDeleteCommand = ReactiveCommand.Create(() => { DeleteTarget = null; });
     }
 
-    /// <summary>Retry budget for the first load, so a backend that is still booting does not look like an empty workspace.</summary>
     public int ApiLoadRetryAttempts { get; set; } = BackendResilience.DefaultAttempts;
-
     public TimeSpan ApiLoadRetryDelay { get; set; } = BackendResilience.BaseDelay;
-
     public TimeSpan ApiLoadRetryMaxDelay { get; set; } = BackendResilience.MaxDelay;
 
     public async Task LoadAsync()
     {
+        IsLoading = true;
         try
         {
             var pipeline = BackendResilience.ForResult<IReadOnlyList<string>?>(
@@ -89,35 +157,141 @@ public class FoldersViewModel : ViewModelBase
                 ApiLoadRetryMaxDelay,
                 "folder-load");
 
-            var roots = await pipeline.ExecuteAsync<IReadOnlyList<string>?>(
+            var agentRoots = await pipeline.ExecuteAsync<IReadOnlyList<string>?>(
                 _ => new ValueTask<IReadOnlyList<string>?>(_apiClient.GetWorkspacesAsync()));
-            if (roots is null)
-            {
-                _logger.LogWarning("Folder load gave up: the backend did not respond");
-                return;
-            }
+
+            var runtimesTask = _apiClient.GetAllCoordinatorRuntimesAsync();
+            var statusesTask = _apiClient.GetProjectCodebaseStatusesAsync();
+
+            await Task.WhenAll(runtimesTask, statusesTask);
+
+            var runtimes = await runtimesTask;
+            var statuses = await statusesTask;
 
             Roots.Clear();
-            foreach (var root in roots)
+            if (agentRoots != null)
             {
-                Roots.Add(root);
+                foreach (var r in agentRoots) Roots.Add(r);
             }
+
+            var agg = WorkspaceAggregator.Aggregate(runtimes, statuses, agentRoots);
+
+            _allWorkspaces.Clear();
+            _allWorkspaces.AddRange(agg.Workspaces);
+
+            RegisteredCount = agg.RegisteredCount;
+            ActiveInstancesCount = agg.ActiveInstancesCount;
+            ActiveWorkspacesCount = agg.ActiveWorkspacesCount;
+            TotalFilesCount = agg.TotalFilesCount;
+            TotalDbSizeBytes = agg.TotalDbSizeBytes;
+            TotalDbSizeDisplay = WorkspaceItemDto.FormatBytes(agg.TotalDbSizeBytes);
+
+            ApplyFilter();
 
             if (!Roots.Contains(SelectedRoot))
             {
                 SelectedRoot = Roots.FirstOrDefault() ?? "";
-                CurrentPath = "";
-            }
-
-            if (!string.IsNullOrEmpty(SelectedRoot))
-            {
-                await ListCurrentAsync();
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to load folders");
+            _logger.LogError(ex, "Failed to load workspaces");
             StatusText = $"Load failed: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private void ApplyFilter()
+    {
+        var q = (_searchQuery ?? "").Trim().ToLowerInvariant();
+        Workspaces.Clear();
+
+        foreach (var ws in _allWorkspaces)
+        {
+            if (FilterStatus == "active" && !ws.IsRunning) continue;
+            if (FilterStatus == "offline" && ws.IsRunning) continue;
+
+            if (!string.IsNullOrEmpty(q))
+            {
+                var match = ws.Name.ToLowerInvariant().Contains(q)
+                    || ws.Root.ToLowerInvariant().Contains(q)
+                    || (ws.SinglePid.HasValue && ws.SinglePid.Value.ToString().Contains(q))
+                    || ws.Processes.Any(p => p.Pid.ToString().Contains(q));
+                if (!match) continue;
+            }
+
+            Workspaces.Add(ws);
+        }
+    }
+
+    private async Task ReindexAsync(WorkspaceItemDto? ws)
+    {
+        if (ws == null) return;
+        StatusText = $"Re-indexing {ws.Name}...";
+        try
+        {
+            var ok = await _apiClient.ReindexCodebaseAsync(ws.Root);
+            StatusText = ok ? $"Re-index started for {ws.Name}" : $"Re-index failed for {ws.Name}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Re-index failed");
+            StatusText = $"Re-index failed: {ex.Message}";
+        }
+    }
+
+    private void OpenCodebaseInBrowser(WorkspaceItemDto? ws)
+    {
+        if (ws == null) return;
+        try
+        {
+            var targetParam = Uri.EscapeDataString(ws.Root);
+            var url = $"http://127.0.0.1:4427/dashboard/codebase?project={targetParam}";
+            Cli.Wrap("cmd")
+                .WithArguments($"/c start \"\" \"{url}\"")
+                .ExecuteAsync()
+                .GetAwaiter()
+                .GetResult();
+            StatusText = $"Opened codebase view for {ws.Name}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to open browser URL");
+            StatusText = $"Could not open browser: {ex.Message}";
+        }
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (DeleteTarget == null) return;
+        var target = DeleteTarget;
+        DeleteTarget = null;
+        StatusText = $"Deleting {target.Name}...";
+        try
+        {
+            var ok = await _apiClient.DeleteProjectAsync(
+                target.Root,
+                deleteRegistry: DeleteRegistry,
+                deleteCodebaseIndex: DeleteCodebaseIndex,
+                deleteDotEling: DeleteDotEling);
+
+            if (ok)
+            {
+                StatusText = $"Deleted {target.Name}";
+                await LoadAsync();
+            }
+            else
+            {
+                StatusText = $"Delete failed for {target.Name}";
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Delete failed");
+            StatusText = $"Delete failed: {ex.Message}";
         }
     }
 
@@ -130,7 +304,6 @@ public class FoldersViewModel : ViewModelBase
             if (await _apiClient.AddWorkspaceAsync(NewRootPath.Trim()))
             {
                 SelectedRoot = NewRootPath.Trim();
-                CurrentPath = "";
                 NewRootPath = "";
                 await LoadAsync();
             }
@@ -158,9 +331,6 @@ public class FoldersViewModel : ViewModelBase
                 if (string.Equals(SelectedRoot, rootToRemove, StringComparison.OrdinalIgnoreCase))
                 {
                     SelectedRoot = "";
-                    CurrentPath = "";
-                    Entries.Clear();
-                    PreviewText = "";
                 }
 
                 await LoadAsync();
@@ -173,117 +343,19 @@ public class FoldersViewModel : ViewModelBase
         }
     }
 
+    public string CurrentPath { get; set; } = "";
+    public FileListEntryDto? SelectedEntry { get; set; }
+
     public async Task SwitchWorkspaceAsync(string root)
     {
         if (string.IsNullOrWhiteSpace(root) || string.Equals(SelectedRoot, root, StringComparison.OrdinalIgnoreCase))
         {
-            if (!string.IsNullOrEmpty(SelectedRoot)) await ListCurrentAsync();
             return;
         }
 
         SelectedRoot = root;
         CurrentPath = "";
         SelectedEntry = null;
-        await ListCurrentAsync();
-    }
-
-    private async Task GoUpAsync()
-    {
-        if (string.IsNullOrEmpty(CurrentPath)) return;
-        var cut = CurrentPath.LastIndexOf('/');
-        if (cut < 0) cut = CurrentPath.LastIndexOf('\\');
-        CurrentPath = cut < 0 ? "" : CurrentPath[..cut];
-        this.RaisePropertyChanged(nameof(CanGoUp));
-        await ListCurrentAsync();
-    }
-
-    private async Task OpenEntryAsync(FileListEntryDto? entry)
-    {
-        if (entry == null || string.IsNullOrEmpty(SelectedRoot)) return;
-        if (!entry.IsDirectory)
-        {
-            await PreviewEntryAsync(entry);
-            return;
-        }
-
-        CurrentPath = string.IsNullOrEmpty(CurrentPath) ? entry.Path : CurrentPath + "/" + entry.Path;
-        this.RaisePropertyChanged(nameof(CanGoUp));
-        await ListCurrentAsync();
-    }
-
-    private async Task PreviewEntryAsync(FileListEntryDto entry)
-    {
-        if (string.IsNullOrEmpty(SelectedRoot)) return;
-        var rel = string.IsNullOrEmpty(CurrentPath) ? entry.Path : CurrentPath + "/" + entry.Path;
-        _logger.LogInformation("Folders preview {Path}", rel);
-        IsEditing = false;
-        try
-        {
-            var file = await _apiClient.ReadFileAsync(SelectedRoot, rel);
-            if (file == null)
-            {
-                StatusText = "Preview failed: file is binary or oversize.";
-                return;
-            }
-
-            PreviewText = file.Content + (file.Truncated ? "\n\n... (truncated)" : "");
-            StatusText = rel;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to preview file");
-            StatusText = $"Preview failed: {ex.Message}";
-        }
-    }
-
-    private async Task SaveEditAsync()
-    {
-        if (string.IsNullOrEmpty(SelectedRoot) || SelectedEntry == null) return;
-        var rel = string.IsNullOrEmpty(CurrentPath) ? SelectedEntry.Path : CurrentPath + "/" + SelectedEntry.Path;
-        _logger.LogInformation("Folders save {Path}", rel);
-        try
-        {
-            if (await _apiClient.WriteFileAsync(SelectedRoot, rel, EditText))
-            {
-                IsEditing = false;
-                StatusText = "Saved " + rel;
-            }
-            else
-            {
-                StatusText = "Save failed.";
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to save file");
-            StatusText = $"Save failed: {ex.Message}";
-        }
-    }
-
-    private async Task ListCurrentAsync()
-    {
-        if (string.IsNullOrEmpty(SelectedRoot))
-        {
-            Entries.Clear();
-            return;
-        }
-
-        try
-        {
-            var entries = await _apiClient.ListDirAsync(SelectedRoot, CurrentPath);
-            Entries.Clear();
-            foreach (var entry in entries)
-            {
-                Entries.Add(entry);
-            }
-
-            this.RaisePropertyChanged(nameof(CanGoUp));
-            StatusText = string.IsNullOrEmpty(CurrentPath) ? SelectedRoot : CurrentPath;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to list directory");
-            StatusText = $"List failed: {ex.Message}";
-        }
+        await LoadAsync();
     }
 }
