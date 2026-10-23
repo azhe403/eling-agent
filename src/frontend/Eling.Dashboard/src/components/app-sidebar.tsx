@@ -12,6 +12,7 @@ import {
   FolderGit2,
   ScrollText,
   Wrench,
+  FileText,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -54,6 +55,11 @@ const navMain = [
     title: "Audit Trail",
     url: "/dashboard/audit-trail",
     icon: <ScrollText className="size-4" />,
+  },
+  {
+    title: "Logs",
+    url: "/dashboard/logs",
+    icon: <FileText className="size-4" />,
   },
   {
     title: "Databases",

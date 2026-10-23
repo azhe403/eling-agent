@@ -82,12 +82,13 @@ function ToastItem({
   )
 }
 
-const GROUP_ORDER = ["memory", "codebase", "filesystem"] as const
+const GROUP_ORDER = ["memory", "codebase", "filesystem", "diagnostics"] as const
 
 const GROUP_TITLES: Record<string, string> = {
   memory: "Memory Tools",
   codebase: "Codebase Tools",
   filesystem: "Filesystem Tools",
+  diagnostics: "Diagnostics Tools",
 }
 
 export function Tools() {
