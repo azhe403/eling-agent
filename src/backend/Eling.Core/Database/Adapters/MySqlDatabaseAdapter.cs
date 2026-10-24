@@ -30,6 +30,10 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
             {
                 builder.GuidFormat = MySqlGuidFormat.None;
             }
+            if (!_connection.ConnectionString.Contains("ConnectionTimeout", StringComparison.OrdinalIgnoreCase))
+            {
+                builder.ConnectionTimeout = 3;
+            }
             return builder.ConnectionString;
         }
     }
@@ -48,7 +52,7 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
         try
         {
             await using var conn = new MySqlConnection(ConnectionString);
-            await conn.OpenAsync(ct);
+            try { await conn.OpenAsync(ct); } catch (Exception ex) { throw new DatabaseUnavailableException(Categorize(ex), ex); }
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT 1;";
             cmd.CommandTimeout = 30;
@@ -67,7 +71,7 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
     public async Task<QueryResult> QueryAsync(string sql, int maxRows, CancellationToken ct = default)
     {
         await using var conn = new MySqlConnection(ConnectionString);
-        await conn.OpenAsync(ct);
+        try { await conn.OpenAsync(ct); } catch (Exception ex) { throw new DatabaseUnavailableException(Categorize(ex), ex); }
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.CommandTimeout = 30;
@@ -105,7 +109,7 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
     public async Task<int> ExecuteAsync(string sql, CancellationToken ct = default)
     {
         await using var conn = new MySqlConnection(ConnectionString);
-        await conn.OpenAsync(ct);
+        try { await conn.OpenAsync(ct); } catch (Exception ex) { throw new DatabaseUnavailableException(Categorize(ex), ex); }
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.CommandTimeout = 30;
@@ -115,7 +119,7 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
     public async Task<IReadOnlyList<string>> ListDatabasesAsync(CancellationToken ct = default)
     {
         await using var conn = new MySqlConnection(ConnectionString);
-        await conn.OpenAsync(ct);
+        try { await conn.OpenAsync(ct); } catch (Exception ex) { throw new DatabaseUnavailableException(Categorize(ex), ex); }
         await using var cmd = conn.CreateCommand();
         // SHOW DATABASES lists what the account may see, and the system
         // schemas are noise in a picker.
@@ -148,7 +152,7 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
     {
         var tables = new List<TableSchema>();
         await using var conn = new MySqlConnection(ConnectionString);
-        await conn.OpenAsync(ct);
+        try { await conn.OpenAsync(ct); } catch (Exception ex) { throw new DatabaseUnavailableException(Categorize(ex), ex); }
 
         // A connection without a default database is a server-level
         // connection: it reaches every database, and the tree lists them
@@ -257,5 +261,33 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
         {
             cmd.Parameters.AddWithValue("@schema", database);
         }
+    }
+
+    private static string Categorize(Exception ex)
+    {
+        if (ex is MySqlConnector.MySqlException mySql)
+        {
+            // MySqlConnector error numbers: 1044/1045 access denied,
+            // 2003/2005 cannot connect / unknown host, 2013 lost connection.
+            return mySql.Number switch
+            {
+                1044 or 1045 => "authentication failed",
+                2003 or 2005 => "host unreachable",
+                2013 => "connection lost",
+                _ => "database unavailable"
+            };
+        }
+
+        if (ex is TimeoutException)
+        {
+            return "connection timed out";
+        }
+
+        if (ex is System.Net.Sockets.SocketException)
+        {
+            return "host unreachable";
+        }
+
+        return "database unavailable";
     }
 }

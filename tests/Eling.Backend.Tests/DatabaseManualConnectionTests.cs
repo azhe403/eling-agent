@@ -45,6 +45,12 @@ public sealed class DatabaseManualConnectionTests : IAsyncLifetime
         builder.Services.AddLogging();
         builder.Services.AddSingleton<IAuditLogger>(NullAuditLogger.Instance);
         builder.Services.AddSingleton<IDatabaseConnectionStore>(_store);
+        builder.Services.AddSingleton<IDatabaseReadCache>(sp => new JsonDatabaseReadCache(
+            _root,
+            sp.GetRequiredService<ILogger<JsonDatabaseReadCache>>()));
+        builder.Services.AddSingleton<IDatabaseReadService>(sp => new DatabaseReadService(
+            sp.GetRequiredService<IDatabaseReadCache>(),
+            sp.GetRequiredService<ILogger<DatabaseReadService>>()));
         var scanner = new AppSettingsConnectionScanner(_root);
         builder.Services.AddSingleton(scanner);
         builder.Services.AddSingleton(new Eling.Backend.Database.DatabaseConnectionImporter(scanner, _store));

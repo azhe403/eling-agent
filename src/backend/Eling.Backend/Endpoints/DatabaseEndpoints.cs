@@ -83,6 +83,7 @@ public static class DatabaseEndpoints
             string id,
             UpdateDatabaseConnectionRequest req,
             IDatabaseConnectionStore store,
+            IDatabaseReadCache readCache,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
@@ -107,6 +108,7 @@ public static class DatabaseEndpoints
                     RequireApprovalForMutations = require
                 };
                 await store.UpsertAsync(updated, ct);
+                readCache.InvalidateConnection(id);
                 return Results.Ok(ToView(updated));
             }
             catch (ArgumentException ex)
@@ -116,10 +118,11 @@ public static class DatabaseEndpoints
             }
         });
 
-        group.MapDelete("/{id}", async (string id, IDatabaseConnectionStore store, CancellationToken ct) =>
+        group.MapDelete("/{id}", async (string id, IDatabaseConnectionStore store, IDatabaseReadCache readCache, CancellationToken ct) =>
         {
             var ok = await store.RemoveAsync(id, ct);
             if (!ok) return Results.NotFound();
+            readCache.InvalidateConnection(id);
             return Results.NoContent();
         });
 
@@ -268,6 +271,7 @@ public static class DatabaseEndpoints
             string? tableName,
             string? database,
             IDatabaseConnectionStore store,
+            IDatabaseReadService readService,
             IAuditLogger auditLogger,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
@@ -276,26 +280,10 @@ public static class DatabaseEndpoints
             var row = await store.FindAsync(id, ct);
             if (row is null) return Results.NotFound();
 
-            IDatabaseAdapter adapter;
-            try
-            {
-                adapter = DatabaseAdapterFactory.CreateAdapter(row);
-            }
-            catch (NotSupportedException ex)
-            {
-                logger.LogWarning(ex, "Database adapter not supported for {Id}", id);
-                return Results.BadRequest(ex.Message);
-            }
-
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                // A server-level connection - one registered without a
-                // database - has no default schema, so it lists the databases
-                // on the server instead of the tables of one of them.
-                var schema = string.IsNullOrWhiteSpace(database) && DatabaseConnectionStringFactory.IsServerLevel(row)
-                    ? new DatabaseSchemaInfo([]) { Databases = await adapter.ListDatabasesAsync(ct) }
-                    : await adapter.GetSchemaAsync(database, ct);
+                var schema = await readService.GetSchemaAsync(row, database, ct);
 
                 if (!string.IsNullOrWhiteSpace(tableName))
                 {
@@ -313,7 +301,8 @@ public static class DatabaseEndpoints
                     Target = id,
                     Outcome = AuditOutcome.Success,
                     Query = tableName,
-                    DurationMs = (int)sw.ElapsedMilliseconds
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                    FromCache = schema.FromCache
                 }, ct);
                 return Results.Ok(schema);
             }
@@ -386,6 +375,7 @@ public static class DatabaseEndpoints
             string id,
             DatabaseQueryRequest req,
             IDatabaseConnectionStore store,
+            IDatabaseReadService readService,
             IAuditLogger auditLogger,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
@@ -411,25 +401,6 @@ public static class DatabaseEndpoints
                 return Results.BadRequest(classification.Reason);
             }
 
-            IDatabaseAdapter adapter;
-            try
-            {
-                adapter = DatabaseAdapterFactory.CreateAdapter(DatabaseConnectionStringFactory.Target(row, req.Database));
-            }
-            catch (NotSupportedException ex)
-            {
-                logger.LogWarning(ex, "Database adapter not supported for {Id}", id);
-                return Results.BadRequest(ex.Message);
-            }
-            catch (ArgumentException ex)
-            {
-                // The stored connection string cannot be read - a broken
-                // registration rather than a bad request, so it answers like
-                // the provider failures below instead of crashing.
-                logger.LogWarning(ex, "Stored connection string is unreadable for {Id}", id);
-                return Results.Problem(statusCode: 502, title: "query failed", detail: ex.Message);
-            }
-
             var maxRows = req.MaxRows;
             if (maxRows < 1) maxRows = 1;
             if (maxRows > 1000) maxRows = 1000;
@@ -437,7 +408,7 @@ public static class DatabaseEndpoints
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                var result = await adapter.QueryAsync(req.Sql, maxRows, ct);
+                var result = await readService.QueryAsync(row, req.Database, req.Sql, maxRows, ct);
                 sw.Stop();
                 await auditLogger.RecordAsync(new AuditEvent
                 {
@@ -449,7 +420,8 @@ public static class DatabaseEndpoints
                     Outcome = AuditOutcome.Success,
                     Query = req.Sql,
                     ResultCount = result.Rows.Count,
-                    DurationMs = (int)sw.ElapsedMilliseconds
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                    FromCache = result.FromCache
                 }, ct);
                 return Results.Ok(result);
             }
@@ -476,6 +448,7 @@ public static class DatabaseEndpoints
             string id,
             DatabaseMutateRequest req,
             IDatabaseConnectionStore store,
+            IDatabaseReadCache readCache,
             ILoggerFactory loggerFactory,
             IAuditLogger auditLogger,
             CancellationToken ct) =>
@@ -560,6 +533,7 @@ public static class DatabaseEndpoints
                     Truncated = truncated,
                     DurationMs = (int)sw.ElapsedMilliseconds,
                 }, ct);
+                readCache.InvalidateConnection(id);
                 return Results.Ok(new DatabaseMutateResponse(affected, truncated));
             }
             catch (Exception ex)

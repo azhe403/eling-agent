@@ -13,23 +13,26 @@ namespace Eling.Backend.Mcp.Tools;
 public sealed class DatabaseQueryTool
 {
     private readonly IDatabaseConnectionStore _store;
+    private readonly IDatabaseReadService _readService;
     private readonly AppSettingsConnectionScanner? _scanner;
     private readonly ILogger<DatabaseQueryTool>? _logger;
     private readonly IAuditLogger? _audit;
 
     public DatabaseQueryTool(
         IDatabaseConnectionStore store,
+        IDatabaseReadService readService,
         AppSettingsConnectionScanner? scanner = null,
         ILogger<DatabaseQueryTool>? logger = null,
         IAuditLogger? audit = null)
     {
         _store = store;
+        _readService = readService;
         _scanner = scanner;
         _logger = logger;
         _audit = audit;
     }
 
-    [McpServerTool(Name = "db_query"), Description("Run a read-only SQL query (SELECT/EXPLAIN/PRAGMA only) against a registered database connection. If the connection is not registered, detect any unimported connections from appsettings.json and report them so they can be imported (with approval) before retrying.")]
+    [McpServerTool(Name = "db_query"), Description("Run a read-only SQL query (SELECT/EXPLAIN/PRAGMA only) against a registered database connection. If the database cannot be reached, the last cached result is returned with fromCache=true and cachedAt set; a cached answer is never returned for a statement that was never run. If the connection is not registered, detect any unimported connections from appsettings.json and report them so they can be imported (with approval) before retrying.")]
     public async Task<QueryResult> QueryAsync(
         [Description("Connection id.")] string connectionId,
         [Description("SQL statement.")] string sql,
@@ -68,10 +71,9 @@ public sealed class DatabaseQueryTool
             // Inside the try, so a stored connection string the provider
             // cannot read answers with the category below rather than the raw
             // failure escaping to the agent.
-            var adapter = DatabaseAdapterFactory.CreateAdapter(DatabaseConnectionStringFactory.Target(row, database));
             if (maxRows < 1) maxRows = 1;
             if (maxRows > 1000) maxRows = 1000;
-            var result = await adapter.QueryAsync(sql, maxRows, cancellationToken);
+            var result = await _readService.QueryAsync(row, database, sql, maxRows, cancellationToken);
             sw.Stop();
             await (_audit?.RecordAsync(new AuditEvent
             {
@@ -82,9 +84,27 @@ public sealed class DatabaseQueryTool
                 Target = connectionId,
                 Query = sql,
                 ResultCount = result.Rows.Count,
-                DurationMs = (int)sw.ElapsedMilliseconds
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                FromCache = result.FromCache
             }, cancellationToken) ?? ValueTask.CompletedTask);
             return result;
+        }
+        catch (DatabaseUnavailableException ex)
+        {
+            sw.Stop();
+            _logger?.LogWarning(ex, "Query failed for {Id}", connectionId);
+            await (_audit?.RecordAsync(new AuditEvent
+            {
+                Trail = AuditTrail.Access,
+                Category = AuditCategory.Database,
+                Action = DatabaseAuditActions.Query,
+                Outcome = AuditOutcome.Error,
+                Target = connectionId,
+                Query = sql,
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                FromCache = false
+            }, cancellationToken) ?? ValueTask.CompletedTask);
+            throw new InvalidOperationException($"query failed: {ex.Reason}");
         }
         catch (Exception ex)
         {

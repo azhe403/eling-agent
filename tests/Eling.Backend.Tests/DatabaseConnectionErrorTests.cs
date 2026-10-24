@@ -51,6 +51,12 @@ public sealed class DatabaseConnectionErrorTests : IAsyncLifetime
         builder.Services.AddLogging();
         builder.Services.AddSingleton<IAuditLogger>(NullAuditLogger.Instance);
         builder.Services.AddSingleton<IDatabaseConnectionStore>(_store);
+        builder.Services.AddSingleton<IDatabaseReadCache>(sp => new JsonDatabaseReadCache(
+            _root,
+            sp.GetRequiredService<ILogger<JsonDatabaseReadCache>>()));
+        builder.Services.AddSingleton<IDatabaseReadService>(sp => new DatabaseReadService(
+            sp.GetRequiredService<IDatabaseReadCache>(),
+            sp.GetRequiredService<ILogger<DatabaseReadService>>()));
         var scanner = new AppSettingsConnectionScanner(_root);
         builder.Services.AddSingleton(scanner);
         builder.Services.AddSingleton(new Eling.Backend.Database.DatabaseConnectionImporter(scanner, _store));
@@ -123,12 +129,12 @@ public sealed class DatabaseConnectionErrorTests : IAsyncLifetime
             DatabaseEnvironment.ReadOnly);
         await _store.UpsertAsync(connection, CancellationToken.None);
 
-        var tool = new DatabaseGetSchemaTool(_store, NullLogger<DatabaseGetSchemaTool>.Instance);
+        var tool = new DatabaseGetSchemaTool(_store, new DatabaseReadService(new JsonDatabaseReadCache(_root)), NullLogger<DatabaseGetSchemaTool>.Instance);
 
         var thrown = await Record.ExceptionAsync(() => tool.GetSchemaAsync(connection.Id));
 
         var error = Assert.IsType<InvalidOperationException>(thrown);
-        Assert.Equal("schema failed", error.Message);
+        Assert.Equal("schema failed: database file could not be opened", error.Message);
     }
 
     [Fact]
@@ -141,7 +147,7 @@ public sealed class DatabaseConnectionErrorTests : IAsyncLifetime
             DatabaseEnvironment.ReadOnly);
         await _store.UpsertAsync(connection, CancellationToken.None);
 
-        var tool = new DatabaseQueryTool(_store, logger: NullLogger<DatabaseQueryTool>.Instance);
+        var tool = new DatabaseQueryTool(_store, new DatabaseReadService(new JsonDatabaseReadCache(_root)), logger: NullLogger<DatabaseQueryTool>.Instance);
 
         var thrown = await Record.ExceptionAsync(() => tool.QueryAsync(connection.Id, "SELECT 1", 100, "orders"));
 

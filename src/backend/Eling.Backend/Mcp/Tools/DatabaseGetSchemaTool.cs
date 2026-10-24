@@ -12,20 +12,23 @@ namespace Eling.Backend.Mcp.Tools;
 public sealed class DatabaseGetSchemaTool
 {
     private readonly IDatabaseConnectionStore _store;
+    private readonly IDatabaseReadService _readService;
     private readonly ILogger<DatabaseGetSchemaTool>? _logger;
     private readonly IAuditLogger? _audit;
 
     public DatabaseGetSchemaTool(
         IDatabaseConnectionStore store,
+        IDatabaseReadService readService,
         ILogger<DatabaseGetSchemaTool>? logger = null,
         IAuditLogger? audit = null)
     {
         _store = store;
+        _readService = readService;
         _logger = logger;
         _audit = audit;
     }
 
-    [McpServerTool(Name = "db_get_schema"), Description("Get schema (tables/columns/FKs/indexes) for a registered database connection. A connection registered without a database is server-level: called without a database it returns the list of databases on the server (in Databases), and with a database it returns that database's tables.")]
+    [McpServerTool(Name = "db_get_schema"), Description("Get schema (tables/columns/FKs/indexes) for a registered database connection. A connection registered without a database is server-level: called without a database it returns the list of databases on the server (in Databases), and with a database it returns that database's tables. If the database cannot be reached, the last cached schema is returned with fromCache=true and cachedAt set.")]
     public async Task<DatabaseSchemaInfo> GetSchemaAsync(
         [Description("Connection id.")] string connectionId,
         [Description("Optional table name filter.")] string? tableName = null,
@@ -38,16 +41,10 @@ public sealed class DatabaseGetSchemaTool
             throw new KeyNotFoundException("connection not found");
         }
 
-        var adapter = DatabaseAdapterFactory.CreateAdapter(row);
         var sw = Stopwatch.StartNew();
         try
         {
-            // A server-level connection - one registered without a database -
-            // has no default schema, so it lists the databases on the server
-            // instead. The names are identity, never credentials.
-            var schema = string.IsNullOrWhiteSpace(database) && DatabaseConnectionStringFactory.IsServerLevel(row)
-                ? new DatabaseSchemaInfo([]) { Databases = await adapter.ListDatabasesAsync(cancellationToken) }
-                : await adapter.GetSchemaAsync(database, cancellationToken);
+            var schema = await _readService.GetSchemaAsync(row, database, cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(tableName))
             {
@@ -64,9 +61,26 @@ public sealed class DatabaseGetSchemaTool
                 Outcome = AuditOutcome.Success,
                 Target = connectionId,
                 Query = tableName,
-                DurationMs = (int)sw.ElapsedMilliseconds
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                FromCache = schema.FromCache
             }, cancellationToken) ?? ValueTask.CompletedTask);
             return schema;
+        }
+        catch (DatabaseUnavailableException ex)
+        {
+            sw.Stop();
+            _logger?.LogWarning(ex, "Schema failed for {Id}", connectionId);
+            await (_audit?.RecordAsync(new AuditEvent
+            {
+                Trail = AuditTrail.Access,
+                Category = AuditCategory.Database,
+                Action = DatabaseAuditActions.GetSchema,
+                Outcome = AuditOutcome.Error,
+                Target = connectionId,
+                Query = tableName,
+                DurationMs = (int)sw.ElapsedMilliseconds
+            }, cancellationToken) ?? ValueTask.CompletedTask);
+            throw new InvalidOperationException($"schema failed: {ex.Reason}");
         }
         catch (Exception ex)
         {

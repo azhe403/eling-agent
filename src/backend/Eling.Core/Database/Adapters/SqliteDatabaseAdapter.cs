@@ -53,7 +53,7 @@ public sealed class SqliteDatabaseAdapter : IDatabaseAdapter
         try
         {
             await using var conn = new SqliteConnection(ResolveConnectionString());
-            await conn.OpenAsync(ct);
+            try { await conn.OpenAsync(ct); } catch (Exception ex) { throw new DatabaseUnavailableException("database file could not be opened", ex); }
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT 1;";
             cmd.CommandTimeout = 30;
@@ -72,7 +72,7 @@ public sealed class SqliteDatabaseAdapter : IDatabaseAdapter
     public async Task<QueryResult> QueryAsync(string sql, int maxRows, CancellationToken ct = default)
     {
         await using var conn = new SqliteConnection(ResolveConnectionString());
-        await conn.OpenAsync(ct);
+        try { await conn.OpenAsync(ct); } catch (Exception ex) { throw new DatabaseUnavailableException("database file could not be opened", ex); }
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.CommandTimeout = 30;
@@ -112,7 +112,7 @@ public sealed class SqliteDatabaseAdapter : IDatabaseAdapter
     public async Task<int> ExecuteAsync(string sql, CancellationToken ct = default)
     {
         await using var conn = new SqliteConnection(ResolveConnectionString());
-        await conn.OpenAsync(ct);
+        try { await conn.OpenAsync(ct); } catch (Exception ex) { throw new DatabaseUnavailableException("database file could not be opened", ex); }
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.CommandTimeout = 30;
@@ -129,7 +129,7 @@ public sealed class SqliteDatabaseAdapter : IDatabaseAdapter
     {
         var tables = new List<TableSchema>();
         await using var conn = new SqliteConnection(ResolveConnectionString());
-        await conn.OpenAsync(ct);
+        try { await conn.OpenAsync(ct); } catch (Exception ex) { throw new DatabaseUnavailableException("database file could not be opened", ex); }
 
         var tableNames = new List<TableInfo>();
         await using (var cmd = conn.CreateCommand())

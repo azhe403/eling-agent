@@ -93,6 +93,13 @@ public static class DashboardServices
             Path.Combine(globalAgentDir, "databases.json"),
             sp.GetRequiredService<ILogger<JsonDatabaseConnectionStore>>()));
 
+        services.AddSingleton<IDatabaseReadCache>(sp => new JsonDatabaseReadCache(
+            globalAgentDir,
+            sp.GetRequiredService<ILogger<JsonDatabaseReadCache>>()));
+        services.AddSingleton<IDatabaseReadService>(sp => new DatabaseReadService(
+            sp.GetRequiredService<IDatabaseReadCache>(),
+            sp.GetRequiredService<ILogger<DatabaseReadService>>()));
+
         services.AddSingleton(sp => new AppSettingsConnectionScanner(
             AppSettingsSourceResolver.Resolve(sp.GetRequiredService<IHostEnvironment>().ContentRootPath),
             sp.GetRequiredService<ILogger<AppSettingsConnectionScanner>>()));

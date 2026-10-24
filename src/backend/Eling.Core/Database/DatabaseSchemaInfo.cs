@@ -31,4 +31,7 @@ public sealed record DatabaseSchemaInfo(IReadOnlyList<TableSchema> Tables)
     /// registered without a database. Empty when the connection names one.
     /// </summary>
     public IReadOnlyList<string> Databases { get; init; } = [];
+
+    public bool FromCache { get; init; }
+    public DateTimeOffset? CachedAt { get; init; }
 }

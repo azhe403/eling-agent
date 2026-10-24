@@ -46,6 +46,12 @@ public static class McpHostBuilder
             services.AddSingleton<IDatabaseConnectionStore>(sp => new JsonDatabaseConnectionStore(
                 Path.Combine(globalAgentDir, "databases.json"),
                 sp.GetRequiredService<ILogger<JsonDatabaseConnectionStore>>()));
+            services.AddSingleton<IDatabaseReadCache>(sp => new JsonDatabaseReadCache(
+                globalAgentDir,
+                sp.GetRequiredService<ILogger<JsonDatabaseReadCache>>()));
+            services.AddSingleton<IDatabaseReadService>(sp => new DatabaseReadService(
+                sp.GetRequiredService<IDatabaseReadCache>(),
+                sp.GetRequiredService<ILogger<DatabaseReadService>>()));
             // The resolver hands back the workspace directory when it holds any
             // appsettings file, so the scanner sees appsettings.json AND the
             // environment files next to it. It used to point at appsettings.json
