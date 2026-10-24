@@ -292,9 +292,13 @@ export function Databases() {
   const [expandedConns, setExpandedConns] = useState<Set<string>>(new Set())
   const [connSchemas, setConnSchemas] = useState<Record<string, SchemaInfo>>({})
   const [activeTable, setActiveTable] = useState<{ connId: string; table: string; database?: string | null } | null>(null)
+  // Open table tabs: clicking a table in the tree opens (or activates) a tab
+  // here instead of replacing the single active table view.
+  const [openTabs, setOpenTabs] = useState<Array<{ connId: string; table: string; database?: string | null }>>([])
   const [expandedDbs, setExpandedDbs] = useState<Set<string>>(new Set())
   const [dbSchemas, setDbSchemas] = useState<Record<string, SchemaInfo>>({})
   const treeItemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const activeTabElRef = useRef<HTMLDivElement | null>(null)
   const asideRef = useRef<HTMLElement | null>(null)
   const connSchemasRef = useRef<Record<string, SchemaInfo>>({})
   const dbSchemasRef = useRef<Record<string, SchemaInfo>>({})
@@ -306,6 +310,7 @@ export function Databases() {
   const activeTableRef = useRef<{ connId: string; table: string; database?: string | null } | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; connId: string; table?: string; database?: string } | null>(null)
   const [cellCtxMenu, setCellCtxMenu] = useState<{ x: number; y: number; row: number; col: number } | null>(null)
+  const [tabCtxMenu, setTabCtxMenu] = useState<{ x: number; y: number; idx: number } | null>(null)
   const [schemaLoading, setSchemaLoading] = useState(false)
   const [browseTable, setBrowseTable] = useState<string | null>(null)
   const [browseResult, setBrowseResult] = useState<QueryResult | null>(null)
@@ -434,6 +439,7 @@ export function Databases() {
       const tab = urlTab || st?.rightTab || "data"
 
       if (st?.expandedConns) setExpandedConns(new Set(st.expandedConns))
+      if (Array.isArray(st?.openTabs)) setOpenTabs(st.openTabs)
       if (connId) {
         setSelectedId(connId)
         setSchemaConnId(connId)
@@ -451,7 +457,9 @@ export function Databases() {
       const database = params.get("database") || st?.activeTable?.database || null
       if (connId && table) {
         autoScrollPendingRef.current = true
-        setActiveTable({ connId, table, database })
+        const restored = { connId, table, database: database ?? null }
+        setActiveTable(restored)
+        setOpenTabs((prev) => prev.some((t) => t.connId === connId && t.table === table && (t.database ?? null) === (database ?? null)) ? prev : [...prev, restored])
         setBrowseTable(table)
         if (database) {
           setExpandedDbs((prev) => {
@@ -526,6 +534,13 @@ export function Databases() {
     }
   }, [activeTable, connSchemas, expandedConns])
 
+  // Auto-scroll the active table tab into view in the (possibly overflowing) tab strip.
+  useEffect(() => {
+    const el = activeTabElRef.current
+    if (el) {
+      el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" })
+    }
+  }, [activeTable])
   useEffect(() => { connSchemasRef.current = connSchemas }, [connSchemas])
   useEffect(() => { activeTableRef.current = activeTable }, [activeTable])
   useEffect(() => () => { if (browsePollRef.current) clearTimeout(browsePollRef.current) }, [])
@@ -550,6 +565,7 @@ export function Databases() {
         selectedId,
         schemaConnId,
         activeTable,
+        openTabs,
       }))
       const params = new URLSearchParams()
       if (schemaConnId) params.set("connectionId", schemaConnId)
@@ -561,7 +577,7 @@ export function Databases() {
     } catch {
       // ignore
     }
-  }, [expandedConns, rightTab, selectedId, schemaConnId, activeTable])
+  }, [expandedConns, rightTab, selectedId, schemaConnId, activeTable, openTabs])
 
   /** The body the create form and the create test share. */
   const createPayload = () => {
@@ -884,6 +900,12 @@ export function Databases() {
     autoScrollPendingRef.current = false
     setError(null)
     const newActive = { connId, table, database: database ?? null }
+    // Open (or reuse) a tab for this table so multiple tables can stay open.
+    setOpenTabs((prev) => {
+      const exists = prev.some((t) => t.connId === connId && t.table === table && (t.database ?? null) === (database ?? null))
+      if (exists) return prev
+      return [...prev, newActive]
+    })
     setActiveTable(newActive)
     activeTableRef.current = newActive
     setSelectedId(connId)
@@ -912,6 +934,59 @@ export function Databases() {
     if (rightTabRef.current === "data") {
       void browseData(connId, table, database)
     }
+  }
+
+  const activateTab = (idx: number) => {
+    const t = openTabs[idx]
+    if (!t) return
+    // Auto-scroll the tree to show the selected table.
+    autoScrollPendingRef.current = true
+    // Reuse selectTreeTable to load schema/data for the tab.
+    void selectTreeTable(t.connId, t.table, t.database ?? undefined)
+  }
+
+  const closeTab = (idx: number) => {
+    setOpenTabs((prev) => {
+      const next = prev.filter((_, i) => i !== idx)
+      // If we closed the active tab, activate a neighbor.
+      const closed = prev[idx]
+      const wasActive = activeTable && closed && activeTable.connId === closed.connId && activeTable.table === closed.table && (activeTable.database ?? null) === (closed.database ?? null)
+      if (wasActive) {
+        const neighbor = next[Math.min(idx, next.length - 1)]
+        if (neighbor) {
+          // Defer activation to after state update.
+          setTimeout(() => { autoScrollPendingRef.current = true; void selectTreeTable(neighbor.connId, neighbor.table, neighbor.database ?? undefined) }, 0)
+        } else {
+          setActiveTable(null)
+          activeTableRef.current = null
+          setBrowseTable(null)
+          setBrowseResult(null)
+          setBrowseTotal(null)
+        }
+      }
+      return next
+    })
+  }
+
+  const closeOtherTabs = (idx: number) => {
+    setOpenTabs((prev) => {
+      const keep = prev[idx]
+      if (!keep) return prev
+      // Activate the kept tab if it isn't already active.
+      if (!(activeTable && activeTable.connId === keep.connId && activeTable.table === keep.table && (activeTable.database ?? null) === (keep.database ?? null))) {
+        setTimeout(() => { autoScrollPendingRef.current = true; void selectTreeTable(keep.connId, keep.table, keep.database ?? undefined) }, 0)
+      }
+      return [keep]
+    })
+  }
+
+  const closeAllTabs = () => {
+    setOpenTabs([])
+    setActiveTable(null)
+    activeTableRef.current = null
+    setBrowseTable(null)
+    setBrowseResult(null)
+    setBrowseTotal(null)
   }
 
   const browseData = async (id: string, table: string, database?: string | null, background = false) => {
@@ -1460,6 +1535,19 @@ export function Databases() {
 
         </aside>
         <main className="flex-1 min-h-0 space-y-4 overflow-hidden">
+      {openTabs.length > 0 ? (
+        <div className="flex items-center gap-1 border-b pb-2 overflow-x-auto">
+          {openTabs.map((t, idx) => {
+            const isActive = activeTable?.connId === t.connId && activeTable?.table === t.table && (activeTable?.database ?? null) === (t.database ?? null)
+            return (
+              <div ref={isActive ? activeTabElRef : undefined} key={`${t.connId}:${t.database ?? ""}:${t.table}`} className={`flex items-center gap-1 rounded px-2 py-1 text-xs cursor-pointer border ${isActive ? "bg-accent font-medium border-accent" : "hover:bg-accent/50 border-transparent"}`} onClick={() => activateTab(idx)} onContextMenu={(e) => { e.preventDefault(); setTabCtxMenu({ x: e.clientX, y: e.clientY, idx }) }}>
+                <span className="truncate max-w-[140px]">{t.table}</span>
+                <button className="ml-1 text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); closeTab(idx) }}>×</button>
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
       <div className="flex gap-2 border-b pb-2">
         <Button size="sm" variant={rightTab === "data" ? "default" : "outline"} onClick={() => setRightTab("data")}>Data</Button>
         <Button size="sm" variant={rightTab === "schema" ? "default" : "outline"} onClick={() => setRightTab("schema")}>Schema</Button>
@@ -1806,6 +1894,20 @@ export function Databases() {
             <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent" onClick={() => { const c = conns.find((x) => x.id === ctxMenu.connId); if (c) openEdit(c); setCtxMenu(null) }}>Edit connection</button>
             <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent" onClick={() => { loadSchema(ctxMenu.connId); setCtxMenu(null) }}>Refresh schema</button>
             <button className="block w-full rounded px-2 py-1 text-left text-sm text-destructive hover:bg-accent" onClick={() => { setDeletingId(ctxMenu.connId); setCtxMenu(null) }}>Delete connection</button>
+          </div>
+        </div>
+      ) : null}
+
+      {tabCtxMenu ? (
+        <div className="fixed inset-0 z-50" onClick={() => setTabCtxMenu(null)}>
+          <div
+            className="absolute min-w-[160px] rounded-md border border-border bg-popover p-1 shadow-md"
+            style={{ left: tabCtxMenu.x, top: tabCtxMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent" onClick={() => { closeTab(tabCtxMenu.idx); setTabCtxMenu(null) }}>Close</button>
+            <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent" onClick={() => { closeOtherTabs(tabCtxMenu.idx); setTabCtxMenu(null) }}>Close others</button>
+            <button className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent" onClick={() => { closeAllTabs(); setTabCtxMenu(null) }}>Close all</button>
           </div>
         </div>
       ) : null}
