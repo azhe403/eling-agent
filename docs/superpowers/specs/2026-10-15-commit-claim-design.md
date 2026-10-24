@@ -36,12 +36,19 @@ branch cannot sweep each other's uncommitted work into one commit. Companion to 
 - `commit_check_conflict(session_id, paths[])` → combines a live foreign commit claim
   (same `checkout` + `branch`), file claims on the paths, and staged/dirty git state into a
   stage/don't-stage decision.
+- `commit_wait(session_id, total_timeout_seconds?, initial_interval_seconds?)` → server-side
+  wait: blocks until no foreign live commit claim exists on the same `checkout` + `branch`
+  (or total timeout, default 180s), polling with exponential backoff starting at
+  `initial_interval_seconds` (default 5s): 5s → 10s → 20s (cap). Does not take the slot;
+  caller still must `commit_claim` after it returns green.
 
 ## Agent guidance (server only)
-- ServerInstructions: must call `commit_check_conflict` before `git add`; on red, stop and
-  report to the user, do not stage; on green, must call `commit_claim` before the first
-  staging; must call `commit_release` immediately after the commit lands; heartbeat on
-  every step change (already required by the session-context phase).
+- ServerInstructions: must call `commit_check_conflict` before `git add`; on red, either
+  call `commit_wait` (server-side blocking wait with timeout) or stop and report to the
+  user (holder info + "retry later or wait for the claim to release"), do not stage; on
+  green, must call `commit_claim` before the first staging; must call `commit_release`
+  immediately after the commit lands; heartbeat on every step change (already required by
+  the session-context phase).
 - No AGENTS.md change in this phase.
 
 ## Error handling
