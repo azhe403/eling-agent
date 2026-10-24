@@ -3,13 +3,15 @@
 import * as React from "react"
 import { cn } from "cn"
 
-function Table({ className, containerClassName, containerStyle, ...props }: React.ComponentProps<"table"> & { containerClassName?: string; containerStyle?: React.CSSProperties }) {
-  return (
-    <div
-      data-slot="table-container"
-      className={cn("relative w-full overflow-auto", containerClassName)}
-      style={containerStyle}
-    >
+const Table = React.forwardRef<HTMLDivElement, React.ComponentProps<"table"> & { containerClassName?: string; containerStyle?: React.CSSProperties }>(
+  ({ className, containerClassName, containerStyle, ...props }, ref) => {
+    return (
+      <div
+        ref={ref}
+        data-slot="table-container"
+        className={cn("relative w-full overflow-auto", containerClassName)}
+        style={containerStyle}
+      >
       <table
         data-slot="table"
         className={cn("w-full caption-bottom text-sm", className)}
@@ -18,6 +20,10 @@ function Table({ className, containerClassName, containerStyle, ...props }: Reac
     </div>
   )
 }
+
+) 
+
+Table.displayName = "Table"
 
 function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
   return (

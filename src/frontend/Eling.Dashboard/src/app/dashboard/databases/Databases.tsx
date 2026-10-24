@@ -67,11 +67,13 @@ type QueryResult = {
   columns: string[]
   rows: unknown[][]
   truncated: boolean
+  fromCache?: boolean
+  cachedAt?: string | null
 }
 
 type ColumnSchema = { name: string; dataType: string; isNullable: boolean; isPrimaryKey: boolean }
 type TableSchema = { name: string; kind: string; columns?: ColumnSchema[]; foreignKeys?: { column: string; referencesTable: string; referencesColumn: string }[] }
-type SchemaInfo = { tables?: TableSchema[]; databases?: string[] }
+type SchemaInfo = { tables?: TableSchema[]; databases?: string[]; fromCache?: boolean; cachedAt?: string | null }
 
 type Detected = {
   settingsKey: string
@@ -83,6 +85,26 @@ type Detected = {
 }
 
 const API = "/api/databases"
+
+const formatCacheAge = (cachedAt?: string | null): string => {
+  if (!cachedAt) return "cached"
+  const ms = Date.now() - new Date(cachedAt).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return "cached"
+  const sec = Math.floor(ms / 1000)
+  if (sec < 60) return `${sec}s ago`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min} min ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr} h ago`
+  const day = Math.floor(hr / 24)
+  return `${day} day${day === 1 ? "" : "s"} ago`
+}
+
+const isStaleCache = (cachedAt?: string | null): boolean => {
+  if (!cachedAt) return false
+  const ms = Date.now() - new Date(cachedAt).getTime()
+  return Number.isFinite(ms) && ms > 24 * 60 * 60 * 1000
+}
 
 const DEFAULT_MYSQL_PORT = 3306
 
@@ -182,7 +204,7 @@ const parseApiError = (text: string): string => {
 
 interface DbNotification {
   id: number
-  type: "success" | "error"
+  type: "success" | "error" | "warning"
   title: string
   text?: string
 }
@@ -279,6 +301,9 @@ export function Databases() {
   const schemaConnIdRef = useRef<string | null>(null)
   const schemaRetryRef = useRef<Record<string, number>>({})
   const autoScrollPendingRef = useRef(false)
+  const browsePollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dataScrollRef = useRef<HTMLDivElement | null>(null)
+  const activeTableRef = useRef<{ connId: string; table: string; database?: string | null } | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; connId: string; table?: string; database?: string } | null>(null)
   const [cellCtxMenu, setCellCtxMenu] = useState<{ x: number; y: number; row: number; col: number } | null>(null)
   const [schemaLoading, setSchemaLoading] = useState(false)
@@ -323,7 +348,7 @@ export function Databases() {
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string; latencyMs: number } | undefined>>({})
   const [sql, setSql] = useState("SELECT 1")
   const [qResult, setQResult] = useState<QueryResult | null>(null)
-  const [qError, setQError] = useState<string | null>(null)
+  // qError removed - errors now shown via toast (notifyDb)
   const [qLoading, setQLoading] = useState(false)
 
   // True when the currently selected connection is read-only. In that case we
@@ -436,24 +461,7 @@ export function Databases() {
           })
         }
         void (async () => {
-          // try cache first (localStorage) for instant render
-          let schema: SchemaInfo | null = database
-            ? dbSchemasRef.current[`${connId}:${database}`] ?? null
-            : connSchemasRef.current[connId] ?? null
-          if (!schema) {
-            try {
-              const raw = localStorage.getItem(schemaCacheKey(connId, database))
-              if (raw) schema = JSON.parse(raw) as SchemaInfo
-            } catch { schema = null }
-          }
-          if (schema) {
-            if (database) {
-              setDbSchemas((prev) => (prev[`${connId}:${database}`] ? prev : { ...prev, [`${connId}:${database}`]: schema }))
-            } else {
-              setConnSchemas((prev) => (prev[connId] ? prev : { ...prev, [connId]: schema }))
-            }
-            setSchemaInfo(schema)
-          }
+          // backend (possibly cached) is the source of truth now
           // background revalidate / fetch
           if (database) {
             void ensureDbSchema(connId, database)
@@ -519,6 +527,8 @@ export function Databases() {
   }, [activeTable, connSchemas, expandedConns])
 
   useEffect(() => { connSchemasRef.current = connSchemas }, [connSchemas])
+  useEffect(() => { activeTableRef.current = activeTable }, [activeTable])
+  useEffect(() => () => { if (browsePollRef.current) clearTimeout(browsePollRef.current) }, [])
   useEffect(() => { dbSchemasRef.current = dbSchemas }, [dbSchemas])
   useEffect(() => { schemaConnIdRef.current = schemaConnId }, [schemaConnId])
 
@@ -793,16 +803,12 @@ export function Databases() {
       const data = await fetchSchema(id)
       setSchemaInfo(data)
       setConnSchemas((prev) => ({ ...prev, [id]: data }))
-      try { localStorage.setItem(schemaCacheKey(id), JSON.stringify(data)) } catch { /* quota */ }
     } catch (e: unknown) {
       notifyDb("error", e instanceof Error ? e.message : "schema failed")
     } finally {
       setSchemaLoading(false)
     }
   }
-
-  const schemaCacheKey = (id: string, database?: string | null) =>
-    database ? `db.schema.cache.${id}.${database}` : `db.schema.cache.${id}`
 
   const fetchSchema = async (id: string, database?: string | null) => {
     const qs = database ? "?database=" + encodeURIComponent(database) : ""
@@ -811,37 +817,21 @@ export function Databases() {
     return await res.json()
   }
 
-  // Stale-while-revalidate: render from localStorage cache instantly, then
-  // refresh from backend in the background and update the cache.
   const ensureSchema = useCallback(async (id: string, opts?: { force?: boolean }) => {
     const force = opts?.force ?? false
-    if (!force && connSchemasRef.current[id]) return // already in memory this session
+    if (!force && connSchemasRef.current[id]?.fromCache === false) return
 
-    let cached: SchemaInfo | null = null
-    if (!force) {
-      try {
-        const raw = localStorage.getItem(schemaCacheKey(id))
-        if (raw) cached = JSON.parse(raw)
-      } catch {
-        cached = null
-      }
-    }
-
-    if (cached) {
-      // instant render from cache
-      setConnSchemas((prev) => (prev[id] ? prev : { ...prev, [id]: cached }))
-      if (schemaConnIdRef.current === id) setSchemaInfo(cached)
-    }
-
-    // background revalidate / initial fetch
     try {
       const fresh = await fetchSchema(id)
       setConnSchemas((prev) => ({ ...prev, [id]: fresh }))
       if (schemaConnIdRef.current === id) setSchemaInfo(fresh)
-      try { localStorage.setItem(schemaCacheKey(id), JSON.stringify(fresh)) } catch { /* quota */ }
-      schemaRetryRef.current[id] = 0 // reset retry counter on success
+      schemaRetryRef.current[id] = 0
+      if (fresh.fromCache) {
+        const delay = (schemaRetryRef.current[id] ?? 0) < 12 ? 5000 : 15000
+        schemaRetryRef.current[id] = (schemaRetryRef.current[id] ?? 0) + 1
+        setTimeout(() => { void ensureSchema(id, { force: true }) }, delay)
+      }
     } catch {
-      // keep cached value on failure; auto-retry a few times
       const retries = schemaRetryRef.current[id] ?? 0
       if (retries < 3) {
         schemaRetryRef.current[id] = retries + 1
@@ -854,12 +844,14 @@ export function Databases() {
   // name is part of the cache key, so two databases never share a schema.
   const ensureDbSchema = useCallback(async (connId: string, database: string) => {
     const key = `${connId}:${database}`
-    if (dbSchemasRef.current[key]) return
+    if (dbSchemasRef.current[key] && !dbSchemasRef.current[key]?.fromCache) return
 
     try {
       const fresh = await fetchSchema(connId, database)
       setDbSchemas((prev) => ({ ...prev, [key]: fresh }))
-      try { localStorage.setItem(schemaCacheKey(connId, database), JSON.stringify(fresh)) } catch { /* quota */ }
+      if (fresh.fromCache) {
+        setTimeout(() => { void ensureDbSchema(connId, database) }, 5000)
+      }
     } catch (e: unknown) {
       notifyDb("error", e instanceof Error ? e.message : "schema failed")
     }
@@ -891,21 +883,18 @@ export function Databases() {
   const selectTreeTable = async (connId: string, table: string, database?: string | null) => {
     autoScrollPendingRef.current = false
     setError(null)
-    setActiveTable({ connId, table, database: database ?? null })
+    const newActive = { connId, table, database: database ?? null }
+    setActiveTable(newActive)
+    activeTableRef.current = newActive
     setSelectedId(connId)
     setSchemaConnId(connId)
     setBrowseTable(table)
     // preserve current tab instead of forcing "data"
     // schema: use in-memory, then localStorage cache, then fetch
-    let schema: SchemaInfo | null = database
+    const schema: SchemaInfo | null = database
       ? dbSchemasRef.current[`${connId}:${database}`] ?? null
       : connSchemasRef.current[connId] ?? null
-    if (!schema) {
-      try {
-        const raw = localStorage.getItem(schemaCacheKey(connId, database))
-        if (raw) schema = JSON.parse(raw) as SchemaInfo
-      } catch { schema = null }
-    }
+    // (localStorage schema cache removed - backend is the source)
     if (schema) {
       if (database) {
         setDbSchemas((prev) => (prev[`${connId}:${database}`] ? prev : { ...prev, [`${connId}:${database}`]: schema }))
@@ -925,13 +914,22 @@ export function Databases() {
     }
   }
 
-  const browseData = async (id: string, table: string, database?: string | null) => {
-    setError(null)
-    setEditingCell(null)
-    const isNewTable = browseTable !== table
+  const browseData = async (id: string, table: string, database?: string | null, background = false) => {
+    // Guard against stale polls from a previous table selection.
+    const current = activeTableRef.current
+    if (current && (current.connId !== id || current.table !== table)) return
+    if (!background) {
+      setError(null)
+      setEditingCell(null)
+    }
+    // Preserve scroll position across refreshes so the table doesn't jump.
+    const savedScroll = dataScrollRef.current?.scrollTop ?? 0
+    const isNewTable = !background && browseTable !== table
     setBrowseTable(table)
-    setBrowseLoading(true)
+    if (!background) setBrowseLoading(true)
     if (isNewTable) {
+      if (browsePollRef.current) clearTimeout(browsePollRef.current)
+      browsePollRef.current = null
       setBrowseResult(null)
       setBrowseTotal(null)
     }
@@ -954,18 +952,34 @@ export function Databases() {
         }),
       ])
       if (!dataRes.ok) throw new Error(parseApiError(await dataRes.text()))
-      setBrowseResult(await dataRes.json())
+      const data = await dataRes.json() as QueryResult
+      setBrowseResult(data)
       if (countRes.ok) {
-        const cd = await countRes.json()
+        const cd = await countRes.json() as QueryResult
         const v = cd?.rows?.[0]?.[0]
-        if (v === null || v === undefined) return
-        const n = typeof v === "number" ? v : Number(v)
-        if (Number.isFinite(n)) setBrowseTotal(n)
+        if (v !== null && v !== undefined) {
+          const n = typeof v === "number" ? v : Number(v)
+          if (Number.isFinite(n)) setBrowseTotal(n)
+        }
+      }
+      if (browsePollRef.current) clearTimeout(browsePollRef.current)
+      if (data.fromCache) {
+        // No toast here: the in-page "Cached data" banner already conveys it,
+        // and a toast on every 5s poll (plus lingering after reconnect) is noisy.
+        browsePollRef.current = setTimeout(() => { void browseData(id, table, database, true) }, 5000)
+      } else {
+        browsePollRef.current = null
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "browse failed")
+      const msg = e instanceof Error ? e.message : "browse failed"
+      const conn = conns.find((c) => c.id === id)
+      notifyDb("error", `Could not load ${table}`, `${conn?.name ?? id}: ${msg}`)
     } finally {
       setBrowseLoading(false)
+      // Restore scroll position so refresh doesn't jump the table.
+      requestAnimationFrame(() => {
+        if (dataScrollRef.current) dataScrollRef.current.scrollTop = savedScroll
+      })
     }
   }
 
@@ -1071,6 +1085,7 @@ export function Databases() {
   const setCellValue = async (rowIndex: number, colIndex: number, value: null | "" | "now") => {
     if (!browseResult || !selectedId || !activeTable) return
     if (selectedIsReadOnly) { notifyDb("error", "This connection is read-only, so data changes are disabled."); return }
+    if (browseResult?.fromCache) { notifyDb("error", "This data is cached (database unreachable), so edits are disabled."); return }
     const colName = browseResult.columns[colIndex]
     if (pkColumnNames().includes(colName)) { notifyDb("error", "Primary key columns cannot be changed here."); return }
     const colSchema = activeSchemaTable()?.columns?.find((c) => c.name === colName)
@@ -1123,7 +1138,7 @@ export function Databases() {
   }
 
   const promptDeleteRow = (rowIndex: number) => {
-    if (selectedIsReadOnly) return
+    if (selectedIsReadOnly || browseResult?.fromCache) return
     if (!browseResult || !selectedId || !activeTable) return
     const where = buildWherePk(browseResult.rows[rowIndex])
     if (!where) { notifyDb("error", "no primary key — cannot delete"); return }
@@ -1209,7 +1224,6 @@ export function Databases() {
 
   const remove = async (id: string) => {
     await fetch(API + "/" + id, { method: "DELETE" })
-    try { localStorage.removeItem(schemaCacheKey(id)) } catch { /* ignore */ }
     await load()
   }
 
@@ -1227,11 +1241,11 @@ export function Databases() {
 
   const runQuery = async () => {
     if (!selectedId) return
-    setQLoading(true); setQError(null); setQResult(null)
+    setQLoading(true); setQResult(null)
     try {
       const trimmed = sql.trim()
       if (/^\s*(insert|update|delete|create|alter|drop|truncate|replace)\b/i.test(trimmed)) {
-        if (selectedIsReadOnly) { setQError("This connection is read-only, so data changes are disabled."); setQLoading(false); return }
+        if (selectedIsReadOnly) { notifyDb("error", "Read-only connection", "This connection is read-only, so data changes are disabled."); setQLoading(false); return }
         const res = await fetch(API + "/" + selectedId + "/mutate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1252,9 +1266,16 @@ export function Databases() {
         body: JSON.stringify({ sql: finalSql, maxRows: 100, database: activeTable?.database ?? null }),
       })
       if (!res.ok) throw new Error(parseApiError(await res.text()))
-      setQResult(await res.json())
+      const qData = await res.json() as QueryResult
+      setQResult(qData)
+      if (qData.fromCache) {
+        const conn = conns.find((c) => c.id === selectedId)
+        notifyDb("warning", `Cached result`, `${conn?.name ?? selectedId}: database unavailable, showing snapshot from ${formatCacheAge(qData.cachedAt)}`)
+      }
     } catch (e: unknown) {
-      setQError(e instanceof Error ? e.message : "query failed")
+      const msg = e instanceof Error ? e.message : "query failed"
+      const conn = conns.find((c) => c.id === selectedId)
+      notifyDb("error", `Query failed`, `${conn?.name ?? selectedId}: ${msg}`)
     } finally {
       setQLoading(false)
     }
@@ -1438,7 +1459,7 @@ export function Databases() {
       </Card>
 
         </aside>
-        <main className="flex-1 min-h-0 space-y-4 overflow-y-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}>
+        <main className="flex-1 min-h-0 space-y-4 overflow-hidden">
       <div className="flex gap-2 border-b pb-2">
         <Button size="sm" variant={rightTab === "data" ? "default" : "outline"} onClick={() => setRightTab("data")}>Data</Button>
         <Button size="sm" variant={rightTab === "schema" ? "default" : "outline"} onClick={() => setRightTab("schema")}>Schema</Button>
@@ -1447,7 +1468,14 @@ export function Databases() {
       {rightTab === "schema" && schemaConnId ? (
         <Card>
           <CardHeader>
-            <CardTitle>Schema · {conns.find((c) => c.id === schemaConnId)?.name}</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              Schema · {conns.find((c) => c.id === schemaConnId)?.name}
+              {schemaInfo?.fromCache ? (
+                <Badge variant="outline" className={isStaleCache(schemaInfo.cachedAt) ? "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-400" : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"}>
+                  {isStaleCache(schemaInfo.cachedAt) ? "stale" : "cached"} · {formatCacheAge(schemaInfo.cachedAt)}
+                </Badge>
+              ) : null}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {schemaLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
@@ -1523,25 +1551,37 @@ export function Databases() {
         <>
           <Card>
             <CardHeader>
-              <CardTitle>Data - {activeTable.table}</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+              Data - {activeTable.table}
+              {browseResult?.fromCache ? (
+                <Badge variant="outline" className={isStaleCache(browseResult.cachedAt) ? "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-400" : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"}>
+                  {isStaleCache(browseResult.cachedAt) ? "stale" : "cached"} · {formatCacheAge(browseResult.cachedAt)}
+                </Badge>
+              ) : null}
+            </CardTitle>
             </CardHeader>
           <CardContent>
-            {browseLoading && !browseResult ? <p className="text-sm text-muted-foreground">Loading.</p> : null}
-            {browseResult ? (
-              <div className="space-y-2">
-                {selectedIsReadOnly ? <p className="text-xs text-muted-foreground">Read-only connection — cells can be edited, but never persisted.</p> : null}
-                <div className="flex items-center gap-2">
+            {/* banner + toolbar: always visible */}
+            <div className="space-y-2">
+              {selectedIsReadOnly && !browseResult?.fromCache ? <p className="text-xs text-muted-foreground">Read-only connection - cells can be edited, but never persisted.</p> : null}
+              {browseResult?.fromCache ? <p className="text-xs text-amber-700 dark:text-amber-400">Cached data - the database is unreachable, so edits are disabled.</p> : null}
+              <div className="flex items-center gap-3 mb-2">
                   <Button size="sm" variant="outline" onClick={() => { void refreshData() }} disabled={browseLoading || mutating} title="Refresh table data">
                     <RefreshCw className={browseLoading ? "size-4 animate-spin" : "size-4"} />
                     <span className="ml-1">Refresh</span>
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => setNewRow(Object.fromEntries(browseResult.columns.map((c) => [c, ""])))} title={selectedIsReadOnly ? "read-only connection — editing disabled" : (pkColumnNames().length === 0 ? "no primary key — read only" : undefined)} disabled={mutating || pkColumnNames().length === 0 || selectedIsReadOnly}>
+                  <Button size="sm" variant="outline" onClick={() => browseResult && setNewRow(Object.fromEntries(browseResult.columns.map((c) => [c, ""])))} title={selectedIsReadOnly ? "read-only connection - editing disabled" : (pkColumnNames().length === 0 ? "no primary key - read only" : undefined)} disabled={mutating || pkColumnNames().length === 0 || selectedIsReadOnly || !!browseResult?.fromCache || !browseResult}>
                     + Add row
                   </Button>
-                  {pkColumnNames().length === 0 ? <span className="text-xs text-muted-foreground">No primary key — read only</span> : null}
+                  {pkColumnNames().length === 0 ? <span className="text-xs text-muted-foreground">No primary key - read only</span> : null}
                 </div>
-                <Table className="text-sm" containerClassName="max-h-[calc(100vh-260px)] min-h-[320px] rounded-md border">
-                  <TableHeader>
+            </div>
+            {/* table: data or loading */}
+            <div className="space-y-2">
+              {browseResult ? (
+                <>
+                  <Table ref={dataScrollRef} className="text-sm" containerClassName="h-[calc(100vh-280px)] rounded-md border">
+                    <TableHeader>
                       <TableRow className="sticky top-0 z-20 bg-background">
                         {browseResult.columns.map((col) => {
   const isIdCol = /^id$/i.test(col)
@@ -1591,7 +1631,7 @@ export function Databases() {
                                       disabled={savingCell}
                                       readOnly={selectedIsReadOnly}
                                     />
-                                    <button type="button" className="shrink-0 rounded border px-1.5 py-0.5 text-xs text-green-600 hover:bg-accent" onClick={() => { void commitEdit() }} disabled={savingCell || mutating} title="Apply edit">Apply</button>
+                                    {!selectedIsReadOnly ? <button type="button" className="shrink-0 rounded border px-1.5 py-0.5 text-xs text-green-600 hover:bg-accent" onClick={() => { void commitEdit() }} disabled={savingCell || mutating || !!browseResult?.fromCache} title="Apply edit">Apply</button> : null}
                                   </div>
                                 </TableCell>
                               )
@@ -1624,13 +1664,15 @@ export function Databases() {
                           <TableCell className="border px-2 py-1 sticky right-0 bg-background z-10">
                             {editingCell?.row === i ? (
                               <div className="flex gap-1">
-                                <button
-                                  className="text-xs text-green-600 hover:underline"
-                                  onClick={() => { void commitEdit() }}
-                                  disabled={savingCell || mutating}
-                                >
-                                  apply
-                                </button>
+                                {!selectedIsReadOnly ? (
+                                  <button
+                                    className="text-xs text-green-600 hover:underline"
+                                    onClick={() => { void commitEdit() }}
+                                    disabled={savingCell || mutating || !!browseResult?.fromCache}
+                                  >
+                                    apply
+                                  </button>
+                                ) : null}
                                 <button
                                   className="text-xs text-muted-foreground hover:underline"
                                   onClick={() => cancelEdit()}
@@ -1685,30 +1727,48 @@ export function Databases() {
                         </TableRow>
                       ) : null}
                     </TableBody>
+                  </Table>
+                  {browseResult.truncated ? <p className="mt-1 text-xs text-muted-foreground">Truncated.</p> : null}
+                </>
+              ) : (
+                <Table className="text-sm" containerClassName="h-[calc(100vh-280px)] rounded-md border">
+                  <TableHeader>
+                    <TableRow className="sticky top-0 z-20 bg-background">
+                      {(schemaInfo?.tables?.find((t) => t.name === activeTable?.table)?.columns ?? []).map((col) => (
+                        <TableHead key={col.name} className="border px-2 py-1 text-left">{col.name}</TableHead>
+                      ))}
+                      <TableHead className="border px-2 py-1 text-left w-16 sticky right-0 bg-background z-40">act</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell colSpan={(schemaInfo?.tables?.find((t) => t.name === activeTable?.table)?.columns?.length ?? 0) + 1} className="text-center text-sm text-muted-foreground py-8">
+                        Loading...
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
                 </Table>
-                {browseResult.truncated ? <p className="mt-1 text-xs text-muted-foreground">Truncated.</p> : null}
-              </div>
-            ) : null}
+              )}
+            </div>
           </CardContent>
         </Card>
-        {browseResult ? (
-          <div className="sticky bottom-0 z-20 flex items-center gap-2 rounded-md bg-muted/80 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur">
-            {browseTotal !== null
-              ? `Total rows: ${browseTotal} (showing ${browseResult.rows.length}${browseResult.truncated ? ", truncated" : ""})`
-              : `Total rows: ${browseResult.rows.length}`}
-          </div>
-        ) : null}
+        <div className="sticky bottom-0 z-20 flex items-center gap-2 rounded-md bg-muted/80 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur">
+          {browseResult
+            ? (browseTotal !== null
+                ? `Total rows: ${browseTotal} (showing ${browseResult.rows.length}${browseResult.truncated ? ", truncated" : ""})`
+                : `Total rows: ${browseResult.rows.length}`)
+            : "Total rows: -"}
+        </div>
         </>
       ) : null}
       {rightTab === "sql" && selectedId ? (
         <Card>
-          <CardHeader><CardTitle>Query - {conns.find(c => c.id === selectedId)?.name}</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="flex items-center gap-2">Query - {conns.find(c => c.id === selectedId)?.name}{qResult?.fromCache ? <Badge variant="outline" className={isStaleCache(qResult.cachedAt) ? "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-400" : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"}>{isStaleCache(qResult.cachedAt) ? "stale" : "cached"} · {formatCacheAge(qResult.cachedAt)}</Badge> : null}</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <textarea className="w-full rounded border p-2 text-sm font-mono" value={sql} onChange={e => setSql(e.target.value)} rows={4} />
             <Button onClick={runQuery} disabled={qLoading}>
               <Play className="mr-2 size-4" /> {qLoading ? "Running…" : "Run"}
             </Button>
-            {qError ? <p className="text-sm text-destructive">{qError}</p> : null}
             {qResult ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -1790,7 +1850,7 @@ export function Databases() {
             {isDateTimeColumn(browseResult?.columns[cellCtxMenu.col] ?? "") ? (
               <button
                 className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
-                disabled={mutating || selectedIsReadOnly || pkColumnNames().includes(browseResult?.columns[cellCtxMenu.col] ?? "")}
+                disabled={mutating || selectedIsReadOnly || !!browseResult?.fromCache || pkColumnNames().includes(browseResult?.columns[cellCtxMenu.col] ?? "")}
                 title={selectedIsReadOnly ? "read-only connection — changes are disabled" : undefined}
                 onClick={() => { const { row, col } = cellCtxMenu; setCellCtxMenu(null); void setCellValue(row, col, "now") }}
               >
@@ -1799,7 +1859,7 @@ export function Databases() {
             ) : null}
             <button
               className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
-              disabled={mutating || selectedIsReadOnly || pkColumnNames().includes(browseResult?.columns[cellCtxMenu.col] ?? "")}
+              disabled={mutating || selectedIsReadOnly || !!browseResult?.fromCache || pkColumnNames().includes(browseResult?.columns[cellCtxMenu.col] ?? "")}
               title={selectedIsReadOnly ? "read-only connection — changes are disabled" : undefined}
               onClick={() => { const { row, col } = cellCtxMenu; setCellCtxMenu(null); void setCellValue(row, col, null) }}
             >
@@ -1807,7 +1867,7 @@ export function Databases() {
             </button>
             <button
               className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
-              disabled={mutating || selectedIsReadOnly || pkColumnNames().includes(browseResult?.columns[cellCtxMenu.col] ?? "")}
+              disabled={mutating || selectedIsReadOnly || !!browseResult?.fromCache || pkColumnNames().includes(browseResult?.columns[cellCtxMenu.col] ?? "")}
               onClick={() => { const { row, col } = cellCtxMenu; setCellCtxMenu(null); void setCellValue(row, col, "") }}
             >
               Set empty string
