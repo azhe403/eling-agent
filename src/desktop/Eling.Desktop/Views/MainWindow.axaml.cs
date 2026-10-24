@@ -34,10 +34,18 @@ public partial class MainWindow : Window
         {
             this.FindControl<ChatView>("ChatPanel")?.DataContext =
                 app.Services.GetRequiredService<ChatViewModel>();
-            this.FindControl<FoldersView>("WorkspacesPanel")?.DataContext =
-                app.Services.GetRequiredService<FoldersViewModel>();
+            var foldersVm = app.Services.GetRequiredService<FoldersViewModel>();
+            this.FindControl<FoldersView>("WorkspacesPanel")?.DataContext = foldersVm;
             this.FindControl<SettingsView>("SettingsPanel")?.DataContext =
                 app.Services.GetRequiredService<SettingsViewModel>();
+
+            if (_viewModel is not null)
+            {
+                _viewModel.OnWorkspaceRefreshRequested += () =>
+                {
+                    _ = foldersVm.LoadAsync();
+                };
+            }
         }
 
         RestoreWindowBounds();

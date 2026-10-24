@@ -17,6 +17,7 @@ public class FoldersViewModel : ViewModelBase
 {
     private readonly ElingApiClient _apiClient;
     private readonly ILogger<FoldersViewModel> _logger;
+    private readonly MainViewModel? _mainViewModel;
 
     private string _selectedRoot = "";
     private string _statusText = "";
@@ -101,10 +102,12 @@ public class FoldersViewModel : ViewModelBase
 
     public FoldersViewModel(
         ElingApiClient apiClient,
-        ILogger<FoldersViewModel> logger)
+        ILogger<FoldersViewModel> logger,
+        MainViewModel? mainViewModel = null)
     {
         _apiClient = apiClient;
         _logger = logger;
+        _mainViewModel = mainViewModel;
 
         LoadCommand = ReactiveCommand.CreateFromTask(() => LoadAsync());
         AddRootCommand = ReactiveCommand.CreateFromTask(() => AddRootAsync());
@@ -115,13 +118,9 @@ public class FoldersViewModel : ViewModelBase
         this.WhenAnyValue(x => x.StatusText)
             .Subscribe(text =>
             {
-                if (!string.IsNullOrEmpty(text) && Avalonia.Application.Current is App app && app.Services != null)
+                if (!string.IsNullOrEmpty(text) && _mainViewModel != null)
                 {
-                    var mainVm = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<MainViewModel>(app.Services);
-                    if (mainVm != null)
-                    {
-                        mainVm.StatusText = text;
-                    }
+                    _mainViewModel.StatusText = text;
                 }
             });
 

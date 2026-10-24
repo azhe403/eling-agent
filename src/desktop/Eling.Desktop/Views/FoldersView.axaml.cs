@@ -1,6 +1,7 @@
+using System;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Eling.Desktop.Services;
 using Eling.Desktop.ViewModels;
@@ -11,48 +12,17 @@ namespace Eling.Desktop.Views;
 
 public partial class FoldersView : UserControl
 {
- public FoldersView()
- {
- InitializeComponent();
- Loaded += async (_, _) =>
- {
- if (DataContext is FoldersViewModel vm)
- {
- await vm.LoadAsync();
- }
- };
-
- var entriesListBox = this.FindControl<ListBox>("EntriesListBox");
- if (entriesListBox is not null)
- {
- entriesListBox.DoubleTapped += OnEntryDoubleTapped;
- }
- var rootsListBox = this.FindControl<ListBox>("RootsListBox");
- if (rootsListBox is not null)
- {
- rootsListBox.SelectionChanged += OnRootsSelectionChanged;
- }
- }
-
-    private bool _switchingWorkspace;
-
-    private async void OnRootsSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    public FoldersView()
     {
-        if (_switchingWorkspace || e.AddedItems.Count == 0) return;
-        if (DataContext is not FoldersViewModel vm) return;
-        if (e.AddedItems[0] is not string picked || string.IsNullOrWhiteSpace(picked)) return;
-        _switchingWorkspace = true;
-        try { await vm.SwitchWorkspaceAsync(picked); }
-        finally { _switchingWorkspace = false; }
+        InitializeComponent();
+        Loaded += async (_, _) =>
+        {
+            if (DataContext is FoldersViewModel vm)
+            {
+                await vm.LoadAsync();
+            }
+        };
     }
-
- private void OnEntryDoubleTapped(object? sender, Avalonia.Input.TappedEventArgs e)
- {
- if (DataContext is FoldersViewModel vm && vm.SelectedEntry is { } entry)
- {
- vm.OpenEntryCommand.Execute(entry).Subscribe();
- }
- }
 
     private void InitializeComponent()
     {
@@ -81,7 +51,7 @@ public partial class FoldersView : UserControl
             ex => vm.StatusText = $"Add failed: {ex.Message}");
     }
 
-    private async System.Threading.Tasks.Task<string?> PickFolderAsync(FoldersViewModel folders)
+    private async Task<string?> PickFolderAsync(FoldersViewModel folders)
     {
         try
         {
@@ -91,8 +61,7 @@ public partial class FoldersView : UserControl
                 return null;
             }
 
-            var browser = this.FindControl<HostBrowseView>("Browser")
-                ?? this.FindControl<HostBrowseView>("Browser2");
+            var browser = this.FindControl<HostBrowseView>("Browser");
             if (browser is null)
             {
                 folders.StatusText = "Browse failed: browser control missing.";
@@ -103,14 +72,20 @@ public partial class FoldersView : UserControl
             var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
             browser.DataContext = new HostBrowseViewModel(apiClient, loggerFactory.CreateLogger<HostBrowseViewModel>());
 
-            // Dispatch load on UI thread since Loaded may have already fired before DataContext assignment
             _ = Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
             {
-                if (browser.DataContext is HostBrowseViewModel browseVm)
-                    await browseVm.LoadInitialAsync();
+                try
+                {
+                    if (browser.DataContext is HostBrowseViewModel browseVm)
+                        await browseVm.LoadInitialAsync();
+                }
+                catch (Exception ex)
+                {
+                    folders.StatusText = $"Browse load failed: {ex.Message}";
+                }
             });
 
-            var tcs = new System.Threading.Tasks.TaskCompletionSource<string?>();
+            var tcs = new TaskCompletionSource<string?>();
             void OnClosed(string? p) => tcs.TrySetResult(p);
 
             browser.Closed += OnClosed;
@@ -125,9 +100,10 @@ public partial class FoldersView : UserControl
                 browser.Closed -= OnClosed;
             }
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
             folders.StatusText = $"Browse failed: {ex.Message}";
+            folders.ShowBrowser = false;
             return null;
         }
     }

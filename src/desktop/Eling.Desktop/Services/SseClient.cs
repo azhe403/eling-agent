@@ -16,6 +16,7 @@ public sealed class SseClient : IDisposable
 
     public event Action? OnMemoryChanged;
     public event Action? OnRuntimesChanged;
+    public event Action? OnCodebaseChanged;
     public event Action<string>? OnStatusChanged;
 
     public SseClient(string baseUrl, ILogger<SseClient> logger)
@@ -126,6 +127,8 @@ public sealed class SseClient : IDisposable
 
                 if (data == "runtimes")
                     OnRuntimesChanged?.Invoke();
+                else if (data == "codebase")
+                    OnCodebaseChanged?.Invoke();
                 else if (!string.IsNullOrEmpty(data) && data != "connected")
                     OnMemoryChanged?.Invoke();
             }

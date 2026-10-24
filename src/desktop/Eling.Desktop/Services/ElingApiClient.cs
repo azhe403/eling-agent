@@ -211,6 +211,84 @@ public sealed class ElingApiClient
         return [];
     }
 
+    public async Task<IReadOnlyList<CoordinatorRuntimeDto>> GetAllCoordinatorRuntimesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var client = GetClient();
+            var response = await client.GetAsync("api/coordinator/runtimes?includeRegistered=true&allProcesses=true", cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                var dtos = await response.Content.ReadFromJsonAsync<List<CoordinatorRuntimeDto>>(JsonOptions, cancellationToken);
+                return dtos ?? [];
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error loading coordinator runtimes");
+        }
+
+        return [];
+    }
+
+    public async Task<IReadOnlyList<ProjectCodebaseStatusDto>> GetProjectCodebaseStatusesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var client = GetClient();
+            var response = await client.GetAsync("api/coordinator/projects/codebase-statuses", cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                var dtos = await response.Content.ReadFromJsonAsync<List<ProjectCodebaseStatusDto>>(JsonOptions, cancellationToken);
+                return dtos ?? [];
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error loading codebase statuses");
+        }
+
+        return [];
+    }
+
+    public async Task<bool> ReindexCodebaseAsync(string projectRoot, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var client = GetClient();
+            var url = $"api/codebase/rebuild-index?project={Uri.EscapeDataString(projectRoot)}";
+            var response = await client.PostAsync(url, null, cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error requesting reindex for {Project}", projectRoot);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeleteProjectAsync(string projectRoot, bool deleteRegistry = true, bool deleteCodebaseIndex = true, bool deleteDotEling = false, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var client = GetClient();
+            var payload = new
+            {
+                workspaceRoot = projectRoot,
+                deleteRegistry,
+                deleteCodebaseIndex,
+                deleteDotEling
+            };
+            var response = await client.PostAsJsonAsync("api/coordinator/project/delete", payload, JsonOptions, cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting project {Project}", projectRoot);
+            return false;
+        }
+    }
+
     public sealed class ProviderConfig
     {
         public string? BaseUrl { get; set; }

@@ -48,6 +48,12 @@ public class MainViewModel : ViewModelBase, IDisposable
     private string _createScope = "all";
 
     public string StatusText { get => _statusText; set => this.RaiseAndSetIfChanged(ref _statusText, value); }
+    public event Action? OnWorkspaceRefreshRequested;
+
+    private void NotifyWorkspaceSseRefresh()
+    {
+        OnWorkspaceRefreshRequested?.Invoke();
+    }
     public bool IsLoading { get => _isLoading; set => this.RaiseAndSetIfChanged(ref _isLoading, value); }
     public bool IsConnected { get => _isConnected; set => this.RaiseAndSetIfChanged(ref _isConnected, value); }
     public string SseStatus { get => _sseStatus; set => this.RaiseAndSetIfChanged(ref _sseStatus, value); }
@@ -205,7 +211,15 @@ public class MainViewModel : ViewModelBase, IDisposable
 
             _sseClient = new SseClient(baseUrl, _loggerFactory.CreateLogger<SseClient>());
             _sseClient.OnMemoryChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(() => _ = LoadMemoriesAsync());
-            _sseClient.OnRuntimesChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(() => _ = LoadRuntimesAsync());
+            _sseClient.OnRuntimesChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                _ = LoadRuntimesAsync();
+                NotifyWorkspaceSseRefresh();
+            });
+            _sseClient.OnCodebaseChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                NotifyWorkspaceSseRefresh();
+            });
             _sseClient.OnStatusChanged += status => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
                 SseStatus = status;

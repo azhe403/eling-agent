@@ -1,80 +1,299 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Eling.Desktop.ViewModels"
+             xmlns:models="using:Eling.Desktop.Models"
              xmlns:views="using:Eling.Desktop.Views"
+             xmlns:conv="using:Eling.Desktop.Converters"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-             mc:Ignorable="d" d:DesignWidth="870" d:DesignHeight="700"
+             mc:Ignorable="d" d:DesignWidth="1050" d:DesignHeight="720"
              x:Class="Eling.Desktop.Views.FoldersView"
              x:DataType="vm:FoldersViewModel">
 
-    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
-        <!-- Add workspace: browse a folder, then Add -->
-        <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="16,12,16,8">
-            <Button Grid.Column="0" Content="Browse..." Click="OnBrowse" Classes="subtle" Padding="10,4" Margin="0,0,8,0" ToolTip.Tip="Pick a folder on disk"/>
-            <TextBox Grid.Column="1" Text="{Binding NewRootPath}" PlaceholderText="Browse or paste a folder path..." VerticalAlignment="Center"/>
-            <Button Grid.Column="2" Content="Add" Click="OnAddRoot" Classes="primary" Padding="12,4" Margin="8,0,0,0" ToolTip.Tip="Browse a folder, then add it as a workspace"/>
+    <Grid RowDefinitions="Auto,Auto,*" Margin="12,8">
+        <!-- 1. Metric Tiles (Registered, Active Instances, Total Indexed Files, Total Index Size) -->
+        <Grid Grid.Row="0" ColumnDefinitions="*,*,*,*" Margin="0,0,0,10">
+            <!-- Registered Workspaces -->
+            <Border Grid.Column="0" Background="#161616" BorderBrush="#262626" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,6,0">
+                <StackPanel Spacing="2">
+                    <TextBlock Text="Registered Workspaces" FontSize="11" Foreground="#9ca3af"/>
+                    <TextBlock Text="{Binding RegisteredCount}" FontSize="20" FontWeight="Bold" Foreground="#f3f4f6"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Active Instances -->
+            <Border Grid.Column="1" Background="#161616" BorderBrush="#262626" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="4,0,4,0">
+                <StackPanel Spacing="2">
+                    <TextBlock Text="Active Instances" FontSize="11" Foreground="#9ca3af"/>
+                    <TextBlock Text="{Binding ActiveInstancesCount}" FontSize="20" FontWeight="Bold" Foreground="#4ade80"/>
+                    <TextBlock Text="{Binding ActiveWorkspacesCount, StringFormat='across {0} active workspaces'}" FontSize="10" Foreground="#6b7280"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Total Indexed Files -->
+            <Border Grid.Column="2" Background="#161616" BorderBrush="#262626" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="4,0,4,0">
+                <StackPanel Spacing="2">
+                    <TextBlock Text="Total Indexed Files" FontSize="11" Foreground="#9ca3af"/>
+                    <TextBlock Text="{Binding TotalFilesCount, StringFormat='{}{0:N0}'}" FontSize="20" FontWeight="Bold" Foreground="#f3f4f6"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Total Index Size -->
+            <Border Grid.Column="3" Background="#161616" BorderBrush="#262626" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="6,0,0,0">
+                <StackPanel Spacing="2">
+                    <TextBlock Text="Total Index Size" FontSize="11" Foreground="#9ca3af"/>
+                    <TextBlock Text="{Binding TotalDbSizeDisplay}" FontSize="20" FontWeight="Bold" Foreground="#f3f4f6"/>
+                </StackPanel>
+            </Border>
         </Grid>
 
-        <!-- Workspace list -->
-        <TextBlock Grid.Row="1" Text="Workspaces" FontSize="13" FontWeight="SemiBold" Foreground="#e5e7eb" VerticalAlignment="Center" Margin="16,0,16,6"/>
-        <ListBox x:Name="RootsListBox" Grid.Row="2" ItemsSource="{Binding Roots}" SelectedItem="{Binding SelectedRoot, Mode=TwoWay}" Height="140" Margin="16,0,16,8" Padding="4" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+        <!-- 2. Search & Filter Bar + Add Workspace Action -->
+        <Border Grid.Row="1" Background="#141416" BorderBrush="#262626" BorderThickness="1" CornerRadius="8" Padding="10,8" Margin="0,0,0,10">
+            <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto">
+                <!-- Search Box -->
+                <TextBox Grid.Row="0" Grid.Column="0" Text="{Binding SearchQuery}" PlaceholderText="Search workspace name, path, or PID..."
+                         FontSize="12" Padding="8,6" Margin="0,0,8,0"/>
+
+                <!-- Status Filter: All / Active / Offline -->
+                <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <Button Content="All" Command="{Binding SetFilterCommand}" CommandParameter="all"
+                            Padding="10,5" FontSize="11" Classes="subtle"
+                            Background="{Binding FilterStatus, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter=all}"
+                            Foreground="#f3f4f6"/>
+                    <Button Content="Active" Command="{Binding SetFilterCommand}" CommandParameter="active"
+                            Padding="10,5" FontSize="11" Classes="subtle"
+                            Background="{Binding FilterStatus, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter=active}"
+                            Foreground="#f3f4f6"/>
+                    <Button Content="Offline" Command="{Binding SetFilterCommand}" CommandParameter="offline"
+                            Padding="10,5" FontSize="11" Classes="subtle"
+                            Background="{Binding FilterStatus, Converter={x:Static conv:ScopeButtonConverter.Instance}, ConverterParameter=offline}"
+                            Foreground="#f3f4f6"/>
+                </StackPanel>
+
+                <!-- Refresh Button -->
+                <Button Grid.Row="0" Grid.Column="2" Command="{Binding RefreshCommand}" Classes="subtle"
+                        Padding="8,5" Margin="8,0,0,0" ToolTip.Tip="Refresh workspaces" VerticalAlignment="Center">
+                    <TextBlock Text="↻ Refresh" FontSize="11" Foreground="#9ca3af"/>
+                </Button>
+
+                <!-- Add Workspace inputs -->
+                <Grid Grid.Row="1" Grid.ColumnSpan="3" ColumnDefinitions="*,Auto,Auto" Margin="0,8,0,0">
+                    <TextBox Grid.Column="0" Text="{Binding NewRootPath}" PlaceholderText="Add new workspace: paste path or Browse..."
+                             FontSize="11" Padding="6,4" Margin="0,0,6,0"/>
+                    <Button Grid.Column="1" Content="Browse..." Click="OnBrowse" Classes="subtle" Padding="8,4" FontSize="11" Margin="0,0,6,0"/>
+                    <Button Grid.Column="2" Content="+ Add" Click="OnAddRoot" Classes="primary" Padding="12,4" FontSize="11"/>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- 3. Workspaces Card List (Matching dashboard cards) -->
+        <ListBox Grid.Row="2" ItemsSource="{Binding Workspaces}"
+                 Background="Transparent" BorderThickness="0" Padding="0"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.Styles>
+                <Style Selector="ListBoxItem">
+                    <Setter Property="Padding" Value="0"/>
+                    <Setter Property="Margin" Value="0,0,0,8"/>
+                </Style>
+                <Style Selector="ListBoxItem /template/ ContentPresenter">
+                    <Setter Property="Background" Value="Transparent"/>
+                </Style>
+            </ListBox.Styles>
             <ListBox.ItemTemplate>
-                <DataTemplate>
-                    <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Grid.Column="0" Text="{Binding StringFormat='📁 {0}'}" FontSize="12" Foreground="#e5e7eb" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                        <Button Grid.Column="1" Content="✕" Command="{Binding $parent[UserControl].((vm:FoldersViewModel)DataContext).RemoveRootCommand}" CommandParameter="{Binding}" Classes="subtle" Padding="6,2" FontSize="11" Margin="8,0,0,0" ToolTip.Tip="Remove this workspace from the list — files on disk are safe"/>
-                    </Grid>
+                <DataTemplate DataType="models:WorkspaceItemDto">
+                    <Border Background="#18181a" BorderBrush="#27272a" BorderThickness="1" CornerRadius="10" Padding="14,12">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <!-- Left info area -->
+                            <StackPanel Grid.Column="0" Spacing="5" VerticalAlignment="Center">
+                                <!-- Line 1: Name + Status badge + Transport + Owner + Chevron toggle -->
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold" Foreground="#ffffff" VerticalAlignment="Center"/>
+
+                                    <!-- Status Badge -->
+                                    <Border Background="{Binding StatusBadgeBg}" CornerRadius="12" Padding="8,2" VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <Ellipse Width="6" Height="6" Fill="{Binding DotColor}" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding StatusBadgeText}" FontSize="11" FontWeight="Medium" Foreground="{Binding StatusBadgeFg}"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!-- MCP transport badge -->
+                                    <Border Background="#242426" CornerRadius="4" Padding="6,2" VerticalAlignment="Center"
+                                            IsVisible="{Binding Transport, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                        <TextBlock Text="{Binding Transport, StringFormat='MCP ({0})'}" FontSize="10" Foreground="#9ca3af"/>
+                                    </Border>
+
+                                    <!-- Owner port badge -->
+                                    <Border Background="#1e293b" CornerRadius="12" Padding="8,2" VerticalAlignment="Center"
+                                            IsVisible="{Binding OwnerPort, Converter={x:Static ObjectConverters.IsNotNull}}">
+                                        <TextBlock Text="{Binding OwnerPort, StringFormat='owner · :{0}'}" FontSize="10" Foreground="#60a5fa"/>
+                                    </Border>
+
+                                    <!-- Expand / Collapse chevron for multi-instance workspace -->
+                                    <Button Content="{Binding ChevronGlyph}"
+                                            Command="{Binding $parent[UserControl].((vm:FoldersViewModel)DataContext).ToggleProcessesCommand}"
+                                            CommandParameter="{Binding}"
+                                            Classes="subtle"
+                                            Padding="6,2"
+                                            FontSize="10"
+                                            IsVisible="{Binding HasMultipleProcesses}"
+                                            ToolTip.Tip="Toggle process instances breakdown"/>
+                                </StackPanel>
+
+                                <!-- Line 2: Folder path -->
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="📁" FontSize="11" Foreground="#9ca3af" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding Root}" FontSize="11" Foreground="#d1d5db" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+
+                                <!-- Line 3: SQLite db info (if indexed) -->
+                                <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasDbInfo}">
+                                    <TextBlock Text="🗄️" FontSize="11" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding DbFileName}" FontSize="11" FontFamily="Cascadia Code,Consolas,Menlo" Foreground="#9ca3af"/>
+                                    <TextBlock Text="{Binding DbSizeDisplay}" FontSize="11" FontFamily="Cascadia Code,Consolas,Menlo" Foreground="#6b7280" Margin="4,0,0,0"/>
+                                </StackPanel>
+
+                                <!-- Line 4: Telemetry row (Last active, CPU, RAM, Files/Chunks, Indexed date) -->
+                                <WrapPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                    <!-- Last active -->
+                                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,12,0">
+                                        <TextBlock Text="🕒" FontSize="10" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding LastActiveDisplay, StringFormat='Last active: {0}'}" FontSize="11" Foreground="#9ca3af"/>
+                                    </StackPanel>
+
+                                    <!-- CPU -->
+                                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,12,0" IsVisible="{Binding IsRunning}">
+                                        <TextBlock Text="⚡" FontSize="10" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding CpuDisplay, StringFormat='CPU: {0}'}" FontSize="11" Foreground="#9ca3af"/>
+                                    </StackPanel>
+
+                                    <!-- RAM -->
+                                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,12,0" IsVisible="{Binding IsRunning}">
+                                        <TextBlock Text="💾" FontSize="10" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding MemoryDisplay, StringFormat='RAM: {0}'}" FontSize="11" Foreground="#9ca3af"/>
+                                    </StackPanel>
+
+                                    <!-- Files count (only shown if indexed) -->
+                                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,12,0" IsVisible="{Binding HasDbInfo}">
+                                        <TextBlock Text="📄" FontSize="10" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding FilesDisplay}" FontSize="11" Foreground="#9ca3af"/>
+                                    </StackPanel>
+
+                                    <!-- Indexed date -->
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="🗂️" FontSize="10" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding IndexedDisplay, StringFormat='Indexed: {0}'}" FontSize="11" Foreground="#9ca3af"/>
+                                    </StackPanel>
+                                </WrapPanel>
+
+                                <!-- Process list drill-down (when expanded) -->
+                                <Border IsVisible="{Binding IsExpanded}" Background="#121214" BorderBrush="#252528" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,6,0,0">
+                                    <ItemsControl ItemsSource="{Binding Processes}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="models:WorkspaceProcessItem">
+                                                <Grid ColumnDefinitions="Auto,Auto,*,Auto" Margin="0,2">
+                                                    <Border Grid.Column="0" Background="{Binding OwnerBadgeBg}" CornerRadius="4" Padding="6,1" VerticalAlignment="Center" Margin="0,0,8,0">
+                                                        <TextBlock Text="{Binding OwnerBadgeText}" FontSize="10" Foreground="{Binding OwnerBadgeFg}"/>
+                                                    </Border>
+                                                    <TextBlock Grid.Column="1" Text="{Binding Pid, StringFormat='PID: {0}'}" FontFamily="Cascadia Code,Consolas,Menlo" FontSize="11" Foreground="#e5e7eb" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                                    <TextBlock Grid.Column="2" Text="{Binding Transport}" FontSize="11" Foreground="#9ca3af" VerticalAlignment="Center"/>
+                                                    <TextBlock Grid.Column="3" Text="{Binding MetricsDisplay}" FontFamily="Cascadia Code,Consolas,Menlo" FontSize="11" Foreground="#60a5fa" VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- Right actions column (Re-index, View Codebase, Delete) -->
+                            <StackPanel Grid.Column="1" Orientation="Vertical" Spacing="6" VerticalAlignment="Center" Margin="16,0,0,0" Width="120">
+                                <Button Content="↻ Re-index"
+                                        Command="{Binding $parent[UserControl].((vm:FoldersViewModel)DataContext).ReindexCommand}"
+                                        CommandParameter="{Binding}"
+                                        Classes="subtle"
+                                        Padding="8,5"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        FontSize="11"
+                                        Background="#222226"
+                                        BorderBrush="#333338"
+                                        BorderThickness="1"
+                                        CornerRadius="6"/>
+                                <Button Content="📖 Codebase"
+                                        Command="{Binding $parent[UserControl].((vm:FoldersViewModel)DataContext).ViewCodebaseCommand}"
+                                        CommandParameter="{Binding}"
+                                        Classes="subtle"
+                                        Padding="8,5"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        FontSize="11"
+                                        Background="#1c2838"
+                                        Foreground="#60a5fa"
+                                        BorderBrush="#253a54"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        ToolTip.Tip="Open Codebase search in browser"/>
+                                <Button Content="🗑 Delete"
+                                        Command="{Binding $parent[UserControl].((vm:FoldersViewModel)DataContext).PromptDeleteCommand}"
+                                        CommandParameter="{Binding}"
+                                        Classes="subtle"
+                                        Padding="8,5"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        FontSize="11"
+                                        Background="#2e1515"
+                                        Foreground="#ef4444"
+                                        BorderBrush="#4a1e1e"
+                                        BorderThickness="1"
+                                        CornerRadius="6"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
 
-        <!-- Files list + breadcrumb nav -->
-        <Grid Grid.Row="3" RowDefinitions="Auto,*" Margin="16,0,16,0">
-            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,6">
-                <Button Grid.Column="0" Content="↑" Command="{Binding GoUpCommand}" Classes="subtle" Padding="8,2"
-                        ToolTip.Tip="Up one folder" IsEnabled="{Binding CanGoUp}"/>
-                <TextBlock Grid.Column="1" Text="{Binding CurrentPath}" FontSize="11" Foreground="#9ca3af"
-                           VerticalAlignment="Center" Margin="8,0" TextTrimming="CharacterEllipsis"/>
-                <Button Grid.Column="2" Content="⟳" Command="{Binding RefreshCommand}" Classes="subtle" Padding="8,2"
-                        ToolTip.Tip="Refresh"/>
-            </Grid>
-            <ListBox x:Name="EntriesListBox" Grid.Row="1" ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry, Mode=TwoWay}">
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <Border Classes="memory-card" Padding="8,6" Margin="0,2">
-                            <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto">
-                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Path}" FontSize="12" FontWeight="SemiBold" Foreground="#e5e7eb" TextTrimming="CharacterEllipsis"/>
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding IsDirectory, StringFormat='{}'}" FontSize="10" Foreground="#9ca3af"/>
-                                <Button Grid.Row="0" Grid.Column="1" Content="→" FontSize="10" Padding="4,2" Command="{Binding $parent[UserControl].((vm:FoldersViewModel)DataContext).OpenEntryCommand}" CommandParameter="{Binding}" Classes="subtle" Margin="4,0,0,0" ToolTip.Tip="Open"/>
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-        </Grid>
+        <!-- Delete Confirmation Modal with Scope Checkboxes -->
+        <Border Grid.RowSpan="3" Classes="modal-overlay" IsVisible="{Binding DeleteTarget, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <Border Classes="modal danger" Width="520">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Delete Workspace Confirmation" FontSize="16" FontWeight="Bold" Foreground="#ef4444"/>
+                    <TextBlock Text="Choose what components to delete for this workspace. Source files on disk will NOT be touched."
+                               FontSize="12" Foreground="#9ca3af" TextWrapping="Wrap"/>
+                    <Border Background="#141414" BorderBrush="#2e2e2e" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,4,0,0">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="{Binding DeleteTarget.Name}" FontSize="13" FontWeight="SemiBold" Foreground="#ffffff"/>
+                            <TextBlock Text="{Binding DeleteTarget.Root}" FontSize="11" Foreground="#9ca3af"/>
+                        </StackPanel>
+                    </Border>
 
-        <!-- Status -->
-        <Border Grid.Row="4" BorderBrush="#2a2a2a" BorderThickness="1"
-                CornerRadius="4" Background="#111113" Padding="10,6" Margin="16,8,16,12">
-            <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#6b7280"
-                       TextTrimming="CharacterEllipsis"/>
+                    <!-- Scope checkboxes -->
+                    <StackPanel Spacing="8" Margin="0,4,0,0">
+                        <CheckBox IsChecked="{Binding DeleteRegistry}" Content="Delete from registry catalog" Foreground="#e5e7eb" FontSize="12"/>
+                        <CheckBox IsChecked="{Binding DeleteCodebaseIndex}" Content="Delete SQLite codebase index file (.db, .db-wal)" Foreground="#e5e7eb" FontSize="12"/>
+                        <CheckBox IsChecked="{Binding DeleteDotEling}" Content="Delete local .eling folder" Foreground="#ef4444" FontSize="12"/>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+                        <Button Content="Cancel" Command="{Binding CancelDeleteCommand}" Classes="subtle" Foreground="#9ca3af"/>
+                        <Button Content="Confirm Delete" Command="{Binding ConfirmDeleteCommand}"
+                                Classes="danger" Padding="14,6"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
         </Border>
 
-        <!-- Folder browser modal overlay (inline, inside the window) -->
-        <Border Grid.RowSpan="5" Background="#aa000000" IsVisible="{Binding ShowBrowser}">
+        <!-- Folder browser modal overlay -->
+        <Border Grid.RowSpan="3" Background="#aa000000" IsVisible="{Binding ShowBrowser}">
             <Border Width="720" Height="620" HorizontalAlignment="Center" VerticalAlignment="Center"
                     Background="#1e1e1e" BorderBrush="#3b3b3b" BorderThickness="1" CornerRadius="12">
                 <Grid RowDefinitions="Auto,*,Auto" Margin="0">
-                    <!-- Title bar -->
                     <Border Grid.Row="0" Background="#252525" BorderBrush="#3b3b3b" BorderThickness="0,0,0,1"
                             Padding="16,12" CornerRadius="12,12,0,0">
                         <TextBlock Text="Browse Host Folders" FontSize="13" FontWeight="SemiBold"
                                    Foreground="#e5e7eb"/>
                     </Border>
-                    <!-- Browser content -->
                     <views:HostBrowseView x:Name="Browser" Grid.Row="1" DataContext="{x:Null}"/>
-                    <!-- Bottom spacer -->
                     <Border Grid.Row="2" Height="8" Background="Transparent"/>
                 </Grid>
             </Border>
