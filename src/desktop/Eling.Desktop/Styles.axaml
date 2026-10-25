@@ -51,7 +51,6 @@
     </Style>
 
     <!-- Filter chips (Type / Tier / Global): the fill *is* the selected marker,
-         so hover and press must not swap it for Fluent's grey. The theme sets the
          background on the template's presenter, which would otherwise win over
          the chip's own Background. -->
     <Style Selector="Button.chip">
@@ -84,6 +83,11 @@
 
     <Style Selector="ListBox">
         <Setter Property="Background" Value="#121212"/>
+    </Style>
+
+    <!-- Memory sidebar: hover highlight for workspace rows -->
+    <Style Selector="Border.workspace-row:pointerover">
+        <Setter Property="Background" Value="#2a2a2a"/>
     </Style>
 
     <!-- Memory sidebar: workspace name is a click target for single-select -->

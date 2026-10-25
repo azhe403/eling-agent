@@ -53,9 +53,6 @@ public class MainViewModel : ViewModelBase, IDisposable
     private string _copyProjectRoot = "";
     private WorkspaceItem? _copyTargetWorkspace;
     private bool _suppressWorkspaceReload;
-    /// <summary>Guards <see cref="LoadMemoriesAsync"/> while a command rewrites
-    /// several scope fields at once, so one refresh follows instead of one per field.</summary>
-    private bool _suspendedReload;
     private bool _showCreateDialog;
     private string _createContent = "";
     private string _createType = "Note";
@@ -267,37 +264,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         ClearSearchCommand = ReactiveCommand.Create(() => { SearchQuery = ""; });
         SelectTypeCommand = ReactiveCommand.Create<string>(type => { SelectedType = type ?? "All"; });
         TierCommand = ReactiveCommand.Create<string>(tier => { Tier = tier ?? "all"; });
-        ToggleGlobalCommand = ReactiveCommand.Create(() =>
-        {
-            // Mirrors the dashboard's Global control: from the aggregated view it
-            // narrows to the global scope, from a global-only view it goes back to
-            // every workspace, otherwise global rides along with the ticked rows.
-            if (AllSelected)
-            {
-                ApplyScope(() =>
-                {
-                    AllSelected = false;   // clears every workspace row
-                    GlobalIncluded = true; // global on its own
-                });
-                return;
-            }
-
-            if (GlobalIncluded)
-            {
-                if (SelectedWorkspaceCount == 0)
-                {
-                    ApplyScope(() => AllSelected = true);
-                }
-                else
-                {
-                    GlobalIncluded = false;
-                }
-
-                return;
-            }
-
-            GlobalIncluded = true;
-        });
+        ToggleGlobalCommand = ReactiveCommand.Create(() => { GlobalIncluded = !GlobalIncluded; });
         ToggleRootCommand = ReactiveCommand.Create<string>(root =>
         {
             if (string.IsNullOrWhiteSpace(root)) return;
@@ -411,28 +378,10 @@ public class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>Applies a scope change that touches several fields, then refreshes
-    /// once — the per-field setters would otherwise fire a request each.</summary>
-    private void ApplyScope(Action change)
-    {
-        _suspendedReload = true;
-        try
-        {
-            change();
-        }
-        finally
-        {
-            _suspendedReload = false;
-        }
-
-        _ = LoadMemoriesAsync();
-    }
-
     public async Task LoadMemoriesAsync()
     {
-        if (_suspendedReload) return;
-
-        IsLoading = true;        _cts?.Cancel();
+        IsLoading = true;
+        _cts?.Cancel();
         _cts = new CancellationTokenSource();
 
         try

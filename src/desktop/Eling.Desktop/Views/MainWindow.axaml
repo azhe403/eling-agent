@@ -55,17 +55,17 @@
                                 <CheckBox x:Name="AllWorkspacesCheckBox" Content="All workspaces"
                                           IsChecked="{Binding AllSelected, Mode=OneWay}"
                                           Click="AllWorkspaces_Click"
-                                          FontSize="12" Foreground="#e5e7eb"/>
+                                          FontSize="12" FontWeight="SemiBold" Foreground="#e5e7eb"
+                                          Cursor="Hand"/>
                                 <ItemsControl ItemsSource="{Binding Workspaces}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate DataType="m:WorkspaceItem">
-                                            <Border
-                                                    Background="{Binding IsSelected, Converter={x:Static conv:BoolToRowBrushConverter.Instance}}"
-                                                    CornerRadius="6" Padding="4,2" Margin="0,1">
+                                            <Border Classes="workspace-row" CornerRadius="6" Padding="4,2" Margin="0,1">
                                                 <Grid ColumnDefinitions="Auto,*">
                                                     <CheckBox Grid.Column="0"
                                                               IsChecked="{Binding IsSelected, Mode=TwoWay}"
                                                               Padding="0" VerticalAlignment="Center"
+                                                              Cursor="Hand"
                                                               ToolTip.Tip="Toggle multi-select"/>
                                                     <Button Grid.Column="1" Classes="workspace-label"
                                                             ToolTip.Tip="{Binding Root}"
