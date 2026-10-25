@@ -532,5 +532,7 @@ public class MemoryToolsTests
         Assert.Contains("ASK the user for approval to run `codebase_index`", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Memory Content Shape", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("standalone durable guidance", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Repetition Detection", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ordinary follow-up questions", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
     }
 }
