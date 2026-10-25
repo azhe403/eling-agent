@@ -53,14 +53,48 @@ public sealed class ElingApiClient
         };
     }
 
-    public async Task<IReadOnlyList<MemoryDto>> GetMemoriesAsync(string scope = "all", int limit = 100, CancellationToken cancellationToken = default)
+    public async Task<MemoryListDto?> GetMemoriesAsync(
+        bool allSelected = true,
+        IReadOnlyList<string>? roots = null,
+        bool globalIncluded = false,
+        int limit = 100,
+        string? type = null,
+        string? q = null,
+        string? tier = null,
+        CancellationToken cancellationToken = default)
     {
-        var url = scope switch
+        string url;
+        var hasRoots = roots != null && roots.Count > 0;
+
+        if (allSelected)
         {
-            "global" => $"api/global/memories?limit={limit}",
-            "all" => $"api/aggregated/memories?limit={limit}",
-            _ => $"api/project/memories?projectRoot={Uri.EscapeDataString(scope)}&limit={limit}"
-        };
+            var parts = new List<string> { $"limit={limit}" };
+            if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "All", StringComparison.OrdinalIgnoreCase)) parts.Add($"type={Uri.EscapeDataString(type)}");
+            if (!string.IsNullOrWhiteSpace(q)) parts.Add($"q={Uri.EscapeDataString(q.Trim())}");
+            url = $"api/aggregated/memories?{string.Join("&", parts)}";
+        }
+        else if (!hasRoots && globalIncluded)
+        {
+            var parts = new List<string> { $"limit={limit}" };
+            if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "All", StringComparison.OrdinalIgnoreCase)) parts.Add($"type={Uri.EscapeDataString(type)}");
+            if (!string.IsNullOrWhiteSpace(q)) parts.Add($"q={Uri.EscapeDataString(q.Trim())}");
+            url = $"api/global/memories?{string.Join("&", parts)}";
+        }
+        else
+        {
+            var parts = new List<string>();
+            if (hasRoots)
+            {
+                foreach (var r in roots!) parts.Add($"project={Uri.EscapeDataString(r)}");
+            }
+            parts.Add("includeAncestors=true");
+            parts.Add($"limit={limit}");
+            if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "All", StringComparison.OrdinalIgnoreCase)) parts.Add($"type={Uri.EscapeDataString(type)}");
+            if (!string.IsNullOrWhiteSpace(q)) parts.Add($"q={Uri.EscapeDataString(q.Trim())}");
+            if (!string.IsNullOrWhiteSpace(tier) && !string.Equals(tier, "project", StringComparison.OrdinalIgnoreCase)) parts.Add($"tier={Uri.EscapeDataString(tier)}");
+            if (globalIncluded) parts.Add("global=true");
+            url = $"api/project/memories?{string.Join("&", parts)}";
+        }
 
         try
         {
@@ -68,8 +102,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync(url, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var list = await response.Content.ReadFromJsonAsync<MemoryListDto>(JsonOptions, cancellationToken);
-                return list?.Items ?? [];
+                return await response.Content.ReadFromJsonAsync<MemoryListDto>(JsonOptions, cancellationToken);
             }
             _logger.LogWarning("GetMemories failed with status {StatusCode}", response.StatusCode);
         }
@@ -78,7 +111,7 @@ public sealed class ElingApiClient
             _logger.LogError(ex, "Error fetching memories from {Url}", url);
         }
 
-        return [];
+        return null;
     }
 
     public async Task<MemoryDto?> CreateMemoryAsync(string content, string type, List<string>? tags, string scope = "all", CancellationToken cancellationToken = default)
@@ -109,14 +142,20 @@ public sealed class ElingApiClient
         return null;
     }
 
-    public async Task<MemoryDto?> UpdateMemoryAsync(string id, string? content, string? type, string? status, string scope = "all", CancellationToken cancellationToken = default)
+    public async Task<MemoryDto?> UpdateMemoryAsync(string id, string? content, string? type, string? status, string scope = "all", string? projectRoot = null, string? tier = null, CancellationToken cancellationToken = default)
     {
-        var url = scope switch
+        string url;
+        if (string.Equals(scope, "global", StringComparison.OrdinalIgnoreCase))
         {
-            "global" => $"api/global/memories/{id}",
-            "all" => $"api/memories/{id}",
-            _ => $"api/project/memories/{id}?projectRoot={Uri.EscapeDataString(scope)}"
-        };
+            url = $"api/global/memories/{id}";
+        }
+        else
+        {
+            var root = !string.IsNullOrWhiteSpace(projectRoot) ? projectRoot : scope;
+            var parts = new List<string> { $"projectRoot={Uri.EscapeDataString(root)}" };
+            if (!string.IsNullOrWhiteSpace(tier)) parts.Add($"tier={Uri.EscapeDataString(tier)}");
+            url = $"api/project/memories/{id}?{string.Join("&", parts)}";
+        }
 
         var payload = new { content, type, status };
         try
@@ -137,14 +176,20 @@ public sealed class ElingApiClient
         return null;
     }
 
-    public async Task<bool> DeleteMemoryAsync(string id, string scope = "all", CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteMemoryAsync(string id, string scope = "all", string? projectRoot = null, string? tier = null, CancellationToken cancellationToken = default)
     {
-        var url = scope switch
+        string url;
+        if (string.Equals(scope, "global", StringComparison.OrdinalIgnoreCase))
         {
-            "global" => $"api/global/memories/{id}",
-            "all" => $"api/memories/{id}",
-            _ => $"api/project/memories/{id}?projectRoot={Uri.EscapeDataString(scope)}"
-        };
+            url = $"api/global/memories/{id}";
+        }
+        else
+        {
+            var root = !string.IsNullOrWhiteSpace(projectRoot) ? projectRoot : scope;
+            var parts = new List<string> { $"projectRoot={Uri.EscapeDataString(root)}" };
+            if (!string.IsNullOrWhiteSpace(tier)) parts.Add($"tier={Uri.EscapeDataString(tier)}");
+            url = $"api/project/memories/{id}?{string.Join("&", parts)}";
+        }
 
         try
         {

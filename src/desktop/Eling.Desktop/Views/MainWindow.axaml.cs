@@ -4,6 +4,7 @@ using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Eling.Desktop;
 using Eling.Desktop.Services;
+using Eling.Desktop.Models;
 using Eling.Desktop.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -41,7 +42,8 @@ public partial class MainWindow : Window
 
             if (_viewModel is not null)
             {
-                _viewModel.OnWorkspaceRefreshRequested += () =>
+                var vm = _viewModel;
+                vm.OnWorkspaceRefreshRequested += () =>
                 {
                     _ = foldersVm.LoadAsync();
                 };
@@ -86,6 +88,19 @@ public partial class MainWindow : Window
 
     private void SidebarSettings_Click(object? sender, RoutedEventArgs e) =>
         ShowOnly(this.FindControl<Control>("SettingsPanel"));
+
+    /// <summary>
+    /// The "All workspaces" switch is driven from here rather than through a
+    /// two-way binding, so the master checkbox always reaches the view model
+    /// (its state is displayed one-way from <see cref="MainViewModel.AllSelected"/>).
+    /// </summary>
+    private void AllWorkspaces_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is CheckBox box && _viewModel is { } vm)
+        {
+            vm.AllSelected = box.IsChecked == true;
+        }
+    }
 
     protected override async void OnLoaded(RoutedEventArgs e)
     {

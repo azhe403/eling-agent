@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,8 +26,16 @@ public class MainViewModel : ViewModelBase, IDisposable
     private bool _isConnected;
     private string _searchQuery = "";
     private string _selectedType = "All";
-    private string _selectedScope = "all";
+    private bool _allSelected = true;
+    private string _tier = "all";
+    private bool _globalIncluded = false;
     private string _sseStatus = "connecting";
+    private string _errorMessage = "";
+    private bool _hasLoadedOnce = false;
+    private int _totalInScope = 0;
+    private int _matchingCount = 0;
+    private Avalonia.Threading.DispatcherTimer? _searchDebounceTimer;
+    private Avalonia.Threading.DispatcherTimer? _errorDismissTimer;
 
     // Edit states
     private MemoryDto? _editingMemory;
@@ -41,6 +50,8 @@ public class MainViewModel : ViewModelBase, IDisposable
     private MemoryDto? _copyTarget;
     private bool _copyAsMove;
     private string _copyProjectRoot = "";
+    private WorkspaceItem? _copyTargetWorkspace;
+    private bool _suppressWorkspaceReload;
     private bool _showCreateDialog;
     private string _createContent = "";
     private string _createType = "Note";
@@ -64,8 +75,23 @@ public class MainViewModel : ViewModelBase, IDisposable
         set
         {
             this.RaiseAndSetIfChanged(ref _searchQuery, value);
-            UpdateFilteredMemories();
+            ScheduleSearchDebounce();
         }
+    }
+
+    private void ScheduleSearchDebounce()
+    {
+        if (_searchDebounceTimer == null)
+        {
+            _searchDebounceTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            _searchDebounceTimer.Tick += (_, _) =>
+            {
+                _searchDebounceTimer?.Stop();
+                _ = LoadMemoriesAsync();
+            };
+        }
+        _searchDebounceTimer.Stop();
+        _searchDebounceTimer.Start();
     }
 
     public string SelectedType
@@ -74,19 +100,65 @@ public class MainViewModel : ViewModelBase, IDisposable
         set
         {
             this.RaiseAndSetIfChanged(ref _selectedType, value);
-            UpdateFilteredMemories();
-        }
-    }
-
-    public string SelectedScope
-    {
-        get => _selectedScope;
-        set
-        {
-            this.RaiseAndSetIfChanged(ref _selectedScope, value);
             _ = LoadMemoriesAsync();
         }
     }
+
+    public string Tier
+    {
+        get => _tier;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _tier, value);
+            if (TierApplies) _ = LoadMemoriesAsync();
+        }
+    }
+
+    public bool GlobalIncluded
+    {
+        get => _globalIncluded;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _globalIncluded, value);
+            this.RaisePropertyChanged(nameof(GlobalToggleText));
+            this.RaisePropertyChanged(nameof(ScopeDisplay));
+            _ = LoadMemoriesAsync();
+        }
+    }
+
+    public string ErrorMessage { get => _errorMessage; set => this.RaiseAndSetIfChanged(ref _errorMessage, value); }
+    public bool HasLoadedOnce { get => _hasLoadedOnce; set => this.RaiseAndSetIfChanged(ref _hasLoadedOnce, value); }
+    public int TotalInScope { get => _totalInScope; set => this.RaiseAndSetIfChanged(ref _totalInScope, value); }
+    public int MatchingCount { get => _matchingCount; set => this.RaiseAndSetIfChanged(ref _matchingCount, value); }
+
+    public bool AllSelected
+    {
+        get => _allSelected;
+        set
+        {
+            // Compare by hand instead of trusting the returned "changed" flag, so
+            // the mirroring below always runs on a real change.
+            var changed = _allSelected != value;
+            this.RaiseAndSetIfChanged(ref _allSelected, value);
+            if (!changed) return;
+
+            _logger.LogInformation("All workspaces switched to {Value} ({Count} workspaces)", value, Workspaces.Count);
+
+            // Mirror the master switch onto every row, so ticking "All workspaces"
+            // ticks every checkbox below it (and unticking clears them). The
+            // per-row events are suppressed: one load below covers the change.
+            _suppressWorkspaceReload = true;
+            foreach (var workspace in Workspaces) workspace.IsSelected = value;
+            _suppressWorkspaceReload = false;
+
+            this.RaisePropertyChanged(nameof(TierApplies));
+            this.RaisePropertyChanged(nameof(ScopeDisplay));
+            this.RaisePropertyChanged(nameof(SelectedWorkspaceCount));
+            _ = LoadMemoriesAsync();
+        }
+    }
+
+    public bool TierApplies => !AllSelected && SelectedWorkspaceCount == 1;
 
     // Edit properties
     public MemoryDto? EditingMemory { get => _editingMemory; set => this.RaiseAndSetIfChanged(ref _editingMemory, value); }
@@ -101,30 +173,56 @@ public class MainViewModel : ViewModelBase, IDisposable
     public MemoryDto? CopyTarget { get => _copyTarget; set => this.RaiseAndSetIfChanged(ref _copyTarget, value); }
     public bool CopyAsMove { get => _copyAsMove; set => this.RaiseAndSetIfChanged(ref _copyAsMove, value); }
     public string CopyProjectRoot { get => _copyProjectRoot; set => this.RaiseAndSetIfChanged(ref _copyProjectRoot, value); }
-    public bool ShowCreateDialog { get => _showCreateDialog; set => this.RaiseAndSetIfChanged(ref _showCreateDialog, value); }
+    public WorkspaceItem? CopyTargetWorkspace
+    {
+        get => _copyTargetWorkspace;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _copyTargetWorkspace, value);
+            CopyProjectRoot = value?.Root ?? "";
+        }
+    }    public bool ShowCreateDialog { get => _showCreateDialog; set => this.RaiseAndSetIfChanged(ref _showCreateDialog, value); }
     public string CreateContent { get => _createContent; set => this.RaiseAndSetIfChanged(ref _createContent, value); }
     public string CreateType { get => _createType; set => this.RaiseAndSetIfChanged(ref _createType, value); }
     public string CreateTags { get => _createTags; set => this.RaiseAndSetIfChanged(ref _createTags, value); }
     public string CreateScope { get => _createScope; set => this.RaiseAndSetIfChanged(ref _createScope, value); }
 
-    public int TotalMemoriesCount => Memories.Count;
-    public int FilteredMemoriesCount => FilteredMemories.Count;
-    public string MemoryCountStatus => $"Showing {FilteredMemoriesCount} of {TotalMemoriesCount} memories";
+    public int TotalMemoriesCount => TotalInScope;
+    public int FilteredMemoriesCount => MatchingCount;
+    public string MemoryCountStatus => $"Showing {MatchingCount} of {TotalInScope} memories";
+    public string ScopeDisplay => AllSelected
+        ? "All workspaces"
+        : (SelectedWorkspaceCount == 0
+            ? "Global"
+            : string.Join(", ", SelectedWorkspaces.Select(w => w.Name)));
+    public bool IsEmpty => HasLoadedOnce && !IsLoading && FilteredMemories.Count == 0;
+    public string GlobalToggleText => GlobalIncluded ? "✓ Global" : "🌐 Global";
     public string ConnectionDetails => IsConnected ? $"{_backendSupervisor.BaseUrl} (Port: {_backendSupervisor.ActivePort})" : "Disconnected";
 
     public ObservableCollection<MemoryDto> Memories { get; } = [];
     public ObservableCollection<MemoryDto> FilteredMemories { get; } = [];
-    public ObservableCollection<RuntimeDto> Runtimes { get; } = [];
+    /// <summary>Registered workspaces (live + remembered) shown in the memory sidebar,
+    /// mirroring the dashboard's <c>/api/coordinator/runtimes?includeRegistered=true</c> rows.</summary>
+    public ObservableCollection<WorkspaceItem> Workspaces { get; } = [];
 
-    public string[] TypeFilters { get; } = ["All", "Fact", "Preference", "Decision", "Lesson", "Note"];
+    /// <summary>Workspaces the user ticked in the sidebar. Empty means "Global only"
+    /// while <see cref="AllSelected"/> covers the aggregate view.</summary>
+    public IReadOnlyList<WorkspaceItem> SelectedWorkspaces => Workspaces.Where(w => w.IsSelected).ToList();
+
+    public int SelectedWorkspaceCount => Workspaces.Count(w => w.IsSelected);
+
     public string[] TypeOptions { get; } = ["Fact", "Preference", "Decision", "Lesson", "Note"];
     public string[] StatusOptions { get; } = ["Active", "Superseded", "Archived"];
 
     // Commands
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> RefreshCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> ClearSearchCommand { get; }
-    public ReactiveCommand<string, System.Reactive.Unit> SelectScopeCommand { get; }
     public ReactiveCommand<string, System.Reactive.Unit> SelectTypeCommand { get; }
+    public ReactiveCommand<string, System.Reactive.Unit> TierCommand { get; }
+    public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> ToggleGlobalCommand { get; }
+    public ReactiveCommand<string, System.Reactive.Unit> ToggleRootCommand { get; }
+    public ReactiveCommand<WorkspaceItem, System.Reactive.Unit> SelectOnlyWorkspaceCommand { get; }
+    public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> SelectAllCommand { get; }
 
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> CreateMemoryCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> SaveCreateCommand { get; }
@@ -159,8 +257,36 @@ public class MainViewModel : ViewModelBase, IDisposable
 
         RefreshCommand = ReactiveCommand.CreateFromTask(() => LoadMemoriesAsync());
         ClearSearchCommand = ReactiveCommand.Create(() => { SearchQuery = ""; });
-        SelectScopeCommand = ReactiveCommand.Create<string>(scope => { SelectedScope = scope ?? "all"; });
         SelectTypeCommand = ReactiveCommand.Create<string>(type => { SelectedType = type ?? "All"; });
+        TierCommand = ReactiveCommand.Create<string>(tier => { Tier = tier ?? "all"; });
+        ToggleGlobalCommand = ReactiveCommand.Create(() => { GlobalIncluded = !GlobalIncluded; });
+        ToggleRootCommand = ReactiveCommand.Create<string>(root =>
+        {
+            if (string.IsNullOrWhiteSpace(root)) return;
+            var item = Workspaces.FirstOrDefault(w => string.Equals(w.Root, root, StringComparison.OrdinalIgnoreCase));
+            if (item is null) return;
+            item.IsSelected = !item.IsSelected;
+        });
+        SelectAllCommand = ReactiveCommand.Create(() => { AllSelected = true; });
+
+        // Clicking a workspace's name selects only that one, like the dashboard's
+        // label button; the checkbox beside it toggles multi-select instead.
+        SelectOnlyWorkspaceCommand = ReactiveCommand.Create<WorkspaceItem>(item =>
+        {
+            if (item is null) return;
+            _suppressWorkspaceReload = true;
+            foreach (var workspace in Workspaces) workspace.IsSelected = ReferenceEquals(workspace, item);
+            _suppressWorkspaceReload = false;
+
+            if (_allSelected)
+            {
+                _allSelected = false;
+                this.RaisePropertyChanged(nameof(AllSelected));
+            }
+            this.RaisePropertyChanged(nameof(TierApplies));
+            this.RaisePropertyChanged(nameof(ScopeDisplay));
+            _ = LoadMemoriesAsync();
+        });
 
         CreateMemoryCommand = ReactiveCommand.Create(() => { ShowCreateDialog = true; });
         SaveCreateCommand = ReactiveCommand.CreateFromTask(() => CreateMemoryAsync());
@@ -192,7 +318,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             if (m == null) return;
             CopyTarget = m;
             CopyAsMove = false;
-            CopyProjectRoot = Runtimes.FirstOrDefault()?.ProjectRoot ?? "";
+            CopyTargetWorkspace = Workspaces.FirstOrDefault();
         });
         ConfirmCopyCommand = ReactiveCommand.CreateFromTask(() => CopyToProjectAsync());
         CancelCopyCommand = ReactiveCommand.Create(() => { CopyTarget = null; });
@@ -213,7 +339,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             _sseClient.OnMemoryChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(() => _ = LoadMemoriesAsync());
             _sseClient.OnRuntimesChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
-                _ = LoadRuntimesAsync();
+                _ = LoadWorkspacesAsync();
                 NotifyWorkspaceSseRefresh();
             });
             _sseClient.OnCodebaseChanged += () => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -227,7 +353,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             });
             _sseClient.Start();
 
-            await LoadRuntimesAsync();
+            await LoadWorkspacesAsync();
             await LoadMemoriesAsync();
         }
         catch (Exception ex)
@@ -246,66 +372,143 @@ public class MainViewModel : ViewModelBase, IDisposable
 
         try
         {
-            _logger.LogInformation("Loading memories (scope={Scope})...", SelectedScope);
-            var memories = await _apiClient.GetMemoriesAsync(SelectedScope, limit: 100, _cts.Token);
+            _logger.LogInformation("Loading memories (all={All}, roots={Roots}, global={Global}, type={Type}, tier={Tier})...", AllSelected, string.Join(",", SelectedWorkspaces.Select(w => w.Root)), GlobalIncluded, SelectedType, Tier);
+            var roots = AllSelected ? null : SelectedWorkspaces.Select(w => w.Root).ToList();
+            var result = await _apiClient.GetMemoriesAsync(
+                AllSelected,
+                roots,
+                GlobalIncluded,
+                limit: 200,
+                type: SelectedType,
+                q: SearchQuery,
+                tier: TierApplies ? Tier : null,
+                _cts.Token);
+
             Memories.Clear();
-            foreach (var memory in memories)
+            FilteredMemories.Clear();
+            if (result != null)
             {
-                Memories.Add(memory);
+                foreach (var memory in result.Items)
+                {
+                    Memories.Add(memory);
+                    FilteredMemories.Add(memory);
+                }
+                TotalInScope = result.Metadata.Total;
+                MatchingCount = result.Metadata.Matching;
+            }
+            else
+            {
+                TotalInScope = 0;
+                MatchingCount = 0;
             }
 
-            UpdateFilteredMemories();
-            StatusText = IsConnected ? $"Connected | {Memories.Count} memories" : StatusText;
-            _logger.LogInformation("Loaded {Count} memories", Memories.Count);
+            HasLoadedOnce = true;
+            ErrorMessage = "";
+            this.RaisePropertyChanged(nameof(IsEmpty));
+            StatusText = IsConnected ? $"Connected | {MatchingCount} of {TotalInScope} memories" : StatusText;
+            _logger.LogInformation("Loaded {Count} memories", FilteredMemories.Count);
+
+            this.RaisePropertyChanged(nameof(TotalMemoriesCount));
+            this.RaisePropertyChanged(nameof(FilteredMemoriesCount));
+            this.RaisePropertyChanged(nameof(MemoryCountStatus));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to load memories");
+            ErrorMessage = ex.Message;
+            ScheduleErrorDismiss();
+            this.RaisePropertyChanged(nameof(IsEmpty));
             StatusText = $"Load failed: {ex.Message}";
         }
         finally
         {
             IsLoading = false;
+            this.RaisePropertyChanged(nameof(IsEmpty));
         }
     }
 
-    private void UpdateFilteredMemories()
+    private void ScheduleErrorDismiss()
     {
-        var filtered = Memories.Where(m =>
-            (SelectedType == "All" || string.Equals(m.Type, SelectedType, StringComparison.OrdinalIgnoreCase)) &&
-            (string.IsNullOrWhiteSpace(SearchQuery) ||
-             m.Content.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase) ||
-             m.Id.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase)))
-            .OrderByDescending(m => m.UpdatedAt)
-            .ThenByDescending(m => m.CreatedAt)
-            .ToList();
-
-        FilteredMemories.Clear();
-        foreach (var item in filtered)
+        if (_errorDismissTimer == null)
         {
-            FilteredMemories.Add(item);
+            _errorDismissTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+            _errorDismissTimer.Tick += (_, _) =>
+            {
+                _errorDismissTimer?.Stop();
+                ErrorMessage = "";
+            };
         }
-
-        this.RaisePropertyChanged(nameof(TotalMemoriesCount));
-        this.RaisePropertyChanged(nameof(FilteredMemoriesCount));
-        this.RaisePropertyChanged(nameof(MemoryCountStatus));
+        _errorDismissTimer.Stop();
+        _errorDismissTimer.Start();
     }
 
-    private async Task LoadRuntimesAsync()
+    /// <summary>
+    /// Loads the workspace list for the memory sidebar. Uses registered runtimes
+    /// (live + remembered) so scopes stay listed after their process exits, and
+    /// shapes them exactly like the dashboard: workspace root, skipping
+    /// codebase-disabled runtimes and the "UserScope" sentinel, deduped
+    /// case-insensitively.
+    /// </summary>
+    private async Task LoadWorkspacesAsync()
     {
         try
         {
-            var runtimes = await _apiClient.GetRuntimesAsync();
-            Runtimes.Clear();
+            var runtimes = await _apiClient.GetAllCoordinatorRuntimesAsync();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var rows = new List<(string Root, string DataDirectory)>();
             foreach (var r in runtimes)
             {
-                Runtimes.Add(r);
+                if (!r.CodebaseEnabled) continue;
+                var root = !string.IsNullOrWhiteSpace(r.WorkspaceRoot) ? r.WorkspaceRoot : r.HeadScopeRoot;
+                if (string.IsNullOrWhiteSpace(root)) continue;
+                if (string.Equals(root, "UserScope", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!seen.Add(root)) continue;
+                rows.Add((root, r.DataDirectory));
+            }
+
+            // Diff in place so retained rows keep their object identity and the
+            // user's tick marks survive a background refresh.
+            var keep = rows.Select(r => r.Root).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            for (var i = Workspaces.Count - 1; i >= 0; i--)
+            {
+                if (!keep.Contains(Workspaces[i].Root)) Workspaces.RemoveAt(i);
+            }
+
+            var present = Workspaces.Select(w => w.Root).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var (root, dataDirectory) in rows)
+            {
+                if (present.Contains(root)) continue;
+                var item = new WorkspaceItem(root, dataDirectory);
+                // A row added while "All workspaces" is on arrives already ticked.
+                item.IsSelected = _allSelected;
+                item.SelectionChanged += OnWorkspaceSelectionChanged;
+                Workspaces.Add(item);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to load runtimes");
+            _logger.LogWarning(ex, "Failed to load workspaces");
         }
+    }
+
+    private void OnWorkspaceSelectionChanged(object? sender, EventArgs e)
+    {
+        if (_suppressWorkspaceReload) return;
+
+        // The master switch is on only while every row is ticked, so ticking the
+        // last workspace by hand also lights it up.
+        var allTicked = Workspaces.Count > 0 && Workspaces.All(w => w.IsSelected);
+        if (_allSelected != allTicked)
+        {
+            _allSelected = allTicked;
+            this.RaisePropertyChanged(nameof(AllSelected));
+        }
+
+        this.RaisePropertyChanged(nameof(TierApplies));
+        this.RaisePropertyChanged(nameof(ScopeDisplay));
+        this.RaisePropertyChanged(nameof(SelectedWorkspaceCount));
+
+        _ = LoadMemoriesAsync();
     }
 
     private async Task CreateMemoryAsync()
@@ -317,8 +520,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             var result = await _apiClient.CreateMemoryAsync(CreateContent.Trim(), CreateType, tags, CreateScope);
             if (result != null)
             {
-                Memories.Insert(0, result);
-                UpdateFilteredMemories();
+                await LoadMemoriesAsync();
                 ShowCreateDialog = false;
                 CreateContent = "";
                 CreateType = "Note";
@@ -337,16 +539,14 @@ public class MainViewModel : ViewModelBase, IDisposable
         try
         {
             var result = await _apiClient.UpdateMemoryAsync(
-                EditingMemory.Id, EditContent, EditType, EditStatus, EditingMemory.Scope ?? "all");
+                EditingMemory.Id, EditContent, EditType, EditStatus,
+                EditingMemory.Scope ?? "all",
+                EditingMemory.Project?.Root,
+                EditingMemory.IsLocalScope ? "project-local" : null);
 
             if (result != null)
             {
-                var index = Memories.ToList().FindIndex(m => m.Id == EditingMemory.Id);
-                if (index >= 0)
-                {
-                    Memories[index] = result;
-                    UpdateFilteredMemories();
-                }
+                await LoadMemoriesAsync();
                 EditingMemory = null;
             }
         }
@@ -361,10 +561,9 @@ public class MainViewModel : ViewModelBase, IDisposable
         if (DeleteTarget == null) return;
         try
         {
-            if (await _apiClient.DeleteMemoryAsync(DeleteTarget.Id, DeleteTarget.Scope ?? "all"))
+            if (await _apiClient.DeleteMemoryAsync(DeleteTarget.Id, DeleteTarget.Scope ?? "all", DeleteTarget.Project?.Root, DeleteTarget.IsLocalScope ? "project-local" : null))
             {
-                Memories.Remove(DeleteTarget);
-                UpdateFilteredMemories();
+                await LoadMemoriesAsync();
                 DeleteTarget = null;
             }
         }

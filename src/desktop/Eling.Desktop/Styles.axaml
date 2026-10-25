@@ -50,6 +50,23 @@
         <Setter Property="BorderThickness" Value="0"/>
     </Style>
 
+    <!-- Filter chips (Type / Tier / Global): the fill *is* the selected marker,
+         so hover and press must not swap it for Fluent's grey. The theme sets the
+         background on the template's presenter, which would otherwise win over
+         the chip's own Background. -->
+    <Style Selector="Button.chip">
+        <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style Selector="Button.chip:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{Binding $parent[Button].Background}"/>
+    </Style>
+    <Style Selector="Button.chip:pressed /template/ ContentPresenter">
+        <Setter Property="Background" Value="{Binding $parent[Button].Background}"/>
+    </Style>
+    <Style Selector="Button.chip:pointerover /template/ ContentPresenter">
+        <Setter Property="BorderBrush" Value="Transparent"/>
+    </Style>
+
     <!-- ListBoxItem: Static, hover follows cursor, not selection -->
     <Style Selector="ListBoxItem">
         <Setter Property="Background" Value="Transparent"/>
@@ -67,6 +84,27 @@
 
     <Style Selector="ListBox">
         <Setter Property="Background" Value="#121212"/>
+    </Style>
+
+    <!-- Memory sidebar: workspace name is a click target for single-select -->
+    <Style Selector="Button.workspace-label">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="8,0,0,0"/>
+        <Setter Property="Margin" Value="0"/>
+        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Foreground" Value="#e5e7eb"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style Selector="Button.workspace-label:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="#ffffff"/>
+    </Style>
+    <Style Selector="Button.workspace-label:pressed /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent"/>
     </Style>
 
     <!-- Memory Card Styles -->

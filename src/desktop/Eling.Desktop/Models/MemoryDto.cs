@@ -16,6 +16,8 @@ public record MemoryDto(
     ProjectInfoDto? Project = null)
 {
     public bool IsGlobalScope => string.Equals(Scope, "global", StringComparison.OrdinalIgnoreCase);
+    public bool IsLocalScope => string.Equals(Scope, "project-local", StringComparison.OrdinalIgnoreCase);
+    public bool IsSharedProjectScope => string.Equals(Scope, "project", StringComparison.OrdinalIgnoreCase);
     public bool IsProjectScope => !IsGlobalScope;
 
     public string ScopeDisplay => IsGlobalScope
