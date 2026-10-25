@@ -246,6 +246,18 @@
                                                         Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).PromptCopyCommand}"
                                                         CommandParameter="{Binding}"
                                                         ToolTip.Tip="Copy or move memory to a Project"/>
+                                                <Button Content="📁 Shared" FontSize="11" Padding="8,4" CornerRadius="4"
+                                                        Background="#14263b" Foreground="#60a5fa" BorderBrush="#1e3a5f" BorderThickness="1"
+                                                        IsVisible="{Binding IsLocalScope}"
+                                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).MoveTierCommand}"
+                                                        CommandParameter="{Binding}"
+                                                        ToolTip.Tip="Move to Shared (committed with the repo)"/>
+                                                <Button Content="💻 Local" FontSize="11" Padding="8,4" CornerRadius="4"
+                                                        Background="#2a1f3d" Foreground="#a78bfa" BorderBrush="#3d2b5a" BorderThickness="1"
+                                                        IsVisible="{Binding IsProjectScope}"
+                                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).MoveTierCommand}"
+                                                        CommandParameter="{Binding}"
+                                                        ToolTip.Tip="Move to Local (machine-only, leaves shared)"/>
                                                 <Button Content="✏ Edit" FontSize="11" Padding="8,4" CornerRadius="4"
                                                         Background="#262626" Foreground="#9ca3af" BorderThickness="0"
                                                         Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).StartEditCommand}"
@@ -366,9 +378,13 @@
                         </StackPanel>
                         <StackPanel Grid.Column="1" Spacing="4" Margin="6,0,0,0">
                             <TextBlock Text="Scope" FontSize="12" Foreground="#9ca3af"/>
-                            <ComboBox SelectedIndex="0" HorizontalAlignment="Stretch">
-                                <ComboBoxItem Content="Current Project" Tag="all"/>
-                                <ComboBoxItem Content="Global Scope" Tag="global"/>
+                            <ComboBox ItemsSource="{Binding ScopeOptions}" SelectedItem="{Binding CreateScope, Mode=TwoWay}"
+                                      HorizontalAlignment="Stretch">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <ComboBoxItem Content="{Binding .}"/>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
                             </ComboBox>
                         </StackPanel>
                     </Grid>
@@ -402,6 +418,8 @@
                                       HorizontalAlignment="Stretch"/>
                         </StackPanel>
                     </Grid>
+                    <TextBlock Text="Tags (comma-separated)" FontSize="12" Foreground="#9ca3af"/>
+                    <TextBox Text="{Binding EditTags}" PlaceholderText="e.g. backend, auth"/>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
                         <Button Content="Cancel" Command="{Binding CancelEditCommand}" Classes="subtle" Foreground="#9ca3af"/>
                         <Button Content="Save Changes" Command="{Binding SaveEditCommand}"

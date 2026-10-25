@@ -42,6 +42,7 @@ public class MainViewModel : ViewModelBase, IDisposable
     private string _editContent = "";
     private string _editType = "Note";
     private string _editStatus = "Active";
+    private string _editTags = "";
 
     // Dialog states
     private MemoryDto? _deleteTarget;
@@ -52,11 +53,14 @@ public class MainViewModel : ViewModelBase, IDisposable
     private string _copyProjectRoot = "";
     private WorkspaceItem? _copyTargetWorkspace;
     private bool _suppressWorkspaceReload;
+    /// <summary>Guards <see cref="LoadMemoriesAsync"/> while a command rewrites
+    /// several scope fields at once, so one refresh follows instead of one per field.</summary>
+    private bool _suspendedReload;
     private bool _showCreateDialog;
     private string _createContent = "";
     private string _createType = "Note";
     private string _createTags = "";
-    private string _createScope = "all";
+    private string _createScope = "Current Project";
 
     public string StatusText { get => _statusText; set => this.RaiseAndSetIfChanged(ref _statusText, value); }
     public event Action? OnWorkspaceRefreshRequested;
@@ -165,6 +169,7 @@ public class MainViewModel : ViewModelBase, IDisposable
     public string EditContent { get => _editContent; set => this.RaiseAndSetIfChanged(ref _editContent, value); }
     public string EditType { get => _editType; set => this.RaiseAndSetIfChanged(ref _editType, value); }
     public string EditStatus { get => _editStatus; set => this.RaiseAndSetIfChanged(ref _editStatus, value); }
+    public string EditTags { get => _editTags; set => this.RaiseAndSetIfChanged(ref _editTags, value); }
 
     // Dialog properties
     public MemoryDto? DeleteTarget { get => _deleteTarget; set => this.RaiseAndSetIfChanged(ref _deleteTarget, value); }
@@ -213,6 +218,7 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     public string[] TypeOptions { get; } = ["Fact", "Preference", "Decision", "Lesson", "Note"];
     public string[] StatusOptions { get; } = ["Active", "Superseded", "Archived"];
+    public string[] ScopeOptions { get; } = ["Current Project", "Global Scope"];
 
     // Commands
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> RefreshCommand { get; }
@@ -244,6 +250,8 @@ public class MainViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> ConfirmCopyCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> CancelCopyCommand { get; }
 
+    public ReactiveCommand<MemoryDto, System.Reactive.Unit> MoveTierCommand { get; }
+
     public MainViewModel(
         BackendSupervisor backendSupervisor,
         ElingApiClient apiClient,
@@ -259,7 +267,37 @@ public class MainViewModel : ViewModelBase, IDisposable
         ClearSearchCommand = ReactiveCommand.Create(() => { SearchQuery = ""; });
         SelectTypeCommand = ReactiveCommand.Create<string>(type => { SelectedType = type ?? "All"; });
         TierCommand = ReactiveCommand.Create<string>(tier => { Tier = tier ?? "all"; });
-        ToggleGlobalCommand = ReactiveCommand.Create(() => { GlobalIncluded = !GlobalIncluded; });
+        ToggleGlobalCommand = ReactiveCommand.Create(() =>
+        {
+            // Mirrors the dashboard's Global control: from the aggregated view it
+            // narrows to the global scope, from a global-only view it goes back to
+            // every workspace, otherwise global rides along with the ticked rows.
+            if (AllSelected)
+            {
+                ApplyScope(() =>
+                {
+                    AllSelected = false;   // clears every workspace row
+                    GlobalIncluded = true; // global on its own
+                });
+                return;
+            }
+
+            if (GlobalIncluded)
+            {
+                if (SelectedWorkspaceCount == 0)
+                {
+                    ApplyScope(() => AllSelected = true);
+                }
+                else
+                {
+                    GlobalIncluded = false;
+                }
+
+                return;
+            }
+
+            GlobalIncluded = true;
+        });
         ToggleRootCommand = ReactiveCommand.Create<string>(root =>
         {
             if (string.IsNullOrWhiteSpace(root)) return;
@@ -298,7 +336,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             StartEdit(m);
         });
         SaveEditCommand = ReactiveCommand.CreateFromTask(() => SaveEditAsync());
-        CancelEditCommand = ReactiveCommand.Create(() => { EditingMemory = null; });
+        CancelEditCommand = ReactiveCommand.Create(() => { EditingMemory = null; EditTags = ""; });
 
         PromptDeleteCommand = ReactiveCommand.Create<MemoryDto>(m => { DeleteTarget = m; });
         ConfirmDeleteCommand = ReactiveCommand.CreateFromTask(() => DeleteMemoryAsync());
@@ -322,6 +360,15 @@ public class MainViewModel : ViewModelBase, IDisposable
         });
         ConfirmCopyCommand = ReactiveCommand.CreateFromTask(() => CopyToProjectAsync());
         CancelCopyCommand = ReactiveCommand.Create(() => { CopyTarget = null; });
+
+        MoveTierCommand = ReactiveCommand.CreateFromTask<MemoryDto>(async m =>
+        {
+            if (m == null) return;
+            var target = m.IsLocalScope ? "project" : "project-local";
+            var ok = await _apiClient.MoveMemoryTierAsync(
+                m.Id, m.Scope ?? "all", m.Project?.Root ?? "", target);
+            if (ok) await LoadMemoriesAsync();
+        });
     }
 
     public async Task InitializeAsync()
@@ -364,10 +411,28 @@ public class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>Applies a scope change that touches several fields, then refreshes
+    /// once — the per-field setters would otherwise fire a request each.</summary>
+    private void ApplyScope(Action change)
+    {
+        _suspendedReload = true;
+        try
+        {
+            change();
+        }
+        finally
+        {
+            _suspendedReload = false;
+        }
+
+        _ = LoadMemoriesAsync();
+    }
+
     public async Task LoadMemoriesAsync()
     {
-        IsLoading = true;
-        _cts?.Cancel();
+        if (_suspendedReload) return;
+
+        IsLoading = true;        _cts?.Cancel();
         _cts = new CancellationTokenSource();
 
         try
@@ -517,7 +582,8 @@ public class MainViewModel : ViewModelBase, IDisposable
         try
         {
             var tags = CreateTags.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(t => t.Trim()).ToList();
-            var result = await _apiClient.CreateMemoryAsync(CreateContent.Trim(), CreateType, tags, CreateScope);
+            var apiScope = CreateScope == "Global Scope" ? "global" : "all";
+            var result = await _apiClient.CreateMemoryAsync(CreateContent.Trim(), CreateType, tags, apiScope);
             if (result != null)
             {
                 await LoadMemoriesAsync();
@@ -538,11 +604,13 @@ public class MainViewModel : ViewModelBase, IDisposable
         if (EditingMemory == null) return;
         try
         {
+            var tags = EditTags.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(t => t.Trim()).ToList();
             var result = await _apiClient.UpdateMemoryAsync(
                 EditingMemory.Id, EditContent, EditType, EditStatus,
                 EditingMemory.Scope ?? "all",
                 EditingMemory.Project?.Root,
-                EditingMemory.IsLocalScope ? "project-local" : null);
+                EditingMemory.IsLocalScope ? "project-local" : null,
+                tags);
 
             if (result != null)
             {
@@ -621,6 +689,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         EditContent = memory.Content;
         EditType = memory.Type;
         EditStatus = memory.Status;
+        EditTags = string.Join(",", memory.Tags ?? new List<string>());
     }
 
     public void Dispose()

@@ -57,7 +57,7 @@ public sealed class ElingApiClient
         bool allSelected = true,
         IReadOnlyList<string>? roots = null,
         bool globalIncluded = false,
-        int limit = 100,
+        int? limit = null,
         string? type = null,
         string? q = null,
         string? tier = null,
@@ -68,14 +68,19 @@ public sealed class ElingApiClient
 
         if (allSelected)
         {
-            var parts = new List<string> { $"limit={limit}" };
+            var parts = new List<string>();
+            if (limit is not null) parts.Add($"limit={limit.Value}");
             if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "All", StringComparison.OrdinalIgnoreCase)) parts.Add($"type={Uri.EscapeDataString(type)}");
             if (!string.IsNullOrWhiteSpace(q)) parts.Add($"q={Uri.EscapeDataString(q.Trim())}");
             url = $"api/aggregated/memories?{string.Join("&", parts)}";
         }
-        else if (!hasRoots && globalIncluded)
+        else if (!hasRoots)
         {
-            var parts = new List<string> { $"limit={limit}" };
+            // Nothing ticked reads as the global scope whatever the global switch
+            // says — the dashboard does the same, so an empty selection returns the
+            // global list instead of the 400 the project endpoint gives for it.
+            var parts = new List<string>();
+            if (limit is not null) parts.Add($"limit={limit.Value}");
             if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "All", StringComparison.OrdinalIgnoreCase)) parts.Add($"type={Uri.EscapeDataString(type)}");
             if (!string.IsNullOrWhiteSpace(q)) parts.Add($"q={Uri.EscapeDataString(q.Trim())}");
             url = $"api/global/memories?{string.Join("&", parts)}";
@@ -88,7 +93,7 @@ public sealed class ElingApiClient
                 foreach (var r in roots!) parts.Add($"project={Uri.EscapeDataString(r)}");
             }
             parts.Add("includeAncestors=true");
-            parts.Add($"limit={limit}");
+            if (limit is not null) parts.Add($"limit={limit.Value}");
             if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "All", StringComparison.OrdinalIgnoreCase)) parts.Add($"type={Uri.EscapeDataString(type)}");
             if (!string.IsNullOrWhiteSpace(q)) parts.Add($"q={Uri.EscapeDataString(q.Trim())}");
             if (!string.IsNullOrWhiteSpace(tier) && !string.Equals(tier, "project", StringComparison.OrdinalIgnoreCase)) parts.Add($"tier={Uri.EscapeDataString(tier)}");
@@ -142,7 +147,7 @@ public sealed class ElingApiClient
         return null;
     }
 
-    public async Task<MemoryDto?> UpdateMemoryAsync(string id, string? content, string? type, string? status, string scope = "all", string? projectRoot = null, string? tier = null, CancellationToken cancellationToken = default)
+    public async Task<MemoryDto?> UpdateMemoryAsync(string id, string? content, string? type, string? status, string scope = "all", string? projectRoot = null, string? tier = null, IReadOnlyList<string>? tags = null, CancellationToken cancellationToken = default)
     {
         string url;
         if (string.Equals(scope, "global", StringComparison.OrdinalIgnoreCase))
@@ -157,7 +162,9 @@ public sealed class ElingApiClient
             url = $"api/project/memories/{id}?{string.Join("&", parts)}";
         }
 
-        var payload = new { content, type, status };
+        object payload = tags is null
+            ? new { content, type, status }
+            : new { content, type, status, tags };
         try
         {
             using var client = GetClient();
@@ -174,6 +181,39 @@ public sealed class ElingApiClient
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Moves a memory between the shared (project) and local (project-local) tiers
+    /// of one workspace — the dashboard's <c>moveTier</c>. The backend merges the
+    /// entry into the target tier and drops the source.
+    /// </summary>
+    public async Task<bool> MoveMemoryTierAsync(string id, string sourceScope, string projectRoot, string targetTier, CancellationToken cancellationToken = default)
+    {
+        var endpoint = string.Equals(targetTier, "project-local", StringComparison.OrdinalIgnoreCase)
+            ? "api/scoped/move-to-local"
+            : "api/scoped/move-to-project";
+        var payload = new
+        {
+            id,
+            sourceScope,
+            sourceProjectRoot = projectRoot,
+            targetProjectRoot = projectRoot
+        };
+
+        try
+        {
+            using var client = GetClient();
+            var response = await client.PostAsJsonAsync(endpoint, payload, JsonOptions, cancellationToken);
+            if (response.IsSuccessStatusCode) return true;
+            _logger.LogWarning("MoveMemoryTier failed with status {StatusCode}", response.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error moving memory tier via {Endpoint}", endpoint);
+        }
+
+        return false;
     }
 
     public async Task<bool> DeleteMemoryAsync(string id, string scope = "all", string? projectRoot = null, string? tier = null, CancellationToken cancellationToken = default)
