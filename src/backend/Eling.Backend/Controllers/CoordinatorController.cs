@@ -239,4 +239,99 @@ public sealed class CoordinatorController(
                 System.IO.File.Delete(sidecarPath);
         }
     }
+
+    /// <summary>
+    /// The workspace list pre-arranged in all three view modes (flat, repo,
+    /// folder), so a client switch never costs a request.
+    /// </summary>
+    [HttpGet("workspaces")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<WorkspaceTreesDto>> GetWorkspacesAsync(
+        [FromQuery] string? status = null,
+        [FromQuery] string? q = null,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedStatus = status?.Trim().ToLowerInvariant() ?? "all";
+        if (normalizedStatus is not ("all" or "active" or "offline"))
+        {
+            return BadRequest(new { error = $"Invalid status value '{status}'. Expected 'all', 'active', or 'offline'." });
+        }
+
+        var runtimes = await registry.AliveOrRegisteredAsync(cancellationToken, allProcesses: true);
+
+        var rows = RowsOf(runtimes);
+
+        var trimmedQuery = q?.Trim();
+        if (!string.IsNullOrEmpty(trimmedQuery))
+        {
+            var query = trimmedQuery;
+            rows = rows.Where(row =>
+            {
+                var nameMatch = row.Name.Contains(query, StringComparison.OrdinalIgnoreCase);
+                var rootMatch = row.Root.Contains(query, StringComparison.OrdinalIgnoreCase);
+                var pidMatches = row.ProcessIds.Any(pid => pid.ToString().Contains(query, StringComparison.OrdinalIgnoreCase));
+                return nameMatch || rootMatch || pidMatches;
+            }).ToList();
+        }
+
+        if (normalizedStatus == "active")
+        {
+            rows = rows.Where(r => r.Alive).ToList();
+        }
+        else if (normalizedStatus == "offline")
+        {
+            rows = rows.Where(r => !r.Alive).ToList();
+        }
+
+        var coreRows = rows.Select(r => new WorkspaceTreeRowDto(
+            r.Root, r.Name, r.RepositoryRoot, r.Alive, r.ProcessCount)).ToList();
+        return Ok(WorkspaceTreeDtoMapper.Map(coreRows));
+    }
+
+    private sealed record WorkspaceRow(
+        string Root,
+        string Name,
+        string? RepositoryRoot,
+        bool Alive,
+        int ProcessCount,
+        IReadOnlyList<int> ProcessIds);
+
+    private static List<WorkspaceRow> RowsOf(IReadOnlyList<RuntimeInfo> runtimes)
+    {
+        var byRoot = new Dictionary<string, List<RuntimeInfo>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var runtime in runtimes)
+        {
+            var root = runtime.CodebaseRoot();
+            if (string.IsNullOrWhiteSpace(root) || root == "UserScope") continue;
+            if (!runtime.CodebaseEnabled) continue;
+
+            if (!byRoot.TryGetValue(root, out var list))
+            {
+                list = [];
+                byRoot[root] = list;
+            }
+            list.Add(runtime);
+        }
+
+        var result = new List<WorkspaceRow>();
+        foreach (var entry in byRoot)
+        {
+            var root = entry.Key;
+            var group = entry.Value;
+            var repoRoot = ResolveRepositoryRoot(group[0]);
+            var alive = group.Any(r => r.IsAlive);
+            var processIds = group.Where(r => r.ProcessId > 0).Select(r => r.ProcessId).ToList();
+            var trimmed = root.TrimEnd('\\', '/');
+            var name = System.IO.Path.GetFileName(trimmed);
+            result.Add(new WorkspaceRow(
+                root,
+                string.IsNullOrEmpty(name) ? root : name,
+                repoRoot,
+                alive,
+                processIds.Count,
+                processIds));
+        }
+        return result;
+    }
 }
