@@ -18,6 +18,10 @@ public class MainViewModel : ViewModelBase, IDisposable
     private readonly ElingApiClient _apiClient;
     private readonly ILogger<MainViewModel> _logger;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly DesktopSettingsStore? _settingsStore;
+    private readonly Dictionary<string, bool> _workspaceExpansion = new(StringComparer.Ordinal);
+    private List<MemoryWorkspaceNode> _workspaceRoots = [];
+    private WorkspaceTreesDto? _trees;
     private SseClient? _sseClient;
     private CancellationTokenSource? _cts;
 
@@ -137,27 +141,15 @@ public class MainViewModel : ViewModelBase, IDisposable
         get => _allSelected;
         set
         {
-            // Compare by hand instead of trusting the returned "changed" flag, so
-            // the mirroring below always runs on a real change.
-            var changed = _allSelected != value;
-            this.RaiseAndSetIfChanged(ref _allSelected, value);
-            if (!changed) return;
-
+            if (_allSelected == value) return;
             _logger.LogInformation("All workspaces switched to {Value} ({Count} workspaces)", value, Workspaces.Count);
-
-            // Mirror the master switch onto every row, so ticking "All workspaces"
-            // ticks every checkbox below it (and unticking clears them). The
-            // per-row events are suppressed: one load below covers the change.
-            _suppressWorkspaceReload = true;
-            foreach (var workspace in Workspaces) workspace.IsSelected = value;
-            _suppressWorkspaceReload = false;
-
-            this.RaisePropertyChanged(nameof(TierApplies));
-            this.RaisePropertyChanged(nameof(ScopeDisplay));
-            this.RaisePropertyChanged(nameof(SelectedWorkspaceCount));
-            _ = LoadMemoriesAsync();
+            ApplyWorkspaceSelection(
+                () => MemoryWorkspaceSelection.SetAll(Workspaces, value),
+                value);
         }
     }
+
+    public string AllWorkspacesBackground => AllSelected ? "#27272a" : "Transparent";
 
     public bool TierApplies => !AllSelected && SelectedWorkspaceCount == 1;
 
@@ -206,6 +198,26 @@ public class MainViewModel : ViewModelBase, IDisposable
     /// <summary>Registered workspaces (live + remembered) shown in the memory sidebar,
     /// mirroring the dashboard's <c>/api/coordinator/runtimes?includeRegistered=true</c> rows.</summary>
     public ObservableCollection<WorkspaceItem> Workspaces { get; } = [];
+    public ObservableCollection<MemoryWorkspaceNode> VisibleWorkspaces { get; } = [];
+    public bool HasNoWorkspaces => Workspaces.Count == 0;
+
+    public ReactiveCommand<string, System.Reactive.Unit> SetWorkspaceGroupModeCommand { get; }
+    public ReactiveCommand<MemoryWorkspaceNode, System.Reactive.Unit> ToggleWorkspaceGroupCommand { get; }
+    public ReactiveCommand<MemoryWorkspaceNode, System.Reactive.Unit> ToggleWorkspaceExpansionCommand { get; }
+
+    private int _workspaceGroupMode = (int)WorkspaceGrouping.Mode.Repo;
+    public int WorkspaceGroupMode
+    {
+        get => _workspaceGroupMode;
+        set
+        {
+            if (value < (int)WorkspaceGrouping.Mode.Flat || value > (int)WorkspaceGrouping.Mode.Folder) return;
+            if (_workspaceGroupMode == value) return;
+            this.RaiseAndSetIfChanged(ref _workspaceGroupMode, value);
+            _settingsStore?.SetWorkspaceGroupMode((WorkspaceGrouping.Mode)value);
+            RebuildWorkspaceNodes();
+        }
+    }
 
     /// <summary>Workspaces the user ticked in the sidebar. Empty means "Global only"
     /// while <see cref="AllSelected"/> covers the aggregate view.</summary>
@@ -253,12 +265,15 @@ public class MainViewModel : ViewModelBase, IDisposable
         BackendSupervisor backendSupervisor,
         ElingApiClient apiClient,
         ILogger<MainViewModel> logger,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        DesktopSettingsStore? settingsStore = null)
     {
         _backendSupervisor = backendSupervisor;
         _apiClient = apiClient;
         _logger = logger;
         _loggerFactory = loggerFactory;
+        _settingsStore = settingsStore;
+        _workspaceGroupMode = (int)(_settingsStore?.GetWorkspaceGroupMode() ?? WorkspaceGrouping.Mode.Repo);
 
         RefreshCommand = ReactiveCommand.CreateFromTask(() => LoadMemoriesAsync());
         ClearSearchCommand = ReactiveCommand.Create(() => { SearchQuery = ""; });
@@ -273,24 +288,30 @@ public class MainViewModel : ViewModelBase, IDisposable
             item.IsSelected = !item.IsSelected;
         });
         SelectAllCommand = ReactiveCommand.Create(() => { AllSelected = true; });
+        SetWorkspaceGroupModeCommand = ReactiveCommand.Create<string>(mode =>
+        {
+            if (int.TryParse(mode, out var parsed)) WorkspaceGroupMode = parsed;
+        });
+        ToggleWorkspaceGroupCommand = ReactiveCommand.Create<MemoryWorkspaceNode>(node =>
+        {
+            if (node is null) return;
+            ApplyWorkspaceSelection(() => MemoryWorkspaceSelection.ToggleGroup(Workspaces, node.Group));
+        });
+        ToggleWorkspaceExpansionCommand = ReactiveCommand.Create<MemoryWorkspaceNode>(node =>
+        {
+            if (node is null) return;
+            node.IsExpanded = !node.IsExpanded;
+            _workspaceExpansion[node.Id] = node.IsExpanded;
+            RebuildVisibleWorkspaces();
+        });
 
-        // Clicking a workspace's name selects only that one, like the dashboard's
-        // label button; the checkbox beside it toggles multi-select instead.
+        // The name selects one workspace; its checkbox toggles the whole node group.
         SelectOnlyWorkspaceCommand = ReactiveCommand.Create<WorkspaceItem>(item =>
         {
             if (item is null) return;
-            _suppressWorkspaceReload = true;
-            foreach (var workspace in Workspaces) workspace.IsSelected = ReferenceEquals(workspace, item);
-            _suppressWorkspaceReload = false;
-
-            if (_allSelected)
-            {
-                _allSelected = false;
-                this.RaisePropertyChanged(nameof(AllSelected));
-            }
-            this.RaisePropertyChanged(nameof(TierApplies));
-            this.RaisePropertyChanged(nameof(ScopeDisplay));
-            _ = LoadMemoriesAsync();
+            ApplyWorkspaceSelection(
+                () => MemoryWorkspaceSelection.SelectOnly(Workspaces, item),
+                false);
         });
 
         CreateMemoryCommand = ReactiveCommand.Create(() => { ShowCreateDialog = true; });
@@ -469,35 +490,48 @@ public class MainViewModel : ViewModelBase, IDisposable
         {
             var runtimes = await _apiClient.GetAllCoordinatorRuntimesAsync();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var rows = new List<(string Root, string DataDirectory)>();
-            foreach (var r in runtimes)
+            var rows = new List<WorkspaceItem>();
+            foreach (var runtime in runtimes)
             {
-                if (!r.CodebaseEnabled) continue;
-                var root = !string.IsNullOrWhiteSpace(r.WorkspaceRoot) ? r.WorkspaceRoot : r.HeadScopeRoot;
+                if (!runtime.CodebaseEnabled) continue;
+                var root = !string.IsNullOrWhiteSpace(runtime.WorkspaceRoot)
+                    ? runtime.WorkspaceRoot
+                    : runtime.HeadScopeRoot;
                 if (string.IsNullOrWhiteSpace(root)) continue;
                 if (string.Equals(root, "UserScope", StringComparison.OrdinalIgnoreCase)) continue;
                 if (!seen.Add(root)) continue;
-                rows.Add((root, r.DataDirectory));
+                rows.Add(new WorkspaceItem(root, runtime.DataDirectory, runtime.RepositoryRoot)
+                {
+                    IsAlive = runtime.IsAlive
+                });
             }
 
-            // Diff in place so retained rows keep their object identity and the
-            // user's tick marks survive a background refresh.
-            var keep = rows.Select(r => r.Root).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // Retain object identity so ticks survive refreshes, but refresh runtime metadata.
+            var keep = rows.Select(row => row.Root).ToHashSet(StringComparer.OrdinalIgnoreCase);
             for (var i = Workspaces.Count - 1; i >= 0; i--)
             {
                 if (!keep.Contains(Workspaces[i].Root)) Workspaces.RemoveAt(i);
             }
 
-            var present = Workspaces.Select(w => w.Root).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var (root, dataDirectory) in rows)
+            var present = Workspaces.ToDictionary(workspace => workspace.Root, StringComparer.OrdinalIgnoreCase);
+            foreach (var row in rows)
             {
-                if (present.Contains(root)) continue;
-                var item = new WorkspaceItem(root, dataDirectory);
-                // A row added while "All workspaces" is on arrives already ticked.
-                item.IsSelected = _allSelected;
-                item.SelectionChanged += OnWorkspaceSelectionChanged;
-                Workspaces.Add(item);
+                if (present.TryGetValue(row.Root, out var existing))
+                {
+                    existing.UpdateRuntime(row.DataDirectory, row.RepositoryRoot, row.IsAlive);
+                    continue;
+                }
+
+                row.IsSelected = _allSelected;
+                row.SelectionChanged += OnWorkspaceSelectionChanged;
+                Workspaces.Add(row);
+                present.Add(row.Root, row);
             }
+
+            var trees = await _apiClient.GetWorkspaceTreesAsync();
+            if (trees is not null) _trees = trees;
+
+            RebuildWorkspaceNodes();
         }
         catch (Exception ex)
         {
@@ -505,23 +539,80 @@ public class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private WorkspaceItem? LookupWorkspace(string root)
+    {
+        return Workspaces.FirstOrDefault(w => string.Equals(w.Root, root, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void RebuildWorkspaceNodes()
+    {
+        if (_trees is not null)
+        {
+            var nodes = WorkspaceGroupMode switch
+            {
+                (int)Eling.Core.Workspaces.WorkspaceGroupMode.Flat => _trees.Flat,
+                (int)Eling.Core.Workspaces.WorkspaceGroupMode.Folder => _trees.Folder,
+                _ => _trees.Repo
+            };
+
+            MemoryWorkspaceTree.CaptureExpansion(_workspaceRoots, _workspaceExpansion);
+            _workspaceRoots = WorkspaceTreeMapper.ToMemoryNodes(nodes, LookupWorkspace);
+            MemoryWorkspaceTree.RestoreExpansion(_workspaceRoots, _workspaceExpansion);
+            MemoryWorkspaceTree.RefreshAggregates(_workspaceRoots);
+        }
+        else
+        {
+            MemoryWorkspaceTree.CaptureExpansion(_workspaceRoots, _workspaceExpansion);
+            _workspaceRoots = MemoryWorkspaceTree.Build(
+                Workspaces.ToList(),
+                (WorkspaceGrouping.Mode)WorkspaceGroupMode);
+            MemoryWorkspaceTree.RestoreExpansion(_workspaceRoots, _workspaceExpansion);
+            MemoryWorkspaceTree.RefreshAggregates(_workspaceRoots);
+        }
+        RebuildVisibleWorkspaces();
+        this.RaisePropertyChanged(nameof(HasNoWorkspaces));
+    }
+
+    private void RebuildVisibleWorkspaces()
+    {
+        VisibleWorkspaces.Clear();
+        foreach (var node in MemoryWorkspaceTree.FlattenVisible(_workspaceRoots))
+            VisibleWorkspaces.Add(node);
+    }
+
+    private void ApplyWorkspaceSelection(Action change, bool? allSelected = null)
+    {
+        _suppressWorkspaceReload = true;
+        try
+        {
+            change();
+        }
+        finally
+        {
+            _suppressWorkspaceReload = false;
+        }
+        NotifyWorkspaceSelectionChanged(allSelected);
+    }
+
     private void OnWorkspaceSelectionChanged(object? sender, EventArgs e)
     {
-        if (_suppressWorkspaceReload) return;
+        if (!_suppressWorkspaceReload) NotifyWorkspaceSelectionChanged();
+    }
 
-        // The master switch is on only while every row is ticked, so ticking the
-        // last workspace by hand also lights it up.
-        var allTicked = Workspaces.Count > 0 && Workspaces.All(w => w.IsSelected);
-        if (_allSelected != allTicked)
+    private void NotifyWorkspaceSelectionChanged(bool? allSelected = null)
+    {
+        var nextAll = allSelected ?? (Workspaces.Count > 0 && Workspaces.All(workspace => workspace.IsSelected));
+        if (_allSelected != nextAll)
         {
-            _allSelected = allTicked;
+            _allSelected = nextAll;
             this.RaisePropertyChanged(nameof(AllSelected));
         }
 
+        this.RaisePropertyChanged(nameof(AllWorkspacesBackground));
         this.RaisePropertyChanged(nameof(TierApplies));
         this.RaisePropertyChanged(nameof(ScopeDisplay));
         this.RaisePropertyChanged(nameof(SelectedWorkspaceCount));
-
+        MemoryWorkspaceTree.RefreshAggregates(_workspaceRoots);
         _ = LoadMemoriesAsync();
     }
 

@@ -316,6 +316,35 @@ public sealed class ElingApiClient
         return [];
     }
 
+    public async Task<WorkspaceTreesDto?> GetWorkspaceTreesAsync(
+        string? status = null,
+        string? q = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var client = GetClient();
+            var query = new List<string>();
+            if (!string.IsNullOrWhiteSpace(status)) query.Add($"status={Uri.EscapeDataString(status.Trim())}");
+            if (!string.IsNullOrWhiteSpace(q)) query.Add($"q={Uri.EscapeDataString(q.Trim())}");
+            var url = query.Count > 0
+                ? $"api/coordinator/workspaces?{string.Join("&", query)}"
+                : "api/coordinator/workspaces";
+
+            var response = await client.GetAsync(url, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                return await response.Content.ReadFromJsonAsync<WorkspaceTreesDto>(JsonOptions, cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error loading workspace trees");
+        }
+
+        return null;
+    }
+
     public async Task<IReadOnlyList<ProjectCodebaseStatusDto>> GetProjectCodebaseStatusesAsync(CancellationToken cancellationToken = default)
     {
         try
