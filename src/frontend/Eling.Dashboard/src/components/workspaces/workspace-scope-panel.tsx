@@ -64,9 +64,7 @@ export function WorkspaceScopePanel({
       </button>
 
       <WorkspaceTree
-        rows={rows}
         selection={selection}
-        mode={mode}
         onSelectOnly={onSelectOnly}
         onToggleRoots={onToggleRoots}
       />

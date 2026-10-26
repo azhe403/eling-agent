@@ -87,9 +87,7 @@ export function WorkspaceSelect({
           </button>
           <WorkspaceGroupToggle mode={mode} onChange={setMode} />
           <WorkspaceTree
-            rows={rows}
             selection={selection}
-            mode={mode}
             onSelectOnly={(root) => {
               onSelectOnly(root)
               setOpen(false)

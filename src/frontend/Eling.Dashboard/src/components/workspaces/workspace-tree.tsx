@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronRight, FolderGit2, GitBranch } from "lucide-react"
 
 import { cn } from "cn"
-import { buildWorkspaceTree, type WorkspaceGroupMode, type WorkspaceNode } from "./grouping"
-import type { WorkspaceRow } from "./runtime-rows"
+import type { WorkspaceNode } from "./grouping"
+import { useWorkspaceTrees } from "./use-workspace-rows"
+import { useWorkspaceGroupMode } from "./use-workspace-group-mode"
 import type { WorkspaceSelection } from "./selection"
 
 /**
@@ -14,23 +15,23 @@ import type { WorkspaceSelection } from "./selection"
  * Three arrangements share one renderer: flat, one row per workspace; by
  * repository, one entry per git repository with its worktrees nested under it;
  * and by folder, one entry per workspace nested by the folders that hold it.
- * The selection underneath stays a flat list of workspace roots, so grouping
- * changes what the list looks like and nothing else.
+ * The arrangement comes from the coordinator, so this component renders a
+ * tree and never computes one; switching mode is a lookup on the same answer,
+ * not a request. The selection underneath stays a flat list of workspace
+ * roots, so grouping changes what the list looks like and nothing else.
  */
 export function WorkspaceTree({
-  rows,
   selection,
-  mode,
   onSelectOnly,
   onToggleRoots,
 }: {
-  rows: readonly WorkspaceRow[]
   selection: WorkspaceSelection
-  mode: WorkspaceGroupMode
   onSelectOnly: (root: string) => void
   onToggleRoots: (roots: readonly string[]) => void
 }) {
-  const nodes = useMemo(() => buildWorkspaceTree(rows, mode), [rows, mode])
+  const { rows, trees } = useWorkspaceTrees()
+  const { mode } = useWorkspaceGroupMode()
+  const nodes = trees[mode]
   // Expansion is a user override on top of a default: a repository with
   // several checkouts starts open, because that grouping is the point of the
   // mode; everything else starts closed until asked for.
@@ -107,15 +108,14 @@ function TreeNode({
   onSelectOnly: (root: string) => void
   onToggleRoots: (roots: readonly string[]) => void
 }) {
-  const group = node.group
-  const includedCount = group.filter((r) => included.has(r.root)).length
-  const allIncluded = group.length > 0 && includedCount === group.length
+  const roots = node.roots
+  const includedCount = roots.filter((r) => included.has(r)).length
+  const allIncluded = roots.length > 0 && includedCount === roots.length
   const someIncluded = includedCount > 0 && !allIncluded
   const hasChildren = node.children.length > 0
-  const open = expanded.has(node.id) || (!collapsed.has(node.id) && group.length > 1)
-  const roots = group.map((r) => r.root)
-  const alive = group.some((r) => r.alive)
-  const row = node.row
+  const open = expanded.has(node.id) || (!collapsed.has(node.id) && roots.length > 1)
+  const alive = node.alive
+  const root = node.root
 
   return (
     <li className="flex flex-col">
@@ -144,16 +144,16 @@ function TreeNode({
           onChange={() => onToggleRoots(roots)}
           label={`Include ${node.label}`}
           title={
-            group.length > 1
+            roots.length > 1
               ? `Include or exclude every checkout of ${node.label}`
               : "Include this workspace in the selection"
           }
         />
 
-        {row ? (
+        {root ? (
           <button
             type="button"
-            onClick={() => onSelectOnly(row.root)}
+            onClick={() => onSelectOnly(root)}
             title={node.path}
             className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
@@ -170,9 +170,9 @@ function TreeNode({
             >
               {node.label}
             </span>
-            {group.length > 1 && (
+            {roots.length > 1 && (
               <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">
-                {group.length}
+                {roots.length}
               </span>
             )}
           </button>
@@ -183,9 +183,9 @@ function TreeNode({
           >
             <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
             <span className="truncate">{node.label}</span>
-            {group.length > 1 && (
+            {roots.length > 1 && (
               <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">
-                {group.length}
+                {roots.length}
               </span>
             )}
           </span>
