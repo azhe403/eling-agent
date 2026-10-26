@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CliWrap;
+using Eling.Core.Workspaces;
 using Eling.Desktop.Models;
 using Eling.Desktop.Services;
 using Microsoft.Extensions.Logging;
@@ -27,6 +29,9 @@ public class FoldersViewModel : ViewModelBase
     // Rich workspace view fields matching the web dashboard
     private string _searchQuery = "";
     private string _filterStatus = "all"; // "all" | "active" | "offline"
+    private WorkspaceGroupMode _groupMode = WorkspaceGroupMode.Repo;
+    private WorkspaceTreesDto? _trees;
+    private CancellationTokenSource? _filterCts;
     private bool _isLoading;
     private int _registeredCount;
     private int _activeInstancesCount;
@@ -52,7 +57,7 @@ public class FoldersViewModel : ViewModelBase
         set
         {
             this.RaiseAndSetIfChanged(ref _searchQuery, value);
-            ApplyFilter();
+            _ = ApplyFilterAsync();
         }
     }
 
@@ -62,7 +67,7 @@ public class FoldersViewModel : ViewModelBase
         set
         {
             this.RaiseAndSetIfChanged(ref _filterStatus, value);
-            ApplyFilter();
+            _ = ApplyFilterAsync();
         }
     }
 
@@ -85,6 +90,17 @@ public class FoldersViewModel : ViewModelBase
     // Rich workspaces list matching dashboard
     private readonly List<WorkspaceItemDto> _allWorkspaces = [];
     public ObservableCollection<WorkspaceItemDto> Workspaces { get; } = [];
+    public ObservableCollection<WorkspaceNode> GroupedNodes { get; } = [];
+
+    public WorkspaceGroupMode GroupMode
+    {
+        get => _groupMode;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _groupMode, value);
+            RebuildGroupedNodes();
+        }
+    }
 
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> LoadCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> AddRootCommand { get; }
@@ -93,6 +109,7 @@ public class FoldersViewModel : ViewModelBase
     public ReactiveCommand<string, System.Reactive.Unit> SwitchWorkspaceCommand { get; }
 
     public ReactiveCommand<string, System.Reactive.Unit> SetFilterCommand { get; }
+    public ReactiveCommand<string, System.Reactive.Unit> SetGroupModeCommand { get; }
     public ReactiveCommand<WorkspaceItemDto, System.Reactive.Unit> ReindexCommand { get; }
     public ReactiveCommand<WorkspaceItemDto, System.Reactive.Unit> ViewCodebaseCommand { get; }
     public ReactiveCommand<WorkspaceItemDto, System.Reactive.Unit> ToggleProcessesCommand { get; }
@@ -125,6 +142,11 @@ public class FoldersViewModel : ViewModelBase
             });
 
         SetFilterCommand = ReactiveCommand.Create<string>(status => FilterStatus = status);
+        SetGroupModeCommand = ReactiveCommand.Create<string>(mode =>
+        {
+            if (Enum.TryParse<WorkspaceGroupMode>(mode, true, out var m))
+                GroupMode = m;
+        });
         ReindexCommand = ReactiveCommand.CreateFromTask<WorkspaceItemDto>(ws => ReindexAsync(ws));
         ViewCodebaseCommand = ReactiveCommand.Create<WorkspaceItemDto>(ws => OpenCodebaseInBrowser(ws));
         ToggleProcessesCommand = ReactiveCommand.Create<WorkspaceItemDto>(ws => ws?.ToggleExpanded());
@@ -185,7 +207,7 @@ public class FoldersViewModel : ViewModelBase
             TotalDbSizeBytes = agg.TotalDbSizeBytes;
             TotalDbSizeDisplay = WorkspaceItemDto.FormatBytes(agg.TotalDbSizeBytes);
 
-            ApplyFilter();
+            await ApplyFilterAsync(debounce: false);
 
             if (!Roots.Contains(SelectedRoot))
             {
@@ -203,26 +225,96 @@ public class FoldersViewModel : ViewModelBase
         }
     }
 
-    private void ApplyFilter()
+    private async Task ApplyFilterAsync(bool debounce = true)
     {
-        var q = (_searchQuery ?? "").Trim().ToLowerInvariant();
-        Workspaces.Clear();
+        _filterCts?.Cancel();
+        _filterCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _filterCts = cts;
 
-        foreach (var ws in _allWorkspaces)
+        try
         {
-            if (FilterStatus == "active" && !ws.IsRunning) continue;
-            if (FilterStatus == "offline" && ws.IsRunning) continue;
-
-            if (!string.IsNullOrEmpty(q))
+            if (debounce)
             {
-                var match = ws.Name.ToLowerInvariant().Contains(q)
-                    || ws.Root.ToLowerInvariant().Contains(q)
-                    || (ws.SinglePid.HasValue && ws.SinglePid.Value.ToString().Contains(q))
-                    || ws.Processes.Any(p => p.Pid.ToString().Contains(q));
-                if (!match) continue;
+                await Task.Delay(150, cts.Token);
             }
 
-            Workspaces.Add(ws);
+            var status = FilterStatus == "all" ? null : FilterStatus;
+            var q = string.IsNullOrWhiteSpace(_searchQuery) ? null : _searchQuery.Trim();
+
+            var trees = await _apiClient.GetWorkspaceTreesAsync(status, q, cts.Token);
+            if (cts.IsCancellationRequested || trees is null) return;
+
+            _trees = trees;
+
+            var byRoot = _allWorkspaces.ToDictionary(ws => ws.Root, StringComparer.OrdinalIgnoreCase);
+            var filteredWorkspaces = new List<WorkspaceItemDto>();
+            foreach (var row in trees.Rows)
+            {
+                if (byRoot.TryGetValue(row.Root, out var existing))
+                {
+                    filteredWorkspaces.Add(existing);
+                }
+                else
+                {
+                    filteredWorkspaces.Add(new WorkspaceItemDto(
+                        root: row.Root,
+                        repositoryRoot: row.RepositoryRoot,
+                        name: row.Name,
+                        isRunning: row.Alive,
+                        processCount: row.ProcessCount,
+                        singlePid: null,
+                        transport: null,
+                        ownerPort: null,
+                        lastHeartbeat: DateTimeOffset.UtcNow,
+                        totalMemoryBytes: null,
+                        totalCpuPercent: null,
+                        files: 0,
+                        chunks: 0,
+                        lastIndexedAt: null,
+                        dbFileName: null,
+                        dbPath: null,
+                        dbSizeBytes: 0,
+                        processes: []));
+                }
+            }
+
+            Workspaces.Clear();
+            foreach (var ws in filteredWorkspaces) Workspaces.Add(ws);
+
+            RebuildGroupedNodes();
+        }
+        catch (OperationCanceledException)
+        {
+            // Suppressed on cancellation
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to apply workspace filter");
+        }
+    }
+
+    private WorkspaceItemDto? LookupWorkspace(string root)
+    {
+        return _allWorkspaces.FirstOrDefault(ws => string.Equals(ws.Root, root, StringComparison.OrdinalIgnoreCase))
+            ?? Workspaces.FirstOrDefault(ws => string.Equals(ws.Root, root, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void RebuildGroupedNodes()
+    {
+        GroupedNodes.Clear();
+        if (_trees is null) return;
+
+        var nodes = GroupMode switch
+        {
+            WorkspaceGroupMode.Flat => _trees.Flat,
+            WorkspaceGroupMode.Folder => _trees.Folder,
+            _ => _trees.Repo
+        };
+
+        foreach (var node in WorkspaceTreeMapper.ToFolderNodes(nodes, LookupWorkspace))
+        {
+            GroupedNodes.Add(node);
         }
     }
 

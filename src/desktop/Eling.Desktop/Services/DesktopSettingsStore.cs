@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.Json;
 using Eling.Core.Scope;
 using Eling.Core.Serialization;
+using Eling.Core.Workspaces;
 using Microsoft.Extensions.Logging;
 
 namespace Eling.Desktop.Services;
@@ -34,6 +35,35 @@ public sealed class DesktopSettingsStore(ILogger<DesktopSettingsStore> logger)
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to save desktop settings");
+        }
+    }
+
+    public WorkspaceGroupMode GetWorkspaceGroupMode()
+    {
+        try
+        {
+            return ReadDocument()?.WorkspaceGroupMode is { } mode &&
+                Enum.IsDefined(mode)
+                ? mode
+                : WorkspaceGroupMode.Repo;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to read workspace group mode");
+            return WorkspaceGroupMode.Repo;
+        }
+    }
+
+    public void SetWorkspaceGroupMode(WorkspaceGroupMode mode)
+    {
+        try
+        {
+            var current = ReadDocument();
+            WriteDocument(current with { WorkspaceGroupMode = mode });
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to save workspace group mode");
         }
     }
 
@@ -118,7 +148,8 @@ public sealed class DesktopSettingsStore(ILogger<DesktopSettingsStore> logger)
 
     private sealed record SettingsDocument(
         string? BackendUrl,
-        WindowBounds? Window);
+        WindowBounds? Window,
+        WorkspaceGroupMode? WorkspaceGroupMode = null);
 
     public sealed record WindowBounds(
         double X,
