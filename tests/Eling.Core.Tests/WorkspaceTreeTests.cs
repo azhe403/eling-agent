@@ -68,28 +68,28 @@ public sealed class WorkspaceTreeTests
     [Fact]
     public void Build_FolderMode_NestsARepositoryInsideAnotherRepository()
     {
-        var inner = "/work/az/bbone-services";
+        var inner = "/work/az/beta";
         var main = new WorkspaceTreeRow(inner, false, inner);
-        var worktree = new WorkspaceTreeRow("/work/az/bbone-services/bb-one", false, inner);
-        var sibling = new WorkspaceTreeRow("/work/az/eling-agent", false, "/work/az/eling-agent");
+        var worktree = new WorkspaceTreeRow("/work/az/beta/beta-order", false, inner);
+        var sibling = new WorkspaceTreeRow("/work/az/alpha", false, "/work/az/alpha");
 
         var nodes = WorkspaceTree.Build([main, worktree, sibling], WorkspaceGroupMode.Folder);
 
-        Assert.Equal(["bbone-services", "eling-agent"], nodes.Select(n => n.Label));
-        Assert.Equal("bb-one", Assert.Single(nodes[0].Children).Label);
+        Assert.Equal(["alpha", "beta"], nodes.Select(n => n.Label));
+        Assert.Equal("beta-order", Assert.Single(nodes[1].Children).Label);
     }
 
     [Fact]
     public void Build_FolderMode_NestsAWorkspaceUnderTheWorkspaceThatContainsIt()
     {
         var outer = new WorkspaceTreeRow("/work/az", false, "/work/az");
-        var inner = new WorkspaceTreeRow("/work/az/bbone-services", false, "/work/az/bbone-services");
+        var inner = new WorkspaceTreeRow("/work/az/beta", false, "/work/az/beta");
 
         var nodes = WorkspaceTree.Build([outer, inner], WorkspaceGroupMode.Folder);
 
         var container = Assert.Single(nodes);
         Assert.Equal("az", container.Label);
-        Assert.Equal("bbone-services", Assert.Single(container.Children).Label);
+        Assert.Equal("beta", Assert.Single(container.Children).Label);
     }
 
     [Fact]
