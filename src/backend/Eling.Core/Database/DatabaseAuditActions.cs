@@ -18,4 +18,12 @@ public static class DatabaseAuditActions
     public const string Query = "db_query";
 
     public const string DetectConnections = "db_detect_connections";
+
+    public const string Keys = "db_keys";
+
+    public const string InspectKey = "db_inspect_key";
+
+    public const string RedisCommand = "redis_command";
+
+    public const string RedisDatabases = "redis_databases";
 }

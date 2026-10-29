@@ -11,18 +11,19 @@ namespace Eling.Core.Database;
 /// File-backed implementation of <see cref="IDatabaseReadCache"/>. Schema and
 /// query (data) entries are stored in two separate files so a data write never
 /// rewrites the (rarely changing) schema file and vice versa.
+///
+/// <para>
+/// Both files share one lock. Forgetting a connection is one operation over
+/// one logical cache: with two locks it could finish half-way and leave the
+/// query file still holding entries for a connection that no longer exists.
+/// The files are small and the lock is held for milliseconds, so one lock
+/// costs nothing and removes a whole class of interleavings.
+/// </para>
 /// </summary>
 public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
 {
-    private const string MutexName = @"Global\eling-db-read-cache";
-    private const string TempSuffix = ".tmp";
-
-    private static readonly TimeSpan GateTimeout = TimeSpan.FromSeconds(5);
-
-    private static readonly Mutex Gate = new(initiallyOwned: false, MutexName);
-
-    private readonly string _schemaFilePath;
-    private readonly string _queryFilePath;
+    private readonly CacheFileGate _schemaGate;
+    private readonly CacheFileGate _queryGate;
     private readonly ILogger<JsonDatabaseReadCache>? _logger;
 
     public JsonDatabaseReadCache(
@@ -31,9 +32,12 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
         var dir = Path.GetFullPath(dataDirectory);
-        _schemaFilePath = Path.Combine(dir, "database-schema-cache.json");
-        _queryFilePath = Path.Combine(dir, "database-query-cache.json");
         _logger = logger;
+        var lockName = CacheFileLock.NameFor(dir, "sql");
+        _schemaGate = new CacheFileGate(
+            Path.Combine(dir, "database-schema-cache.json"), lockName, logger);
+        _queryGate = new CacheFileGate(
+            Path.Combine(dir, "database-query-cache.json"), lockName, logger);
     }
 
     public bool TryGetSchema(
@@ -50,9 +54,9 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
             var found = false;
             DatabaseSchemaInfo? v = null;
             DateTimeOffset? ca = null;
-            WithGate(() =>
+            _schemaGate.WithGate(() =>
             {
-                var file = LoadSchemaCore();
+                var file = _schemaGate.Load(() => new DatabaseSchemaCacheFile([], []));
                 var entry = file.Schemas.FirstOrDefault(e =>
                     string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal) &&
                     string.Equals(e.Database, database, StringComparison.Ordinal));
@@ -78,7 +82,7 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Failed to read cached schema for {Id} from {Path}.", connectionId, _schemaFilePath);
+            _logger?.LogWarning(ex, "Failed to read cached schema for {Id} from {Path}.", connectionId, _schemaGate.Path);
             return false;
         }
     }
@@ -92,9 +96,9 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
 
         try
         {
-            WithGate(() =>
+            _schemaGate.WithGate(() =>
             {
-                var file = LoadSchemaCore();
+                var file = _schemaGate.Load(() => new DatabaseSchemaCacheFile([], []));
                 var cachedAt = DateTimeOffset.UtcNow;
                 var entry = new CachedSchemaEntry(connectionId, database, cachedAt, value);
 
@@ -113,12 +117,12 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
                 }
 
                 PruneSchema(file);
-                SaveSchemaCore(file);
+                _schemaGate.Save(file);
             });
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Failed to write cached schema for {Id} to {Path}.", connectionId, _schemaFilePath);
+            _logger?.LogWarning(ex, "Failed to write cached schema for {Id} to {Path}.", connectionId, _schemaGate.Path);
         }
     }
 
@@ -140,9 +144,9 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
             var found = false;
             QueryResult? v = null;
             DateTimeOffset? ca = null;
-            WithGate(() =>
+            _queryGate.WithGate(() =>
             {
-                var file = LoadQueryCore();
+                var file = _queryGate.Load(() => new DatabaseQueryCacheFile([]));
                 var hash = HashSql(sql);
                 var entry = file.Queries.FirstOrDefault(e =>
                     string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal) &&
@@ -175,7 +179,7 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Failed to read cached query for {Id} from {Path}.", connectionId, _queryFilePath);
+            _logger?.LogWarning(ex, "Failed to read cached query for {Id} from {Path}.", connectionId, _queryGate.Path);
             return false;
         }
     }
@@ -191,9 +195,9 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
 
         try
         {
-            WithGate(() =>
+            _queryGate.WithGate(() =>
             {
-                var file = LoadQueryCore();
+                var file = _queryGate.Load(() => new DatabaseQueryCacheFile([]));
                 var cachedAt = DateTimeOffset.UtcNow;
                 var rows = value.Rows
                     .Select(row => (IReadOnlyList<JsonElement>)row
@@ -228,12 +232,12 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
                 }
 
                 PruneQuery(file);
-                SaveQueryCore(file);
+                _queryGate.Save(file);
             });
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Failed to write cached query for {Id} to {Path}.", connectionId, _queryFilePath);
+            _logger?.LogWarning(ex, "Failed to write cached query for {Id} to {Path}.", connectionId, _queryGate.Path);
         }
     }
 
@@ -250,9 +254,9 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
             var found = false;
             IReadOnlyList<string>? v = null;
             DateTimeOffset? ca = null;
-            WithGate(() =>
+            _schemaGate.WithGate(() =>
             {
-                var file = LoadSchemaCore();
+                var file = _schemaGate.Load(() => new DatabaseSchemaCacheFile([], []));
                 var entry = file.DatabaseLists.FirstOrDefault(e =>
                     string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal));
 
@@ -273,7 +277,7 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Failed to read cached database list for {Id} from {Path}.", connectionId, _schemaFilePath);
+            _logger?.LogWarning(ex, "Failed to read cached database list for {Id} from {Path}.", connectionId, _schemaGate.Path);
             return false;
         }
     }
@@ -286,9 +290,9 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
 
         try
         {
-            WithGate(() =>
+            _schemaGate.WithGate(() =>
             {
-                var file = LoadSchemaCore();
+                var file = _schemaGate.Load(() => new DatabaseSchemaCacheFile([], []));
                 var cachedAt = DateTimeOffset.UtcNow;
                 var entry = new CachedDatabaseListEntry(connectionId, cachedAt, value);
 
@@ -306,12 +310,12 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
                 }
 
                 PruneSchema(file);
-                SaveSchemaCore(file);
+                _schemaGate.Save(file);
             });
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Failed to write cached database list for {Id} to {Path}.", connectionId, _schemaFilePath);
+            _logger?.LogWarning(ex, "Failed to write cached database list for {Id} to {Path}.", connectionId, _schemaGate.Path);
         }
     }
 
@@ -321,23 +325,24 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
 
         try
         {
-            WithGate(() =>
+            // One lock, both files: forgetting a connection must either forget
+            // it everywhere or fail loudly, never leave the query file still
+            // holding entries for a connection that no longer exists.
+            _schemaGate.Lock.Run(() =>
             {
-                // Schema file
-                var schemaFile = LoadSchemaCore();
-                var sChanged = false;
+                var schemaFile = _schemaGate.Load(() => new DatabaseSchemaCacheFile([], []));
+                var changed = false;
                 if (schemaFile.Schemas.RemoveAll(e =>
-                    string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal)) > 0) sChanged = true;
+                    string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal)) > 0) changed = true;
                 if (schemaFile.DatabaseLists.RemoveAll(e =>
-                    string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal)) > 0) sChanged = true;
-                if (sChanged) SaveSchemaCore(schemaFile);
+                    string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal)) > 0) changed = true;
+                if (changed) _schemaGate.Save(schemaFile);
 
-                // Query file
-                var queryFile = LoadQueryCore();
+                var queryFile = _queryGate.Load(() => new DatabaseQueryCacheFile([]));
                 if (queryFile.Queries.RemoveAll(e =>
                     string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal)) > 0)
                 {
-                    SaveQueryCore(queryFile);
+                    _queryGate.Save(queryFile);
                 }
             });
         }
@@ -394,113 +399,6 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
     private static void PruneQuery(DatabaseQueryCacheFile file)
     {
         file.Queries.RemoveAll(e => IsExpired(e.CachedAt));
-    }
-
-    private DatabaseSchemaCacheFile LoadSchemaCore()
-    {
-        if (!File.Exists(_schemaFilePath)) return new DatabaseSchemaCacheFile([], []);
-
-        try
-        {
-            var json = File.ReadAllText(_schemaFilePath);
-            if (string.IsNullOrWhiteSpace(json)) return new DatabaseSchemaCacheFile([], []);
-
-            return JsonSerializer.Deserialize<DatabaseSchemaCacheFile>(json, JsonDefaults.Shared)
-                ?? new DatabaseSchemaCacheFile([], []);
-        }
-        catch (JsonException ex)
-        {
-            _logger?.LogWarning(ex, "Ignoring unreadable database schema cache at {Path}.", _schemaFilePath);
-            return new DatabaseSchemaCacheFile([], []);
-        }
-    }
-
-    private void SaveSchemaCore(DatabaseSchemaCacheFile file)
-    {
-        var dir = Path.GetDirectoryName(_schemaFilePath);
-        if (!string.IsNullOrEmpty(dir))
-        {
-            Directory.CreateDirectory(dir);
-        }
-
-        var tempPath = _schemaFilePath + TempSuffix;
-        var json = JsonSerializer.Serialize(file, JsonDefaults.Shared);
-        File.WriteAllText(tempPath, json);
-        File.Move(tempPath, _schemaFilePath, overwrite: true);
-    }
-
-    private DatabaseQueryCacheFile LoadQueryCore()
-    {
-        if (!File.Exists(_queryFilePath)) return new DatabaseQueryCacheFile([]);
-
-        try
-        {
-            var json = File.ReadAllText(_queryFilePath);
-            if (string.IsNullOrWhiteSpace(json)) return new DatabaseQueryCacheFile([]);
-
-            return JsonSerializer.Deserialize<DatabaseQueryCacheFile>(json, JsonDefaults.Shared)
-                ?? new DatabaseQueryCacheFile([]);
-        }
-        catch (JsonException ex)
-        {
-            _logger?.LogWarning(ex, "Ignoring unreadable database query cache at {Path}.", _queryFilePath);
-            return new DatabaseQueryCacheFile([]);
-        }
-    }
-
-    private void SaveQueryCore(DatabaseQueryCacheFile file)
-    {
-        var dir = Path.GetDirectoryName(_queryFilePath);
-        if (!string.IsNullOrEmpty(dir))
-        {
-            Directory.CreateDirectory(dir);
-        }
-
-        var tempPath = _queryFilePath + TempSuffix;
-        var json = JsonSerializer.Serialize(file, JsonDefaults.Shared);
-        File.WriteAllText(tempPath, json);
-        File.Move(tempPath, _queryFilePath, overwrite: true);
-    }
-
-    private T WithGate<T>(Func<T> action)
-    {
-        EnterGate();
-        try
-        {
-            return action();
-        }
-        finally
-        {
-            Gate.ReleaseMutex();
-        }
-    }
-
-    private void WithGate(Action action)
-    {
-        EnterGate();
-        try
-        {
-            action();
-        }
-        finally
-        {
-            Gate.ReleaseMutex();
-        }
-    }
-
-    private static void EnterGate()
-    {
-        try
-        {
-            if (!Gate.WaitOne(GateTimeout))
-            {
-                throw new TimeoutException(
-                    $"Timed out after {GateTimeout} waiting for the database read cache gate.");
-            }
-        }
-        catch (AbandonedMutexException)
-        {
-        }
     }
 
     private static bool EntriesEqual(CachedSchemaEntry a, CachedSchemaEntry b)

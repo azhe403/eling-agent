@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using MySqlConnector;
+using StackExchange.Redis;
 
 namespace Eling.Core.Database;
 
@@ -17,6 +18,9 @@ public static class DatabaseConnectionStringFactory
     /// <summary>The port MySQL listens on unless the connection says otherwise.</summary>
     public const int DefaultMySqlPort = 3306;
 
+    /// <summary>The port Redis listens on unless the connection says otherwise.</summary>
+    public const int DefaultRedisPort = 6379;
+
     /// <summary>
     /// Reads a stored connection string back into its fields, or returns
     /// <c>null</c> when the string cannot be read as this provider - the
@@ -33,6 +37,7 @@ public static class DatabaseConnectionStringFactory
         {
             DatabaseProvider.MySql => ParseMySql(connectionString),
             DatabaseProvider.Sqlite => ParseSqlite(connectionString),
+            DatabaseProvider.Redis => ParseRedis(connectionString),
             _ => null,
         };
     }
@@ -49,6 +54,7 @@ public static class DatabaseConnectionStringFactory
     {
         DatabaseProvider.MySql => BuildMySql(fields),
         DatabaseProvider.Sqlite => BuildSqlite(fields),
+        DatabaseProvider.Redis => BuildRedis(fields),
         _ => throw new ArgumentException($"provider '{provider}' is not supported.", nameof(provider)),
     };
 
@@ -72,6 +78,7 @@ public static class DatabaseConnectionStringFactory
     {
         DatabaseProvider.MySql => UpdateMySql(storedConnectionString, entered),
         DatabaseProvider.Sqlite => UpdateSqlite(storedConnectionString, entered),
+        DatabaseProvider.Redis => UpdateRedis(storedConnectionString, entered),
         _ => throw new ArgumentException($"provider '{provider}' is not supported.", nameof(provider)),
     };
 
@@ -91,6 +98,9 @@ public static class DatabaseConnectionStringFactory
             DatabaseProvider.MySql => WithMySqlDatabase(connectionString, database),
             // A SQLite file is its own database; there is nothing to point at.
             DatabaseProvider.Sqlite => connectionString,
+            // Redis database index is passed per-request via the keys route; the
+            // stored connection keeps its default database unless explicitly set.
+            DatabaseProvider.Redis => WithRedisDatabase(connectionString, database),
             _ => throw new ArgumentException($"provider '{provider}' is not supported.", nameof(provider)),
         };
 
@@ -322,6 +332,199 @@ public static class DatabaseConnectionStringFactory
             ?? throw new ArgumentException("filePath must not be blank.", nameof(entered));
         builder.DataSource = filePath;
         return builder.ToString();
+    }
+
+    private static ManualConnectionFields? ParseRedis(string connectionString)
+    {
+        ConfigurationOptions options;
+        try
+        {
+            options = ConfigurationOptions.Parse(connectionString);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        var host = GetRedisHost(options);
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return null;
+        }
+
+        return new ManualConnectionFields(
+            host,
+            GetRedisPort(options) ?? DefaultRedisPort,
+            options.DefaultDatabase >= 0 ? options.DefaultDatabase.ToString() : null,
+            NullIfBlank(options.User),
+            NullIfBlank(options.Password),
+            null);
+    }
+
+    private static string BuildRedis(ManualConnectionFields fields)
+    {
+        var host = NullIfBlank(fields.Host)
+            ?? throw new ArgumentException("host must not be blank.", nameof(fields));
+
+        var port = fields.Port ?? DefaultRedisPort;
+        if (port < 1 || port > 65535)
+        {
+            throw new ArgumentException("port must be between 1 and 65535.", nameof(fields));
+        }
+
+        var options = new ConfigurationOptions();
+        options.EndPoints.Add(host, port);
+
+        var username = NullIfBlank(fields.Username);
+        if (username is not null)
+        {
+            options.User = username;
+        }
+
+        var password = NullIfBlank(fields.Password);
+        if (password is not null)
+        {
+            options.Password = RequireRedisPasswordRoundTrip(password);
+        }
+
+        var database = NullIfBlank(fields.Database);
+        if (database is not null)
+        {
+            if (!RedisDatabaseIndex.TryParse(database, out var db))
+            {
+                throw new ArgumentException(RedisDatabaseIndex.Refusal, nameof(fields));
+            }
+            options.DefaultDatabase = db.Value;
+        }
+
+        options.AbortOnConnectFail = false;
+        options.ConnectTimeout = 5000;
+        options.SyncTimeout = 5000;
+        options.ClientName = "eling-dashboard";
+        options.AllowAdmin = false;
+
+        return options.ToString();
+    }
+
+    /// <summary>
+    /// StackExchange.Redis writes the password unquoted and reads it back up to
+    /// the next comma, so a comma would be silently cut off on the next open.
+    /// Refuse it at save time instead of storing a password that does not work.
+    /// </summary>
+    private static string RequireRedisPasswordRoundTrip(string password)
+    {
+        if (password.Contains(','))
+        {
+            throw new ArgumentException(
+                "Redis password must not contain a comma: the connection string format cannot keep it.", nameof(password));
+        }
+        return password;
+    }
+
+    private static string UpdateRedis(string storedConnectionString, ManualConnectionFields entered)
+    {
+        ConfigurationOptions options;
+        try
+        {
+            options = ConfigurationOptions.Parse(storedConnectionString);
+        }
+        catch (Exception)
+        {
+            return BuildRedis(entered);
+        }
+
+        var host = NullIfBlank(entered.Host) ?? GetRedisHost(options);
+        if (host is null)
+        {
+            throw new ArgumentException("host must not be blank.", nameof(entered));
+        }
+
+        var port = entered.Port ?? GetRedisPort(options) ?? DefaultRedisPort;
+        if (port < 1 || port > 65535)
+        {
+            throw new ArgumentException("port must be between 1 and 65535.", nameof(entered));
+        }
+
+        options.EndPoints.Clear();
+        options.EndPoints.Add(host, port);
+
+        var username = NullIfBlank(entered.Username);
+        if (username is not null)
+        {
+            options.User = username;
+        }
+
+        var password = NullIfBlank(entered.Password);
+        if (password is not null)
+        {
+            options.Password = RequireRedisPasswordRoundTrip(password);
+        }
+
+        var database = NullIfBlank(entered.Database);
+        if (database is null)
+        {
+            // An empty database box means "server-level default (0)".
+            options.DefaultDatabase = 0;
+        }
+        else
+        {
+            if (!RedisDatabaseIndex.TryParse(database, out var db))
+            {
+                throw new ArgumentException(RedisDatabaseIndex.Refusal, nameof(entered));
+            }
+            options.DefaultDatabase = db.Value;
+        }
+
+        return options.ToString();
+    }
+
+    private static string WithRedisDatabase(string connectionString, string database)
+    {
+        if (!RedisDatabaseIndex.TryParse(database, out var db))
+        {
+            throw new ArgumentException(RedisDatabaseIndex.Refusal, nameof(database));
+        }
+
+        ConfigurationOptions options;
+        try
+        {
+            options = ConfigurationOptions.Parse(connectionString);
+        }
+        catch (Exception)
+        {
+            throw new ArgumentException("the stored connection string is not readable as Redis.", nameof(connectionString));
+        }
+
+        options.DefaultDatabase = db.Value;
+        return options.ToString();
+    }
+
+    /// <summary>
+    /// The host of a parsed Redis connection string, or null when it names no
+    /// endpoint. The one place this is read: the dashboard form, the appsettings
+    /// scanner and the connection-string round trip all ask here.
+    /// </summary>
+    public static string? GetRedisHost(ConfigurationOptions options)
+    {
+        var endpoint = options.EndPoints.FirstOrDefault();
+        if (endpoint is System.Net.IPEndPoint ip) return ip.Address.ToString();
+        if (endpoint is System.Net.DnsEndPoint dns) return dns.Host;
+        return endpoint?.ToString()?.Split(':')[0];
+    }
+
+    /// <summary>
+    /// The port of a parsed Redis connection string, or null when it names no
+    /// endpoint or no port.
+    /// </summary>
+    public static int? GetRedisPort(ConfigurationOptions options)
+    {
+        var endpoint = options.EndPoints.FirstOrDefault();
+        if (endpoint is System.Net.IPEndPoint ip) return ip.Port;
+        if (endpoint is System.Net.DnsEndPoint dns) return dns.Port;
+        var s = endpoint?.ToString();
+        if (s is null) return null;
+        var parts = s.Split(':', 2);
+        return parts.Length == 2 && int.TryParse(parts[1], out var p) ? p : null;
     }
 
     private static string? NullIfBlank(string? value) =>

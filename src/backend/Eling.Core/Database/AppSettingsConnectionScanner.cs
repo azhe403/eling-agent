@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using MySqlConnector;
+using StackExchange.Redis;
 
 namespace Eling.Core.Database;
 
@@ -182,10 +183,17 @@ public sealed class AppSettingsConnectionScanner
             csProp.ValueKind == JsonValueKind.String)
         {
             var key = string.IsNullOrWhiteSpace(path) ? "ConnectionString" : path;
+            var connectionString = csProp.GetString() ?? string.Empty;
+            if (TryGetCaseInsensitive(element, "Password", out var passwordProp) &&
+                passwordProp.ValueKind == JsonValueKind.String)
+            {
+                connectionString = WithRedisPassword(connectionString, passwordProp.GetString() ?? string.Empty);
+            }
+
             // Avoid duplicates already added by the standard ConnectionStrings section.
             if (!results.Any(r => string.Equals(r.SettingsKey, key, StringComparison.Ordinal)))
             {
-                results.Add(Classify(key, csProp.GetString() ?? string.Empty));
+                results.Add(Classify(key, connectionString));
             }
         }
 
@@ -294,6 +302,32 @@ public sealed class AppSettingsConnectionScanner
 
         if (!classified)
         {
+            try
+            {
+                var options = ConfigurationOptions.Parse(value);
+                if (options.EndPoints.Count > 0)
+                {
+                    provider = DatabaseProvider.Redis;
+                    // The host is read through the connection-string factory, so
+                    // the scanner and the dashboard form cannot disagree about
+                    // what a stored endpoint means.
+                    var host = DatabaseConnectionStringFactory.GetRedisHost(options) ?? key;
+                    name = host.Contains("redis", StringComparison.OrdinalIgnoreCase)
+                        ? host
+                        : $"redis-{host}";
+                    var maskedOptions = ConfigurationOptions.Parse(value);
+                    maskedOptions.Password = "*****";
+                    masked = maskedOptions.ToString();
+                    classified = true;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        if (!classified)
+        {
             provider = null;
             rejection = "unrecognized connection string";
             name = key;
@@ -301,6 +335,47 @@ public sealed class AppSettingsConnectionScanner
         }
 
         return new DetectedConnection(key, name, value, masked, provider, rejection);
+    }
+
+    /// <summary>
+    /// Appends a sibling "Password" property to a Redis connection string when
+    /// the string itself does not already carry credentials. A bare endpoint
+    /// such as "host:6371" plus a neighboring "Password" property becomes
+    /// "host:6371,password=..."; a string that already has a password is
+    /// returned unchanged so the stored credential wins over the sibling.
+    /// </summary>
+    private static string WithRedisPassword(string connectionString, string password)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString) || string.IsNullOrWhiteSpace(password))
+        {
+            return connectionString;
+        }
+
+        ConfigurationOptions options;
+        try
+        {
+            options = ConfigurationOptions.Parse(connectionString);
+        }
+        catch
+        {
+            // Not parseable as Redis options; nothing safe to merge into.
+            return connectionString;
+        }
+
+        if (options.EndPoints.Count == 0)
+        {
+            // Not a Redis endpoint string; do not rewrite a non-Redis connection.
+            return connectionString;
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Password))
+        {
+            // The connection string already names a password: keep it.
+            return connectionString;
+        }
+
+        options.Password = password;
+        return options.ToString();
     }
 
     private static bool TryGetCaseInsensitive(JsonElement obj, string name, out JsonElement value)
