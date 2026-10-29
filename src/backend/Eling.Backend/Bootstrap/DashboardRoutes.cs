@@ -70,6 +70,7 @@ public static class DashboardRoutes
         app.MapAgentChatEndpoints();
         app.MapCodebaseRoutes();
         app.MapDatabaseEndpoints();
+        app.MapDatabaseKeyEndpoints();
         app.MapAuditRoutes();
         app.MapControllers();
         app.MapFallbackToFile("index.html");

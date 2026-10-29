@@ -40,6 +40,10 @@ public sealed class DatabaseGetSchemaTool
         {
             throw new KeyNotFoundException("connection not found");
         }
+        if (row.Provider == DatabaseProvider.Redis)
+        {
+            throw new InvalidOperationException(RedisRequirement.NotSql(row, "use redis_scan"));
+        }
 
         var sw = Stopwatch.StartNew();
         try

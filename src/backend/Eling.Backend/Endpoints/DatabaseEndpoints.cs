@@ -3,6 +3,7 @@ using Eling.Backend.Dtos;
 using Eling.Core.Audit;
 using Eling.Core.Database;
 using Eling.Core.Database.Adapters;
+using StackExchange.Redis;
 using Microsoft.AspNetCore.Http;
 
 namespace Eling.Backend.Endpoints;
@@ -84,6 +85,8 @@ public static class DatabaseEndpoints
             UpdateDatabaseConnectionRequest req,
             IDatabaseConnectionStore store,
             IDatabaseReadCache readCache,
+            IRedisReadCache redisReadCache,
+            IRedisConnectionPool redisPool,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
@@ -109,6 +112,11 @@ public static class DatabaseEndpoints
                 };
                 await store.UpsertAsync(updated, ct);
                 readCache.InvalidateConnection(id);
+                redisReadCache.InvalidateConnection(id);
+                // A changed connection string means a different server, or a
+                // new password: the pooled multiplexer still points at the
+                // old credentials, so it has to go with the old row.
+                redisPool.Invalidate(id);
                 return Results.Ok(ToView(updated));
             }
             catch (ArgumentException ex)
@@ -118,11 +126,15 @@ public static class DatabaseEndpoints
             }
         });
 
-        group.MapDelete("/{id}", async (string id, IDatabaseConnectionStore store, IDatabaseReadCache readCache, CancellationToken ct) =>
+        group.MapDelete("/{id}", async (string id, IDatabaseConnectionStore store, IDatabaseReadCache readCache, IRedisReadCache redisReadCache, IRedisConnectionPool redisPool, CancellationToken ct) =>
         {
             var ok = await store.RemoveAsync(id, ct);
             if (!ok) return Results.NotFound();
             readCache.InvalidateConnection(id);
+            redisReadCache.InvalidateConnection(id);
+            // The row is gone; any pooled multiplexer it left behind would
+            // otherwise sit in memory until the idle evictor gets it.
+            redisPool.Invalidate(id);
             return Results.NoContent();
         });
 
@@ -176,7 +188,8 @@ public static class DatabaseEndpoints
         group.MapPost("/test-connection", async (
             CreateDatabaseConnectionRequest req,
             ILoggerFactory loggerFactory,
-            CancellationToken ct) =>
+            IRedisConnectionPool redisPool,
+            CancellationToken ct = default) =>
         {
             var logger = loggerFactory.CreateLogger("Database");
             DatabaseConnection conn;
@@ -199,6 +212,11 @@ public static class DatabaseEndpoints
 
             try
             {
+                if (conn.Provider == DatabaseProvider.Redis)
+                {
+                    return Results.Ok(await TestRedisAsync(redisPool, conn, logger, ct));
+                }
+
                 var adapter = DatabaseAdapterFactory.CreateAdapter(conn);
                 var result = await adapter.TestAsync(ct);
                 return Results.Ok(new DatabaseTestResponse(result.Ok, result.Message, result.LatencyMs));
@@ -220,7 +238,8 @@ public static class DatabaseEndpoints
             TestDatabaseConnectionRequest? req,
             IDatabaseConnectionStore store,
             ILoggerFactory loggerFactory,
-            CancellationToken ct) =>
+            IRedisConnectionPool redisPool,
+            CancellationToken ct = default) =>
         {
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
@@ -246,6 +265,17 @@ public static class DatabaseEndpoints
 
             try
             {
+                if (row.Provider == DatabaseProvider.Redis)
+                {
+                    var conn2 = row with { ConnectionString = connectionString };
+                    var tested = await TestRedisAsync(redisPool, conn2, logger, ct);
+                    if (tested.Ok)
+                    {
+                        await store.MarkConnectedAsync(id, DateTimeOffset.UtcNow, ct);
+                    }
+                    return Results.Ok(tested);
+                }
+
                 var adapter = DatabaseAdapterFactory.CreateAdapter(row with { ConnectionString = connectionString });
                 var result = await adapter.TestAsync(ct);
                 if (result.Ok)
@@ -279,6 +309,10 @@ public static class DatabaseEndpoints
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
             if (row is null) return Results.NotFound();
+            if (row.Provider == DatabaseProvider.Redis)
+            {
+                return Results.BadRequest(RedisRequirement.NotSql(row, "use /keys"));
+            }
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
@@ -383,6 +417,10 @@ public static class DatabaseEndpoints
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
             if (row is null) return Results.NotFound();
+            if (row.Provider == DatabaseProvider.Redis)
+            {
+                return Results.BadRequest(RedisRequirement.NotSql(row, "use /keys"));
+            }
 
             var classification = SqlSafety.Classify(req.Sql);
             if (classification.Verdict != SqlVerdict.ReadOnly)
@@ -456,6 +494,10 @@ public static class DatabaseEndpoints
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
             if (row is null) return Results.NotFound();
+            if (row.Provider == DatabaseProvider.Redis)
+            {
+                return Results.BadRequest(RedisRequirement.NotSql(row, "mutations are not supported"));
+            }
 
             if (row.Environment == DatabaseEnvironment.ReadOnly)
             {
@@ -660,5 +702,47 @@ public static class DatabaseEndpoints
         }
 
         return DatabaseConnectionStringFactory.Build(provider, manual);
+    }
+
+    /// <summary>
+    /// Tests a Redis connection: reach the server, refuse a topology this phase
+    /// does not support, then ping one logical database.
+    ///
+    /// <para>
+    /// Both test routes - the one that takes a form and the one that takes a
+    /// stored id - asked the same questions in their own copy, so the two could
+    /// answer differently after a change to either. They ask here now.
+    /// </para>
+    /// </summary>
+    private static async Task<DatabaseTestResponse> TestRedisAsync(
+        IRedisConnectionPool pool,
+        DatabaseConnection connection,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var mux = await pool.GetAsync(connection, ct);
+            var server = mux.GetEndPoints().Length > 0 ? mux.GetServer(mux.GetEndPoints()[0]) : null;
+            if (server is not null)
+            {
+                var topology = server.ServerType;
+                if (topology == ServerType.Cluster || topology == ServerType.Sentinel)
+                {
+                    return new DatabaseTestResponse(false, RedisRequirement.StandaloneOnly, 0);
+                }
+            }
+
+            await mux.GetDatabase(0).PingAsync();
+            sw.Stop();
+            return new DatabaseTestResponse(true, "connected", sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            logger.LogWarning(ex, "Redis test failed");
+            return new DatabaseTestResponse(false, "connection failed", 0);
+        }
     }
 }

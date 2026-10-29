@@ -57,6 +57,12 @@ public sealed class DatabaseConnectionErrorTests : IAsyncLifetime
         builder.Services.AddSingleton<IDatabaseReadService>(sp => new DatabaseReadService(
             sp.GetRequiredService<IDatabaseReadCache>(),
             sp.GetRequiredService<ILogger<DatabaseReadService>>()));
+        // Mapping the database routes binds the Redis pool as a handler
+        // parameter, so a host without it cannot build the route table at all.
+        builder.Services.AddSingleton<IRedisConnectionPool>(new RedisConnectionPool());
+        builder.Services.AddSingleton<IRedisReadCache>(sp => new JsonRedisReadCache(
+            _root,
+            sp.GetRequiredService<ILogger<JsonRedisReadCache>>()));
         var scanner = new AppSettingsConnectionScanner(_root);
         builder.Services.AddSingleton(scanner);
         builder.Services.AddSingleton(new Eling.Backend.Database.DatabaseConnectionImporter(scanner, _store));

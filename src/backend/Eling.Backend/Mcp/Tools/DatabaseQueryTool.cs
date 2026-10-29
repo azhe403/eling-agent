@@ -49,6 +49,11 @@ public sealed class DatabaseQueryTool
                 : $"connection not found. {hint}");
         }
 
+        if (row.Provider == DatabaseProvider.Redis)
+        {
+            throw new InvalidOperationException(RedisRequirement.NotSql(row, "use redis_scan"));
+        }
+
         var classification = SqlSafety.Classify(sql);
         if (classification.Verdict != SqlVerdict.ReadOnly)
         {

@@ -52,6 +52,14 @@ public static class McpHostBuilder
             services.AddSingleton<IDatabaseReadService>(sp => new DatabaseReadService(
                 sp.GetRequiredService<IDatabaseReadCache>(),
                 sp.GetRequiredService<ILogger<DatabaseReadService>>()));
+            services.AddSingleton<IRedisConnectionPool>(sp => new RedisConnectionPool());
+            services.AddSingleton<IRedisReadCache>(sp => new JsonRedisReadCache(
+                globalAgentDir,
+                sp.GetRequiredService<ILogger<JsonRedisReadCache>>()));
+            services.AddSingleton<IRedisKeyReadService>(sp => new RedisKeyReadService(
+                sp.GetRequiredService<IRedisConnectionPool>(),
+                sp.GetRequiredService<IRedisReadCache>(),
+                sp.GetRequiredService<ILogger<RedisKeyReadService>>()));
             // The resolver hands back the workspace directory when it holds any
             // appsettings file, so the scanner sees appsettings.json AND the
             // environment files next to it. It used to point at appsettings.json

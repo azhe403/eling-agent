@@ -47,7 +47,9 @@ public sealed class DatabaseConnectionImporter
                 continue;
             }
 
-            var name = candidate.Name;
+            var name = candidate.Provider == DatabaseProvider.Redis
+                ? candidate.SettingsKey
+                : candidate.Name;
             try
             {
                 if (existingNames.Contains(name))
