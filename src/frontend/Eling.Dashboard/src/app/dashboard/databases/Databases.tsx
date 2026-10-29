@@ -6,6 +6,9 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Play, RefreshCw, Plus, AlertCircle, X, CheckCircle2 } from "lucide-react"
 
 import { DashboardHeader } from "@/components/dashboard-header"
+import { DbTab, REDIS_TAB_TABLE, isRedisTab, tabKey } from "./db-tabs"
+import { RedisDbInfo, RedisPage, fetchRedisDatabases, visibleRedisDbs, pickRedisDb, parseRedisDb, dbRowLabel, dbRowCount, dbRowAsOf, redisPageKey, redisPageScope } from "./redis-browser"
+import { RedisPrefixTree, formatTtl } from "./redis-tree"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -20,6 +23,14 @@ import { copyText } from "@/lib/clipboard"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table"
 import { DatePicker } from "@/components/ui/date-picker"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { useMediaQuery } from "@/hooks/use-media-query"
+import { XL_BREAKPOINT } from "@/lib/constants"
 import { DatabaseCombobox } from "./DatabaseCombobox"
 import {
   AlertDialog,
@@ -291,10 +302,10 @@ export function Databases() {
   const [schemaInfo, setSchemaInfo] = useState<SchemaInfo | null>(null)
   const [expandedConns, setExpandedConns] = useState<Set<string>>(new Set())
   const [connSchemas, setConnSchemas] = useState<Record<string, SchemaInfo>>({})
-  const [activeTable, setActiveTable] = useState<{ connId: string; table: string; database?: string | null } | null>(null)
+  const [activeTable, setActiveTable] = useState<DbTab | null>(null)
   // Open table tabs: clicking a table in the tree opens (or activates) a tab
   // here instead of replacing the single active table view.
-  const [openTabs, setOpenTabs] = useState<Array<{ connId: string; table: string; database?: string | null }>>([])
+  const [openTabs, setOpenTabs] = useState<DbTab[]>([])
   const [expandedDbs, setExpandedDbs] = useState<Set<string>>(new Set())
   const [dbSchemas, setDbSchemas] = useState<Record<string, SchemaInfo>>({})
   const treeItemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
@@ -305,9 +316,22 @@ export function Databases() {
   const schemaConnIdRef = useRef<string | null>(null)
   const schemaRetryRef = useRef<Record<string, number>>({})
   const autoScrollPendingRef = useRef(false)
+  /** Guards the inspector against an answer for a key that is no longer shown. */
+  const redisInspectRequestRef = useRef(0)
   const browsePollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /**
+   * Every retry timer the schema refetchers start, so unmounting can clear
+   * them: otherwise a 5-second poll started just before the panel closed
+   * would still fire and write into state of a gone component.
+   */
+  const pendingSchemaTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+  useEffect(() => () => {
+    for (const t of pendingSchemaTimers.current) clearTimeout(t)
+    pendingSchemaTimers.current.clear()
+  }, [])
   const dataScrollRef = useRef<HTMLDivElement | null>(null)
-  const activeTableRef = useRef<{ connId: string; table: string; database?: string | null } | null>(null)
+  const activeTableRef = useRef<DbTab | null>(null)
+  const browseInFlightRef = useRef(0)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; connId: string; table?: string; database?: string } | null>(null)
   const [cellCtxMenu, setCellCtxMenu] = useState<{ x: number; y: number; row: number; col: number } | null>(null)
   const [tabCtxMenu, setTabCtxMenu] = useState<{ x: number; y: number; idx: number } | null>(null)
@@ -353,6 +377,47 @@ export function Databases() {
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string; latencyMs: number } | undefined>>({})
   const [sql, setSql] = useState("SELECT 1")
   const [qResult, setQResult] = useState<QueryResult | null>(null)
+
+  const [redisPrefix, setRedisPrefix] = useState("")
+  /**
+   * The prefix the tree is rooted at. Empty means the whole database; anything
+   * else means "show only the keys under this prefix". Kept apart from
+   * `redisPrefix` (what the box currently says) so typing does not re-root the
+   * tree until the person asks for it.
+   */
+  const [redisRootPrefix, setRedisRootPrefix] = useState("")
+  const [redisDbs, setRedisDbs] = useState<Record<string, RedisDbInfo[]>>({})
+  const activeRedisDb = isRedisTab(activeTable ?? null) ? (activeTable?.redisDb ?? 0) : 0
+  const activeIsRedis = isRedisTab(activeTable)
+  const [redisPages, setRedisPages] = useState<Record<string, RedisPage>>({})
+  const [redisExpanded, setRedisExpanded] = useState<Set<string>>(new Set())
+  const [redisInspectKey, setRedisInspectKey] = useState("")
+  const [redisLoading, setRedisLoading] = useState(false)
+  const redisInFlightRef = useRef(0)
+  /**
+   * A counter, not a flag: two levels opened at once keep the spinner alive
+   * until both land, and a late answer for a level that is no longer shown
+   * cannot lift a flag the other one is still holding.
+   */
+  const redisSetLoading = (delta: number) => {
+    redisInFlightRef.current = Math.max(0, redisInFlightRef.current + delta)
+    setRedisLoading(redisInFlightRef.current > 0)
+  }
+  const [redisInspect, setRedisInspect] = useState<{
+    key: string
+    type: string
+    ttlSeconds: number
+    expiresAt: string | null
+    length: number
+    encoding: string | null
+    preview: {
+      kind: string
+      entries: Array<{ field: string | null; value: string | null }>
+      truncated: boolean
+    }
+  } | null>(null)
+  const [redisInspectOpen, setRedisInspectOpen] = useState(false)
+  const isWide = useMediaQuery(`(min-width: ${XL_BREAKPOINT}px)`)
   // qError removed - errors now shown via toast (notifyDb)
   const [qLoading, setQLoading] = useState(false)
 
@@ -361,6 +426,158 @@ export function Databases() {
   // 403 round-trips) — surface the restriction locally instead.
   const selectedConn = conns.find((c) => c.id === selectedId)
   const selectedIsReadOnly = selectedConn?.environment === "ReadOnly"
+  const selectedIsRedis = selectedConn?.provider === "Redis"
+
+  const loadRedisDatabases = async (connId: string) => {
+    try {
+      const list = await fetchRedisDatabases(connId)
+      setRedisDbs(prev => ({ ...prev, [connId]: list }))
+    } catch (e: unknown) {
+      notifyDb("error", "Redis databases failed", e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const fetchRedisPrefix = async (id: string, database: number, prefix: string) => {
+    redisSetLoading(1)
+    try {
+      const qs = new URLSearchParams()
+      qs.set("database", String(database))
+      if (prefix) qs.set("prefix", prefix)
+      qs.set("cursor", "0")
+      qs.set("pageOffset", "0")
+      qs.set("pageSize", "200")
+      const res = await fetch(`${API}/${id}/keys?${qs.toString()}`)
+      if (!res.ok) throw new Error(parseApiError(await res.text()))
+      const page: RedisPage = await res.json()
+      const key = redisPageKey(id, database, prefix)
+      setRedisPages((prev) => ({ ...prev, [key]: page }))
+    } catch (e: unknown) {
+      notifyDb("error", "Redis key browse failed", e instanceof Error ? e.message : String(e))
+    } finally {
+      redisSetLoading(-1)
+    }
+  }
+
+  /**
+   * Continue a page that stopped before the server's scan did: the cursor and
+   * page offset the previous page left behind are sent back, so the next
+   * answer resumes where the last one stopped instead of restarting it.
+   */
+  const loadMoreRedis = async (id: string, database: number, prefix: string) => {
+    const key = redisPageKey(id, database, prefix)
+    const page = redisPages[key]
+    if (!page || page.complete) return
+    redisSetLoading(1)
+    try {
+      const qs = new URLSearchParams()
+      qs.set("database", String(database))
+      if (prefix) qs.set("prefix", prefix)
+      qs.set("cursor", String(page.cursor))
+      qs.set("pageOffset", String(page.pageOffset))
+      qs.set("pageSize", "200")
+      const res = await fetch(`${API}/${id}/keys?${qs.toString()}`)
+      if (!res.ok) throw new Error(parseApiError(await res.text()))
+      const next: RedisPage = await res.json()
+      // The continuation appends to what the page already has: a node or key
+      // the two answers both carry is one thing, not two.
+      setRedisPages((prev) => {
+        const base = prev[key]
+        if (!base) return { ...prev, [key]: next }
+        const seenNodes = new Set(base.nodes.map((n) => n.prefix))
+        const seenKeys = new Set(base.keys.map((k) => k.key))
+        const nodes = [...base.nodes, ...next.nodes.filter((n) => !seenNodes.has(n.prefix))]
+        const keys = [...base.keys, ...next.keys.filter((k) => !seenKeys.has(k.key))]
+        const cursor = next.complete ? 0 : next.cursor
+        const pageOffset = next.complete ? 0 : next.pageOffset
+        // `scanned` counts what one answer scanned, so the running total is the sum.
+        const scanned = base.scanned + next.scanned
+        return { ...prev, [key]: { ...next, nodes, keys, cursor, pageOffset, scanned } }
+      })
+    } catch (e: unknown) {
+      notifyDb("error", "Redis key browse failed", e instanceof Error ? e.message : String(e))
+    } finally {
+      redisSetLoading(-1)
+    }
+  }
+
+  /**
+   * Roots the tree at the prefix in the box. The scan is prefix-filtered on the
+   * server, so a narrow prefix is also the cheap way to read a busy database.
+   */
+  const browseRedisPrefix = (id: string, database: number, prefix: string) => {
+    const target = prefix.trim()
+    setRedisPrefix(target)
+    setRedisRootPrefix(target)
+    setRedisExpanded(new Set())
+    void fetchRedisPrefix(id, database, target)
+  }
+
+  const toggleRedisPrefix = async (id: string, prefix: string) => {
+    const db = activeRedisDb
+    const key = redisPageKey(id, db, prefix)
+    const isExpanded = redisExpanded.has(key)
+    setRedisExpanded((prev) => {
+      const next = new Set(prev)
+      if (isExpanded) next.delete(key)
+      else next.add(key)
+      return next
+    })
+    if (!isExpanded && !redisPages[key]) {
+      await fetchRedisPrefix(id, db, prefix)
+    }
+  }
+
+  const selectRedisKey = async (key: string) => {
+    // The key belongs to the connection of the tab that shows it, not to
+    // whatever the sidebar happens to have selected: picking another
+    // connection while a Redis tab is open used to ask the wrong server.
+    const connId = activeTable?.connId
+    if (!connId) return
+    const request = ++redisInspectRequestRef.current
+    setRedisInspectKey(key)
+    try {
+      const qs = new URLSearchParams()
+      qs.set("key", key)
+      qs.set("database", String(activeRedisDb))
+      const res = await fetch(`${API}/${connId}/keys/inspect?${qs.toString()}`)
+      if (!res.ok) throw new Error(parseApiError(await res.text()))
+      const payload = await res.json()
+      // A slower answer must not land on a tab that has moved on.
+      if (request !== redisInspectRequestRef.current) return
+      setRedisInspect(payload)
+      setRedisInspectOpen(true)
+    } catch (e: unknown) {
+      if (request !== redisInspectRequestRef.current) return
+      notifyDb("error", "Redis inspect failed", e instanceof Error ? e.message : String(e))
+      setRedisInspect(null)
+      setRedisInspectKey("")
+    }
+  }
+
+  const toggleRedisConn = (id: string) => {
+    const wasExpanded = expandedConns.has(id)
+    setExpandedConns((prev) => {
+      const next = new Set(prev)
+      if (wasExpanded) next.delete(id)
+      else next.add(id)
+      return next
+    })
+    if (!wasExpanded) void loadRedisDatabases(id)
+  }
+
+  const openRedisDb = (connId: string, dbIndex: number) => {
+    const tab: DbTab = { connId, table: REDIS_TAB_TABLE, database: null, kind: "redis", redisDb: dbIndex }
+    setOpenTabs((prev) => (prev.some((t) => tabKey(t) === tabKey(tab)) ? prev : [...prev, tab]))
+    setActiveTable(tab)
+    activeTableRef.current = tab
+    setSelectedId(connId)
+    setSchemaConnId(connId)
+    setRightTab("data")
+    setRedisInspect(null)
+    setRedisInspectKey("")
+    const rootKey = redisPageKey(connId, dbIndex, "")
+    if (!redisPages[rootKey]) void fetchRedisPrefix(connId, dbIndex, "")
+  }
 
   // The name follows the fields the person typed, until they type a name of
   // their own.
@@ -385,6 +602,7 @@ export function Databases() {
   // detect/import
   const [detected, setDetected] = useState<Detected[]>([])
   const [selectedKeys, setSelectedKeys] = useState<string[]>([])
+  const [showImportConfirm, setShowImportConfirm] = useState(false)
 
   // sqlite file picker
   const [showPicker, setShowPicker] = useState(false)
@@ -438,13 +656,13 @@ export function Databases() {
       const connId = urlConn || st?.schemaConnId || st?.selectedId
       const tab = urlTab || st?.rightTab || "data"
 
+      const savedTab = (st?.activeTable as DbTab | null) ?? null
+
       if (st?.expandedConns) setExpandedConns(new Set(st.expandedConns))
       if (Array.isArray(st?.openTabs)) setOpenTabs(st.openTabs)
       if (connId) {
         setSelectedId(connId)
         setSchemaConnId(connId)
-        // ensure the connection holding the previously selected table is
-        // expanded so its table row is rendered (and can be scrolled to)
         setExpandedConns((prev) => {
           const next = new Set(prev)
           next.add(connId)
@@ -453,9 +671,34 @@ export function Databases() {
       }
       setRightTab(tab)
 
-      const table = urlTable || st?.activeTable?.table
-      const database = params.get("database") || st?.activeTable?.database || null
-      if (connId && table) {
+      const table = urlTable || savedTab?.table
+      const database = params.get("database") || savedTab?.database || null
+      const savedRedisForThisConn = savedTab?.kind === "redis" && savedTab.connId === connId
+      const restoredKind = isRedisTab({ table }) || savedRedisForThisConn ? "redis" as const : undefined
+      if (connId && table && restoredKind === "redis") {
+        void (async () => {
+          // The URL names the database, or the saved tab does. Only when
+          // neither does is the list needed - and then it has to be read
+          // before the tab opens, or the fallback "first database that holds
+          // keys" can only ever be db0.
+          const urlDb = params.get("redisDb")
+          const savedDb = savedTab && savedTab.connId === connId ? savedTab : null
+          let available = redisDbs[connId] ?? []
+          if (parseRedisDb(urlDb) === null && typeof savedDb?.redisDb !== "number") {
+            available = await fetchRedisDatabases(connId).catch(() => [] as RedisDbInfo[])
+            setRedisDbs((prev) => ({ ...prev, [connId]: available }))
+          }
+
+          const db = pickRedisDb({ urlDb, savedTab: savedDb, connId, available })
+          const restored: DbTab = { connId, table, database: null, kind: "redis", redisDb: db }
+          setActiveTable(restored)
+          activeTableRef.current = restored
+          setOpenTabs((prev) => prev.some((t) => tabKey(t) === tabKey(restored)) ? prev : [...prev, restored])
+          // Reloading used to restore the db selection but leave the card empty,
+          // so a refresh looked like the browser had lost the keys.
+          void fetchRedisPrefix(connId, db, "")
+        })()
+      } else if (connId && table) {
         autoScrollPendingRef.current = true
         const restored = { connId, table, database: database ?? null }
         setActiveTable(restored)
@@ -543,6 +786,18 @@ export function Databases() {
   }, [activeTable])
   useEffect(() => { connSchemasRef.current = connSchemas }, [connSchemas])
   useEffect(() => { activeTableRef.current = activeTable }, [activeTable])
+
+  // The inspector belongs to one key of one database of one connection: reset
+  // it when any of those change, so a stale value is not shown beside another
+  // tree. Keyed on the database alone it survived switching connection.
+  // The root prefix goes with them: a filter typed for one database means
+  // nothing in another.
+  useEffect(() => {
+    setRedisInspect(null)
+    setRedisInspectKey("")
+    setRedisRootPrefix("")
+    setRedisPrefix("")
+  }, [activeTable?.connId, activeRedisDb])
   useEffect(() => () => { if (browsePollRef.current) clearTimeout(browsePollRef.current) }, [])
   useEffect(() => { dbSchemasRef.current = dbSchemas }, [dbSchemas])
   useEffect(() => { schemaConnIdRef.current = schemaConnId }, [schemaConnId])
@@ -554,6 +809,13 @@ export function Databases() {
       if (!connSchemas[id]) void ensureSchema(id)
     }
   }, [expandedConns, connSchemas])
+
+  useEffect(() => {
+    for (const id of expandedConns) {
+      const conn = conns.find((c) => c.id === id)
+      if (conn?.provider === "Redis" && !redisDbs[id]) void loadRedisDatabases(id)
+    }
+  }, [expandedConns, conns, redisDbs])
 
   // Persist explorer position (only after restore, to avoid clobbering saved state on mount)
   useEffect(() => {
@@ -572,6 +834,10 @@ export function Databases() {
       if (activeTable?.table) params.set("table", activeTable.table)
       if (activeTable?.database) params.set("database", activeTable.database)
       if (rightTab) params.set("tab", rightTab)
+      // The Redis panel's db selection is part of the view, so it belongs in
+      // the URL: without it a refresh dropped back to db0 while the tree above
+      // still showed the keys of the db that was actually selected.
+      if (isRedisTab(activeTable)) params.set("redisDb", String(activeTable?.redisDb ?? 0))
       const qs = params.toString()
       window.history.replaceState(null, "", qs ? "?" + qs : window.location.pathname)
     } catch {
@@ -845,13 +1111,15 @@ export function Databases() {
       if (fresh.fromCache) {
         const delay = (schemaRetryRef.current[id] ?? 0) < 12 ? 5000 : 15000
         schemaRetryRef.current[id] = (schemaRetryRef.current[id] ?? 0) + 1
-        setTimeout(() => { void ensureSchema(id, { force: true }) }, delay)
+        const timer = setTimeout(() => { void ensureSchema(id, { force: true }) }, delay)
+        pendingSchemaTimers.current.add(timer)
       }
     } catch {
       const retries = schemaRetryRef.current[id] ?? 0
       if (retries < 3) {
         schemaRetryRef.current[id] = retries + 1
-        setTimeout(() => { void ensureSchema(id) }, 2000 * (retries + 1))
+        const timer = setTimeout(() => { void ensureSchema(id) }, 2000 * (retries + 1))
+        pendingSchemaTimers.current.add(timer)
       }
     }
   }, [])
@@ -866,7 +1134,8 @@ export function Databases() {
       const fresh = await fetchSchema(connId, database)
       setDbSchemas((prev) => ({ ...prev, [key]: fresh }))
       if (fresh.fromCache) {
-        setTimeout(() => { void ensureDbSchema(connId, database) }, 5000)
+        const timer = setTimeout(() => { void ensureDbSchema(connId, database) }, 5000)
+        pendingSchemaTimers.current.add(timer)
       }
     } catch (e: unknown) {
       notifyDb("error", e instanceof Error ? e.message : "schema failed")
@@ -939,8 +1208,25 @@ export function Databases() {
   const activateTab = (idx: number) => {
     const t = openTabs[idx]
     if (!t) return
+    activateTabEntry(t)
+  }
+
+  const activateTabEntry = (t: DbTab) => {
     // Auto-scroll the tree to show the selected table.
-    autoScrollPendingRef.current = true
+    autoScrollPendingRef.current = !isRedisTab(t)
+    if (isRedisTab(t)) {
+      setSelectedId(t.connId)
+      setSchemaConnId(t.connId)
+      setRightTab("data")
+      setActiveTable(t)
+      activeTableRef.current = t
+      setRedisInspect(null)
+      setRedisInspectKey("")
+      const db = t.redisDb ?? 0
+      const rootKey = redisPageKey(t.connId, db, "")
+      if (!redisPages[rootKey]) void fetchRedisPrefix(t.connId, db, "")
+      return
+    }
     // Reuse selectTreeTable to load schema/data for the tab.
     void selectTreeTable(t.connId, t.table, t.database ?? undefined)
   }
@@ -950,12 +1236,12 @@ export function Databases() {
       const next = prev.filter((_, i) => i !== idx)
       // If we closed the active tab, activate a neighbor.
       const closed = prev[idx]
-      const wasActive = activeTable && closed && activeTable.connId === closed.connId && activeTable.table === closed.table && (activeTable.database ?? null) === (closed.database ?? null)
+      const wasActive = activeTable && closed && tabKey(activeTable!) === tabKey(closed)
       if (wasActive) {
         const neighbor = next[Math.min(idx, next.length - 1)]
         if (neighbor) {
           // Defer activation to after state update.
-          setTimeout(() => { autoScrollPendingRef.current = true; void selectTreeTable(neighbor.connId, neighbor.table, neighbor.database ?? undefined) }, 0)
+          setTimeout(() => { activateTabEntry(neighbor) }, 0)
         } else {
           setActiveTable(null)
           activeTableRef.current = null
@@ -973,8 +1259,8 @@ export function Databases() {
       const keep = prev[idx]
       if (!keep) return prev
       // Activate the kept tab if it isn't already active.
-      if (!(activeTable && activeTable.connId === keep.connId && activeTable.table === keep.table && (activeTable.database ?? null) === (keep.database ?? null))) {
-        setTimeout(() => { autoScrollPendingRef.current = true; void selectTreeTable(keep.connId, keep.table, keep.database ?? undefined) }, 0)
+      if (!(activeTable && tabKey(activeTable!) === tabKey(keep))) {
+        setTimeout(() => { activateTabEntry(keep) }, 0)
       }
       return [keep]
     })
@@ -990,9 +1276,11 @@ export function Databases() {
   }
 
   const browseData = async (id: string, table: string, database?: string | null, background = false) => {
-    // Guard against stale polls from a previous table selection.
+    const request = ++browseInFlightRef.current
+    // Guard against stale polls from a previous table selection — including
+    // the database: a poll for db2 must not answer into a db3 tab.
     const current = activeTableRef.current
-    if (current && (current.connId !== id || current.table !== table)) return
+    if (current && (current.connId !== id || current.table !== table || (current.database ?? null) !== (database ?? null))) return
     if (!background) {
       setError(null)
       setEditingCell(null)
@@ -1028,7 +1316,10 @@ export function Databases() {
       ])
       if (!dataRes.ok) throw new Error(parseApiError(await dataRes.text()))
       const data = await dataRes.json() as QueryResult
-      setBrowseResult(data)
+      // The poll and the click may have crossed in flight; a late answer for
+      // a tab the user has left must not overwrite a fresher one — but the
+      // spinner it raised stays its own to clear.
+      if (request === browseInFlightRef.current) setBrowseResult(data)
       if (countRes.ok) {
         const cd = await countRes.json() as QueryResult
         const v = cd?.rows?.[0]?.[0]
@@ -1038,19 +1329,22 @@ export function Databases() {
         }
       }
       if (browsePollRef.current) clearTimeout(browsePollRef.current)
-      if (data.fromCache) {
-        // No toast here: the in-page "Cached data" banner already conveys it,
-        // and a toast on every 5s poll (plus lingering after reconnect) is noisy.
-        browsePollRef.current = setTimeout(() => { void browseData(id, table, database, true) }, 5000)
-      } else {
-        browsePollRef.current = null
+      if (request === browseInFlightRef.current) {
+        if (data.fromCache) {
+          // No toast here: the in-page "Cached data" banner already conveys it,
+          // and a toast on every 5s poll (plus lingering after reconnect) is noisy.
+          browsePollRef.current = setTimeout(() => { void browseData(id, table, database, true) }, 5000)
+        } else {
+          browsePollRef.current = null
+        }
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "browse failed"
       const conn = conns.find((c) => c.id === id)
       notifyDb("error", `Could not load ${table}`, `${conn?.name ?? id}: ${msg}`)
     } finally {
-      setBrowseLoading(false)
+      // Only the newest request clears the spinner it raised.
+      if (!background && request === browseInFlightRef.current) setBrowseLoading(false)
       // Restore scroll position so refresh doesn't jump the table.
       requestAnimationFrame(() => {
         if (dataScrollRef.current) dataScrollRef.current.scrollTop = savedScroll
@@ -1080,7 +1374,9 @@ export function Databases() {
 
   const refreshData = async () => {
     if (!selectedId || !activeTable) return
-    await browseData(selectedId, activeTable.table, activeTable.database)
+    // The active tab owns its database; the selection does not. Polling from
+    // the selection wrote another database's rows under this table's name.
+    await browseData(activeTable.connId, activeTable.table, activeTable.database)
   }
 
   const buildWherePk = (row: unknown[]) => {
@@ -1370,7 +1666,13 @@ export function Databases() {
     await res.json()
     setSelectedKeys([])
     setDetected([])
+    setShowImportConfirm(false)
     await load()
+  }
+
+  const openImportConfirm = () => {
+    if (selectedKeys.length === 0) return
+    setShowImportConfirm(true)
   }
 
   const browse = async (path: string | null) => {
@@ -1414,23 +1716,60 @@ export function Databases() {
     }
   }
 
+  // Shared between the docked right column (xl and up) and the popup used on
+  // narrower screens, so both show exactly the same preview.
+  //
+  // Stacked field/value rows instead of a table: the docked column is 360px
+  // and a hash field can be a long JSON blob, so table columns forced a
+  // horizontal scrollbar and clipped the value mid-word.
+  const redisInspectBody = redisInspect ? (
+    <>
+      {redisInspect.preview.entries.length > 0 ? (
+        <div className="space-y-1">
+          {redisInspect.preview.entries.map((entry, i) => (
+            <div key={`${entry.field ?? "item"}-${i}`} className="rounded border px-2 py-1">
+              {entry.field !== null ? (
+                <p className="break-all font-mono text-[11px] text-muted-foreground">{entry.field}</p>
+              ) : null}
+              <p className="whitespace-pre-wrap break-all text-xs">{entry.value ?? "null"}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">No preview entries.</p>
+      )}
+      {redisInspect.preview.truncated ? (
+        <p className="text-xs text-amber-600">Preview truncated.</p>
+      ) : null}
+    </>
+  ) : null
+
+  const redisInspectMeta = redisInspect
+    ? `${redisInspect.type} · len ${redisInspect.length} · ${formatTtl(redisInspect.ttlSeconds)}`
+    : ""
+
    return (
      <div className="flex h-screen flex-col overflow-hidden">
        <div className="shrink-0">
-         <DashboardHeader label="Databases" />
+         <DashboardHeader label="Databases">
+           <Button
+             size="sm"
+             onClick={() => { if (showCreate) { setShowCreate(false) } else { openCreate() } }}
+           >
+             <Plus className="mr-2 size-4" /> New connection
+           </Button>
+
+           <Button
+             variant="outline"
+             size="sm"
+             onClick={() => { void load(); for (const id of expandedConns) { void ensureSchema(id, { force: true }); const conn = conns.find((c) => c.id === id); if (conn?.provider === "Redis") void loadRedisDatabases(id) } }}
+           >
+             <RefreshCw className="mr-2 size-4" />
+             <span className="hidden sm:inline-block">Refresh</span>
+           </Button>
+         </DashboardHeader>
        </div>
        <div className="flex-1 flex flex-col min-h-0 overflow-hidden gap-4 p-4 pt-2">
-         <div className="flex flex-wrap gap-2 shrink-0">
-        <Button onClick={() => { if (showCreate) { setShowCreate(false) } else { openCreate() } }}>
-          <Plus className="mr-2 size-4" /> New connection
-        </Button>
-
-        <Button variant="outline" onClick={() => { void load(); for (const id of expandedConns) void ensureSchema(id, { force: true }) }}>
-          <RefreshCw className="mr-2 size-4" /> Refresh
-        </Button>
-      </div>
-
-
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
 
@@ -1456,7 +1795,7 @@ export function Databases() {
                 {d.rejectionReason ? <Badge variant="destructive">{d.rejectionReason}</Badge> : null}
               </label>
             ))}
-            <Button onClick={doImport} disabled={selectedKeys.length === 0}>Import selected</Button>
+            <Button onClick={openImportConfirm} disabled={selectedKeys.length === 0}>Import selected</Button>
           </CardContent>
         </Card>
       ) : null}
@@ -1467,11 +1806,15 @@ export function Databases() {
         <CardHeader><CardTitle>Connections</CardTitle></CardHeader>
         <CardContent className="space-y-1 p-2">
           {loading ? <p className="text-sm text-muted-foreground">Loading.</p> : null}
+          {/* Tree rows stay plain <button>s on purpose: shadcn's Button bakes in
+              a minimum height and text-sm, and these rows are one line at 20px
+              (db rows) and 28px (connection rows) so a deep tree stays readable.
+              Every interactive control outside the tree uses Button. */}
           {conns.map(c => (
             <div key={c.id} className="space-y-1">
               <button
                 className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-sm hover:bg-accent"
-                onClick={() => toggleConn(c.id)}
+                onClick={() => c.provider === "Redis" ? toggleRedisConn(c.id) : toggleConn(c.id)}
                 onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, connId: c.id }) }}
               >
                 <span className="text-xs">{expandedConns.has(c.id) ? "▾" : "▸"}</span>
@@ -1479,8 +1822,26 @@ export function Databases() {
               </button>
               {expandedConns.has(c.id) ? (
                 <div className="ml-3 space-y-0.5">
-                  {!connSchemas[c.id] ? <p className="ml-2 text-xs text-muted-foreground">Loading.</p> : null}
-                  {c.isServerLevel ? (
+                  {c.provider === "Redis" ? (
+                    redisDbs[c.id] ? (
+                      visibleRedisDbs(redisDbs[c.id], (activeTable?.connId === c.id && isRedisTab(activeTable)) ? (activeTable?.redisDb ?? 0) : null).map((db) => {
+                        const isActiveRedis = activeIsRedis && activeTable?.connId === c.id && activeTable?.redisDb === db.index
+                        return (
+                          <button
+                            key={db.index}
+                            className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs hover:bg-accent ${isActiveRedis ? "bg-accent font-medium" : ""}`}
+                            onClick={() => openRedisDb(c.id, db.index)}
+                          >
+                            <span>🗄</span>
+                            <span className="min-w-0 flex-1 truncate">{dbRowLabel(db)}</span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">{dbRowCount(db)}</span>
+                            {dbRowAsOf(db) ? <span className="shrink-0 text-[10px] text-amber-700 dark:text-amber-400">{dbRowAsOf(db)}</span> : null}
+                          </button>
+                        )
+                      })
+                    ) : <p className="ml-2 text-xs text-muted-foreground">Loading.</p>
+                  ) : !connSchemas[c.id] ? <p className="ml-2 text-xs text-muted-foreground">Loading.</p> : null}
+                  {c.provider !== "Redis" && c.isServerLevel ? (
                     // A server-level connection reaches every database on the
                     // server, so the tree lists them before the tables.
                     (connSchemas[c.id]?.databases ?? []).map((db) => (
@@ -1534,14 +1895,14 @@ export function Databases() {
       </Card>
 
         </aside>
-        <main className="flex-1 min-h-0 space-y-4 overflow-hidden">
+        <main className={`flex-1 min-h-0 overflow-hidden ${activeIsRedis ? "flex flex-col gap-4" : "space-y-4"}`}>
       {openTabs.length > 0 ? (
         <div className="flex items-center gap-1 border-b pb-2 overflow-x-auto">
           {openTabs.map((t, idx) => {
-            const isActive = activeTable?.connId === t.connId && activeTable?.table === t.table && (activeTable?.database ?? null) === (t.database ?? null)
+            const isActive = activeTable && tabKey(activeTable!) === tabKey(t)
             return (
-              <div ref={isActive ? activeTabElRef : undefined} key={`${t.connId}:${t.database ?? ""}:${t.table}`} className={`flex items-center gap-1 rounded px-2 py-1 text-xs cursor-pointer border ${isActive ? "bg-accent font-medium border-accent" : "hover:bg-accent/50 border-transparent"}`} onClick={() => activateTab(idx)} onContextMenu={(e) => { e.preventDefault(); setTabCtxMenu({ x: e.clientX, y: e.clientY, idx }) }}>
-                <span className="truncate max-w-[140px]">{t.table}</span>
+              <div ref={isActive ? activeTabElRef : undefined} key={tabKey(t)} className={`flex items-center gap-1 rounded px-2 py-1 text-xs cursor-pointer border ${isActive ? "bg-accent font-medium border-accent" : "hover:bg-accent/50 border-transparent"}`} onClick={() => activateTab(idx)} onContextMenu={(e) => { e.preventDefault(); setTabCtxMenu({ x: e.clientX, y: e.clientY, idx }) }}>
+                <span className="truncate max-w-[140px]">{isRedisTab(t) ? `${conns.find((c) => c.id === t.connId)?.name ?? t.table} · db${t.redisDb ?? 0}` : t.table}</span>
                 <button className="ml-1 text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); closeTab(idx) }}>×</button>
               </div>
             )
@@ -1550,10 +1911,14 @@ export function Databases() {
       ) : null}
       <div className="flex gap-2 border-b pb-2">
         <Button size="sm" variant={rightTab === "data" ? "default" : "outline"} onClick={() => setRightTab("data")}>Data</Button>
-        <Button size="sm" variant={rightTab === "schema" ? "default" : "outline"} onClick={() => setRightTab("schema")}>Schema</Button>
-        <Button size="sm" variant={rightTab === "sql" ? "default" : "outline"} onClick={() => setRightTab("sql")}>SQL</Button>
+        {!activeIsRedis ? (
+          <Button size="sm" variant={rightTab === "schema" ? "default" : "outline"} onClick={() => setRightTab("schema")}>Schema</Button>
+        ) : null}
+        {!activeIsRedis ? (
+          <Button size="sm" variant={rightTab === "sql" ? "default" : "outline"} onClick={() => setRightTab("sql")}>SQL</Button>
+        ) : null}
       </div>
-      {rightTab === "schema" && schemaConnId ? (
+      {rightTab === "schema" && schemaConnId && !selectedIsRedis ? (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1632,10 +1997,175 @@ export function Databases() {
         </Card>
       ) : null}
 
-      {rightTab === "data" && !activeTable ? (
+      {activeIsRedis && rightTab === "data" ? (
+        <Card className="flex-1 min-h-0">
+          <CardHeader>
+            <CardTitle>Redis · {conns.find((c) => c.id === activeTable?.connId)?.name ?? selectedId} · db{activeRedisDb}</CardTitle>
+            <CardDescription>
+              Browse keys for logical database {activeRedisDb}. Click a key to inspect its value.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-1 flex-col min-h-0 gap-3">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Input
+                className="flex-1"
+                placeholder="prefix — Enter to browse under it"
+                value={redisPrefix}
+                onChange={(e) => setRedisPrefix(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return
+                  const connId = activeTable?.connId
+                  if (!connId) return
+                  browseRedisPrefix(connId, activeRedisDb, redisPrefix)
+                }}
+                disabled={!activeTable?.connId}
+              />
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const connId = activeTable?.connId
+                  if (!connId) return
+                  browseRedisPrefix(connId, activeRedisDb, redisPrefix)
+                }}
+                disabled={redisLoading || !activeTable?.connId}
+              >
+                Browse
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  const connId = activeTable?.connId
+                  if (!connId) return
+                  const scope = redisPageScope(connId, activeRedisDb)
+                  setRedisPrefix("")
+                  setRedisRootPrefix("")
+                  setRedisPages((prev) => {
+                    const next = { ...prev }
+                    for (const k of Object.keys(next)) {
+                      if (k.startsWith(scope)) delete next[k]
+                    }
+                    return next
+                  })
+                  setRedisExpanded((prev) => new Set([...prev].filter((k) => !k.startsWith(scope))))
+                  void fetchRedisPrefix(connId, activeRedisDb, "")
+                }}
+                disabled={redisLoading || !activeTable?.connId}
+              >
+                {redisLoading ? "Browsing…" : "Root"}
+              </Button>
+            </div>
+            <div className={`grid min-h-0 flex-1 grid-rows-[1fr] gap-2 ${isWide && redisInspect ? "xl:grid-cols-[360px_minmax(0,1fr)]" : ""}`}>
+            <div className="min-w-0 flex flex-col min-h-0 rounded-md border p-3 overflow-hidden">
+              <div className="shrink-0 flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  {(() => {
+                    const scope = redisPageScope(activeTable?.connId ?? "", activeRedisDb)
+                    // Only the pages in view: a root prefix hides the rest of
+                    // the database, and a count of what is off-screen would
+                    // read as if the filter did nothing.
+                    const dbPages = Object.entries(redisPages)
+                      .filter(([key]) => key.startsWith(scope))
+                      .map(([, page]) => page)
+                      .filter((page) => redisRootPrefix === "" || page.prefix.startsWith(redisRootPrefix))
+                    if (dbPages.length === 0) return "No Redis key tree loaded yet."
+                    const counts = `${dbPages.reduce((sum, p) => sum + p.nodes.length, 0)} prefixes · ${dbPages.reduce((sum, p) => sum + p.keys.length, 0)} keys`
+                    const activeKey = redisPageKey(activeTable?.connId ?? "", activeRedisDb, redisRootPrefix)
+                    const activePage = redisPages[activeKey]
+                    const scanned = activePage ? ` · scanned ${activePage.scanned} so far` : ""
+                    const continued = activePage && !activePage.complete ? " (more)" : ""
+                    const label = redisRootPrefix === ""
+                      ? `${counts} (this level)`
+                      : `${counts} under ${redisRootPrefix}`
+                    return `${label}${continued}${scanned}`
+                  })()}
+                </p>
+                <div className="flex shrink-0 items-center gap-2">
+                  {(() => {
+                    const activeKey = redisPageKey(activeTable?.connId ?? "", activeRedisDb, redisRootPrefix)
+                    const activePage = redisPages[activeKey]
+                    if (!activePage || activePage.complete) return null
+                    return (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => activeTable?.connId && void loadMoreRedis(activeTable.connId, activeRedisDb, redisRootPrefix)}
+                        disabled={redisLoading || !activeTable?.connId}
+                      >
+                        {redisLoading ? "Loading…" : "Load more"}
+                      </Button>
+                    )
+                  })()}
+                  <Button variant="ghost" size="sm" onClick={() => setRedisExpanded((prev) => new Set([...prev].filter((k) => !k.startsWith(redisPageScope(activeTable?.connId ?? "", activeRedisDb)))))}>
+                    Collapse all
+                  </Button>
+                </div>
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                {redisPages[redisPageKey(activeTable?.connId ?? "", activeRedisDb, redisRootPrefix)] ? (
+                  <RedisPrefixTree
+                    connId={activeTable?.connId ?? ""}
+                    db={activeRedisDb}
+                    prefix={redisRootPrefix}
+                    pages={redisPages}
+                    expanded={redisExpanded}
+                    inspectKey={redisInspectKey}
+                    onToggle={(prefix) => activeTable?.connId && toggleRedisPrefix(activeTable.connId, prefix)}
+                    onSelectKey={(key) => void selectRedisKey(key)}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {redisRootPrefix === ""
+                      ? "Press Root to load the key tree."
+                      : `Nothing loaded under ${redisRootPrefix} — press Browse.`}
+                  </p>
+                )}
+              </div>
+            </div>
+            {isWide && redisInspect ? (
+              <div className="flex min-h-0 flex-col rounded-md border p-3">
+                <div className="shrink-0 flex items-start justify-between gap-2">
+                  <p className="min-w-0 break-all font-mono text-xs font-medium">{redisInspect.key}</p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="size-6 shrink-0 p-0"
+                    aria-label="Close key inspector"
+                    onClick={() => {
+                      setRedisInspect(null)
+                      setRedisInspectKey("")
+                    }}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </div>
+                <p className="shrink-0 text-xs text-muted-foreground">{redisInspectMeta}</p>
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  {redisInspectBody}
+                </div>
+              </div>
+            ) : null}
+            </div>
+            <Dialog
+              open={!isWide && redisInspectOpen && redisInspect !== null}
+              onOpenChange={setRedisInspectOpen}
+            >
+              <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle className="break-all font-mono text-sm">
+                    {redisInspect?.key}
+                  </DialogTitle>
+                </DialogHeader>
+                <p className="text-xs text-muted-foreground">{redisInspectMeta}</p>
+                {redisInspectBody}
+              </DialogContent>
+            </Dialog>
+          </CardContent>
+        </Card>
+      ) : null}
+      {!activeIsRedis && rightTab === "data" && !activeTable ? (
         <p className="text-sm text-muted-foreground">Select a table from the tree to view its data.</p>
       ) : null}
-      {rightTab === "data" && activeTable ? (
+      {!activeIsRedis && rightTab === "data" && activeTable ? (
         <>
           <Card>
             <CardHeader>
@@ -1849,7 +2379,7 @@ export function Databases() {
         </div>
         </>
       ) : null}
-      {rightTab === "sql" && selectedId ? (
+      {rightTab === "sql" && selectedId && !selectedIsRedis ? (
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2">Query - {conns.find(c => c.id === selectedId)?.name}{qResult?.fromCache ? <Badge variant="outline" className={isStaleCache(qResult.cachedAt) ? "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-400" : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"}>{isStaleCache(qResult.cachedAt) ? "stale" : "cached"} · {formatCacheAge(qResult.cachedAt)}</Badge> : null}</CardTitle></CardHeader>
           <CardContent className="space-y-3">
@@ -2176,6 +2706,7 @@ export function Databases() {
                   <SelectContent>
                     <SelectItem value="Sqlite">Sqlite</SelectItem>
                     <SelectItem value="MySql">MySql</SelectItem>
+                    <SelectItem value="Redis">Redis</SelectItem>
                   </SelectContent>
                 </Select>
                 <div className="flex rounded-lg border p-0.5">
@@ -2323,6 +2854,40 @@ export function Databases() {
             <AlertDialogAction onClick={() => setShowReadOnlyDeleteDialog(false)}>
               OK
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={showImportConfirm}
+        onOpenChange={(open) => {
+          if (!open) setShowImportConfirm(false)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Import {selectedKeys.length} connection{selectedKeys.length === 1 ? "" : "s"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The following keys will be registered as read-only connections:
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="max-h-60 space-y-1 overflow-y-auto">
+            {detected
+              .filter((d) => selectedKeys.includes(d.settingsKey))
+              .map((d) => (
+                <div key={d.settingsKey} className="rounded border bg-muted/40 px-2 py-1 text-sm">
+                  <div className="font-medium">{d.settingsKey}</div>
+                  {d.sourceFile ? (
+                    <div className="text-xs text-muted-foreground">{d.sourceFile} → {d.name}</div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">→ {d.name}</div>
+                  )}
+                </div>
+              ))}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { void doImport() }}>Import</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
