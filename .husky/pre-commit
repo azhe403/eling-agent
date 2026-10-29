@@ -64,7 +64,11 @@ SCOPE_FILES=$(echo "$CHANGED" | grep -vE "^(Directory\.Build|Eling\.slnx|mise\.t
 TOUCH_DASHBOARD=0
 TOUCH_BACKEND=0
 TOUCH_DESKTOP=0
-if echo "$SCOPE_FILES" | grep -qE "^(src/frontend/|tests/.*Frontend|tests/.*Dashboard)"; then
+# A test file under tests/ written in C# belongs to a C# layer: the dashboard
+# layer is TypeScript only. The old pattern "tests/.*Dashboard" matched
+# tests/Eling.Backend.Tests/DashboardPortTests.cs and called a backend test a
+# dashboard change, which made that file impossible to commit at all.
+if echo "$SCOPE_FILES" | grep -qE "^(src/frontend/|tests/.*\.(ts|tsx|js|jsx|mjs|cjs))"; then
   TOUCH_DASHBOARD=1
 fi
 if echo "$SCOPE_FILES" | grep -qE "^(src/backend/|tests/Eling\.Core|tests/Eling\.Backend)"; then
