@@ -235,6 +235,15 @@ export function CodebaseList() {
   const [rebuildMode, setRebuildMode] = useState<RebuildMode>("incremental")
   const [rebuildProgress, setRebuildProgress] = useState<RebuildProgress | null>(null)
   const [rebuildStarting, setRebuildStarting] = useState(false)
+  // Persist the running job id so a page refresh can re-attach to an in-flight
+  // rebuild instead of silently dropping the progress indicator.
+  const REBUILD_JOB_KEY = "codebase:rebuildJobId"
+  // The rebuild-mode dropdown is a base-ui Menu whose radio items do not
+  // close the popup on selection (radio items are toggles, not actions).
+  // Without this the popup stays open after picking a mode, which reads as
+  // a checkbox. Controlling `open` and closing on `onValueChange` makes a
+  // selection act like a normal menu item: pick, close, done.
+  const [rebuildModeMenuOpen, setRebuildModeMenuOpen] = useState(false)
   const rebuilding =
     rebuildStarting || (rebuildProgress?.isRunning ?? false)
 
@@ -288,39 +297,128 @@ export function CodebaseList() {
   // progress snapshot, so the UI has something to render before the first SSE
   // frame lands. Tiles refresh on each "codebase" notification from the
   // backend, and once more when the job reports it finished.
-  const rebuild = useCallback(async () => {
-    setRebuildStarting(true)
-    setStatusError(null)
-    try {
-      const res = await fetch(
-        rebuildUrl(selection, rebuildMode === "full", Date.now()),
-        {
-          method: "POST",
-          cache: "no-store",
+  const rebuild = useCallback(
+    async (mode: RebuildMode) => {
+      // Always take the mode explicitly so a stale closure can never
+      // silently flip incremental into a full reindex.
+      setRebuildMode(mode)
+      setRebuildStarting(true)
+      setStatusError(null)
+      try {
+        const res = await fetch(
+          rebuildUrl(selection, mode === "full", Date.now()),
+          {
+            method: "POST",
+            cache: "no-store",
+          }
+        )
+        if (!res.ok) throw new Error(`API returned ${res.status}`)
+        const snap = (await res.json()) as RebuildProgress
+        setRebuildProgress(snap)
+        if (snap.jobId) {
+          try { localStorage.setItem(REBUILD_JOB_KEY, snap.jobId) } catch { /* ignore */ }
         }
-      )
-      if (!res.ok) throw new Error(`API returned ${res.status}`)
-      setRebuildProgress((await res.json()) as RebuildProgress)
-    } catch (e) {
-      setStatusError(e instanceof Error ? e.message : "Rebuild failed")
-    } finally {
-      setRebuildStarting(false)
-    }
-  }, [rebuildMode, selection])
+      } catch (e) {
+        setStatusError(e instanceof Error ? e.message : "Rebuild failed")
+      } finally {
+        setRebuildStarting(false)
+      }
+    },
+    [selection]
+  )
 
   // A final snapshot also refetches the tiles, so the numbers stay correct
   // even if the SSE channel is down and the per-root notifications were lost.
+  // When the job finishes cleanly, the finished-report banner auto-dismisses
+  // after a few seconds; a report with failed projects stays visible so the
+  // failures can actually be read.
   const handleRebuildProgress = useCallback(
     (progress: RebuildProgress) => {
       setRebuildProgress(progress)
+      if (progress.jobId) {
+        try {
+          if (progress.isRunning) {
+            localStorage.setItem(REBUILD_JOB_KEY, progress.jobId)
+          } else {
+            localStorage.removeItem(REBUILD_JOB_KEY)
+          }
+        } catch {
+          // ignore storage errors
+        }
+      }
       if (!progress.isRunning) void loadStatus()
     },
     [loadStatus]
   )
 
-  // The hook stashes the callback in a ref, so passing the callback directly
-  // does not resubscribe the stream when the scope changes.
+  // Keep SSE subscription for real-time updates (primary channel).
   useCodebaseRebuildSse(handleRebuildProgress)
+
+  // Poll the job status as a fallback for the SSE stream: the stream can drop
+  // or miss the terminal frame (proxy buffering, late subscriber), leaving
+  // `rebuilding` stuck true forever. Polling guarantees the terminal state
+  // lands even when SSE does not.
+  useEffect(() => {
+    if (!rebuildProgress?.isRunning || !rebuildProgress.jobId) return
+    const jobId = rebuildProgress.jobId
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/codebase/rebuild-index/${jobId}`, { cache: "no-store" })
+        if (!res.ok) return
+        const snap = (await res.json()) as RebuildProgress
+        setRebuildProgress(snap)
+        if (!snap.isRunning) {
+          clearInterval(interval)
+          void loadStatus()
+        }
+      } catch {
+        // ignore transient errors; next tick retries
+      }
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [rebuildProgress?.isRunning, rebuildProgress?.jobId, loadStatus])
+
+  // Re-attach to an in-flight rebuild after a page refresh: the POST response
+  // (and the SSE stream) are lost on reload, but the backend job keeps running
+  // and its snapshot is still fetchable by jobId.
+  useEffect(() => {
+    let cancelled = false
+    const restore = async () => {
+      let jobId: string | null = null
+      try { jobId = localStorage.getItem(REBUILD_JOB_KEY) } catch { return }
+      if (!jobId) return
+      try {
+        const res = await fetch(`/api/codebase/rebuild-index/${jobId}`, { cache: "no-store" })
+        if (!res.ok) throw new Error("not found")
+        const snap = (await res.json()) as RebuildProgress
+        if (cancelled) return
+        setRebuildProgress(snap)
+        // The pointer only exists to re-attach to an in-flight rebuild, so drop
+        // it once the job is done. Auto-hiding a clean report is the shared
+        // effect below; a timer here would duplicate that rule and outlive the
+        // component.
+        if (!snap.isRunning) {
+          try { localStorage.removeItem(REBUILD_JOB_KEY) } catch { /* ignore */ }
+        }
+      } catch {
+        // Job gone (backend restarted, or unknown id): drop the stale pointer.
+        try { localStorage.removeItem(REBUILD_JOB_KEY) } catch { /* ignore */ }
+      }
+    }
+    void restore()
+    return () => { cancelled = true }
+  }, [])
+
+  // A clean finished report is transient: it confirms the rebuild ran, then
+  // gets out of the way. Errors are not transient — a failing project's
+  // message must stay on screen until the user dismisses it, so only a
+  // report with no failed projects is auto-hidden.
+  useEffect(() => {
+    if (!rebuildProgress || rebuildProgress.isRunning) return
+    if (rebuildProgress.results.some((r) => !r.ok)) return
+    const timer = setTimeout(() => setRebuildProgress(null), 5000)
+    return () => clearTimeout(timer)
+  }, [rebuildProgress])
 
   // The scope travels with the query rather than being read from the
   // callback's closure: every request states which scope it is for, so a
@@ -593,7 +691,7 @@ export function CodebaseList() {
             variant="outline"
             size="sm"
             onClick={() => void loadStatus()}
-            disabled={statusLoading}
+            disabled={statusLoading || rebuilding}
           >
             <RefreshCw
               className={statusLoading ? "size-4 animate-spin" : "size-4"}
@@ -604,18 +702,29 @@ export function CodebaseList() {
             <Button
               size="sm"
               disabled={rebuilding}
-              onClick={() => void rebuild()}
-              title={`Rebuild mode: ${rebuildModeLabel(rebuildMode)}`}
-              aria-label={`Rebuild index, ${rebuildModeLabel(rebuildMode)} mode`}
-            >              <RefreshCw
+              onClick={() => void rebuild(rebuildMode)}
+              title={`Rebuild index (${rebuildModeLabel(rebuildMode)})`}
+              aria-label={`Rebuild index in ${rebuildModeLabel(rebuildMode)} mode`}
+            >
+              <RefreshCw
                 className={rebuilding ? "size-4 animate-spin" : "size-4"}
               />
               <span className="hidden sm:inline-block">
-                {rebuilding ? "Indexing…" : "Rebuild"}
+                {rebuilding ? "Indexing…" : `Rebuild ${rebuildModeLabel(rebuildMode)}`}
               </span>
             </Button>
-            <DropdownMenu>
+            <DropdownMenu
+              open={rebuildModeMenuOpen}
+              onOpenChange={(open) => {
+                // Block opening (the mode cannot change mid-rebuild) but never
+                // block closing: a controlled menu that ignores a close request
+                // cannot be dismissed by clicking outside.
+                if (rebuilding && open) return
+                setRebuildModeMenuOpen(open)
+              }}
+            >
               <DropdownMenuTrigger
+                disabled={rebuilding}
                 render={<Button variant="outline" size="icon-sm" />}
               >
                 <ChevronDown className="size-4" />
@@ -629,9 +738,15 @@ export function CodebaseList() {
                     group's aria-labelledby. */}
                 <DropdownMenuRadioGroup
                   value={rebuildMode}
-                  onValueChange={(value) =>
-                    setRebuildMode(value as RebuildMode)
-                  }
+                  onValueChange={(value) => {
+                    // Picking a mode is an action, not a toggle: apply it and
+                    // start the rebuild straight away, so the drop-down behaves
+                    // like a direct command instead of a two-step picker.
+                    const mode = value as RebuildMode
+                    setRebuildMode(mode)
+                    setRebuildModeMenuOpen(false)
+                    void rebuild(mode)
+                  }}
                 >
                   <DropdownMenuLabel>Rebuild mode</DropdownMenuLabel>
                   <DropdownMenuRadioItem value="incremental">
