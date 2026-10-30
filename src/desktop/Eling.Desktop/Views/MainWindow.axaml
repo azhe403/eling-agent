@@ -47,39 +47,105 @@
                     <views:FoldersView x:Name="WorkspacesPanel" IsVisible="False" DataContext="{x:Null}" />
                     <Grid x:Name="MemoryPanel" IsVisible="False">
                         <Grid.ColumnDefinitions>280,*</Grid.ColumnDefinitions>
-                        <!-- Workspace sidebar (multi-select) -->
+                        <!-- Workspace picker: the dashboard's scope panel, cloned -->
                         <Border Grid.Column="0" Background="#161616" BorderBrush="#2a2a2a" BorderThickness="0,0,1,0" Padding="10,12">
                             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                            <StackPanel Spacing="8" Margin="0,0,4,0">
-                                <TextBlock Text="Workspaces" FontSize="12" FontWeight="SemiBold" Foreground="#9ca3af"/>
-                                <CheckBox x:Name="AllWorkspacesCheckBox" Content="All workspaces"
-                                          IsChecked="{Binding AllSelected, Mode=OneWay}"
-                                          Click="AllWorkspaces_Click"
-                                          FontSize="12" FontWeight="SemiBold" Foreground="#e5e7eb"
-                                          Cursor="Hand"/>
-                                <ItemsControl ItemsSource="{Binding Workspaces}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate DataType="m:WorkspaceItem">
-                                            <Border Classes="workspace-row" CornerRadius="6" Padding="4,2" Margin="0,1">
-                                                <Grid ColumnDefinitions="Auto,*">
-                                                    <CheckBox Grid.Column="0"
-                                                              IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                                              Padding="0" VerticalAlignment="Center"
-                                                              Cursor="Hand"
-                                                              ToolTip.Tip="Toggle multi-select"/>
-                                                    <Button Grid.Column="1" Classes="workspace-label"
-                                                            ToolTip.Tip="{Binding Root}"
-                                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectOnlyWorkspaceCommand}"
-                                                            CommandParameter="{Binding}">
-                                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
-                                                                   TextWrapping="NoWrap" VerticalAlignment="Center"/>
-                                                    </Button>
-                                                </Grid>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
+                                <StackPanel Spacing="6" Margin="0,0,4,0">
+                                    <!-- All workspaces -->
+                                    <Button Command="{Binding SelectAllCommand}"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Left"
+                                            Padding="8,6"
+                                            Background="{Binding AllWorkspacesBackground}"
+                                            BorderBrush="#2f2f2f"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            ToolTip.Tip="Include every workspace in the selection">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <TextBlock Text="🗂" FontSize="13" VerticalAlignment="Center"/>
+                                            <TextBlock Text="All workspaces" FontSize="12" FontWeight="SemiBold"
+                                                       Foreground="#e5e7eb" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+
+                                    <!-- Grouping: flat / repo / folder -->
+                                    <Border Background="Transparent" BorderBrush="#2f2f2f" BorderThickness="1"
+                                            CornerRadius="8" Padding="2">
+                                        <Grid ColumnDefinitions="*,*,*">
+                                            <Button Grid.Column="0" Content="Flat" FontSize="11" Padding="8,4"
+                                                    Command="{Binding SetWorkspaceGroupModeCommand}" CommandParameter="0"
+                                                    Background="{Binding WorkspaceGroupMode, Converter={x:Static conv:SegmentButtonConverter.Instance}, ConverterParameter=0}"
+                                                    BorderThickness="0" CornerRadius="6"
+                                                    ToolTip.Tip="One row per workspace, the way the runtime registry holds them"/>
+                                            <Button Grid.Column="1" Content="Repo" FontSize="11" Padding="8,4"
+                                                    Command="{Binding SetWorkspaceGroupModeCommand}" CommandParameter="1"
+                                                    Background="{Binding WorkspaceGroupMode, Converter={x:Static conv:SegmentButtonConverter.Instance}, ConverterParameter=1}"
+                                                    BorderThickness="0" CornerRadius="6"
+                                                    ToolTip.Tip="One entry per git repository, with its worktrees nested under it"/>
+                                            <Button Grid.Column="2" Content="Folder" FontSize="11" Padding="8,4"
+                                                    Command="{Binding SetWorkspaceGroupModeCommand}" CommandParameter="2"
+                                                    Background="{Binding WorkspaceGroupMode, Converter={x:Static conv:SegmentButtonConverter.Instance}, ConverterParameter=2}"
+                                                    BorderThickness="0" CornerRadius="6"
+                                                    ToolTip.Tip="One entry per workspace, nested by the folders that hold them"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <TextBlock Text="No indexed workspaces." FontSize="11" Foreground="#6b7280"
+                                               Margin="4,6" IsVisible="{Binding HasNoWorkspaces}"/>
+
+                                    <!-- Rows: chevron, checkbox, icon, label, group count, liveness -->
+                                    <ItemsControl ItemsSource="{Binding VisibleWorkspaces}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="m:MemoryWorkspaceNode">
+                                                <Border Classes="workspace-row" CornerRadius="6" Margin="{Binding RowMargin}"
+                                                        Padding="0,1" Background="Transparent">
+                                                    <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
+                                                        <Button Grid.Column="0" Content="{Binding ChevronGlyph}"
+                                                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleWorkspaceExpansionCommand}"
+                                                                CommandParameter="{Binding}"
+                                                                Classes="subtle" Padding="0" Width="14" FontSize="9"
+                                                                Foreground="#9ca3af"
+                                                                IsVisible="{Binding HasChildren}"
+                                                                ToolTip.Tip="Expand or collapse"/>
+                                                        <CheckBox Grid.Column="1"
+                                                                  IsChecked="{Binding CheckState, Mode=OneWay}"
+                                                                  IsThreeState="False"
+                                                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleWorkspaceGroupCommand}"
+                                                                  CommandParameter="{Binding}"
+                                                                  Padding="0" VerticalAlignment="Center"
+                                                                  Cursor="Hand"
+                                                                  ToolTip.Tip="Include this workspace in the selection"/>
+                                                        <TextBlock Grid.Column="2" Text="{Binding IsWorktree, Converter={x:Static conv:WorktreeIconConverter.Instance}}"
+                                                                   FontSize="12" Foreground="#9ca3af" VerticalAlignment="Center" Margin="2,0,0,0"/>
+                                                        <Button Grid.Column="3" Classes="workspace-label"
+                                                                ToolTip.Tip="{Binding Path}"
+                                                                IsVisible="{Binding CanSelectOnly}"
+                                                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectOnlyWorkspaceCommand}"
+                                                                CommandParameter="{Binding Row}">
+                                                            <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis"
+                                                                       TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                                                        </Button>
+                                                        <TextBlock Grid.Column="3" Text="{Binding Label}"
+                                                                   FontSize="12" Foreground="#e5e7eb"
+                                                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                                                   VerticalAlignment="Center" Margin="8,0,0,0"
+                                                                   IsVisible="{Binding !CanSelectOnly}"/>
+                                                        <Border Grid.Column="4" Background="#262626" CornerRadius="3"
+                                                                Padding="4,0" Margin="6,0,0,0" VerticalAlignment="Center"
+                                                                IsVisible="{Binding ShowGroupCount}">
+                                                            <TextBlock Text="{Binding GroupCountText}" FontSize="9"
+                                                                       Foreground="#9ca3af"/>
+                                                        </Border>
+                                                        <Ellipse Grid.Column="5" Width="6" Height="6" Margin="8,0,4,0"
+                                                                 VerticalAlignment="Center"
+                                                                 Fill="{Binding DotColor}"
+                                                                 ToolTip.Tip="{Binding StatusTip}"/>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
                             </ScrollViewer>
                         </Border>
                         <!-- Content -->

@@ -89,19 +89,6 @@ public partial class MainWindow : Window
     private void SidebarSettings_Click(object? sender, RoutedEventArgs e) =>
         ShowOnly(this.FindControl<Control>("SettingsPanel"));
 
-    /// <summary>
-    /// The "All workspaces" switch is driven from here rather than through a
-    /// two-way binding, so the master checkbox always reaches the view model
-    /// (its state is displayed one-way from <see cref="MainViewModel.AllSelected"/>).
-    /// </summary>
-    private void AllWorkspaces_Click(object? sender, RoutedEventArgs e)
-    {
-        if (sender is CheckBox box && _viewModel is { } vm)
-        {
-            vm.AllSelected = box.IsChecked == true;
-        }
-    }
-
     protected override async void OnLoaded(RoutedEventArgs e)
     {
         base.OnLoaded(e);

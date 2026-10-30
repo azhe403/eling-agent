@@ -4,6 +4,19 @@
              xmlns:local="using:Eling.Desktop"
              RequestedThemeVariant="Dark">
 
+    <Application.Resources>
+        <!-- The theme paints checked boxes with the Windows accent; the app's
+             accent is blue, so both the accent itself and the checkbox keys
+             that derive from it are pinned here. -->
+        <Color x:Key="SystemAccentColor">#3B82F6</Color>
+        <Color x:Key="SystemAccentColorLight1">#60A5FA</Color>
+        <Color x:Key="SystemAccentColorLight2">#93C5FD</Color>
+        <Color x:Key="SystemAccentColorLight3">#BFDBFE</Color>
+        <Color x:Key="SystemAccentColorDark1">#2563EB</Color>
+        <Color x:Key="SystemAccentColorDark2">#1D4ED8</Color>
+        <Color x:Key="SystemAccentColorDark3">#1E40AF</Color>
+    </Application.Resources>
+
     <Application.DataTemplates>
         <local:ViewLocator />
     </Application.DataTemplates>
