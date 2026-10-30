@@ -52,6 +52,8 @@ public sealed class CoordinatorControllerTests : IAsyncLifetime
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton(_registry);
         builder.Services.AddSingleton(new MemoryChangeBroadcaster());
+        builder.Services.AddSingleton(new Eling.Core.Workspaces.WorkspaceExpansionStore(
+            Path.Combine(_root, "workspace-expansion.json")));
         // Controllers are discovered from the entry assembly, which under a test
         // host is the test runner; the backend assembly must be added or the
         // route 404s.

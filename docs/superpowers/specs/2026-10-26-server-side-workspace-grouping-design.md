@@ -87,26 +87,25 @@ at once.
 still walks the graph to nest it, which is grouping logic leaking back across the
 seam.
 
-The final design is a hybrid: **one request, three arrangements in the payload**.
-The contract stays one call with one answer, but the answer carries `flat`, `repo`,
-and `folder` together, so the mode toggle is a client-side lookup with no request
-and no cache. This is what the plan in
-`docs/superpowers/plans/2026-10-26-server-side-workspace-grouping.md` implements;
-section 8.1 below is the authoritative contract.
+The final design is **approach A**: one endpoint, one arrangement per request,
+selected by the `group` query parameter. `rows` is always sent so node
+references stay cheap and the client can join `nodes` against `rows` by root.
+Section 8.1 below is the authoritative contract.
 
 ## 8. Design
 
 ### 8.1 Endpoint
 
 ```
-GET /api/coordinator/workspaces?status=all|active|offline&q=<text>
+GET /api/coordinator/workspaces?group=flat|repo|folder&status=all|active|offline&q=<text>
 ```
 
 - Lives on `CoordinatorController`, next to `/runtimes`. Under `/coordinator` so it
   cannot be mistaken for the `/api/agent/workspaces` registry CRUD routes.
-- No `group` parameter. The response carries **all three arrangements**
-  (`flat`, `repo`, `folder`) so a mode toggle never costs a request and no client
-  needs a per-mode cache. Mode selection happens entirely on the client.
+- `group` selects the arrangement: `flat`, `repo`, or `folder`. Missing or invalid
+  → `400`. The response carries `rows` plus **that single arrangement** as
+  `nodes`, so each mode is a fresh, authoritative server answer — no client keeps
+  a per-mode cache and no mode switch is a client-side lookup.
 - `status` and `q` filter **before** grouping, so a filtered list is still a
   server-computed tree. `q` matches the workspace name, its root, or any owning
   process id, case-insensitively.
@@ -120,6 +119,7 @@ Response:
 
 ```json
 {
+  "group": "repo",
   "rows": [
     {
       "root": "/work/org/alpha",
@@ -138,28 +138,13 @@ Response:
       "processCount": 0
     }
   ],
-  "flat": [
-    {
-      "id": "ws:/work/org/alpha",
-      "label": "alpha",
-      "path": "/work/org/alpha",
-      "root": "/work/org/alpha",
-      "roots": ["/work/org/alpha"],
-      "isRepository": false,
-      "isWorktree": false,
-      "children": []
-    }
-  ],
-  "repo": [
+  "nodes": [
     {
       "id": "repo:/work/org/beta",
       "label": "beta",
       "path": "/work/org/beta",
       "root": null,
-      "roots": [
-        "/work/org/beta",
-        "/work/org/beta/beta-order"
-      ],
+      "roots": ["/work/org/beta", "/work/org/beta/beta-order"],
       "isRepository": true,
       "isWorktree": false,
       "children": [
@@ -175,19 +160,17 @@ Response:
         }
       ]
     }
-  ],
-  "folder": [
-    "...same nodes, nested by containing workspace path..."
   ]
 }
 ```
 
 `rows` is the flat list, sent once so node references stay cheap: a node names its
 workspaces by `root`/`roots`, and the client joins them against `rows` by root.
-`isRepository` is true for a repository node (one whose `id` starts with
-`repo:`). A repository node's `root` is its main checkout when that checkout is
-itself registered, otherwise `null` — the same distinction `WorkspaceNode.row`
-carries today. Three rules visible from the example:
+`nodes` is the arrangement for the requested `group`. `isRepository` is true for
+a repository node (one whose `id` starts with `repo:`). A repository node's
+`root` is its main checkout when that checkout is itself registered, otherwise
+`null` — the same distinction `WorkspaceNode.row` carries today. Three rules
+visible from the example:
 
 1. **`root` may be `null`.** A repository node whose main checkout is not itself
    a registered workspace still stands for the group; its checkbox scope comes
@@ -224,7 +207,7 @@ rows → resolve repository roots → filter → `WorkspaceTree.Build` → map t
   `FolderNodes`, `BuildFolder`, `CreateLeaf`, `CreateRepository`,
   `RepositoryGroups`, `NearestContainer`, `PathKey`, `NameOf`, `IsAncestor`).
   What survives in `MemoryWorkspaceTree` is presentation only: `FlattenVisible`,
-  `CaptureExpansion`, `RestoreExpansion`, `RefreshAggregates`.
+  `ApplyExpansion`, `RefreshAggregates`.
 
 ### 8.4 Client behaviour
 
@@ -232,25 +215,46 @@ The mode toggle remains a client preference (`useWorkspaceGroupMode` localStorag
 `DesktopSettingsStore`), because it is a person's reading choice, not a fact about
 the machine. Only the tree moves to the server.
 
-Because the response carries all three arrangements, a mode change is a pure
-client-side lookup (`trees[mode]`) with no request, no cache, and no flicker. The
-response is held once and invalidated only when the workspace set changes (SSE
-`runtimes` event, or an explicit reload), so a stale tree can never outlive its
-rows.
+A mode change is a fresh `?group=…` request for that mode — that is the point of
+approach A: every tree the client renders is a current, authoritative server
+answer, so there is no per-mode cache to invalidate and no stale tree that can
+outlive its rows. The client never computes a tree; it only asks which
+arrangement to render and renders the `nodes` the server returns.
 
 This is not grouping: the client never decides what belongs under what; it only
-picks which pre-computed arrangement to render.
+picks which pre-computed arrangement to request.
 
-### 8.5 Consumers
+Two surfaces on the same page (the scope panel and the list beside it) ask for
+the same mode, so they share one request rather than issuing two; a mode switch
+is still a fresh request, because the mode changed.
+
+### 8.5 The tree's open/closed shape
+
+Which nodes the user opened and closed is a reading choice, like the mode, so it
+is remembered — and remembered in one place, so the desktop app and the
+dashboard show the same tree:
+
+- `GET/PUT /api/coordinator/workspaces/expanded` carries
+  `{ expanded: string[], collapsed: string[] }` — node ids the user explicitly
+  opened and closed. A node nobody touched keeps the default for its kind (a
+  repository with several checkouts starts open).
+- `Eling.Core/Workspaces/WorkspaceExpansionStore.cs` owns the file, under the
+  user's config directory. The backend is the only writer, so there is exactly
+  one copy.
+- Both clients read it on load and write it after a toggle. A failed read keeps
+  the shape already in memory rather than pretending the user closed
+  everything.
+
+### 8.6 Consumers
 
 | Consumer | Change |
 |---|---|
-| `use-workspace-rows.ts` | fetches `.../workspaces?group=…`, exposes `rows` + `tree`, keeps the per-mode cache |
-| `workspace-tree.tsx` | renders the `tree` it is given; no `buildWorkspaceTree` call |
-| `workspace-scope-panel.tsx`, `workspace-select.tsx` | pass `tree` instead of `rows` + `mode` |
-| `CodebaseList.tsx`, `MemoriesList.tsx` | unchanged call site; the hook now returns a tree too |
-| `FoldersViewModel.cs` | `RebuildGroupedNodes` maps the API tree instead of calling `WorkspaceGrouping.Build`; filter changes trigger a debounced refetch |
-| `MainViewModel.cs` | `RefreshWorkspaceTree` maps the API tree instead of `MemoryWorkspaceTree.Build` |
+| `use-workspace-rows.ts` | fetches `.../workspaces?group=…` for the requested mode, exposes `rows` + `nodes`; one store per page, so two surfaces on the same mode share one request |
+| `workspace-tree.tsx` | renders the `nodes` it is given; no `buildWorkspaceTree` call; expansion comes from the shared store |
+| `workspace-scope-panel.tsx`, `workspace-select.tsx` | pass `nodes` instead of `rows` + `mode` |
+| `CodebaseList.tsx`, `MemoriesList.tsx` | unchanged call site; the hook now returns a node list too |
+| `FoldersViewModel.cs` | `RebuildGroupedNodes` maps the API `nodes` instead of calling `WorkspaceGrouping.Build`; a filter or mode change re-fetches |
+| `MainViewModel.cs` | maps the API `nodes` into the memory sidebar instead of `MemoryWorkspaceTree.Build`; reads and writes the shared expansion |
 
 ## 9. Testing
 
@@ -258,18 +262,22 @@ picks which pre-computed arrangement to render.
   worktree nesting, folder nesting by nearest container, a workspace outside any
   repository, mixed path casing and separators, and the no-registered-main-checkout
   case. These replace the current `MemoryWorkspaceTreeTests` coverage of `Build`.
+  The expansion store's round trip, de-duplication and corrupt-file handling are
+  covered here too.
 - `Eling.Backend.Tests`: the endpoint — mode selection, `status`/`q` filtering
   before grouping, `UserScope` and `codebaseEnabled: false` exclusion, and that a
   repository node reports `root: null` when its main checkout is not registered.
+  The expansion endpoints are covered as a round trip.
 - `Eling.Desktop.Tests`: keep flatten/expand/collapse tests against a tree parsed
   from a canned API response.
-- Dashboard: one test that a cached mode renders without a second fetch.
+- Dashboard: a test that a mode switch issues a fresh request, and that two
+  surfaces on the same mode share one.
 
 ## 10. Risks
 
 - **Debounced refetch on filter keystrokes.** The desktop Folders search now costs
-  a request per pause. Mitigated by a ~250 ms debounce and the per-mode cache;
-  accepted because the alternative is client-side set logic.
+  a request per pause. Mitigated by a ~150 ms debounce; accepted because the
+  alternative is client-side set logic.
 - **Contract drift if a client keeps a fallback path.** Guarded by deleting the
   client implementations outright rather than leaving them unused.
 - **`GitRepositoryResolver` per row remains the dominant cost** of this endpoint
@@ -284,29 +292,37 @@ picks which pre-computed arrangement to render.
 - Metrics and codebase statistics left out of the payload (section 4).
 - Default mode `repo`, matching both clients' current default.
 
-## 12. Deviations recorded at implementation
+## 12. Implementation notes
 
-The endpoint as shipped is `GET /api/coordinator/workspaces?status=…&q=…` —
-**no `group` parameter**. The response carries `rows` plus all three
-arrangements (`flat`, `repo`, `folder`) in one payload, exactly as section 8.1
-describes, rather than one arrangement per request. This is the "approach B"
-option from section 7: switching the view is a client-side lookup
-(`trees[mode]`) with no request, so no client keeps a per-mode cache. The
-deviation is recorded here because section 7 lists it as the rejected option,
-but the final design (section 8.1) is authoritative and that is what both
-clients implement.
+The endpoint ships as `GET /api/coordinator/workspaces?group=flat|repo|folder&status=…&q=…`
+— **approach A** from section 7. One arrangement per request, selected by the
+`group` parameter; the response carries `rows` plus that single arrangement as
+`nodes`. Switching mode is a fresh request, so no client keeps a per-mode cache
+and no tree can outlive its rows.
 
 Concrete implementation notes:
 
-- The wire contract is `{ rows, flat, repo, folder }`; node shape
+- The wire contract is `{ rows, group, nodes }`; node shape
   `{ id, label, path, root, alive, roots[], isRepository, isWorktree,
   children[] }`; row shape `{ root, name, repositoryRoot, alive,
   processCount }`. `processCount` counts live processes only, so a
   remembered workspace whose process has exited reports `0`.
-- The dashboard's `useWorkspaceRows` / `useWorkspaceTrees` share one module
-  cache, so a page that renders both a scope panel and the list beside it
-  issues a single request and the tree can never disagree with the rows.
-- The desktop `MainViewModel` caches the last good response in a `_trees`
-  field and rebuilds the memory sidebar synchronously from it on a mode
-  toggle; the Folders page refetches through `GetWorkspaceTreesAsync` on a
-  filter change, debounced ~150 ms.
+- The dashboard's `useWorkspaceTrees(mode)` issues one request per mode. One
+  store per page holds the current answer, so a scope panel and the list beside
+  it that share a mode share one request. The store remembers which mode the
+  page is asking for and stamps each request with a per-mode generation, so an
+  answer for a mode the reader already left — or a superseded answer for the
+  same mode — is dropped rather than rendered under the wrong arrangement.
+- The desktop `MainViewModel` keeps the last good response in a `_trees` field
+  and rebuilds the memory sidebar from it; a mode toggle re-fetches, and a
+  superseded request is cancelled so it can never overwrite the new answer.
+  The Folders page refetches through `GetWorkspaceTreesAsync(group, status, q)`
+  on a filter change, debounced ~150 ms.
+- The tree's open/closed shape lives in the backend
+  (`GET/PUT /api/coordinator/workspaces/expanded`, section 8.5). Both clients
+  read it when they load the tree and again on a runtime refresh, and write it
+  after a toggle — a toggle is never followed by a re-read, so a failed write
+  cannot be overwritten by the copy it failed to update.
+- All wire examples in this document and in the Core tree tests use dummy
+  paths (`/work/org/alpha`, `/work/org/beta`, …) and neutral names — no real
+  machine paths or repository names.

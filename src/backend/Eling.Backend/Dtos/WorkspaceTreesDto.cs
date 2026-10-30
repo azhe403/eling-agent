@@ -1,18 +1,24 @@
 namespace Eling.Backend.Dtos;
 
 /// <summary>
-/// The workspace list, pre-arranged in all three view modes, so a client
-/// switch never costs a request and neither client keeps a per-mode cache.
+/// The workspace list, pre-arranged for ONE view mode at a time. The client
+/// picks a mode (<c>flat</c>, <c>repo</c>, or <c>folder</c>) and receives the
+/// rows plus that single arrangement, so switching mode is a fresh request —
+/// never client-side grouping.
 /// </summary>
 /// <remarks>
-/// All three arrangements describe the same <see cref="Rows"/>. A client picks
-/// one and renders it; none of them derives grouping from the rows itself.
+/// <see cref="Rows"/> is the flat, deduplicated list; <see cref="Nodes"/> is
+/// the tree for the requested mode. A client renders <see cref="Nodes"/> and
+/// joins them against <see cref="Rows"/> by root; it never derives grouping
+/// from the rows itself.
 /// </remarks>
+/// <param name="Rows">The deduplicated workspaces the arrangement was built from.</param>
+/// <param name="Group">The mode that was honoured: <c>flat</c>, <c>repo</c>, or <c>folder</c>.</param>
+/// <param name="Nodes">The arrangement for <paramref name="Group"/>.</param>
 public sealed record WorkspaceTreesDto(
     IReadOnlyList<WorkspaceTreeRowDto> Rows,
-    IReadOnlyList<WorkspaceTreeNodeDto> Flat,
-    IReadOnlyList<WorkspaceTreeNodeDto> Repo,
-    IReadOnlyList<WorkspaceTreeNodeDto> Folder);
+    string Group,
+    IReadOnlyList<WorkspaceTreeNodeDto> Nodes);
 
 /// <summary>
 /// One deduplicated workspace, as the list needs it before grouping.
@@ -46,6 +52,7 @@ public sealed record WorkspaceTreeRowDto(
 /// The workspace this node stands for, or null when the node is a repository
 /// with no registered main checkout.
 /// </param>
+/// <param name="Alive">True when any workspace this node covers has a running process.</param>
 /// <param name="Roots">
 /// Every workspace root this node covers — the checkbox scope. A repository
 /// node covers its worktrees, so ticking it ticks all of them.
@@ -63,3 +70,13 @@ public sealed record WorkspaceTreeNodeDto(
     bool IsRepository,
     bool IsWorktree,
     IReadOnlyList<WorkspaceTreeNodeDto> Children);
+
+/// <summary>
+/// The workspace tree's open/closed shape, shared by the desktop app and the
+/// dashboard so both render the same tree.
+/// </summary>
+/// <param name="Expanded">Node ids the user explicitly opened.</param>
+/// <param name="Collapsed">Node ids the user explicitly closed.</param>
+public sealed record WorkspaceExpansionDto(
+    IReadOnlyList<string> Expanded,
+    IReadOnlyList<string> Collapsed);

@@ -1,7 +1,7 @@
 # Dashboard ↔ Desktop Parity
 
-**Date:** 2026-10-23
-**Status:** Draft — traceability doc for parity planning
+**Date:** 2026-10-24
+**Status:** Draft — traceability doc for parity planning (refreshed)
 **Scope:** `src/frontend/Eling.Dashboard` (Next.js) vs `src/desktop/Eling.Desktop` (Avalonia)
 
 ## 1. Roles (clarified)
@@ -15,11 +15,11 @@ Both share the same backend API. Target: **1:1 feature parity**, with Desktop ad
 
 | Metric | Dashboard | Desktop |
 |---|---|---|
-| Build | ✓ (14 routes) | ✓ (1 warning: CS8602 in InlineFormattedTextBlock) |
+| Build | ✓ (next build) | ✓ (1 warning: CS8602 in InlineFormattedTextBlock) |
 | Tests | 2/2 pass (vitest) — minimal coverage | 95/95 pass (xunit) |
-| Lint | 0 errors, 6 warnings (react-hooks) — cleaned 2026-10-23 | n/a (.NET) |
-| Git status | 42 uncommitted changes (logs WIP) | clean |
-| Last commit | 2026-10-22 | 2026-10-20 |
+| Lint | 0 errors, 5 warnings (react-hooks) | n/a (.NET) |
+| Git status | 1 uncommitted change (backend ServerInstructions.cs) | clean |
+| Last commit | 2026-10-24 (workspace panel parity, db read cache, log viewer) | 2026-10-24 |
 
 ## 3. Feature matrix (target 1:1)
 
@@ -37,7 +37,7 @@ Both share the same backend API. Target: **1:1 feature parity**, with Desktop ad
 | Codebase search / viewer | ✓ | — | port → desktop |
 | Databases (schema / query) | ✓ | — | port → desktop |
 | Audit Trail | ✓ | — | port → desktop |
-| Logs (tail live) | WIP | — | port → desktop |
+| Logs (tail live) | ✓ | — | port → desktop |
 | Judge | ✓ | — | port → desktop |
 | Tools catalog | ✓ | — | port → desktop |
 | Unit tests | 2 | 95 | dashboard needs coverage |
@@ -55,11 +55,14 @@ Both share the same backend API. Target: **1:1 feature parity**, with Desktop ad
 
 ## 5. Action plan (ordered)
 
-1. ~~Commit/benahi logs WIP + fix 3 lint errors in dashboard (`use-log-tail.ts`).~~ ✅ Done (0 errors, 6 warnings remain).
-2. Increase dashboard test coverage (currently 2 tests).
-3. Port memory-ops (promote/copy/host browse) to dashboard. (Settings/backend URL stays desktop-only.)
-4. Port observability (codebase/db/audit/logs/judge/tools) to desktop.
-5. Strengthen desktop code editor.
+1. ~~Commit/benahi logs WIP + fix lint errors in dashboard (`use-log-tail.ts`).~~ ✅ Done (0 errors, 5 warnings remain).
+2. ~~Workspace panel parity: desktop Folders now matches `/dashboard/workspaces`.~~ ✅ Done (commit f3a9c6b).
+3. ~~Memory workspace sidebar parity: desktop now matches the dashboard workspace tree (flat/repo/folder grouping, checkboxes, expand/collapse, worktree rows, live/offline status).~~ ✅ Done (6 new tests, 101 passing).
+4. ~~Workspace tree open/closed shape shared by both clients: one store behind `/api/coordinator/workspaces/expanded` (`{ expanded, collapsed }`), read on load and written on every toggle, so a node collapsed in one client is collapsed in the other.~~ ✅ Done (desktop 108 passing, backend 817, dashboard 35).
+5. Increase dashboard test coverage (currently 2 tests).
+6. Port memory-ops (promote/copy/host browse) to dashboard. (Settings/backend URL stays desktop-only.)
+7. Port observability (codebase/db/audit/logs/judge/tools) to desktop.
+8. Strengthen desktop code editor.
 
 ## 6. Traceability
 

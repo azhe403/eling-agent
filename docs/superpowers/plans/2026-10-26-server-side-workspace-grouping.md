@@ -4,7 +4,8 @@
 
 **Goal:** Make the coordinator the single owner of the workspace list's arrangement. Today three copies of the same grouping rules exist (`src/frontend/Eling.Dashboard/src/components/workspaces/grouping.ts`, `src/desktop/Eling.Desktop/Services/WorkspaceGrouping.cs`, `src/desktop/Eling.Desktop/Services/MemoryWorkspaceTree.cs`) and drift apart. After this plan the rules live once, in `Eling.Core`, and both clients render a tree the backend hands them.
 
-**Architecture:** `GET /api/coordinator/workspaces` returns the workspace rows plus **all three arrangements** (`flat`, `repo`, `folder`) in one response, so switching the view never costs a request and neither client needs a per-mode cache. The endpoint derives rows from `RuntimeRegistry` (the rules `workspaceRowsOf` and `MainViewModel.RefreshWorkspacesAsync` currently duplicate) and applies the `status`/`q` filter before grouping. Clients keep their view models and checkbox state; only the tree *shape* comes from the server. `WorkspaceGrouping.cs`, `MemoryWorkspaceTree.Build`, and `buildWorkspaceTree` are deleted.
+**Architecture:** `GET /api/coordinator/workspaces?group=flat|repo|folder` returns the workspace rows plus **the one arrangement asked for**, so every tree a client renders is a current answer and neither client needs a per-mode cache. The endpoint derives rows from `RuntimeRegistry` (the rules `workspaceRowsOf` and `MainViewModel.RefreshWorkspacesAsync` currently duplicate) and applies the `status`/`q` filter before grouping. Clients keep their view models and checkbox state; only the tree *shape* comes from the server. `WorkspaceGrouping.cs`, `MemoryWorkspaceTree.Build`, and `buildWorkspaceTree` are deleted. The tree's open/closed shape is served by `GET/PUT /api/coordinator/workspaces/expanded` (`{ expanded, collapsed }`) and shared by both clients.
+
 
 **Tech Stack:** .NET 10 (ASP.NET Core), `Eling.Core` (no dependencies), System.Text.Json, xUnit. Dashboard: Next.js 16, React 19, TypeScript. Desktop: Avalonia 12 + ReactiveUI.
 
@@ -114,7 +115,7 @@
   - `Rows_FallsBackToHeadScopeRoot` — `WorkspaceRoot` null → row root is `HeadScopeRoot`.
   - `Status_Active_FiltersOfflineWorkspaces` — one live, one remembered; `?status=active` returns one row and a repo tree with one member.
   - `Query_MatchesFolderNameAndProcessId` — `?q=` with a substring of the folder name, and separately the PID as a string.
-  - `Response_CarriesAllThreeArrangements` — `flat`, `repo`, `folder` all non-empty and consistent with `rows`.
+  - `Response_CarriesTheRequestedArrangement` — `?group=repo` returns `group: "repo"` and a `nodes` tree consistent with `rows`; `?group=flat` and `?group=folder` likewise.
   - `Status_Unknown_ReturnsBadRequest`
 
   Run: `dotnet test tests/Eling.Backend.Tests --filter FullyQualifiedName~WorkspaceTreeControllerTests` → 404s / compile errors.
@@ -124,6 +125,7 @@
   ```csharp
   [HttpGet("workspaces")]
   public async Task<ActionResult<WorkspaceTreesDto>> GetWorkspacesAsync(
+      [FromQuery] string? group = "repo",
       [FromQuery] string? status = "all",
       [FromQuery] string? q = null,
       CancellationToken cancellationToken = default)
@@ -157,15 +159,16 @@
 - Consumes: `GET /api/coordinator/workspaces`.
 - Produces:
   - `type WorkspaceTreeNode = { id, label, path, root: string | null, alive: boolean, roots: readonly string[], isRepository: boolean, isWorktree: boolean, children: readonly WorkspaceTreeNode[] }` — replaces `WorkspaceNode`, whose `row`/`group` of `WorkspaceRow` are gone.
-  - `fetchWorkspaceTrees(): Promise<WorkspaceTreesResponse>` in `runtime-rows.ts`, tolerant of missing fields like `fetchRuntimes`.
-  - `useWorkspaceTrees(): { rows, trees, error, reload }` and `useWorkspaceTree(mode): WorkspaceTreeNode[]` in `use-workspace-rows.ts`. Both read one module-level cache with in-flight de-duplication, so a page and a tree mounted together issue one request.
+  - `fetchWorkspaceTrees(group): Promise<WorkspaceTreesPayload>` in `runtime-rows.ts`, tolerant of missing fields like `fetchRuntimes`; it sends `?group=…` and reads back `rows` + `nodes`.
+  - `useWorkspaceTrees(mode): { rows, nodes, error, reload }` and `useWorkspaceRows(): { rows, error, reload }` in `use-workspace-rows.ts`. Both read one module-level store with in-flight de-duplication, so a page and a tree mounted together on the same mode issue one request; a mode switch is a fresh request.
+  - `useWorkspaceExpansion()` in `use-workspace-expansion.ts` — the shared `{ expanded, collapsed }` shape, read from `/api/coordinator/workspaces/expanded` on mount and written on every toggle.
   - `WorkspaceTree` takes no `rows` prop any more: it calls `useWorkspaceTrees()` + `useWorkspaceGroupMode()` itself.
 
 - [ ] **Step 1: Add the payload type and fetch** in `runtime-rows.ts` next to `fetchRuntimes`. Reuse the same defensive reading (`?? null`, `Array.isArray`).
 
 - [ ] **Step 2: Reduce `grouping.ts` to types.** Delete `pathKey`, `isAncestor`, `repositoryKey`, `repositoryGroups`, `workspaceNode`, `repositoryNode`, `byLabel`, `flatNodes`, `repositoryNodes`, `folderNodes`, `buildWorkspaceTree`. Keep `WorkspaceGroupMode`, the node type, and a `workspaceTreesOf(response)` mapper that picks `flat`/`repo`/`folder`. Rewrite the file header: the arrangement now comes from the coordinator; this file only names its shape.
 
-- [ ] **Step 3: Extend the hook.** Keep `cachedRows`/`cachedError`, add `cachedTrees` and an `inFlight` promise so two mounts share one request. `useWorkspaceRows()` keeps its current signature (`{ rows, error, reload }`) so `MemoriesList.tsx` and `CodebaseList.tsx` need no change. `useWorkspaceTree(mode)` derives from the same state — no extra fetch, no refetch on mode change.
+- [ ] **Step 3: Extend the hook.** One module-level store per page, keyed by mode: `cachedAnswer`/`cachedError` plus an `inFlight` map, so two mounts on the same mode share one request and a mode change issues a fresh one. The store remembers which mode the page is asking for and stamps each request with a per-mode generation, so an answer for a mode the reader already left — or a superseded answer for the same mode — is dropped instead of rendered under the wrong arrangement. `useWorkspaceRows()` keeps its current signature (`{ rows, error, reload }`) so `MemoriesList.tsx` and `CodebaseList.tsx` need no change. `useWorkspaceTrees(mode)` reads the same store and also returns `nodes`.
 
 - [ ] **Step 4: Rewire `workspace-tree.tsx`.** Drop the `rows` and `mode` props' derivation: `const { trees } = useWorkspaceTrees()`, `const { mode } = useWorkspaceGroupMode()`, `const nodes = trees[mode]`. Then replace the row-shaped reads:
 
@@ -180,7 +183,7 @@
 
 - [ ] **Step 5: Update the two call sites.** `workspace-select.tsx` and `workspace-scope-panel.tsx` stop passing `rows`/`mode` into `WorkspaceTree`; they keep their own `rows` prop for `SingleSelect` and counts.
 
-- [ ] **Step 6: Verify.** `pnpm lint` and `pnpm build` in `src/frontend/Eling.Dashboard`. Then run the dev frontend on 4427 against the dev backend on 4417 and toggle all three modes on the memories and codebase pages: same tree as before, expansion defaults unchanged, ticking a repository ticks its worktrees, and the network panel shows one `workspaces` request per page load (not one per toggle).
+- [ ] **Step 6: Verify.** `pnpm lint` and `pnpm build` in `src/frontend/Eling.Dashboard`. Then run the dev frontend on 4427 against the dev backend on 4417 and toggle all three modes on the memories and codebase pages: same tree as before, expansion defaults unchanged, ticking a repository ticks its worktrees, and the network panel shows one `workspaces` request per mount and a fresh one per mode switch (not one per keystroke).
 
 - [ ] **Step 7: Commit.** `feat(dashboard): render the workspace tree from the coordinator`
 
@@ -199,13 +202,14 @@
 **Interfaces:**
 - Consumes: `GET api/coordinator/workspaces`, `Eling.Core.Workspaces.WorkspaceGroupMode`.
 - Produces:
-  - `record WorkspaceTreesDto(IReadOnlyList<WorkspaceTreeRowDto> Rows, IReadOnlyList<WorkspaceTreeNodeDto> Flat, IReadOnlyList<WorkspaceTreeNodeDto> Repo, IReadOnlyList<WorkspaceTreeNodeDto> Folder)` with `WorkspaceTreeNodeDto.Children` defaulting to `[]` when absent.
-  - `Task<WorkspaceTreesDto?> GetWorkspaceTreesAsync(string? status, string? q, CancellationToken ct = default)` on `ElingApiClient`, returning `null` on failure like its neighbours.
+  - `record WorkspaceTreesDto(IReadOnlyList<WorkspaceTreeRowDto> Rows, string Group, IReadOnlyList<WorkspaceTreeNodeDto> Nodes)` — one arrangement per response, named by `Group`; `WorkspaceTreeNodeDto.Children` defaults to `[]` when absent.
+  - `Task<WorkspaceTreesDto?> GetWorkspaceTreesAsync(string group, string? status, string? q, CancellationToken ct = default)` on `ElingApiClient`, returning `null` on failure like its neighbours.
+  - `Task<WorkspaceExpansionDto?> GetWorkspaceExpansionAsync(...)` / `Task SetWorkspaceExpansionAsync(WorkspaceExpansionDto, ...)` — the shared `{ expanded, collapsed }` shape.
   - `static class WorkspaceTreeMapper`:
-    - `List<WorkspaceNode> ToFolderNodes(IReadOnlyList<WorkspaceTreeNodeDto> nodes, Func<string, WorkspaceItemDto?> row)`
     - `List<MemoryWorkspaceNode> ToMemoryNodes(IReadOnlyList<WorkspaceTreeNodeDto> nodes, Func<string, WorkspaceItem?> row)`
+    - `List<WorkspaceNode> ToFolderNodes(IReadOnlyList<WorkspaceTreeNodeDto> nodes, Func<string, WorkspaceItem?> row)` — the Folders page's own mapper; the dashboard maps its nodes in `grouping.ts`.
     - Both preserve id, label, path, `IsRepository`, `IsWorktree`, child order; `Group` is the rows resolved through the lookup in `Roots` order (unresolvable roots are skipped, never invented); `MemoryWorkspaceNode` starts expanded when it is not a worktree and has more than one root, matching `MemoryWorkspaceTree.Build` today.
-  - `MemoryWorkspaceTree` keeps `FlattenVisible`, `CaptureExpansion`, `RestoreExpansion`, `RefreshAggregates`; `Build` and its private helpers are deleted.
+  - `MemoryWorkspaceTree` keeps `FlattenVisible`, `ApplyExpansion`, `RefreshAggregates`; `Build` and its private helpers are deleted. `ApplyExpansion` takes a `WorkspaceExpansionState` (explicit expanded/collapsed sets, defaults for untouched nodes) rather than a captured snapshot.
 
 - [ ] **Step 1: Write the failing tests** in `tests/Eling.Desktop.Tests/WorkspaceTreeMapperTests.cs`: repository node keeps its worktree child and group order; `Row` is the *same instance* the lookup returned (assert `Assert.Same`); an unknown root is skipped rather than added; a leaf starts collapsed and a multi-root repository starts expanded; flat mode preserves server order.
 
@@ -213,16 +217,15 @@
 
 - [ ] **Step 2: Implement** the DTOs, the client method, and the mapper.
 
-- [ ] **Step 3: Wire `MainViewModel`.** `RefreshWorkspacesAsync` fetches runtimes as today, then `GetWorkspaceTreesAsync(null, null)`, stores the response in a `_trees` field, and calls `RebuildWorkspaceNodes()`. `RebuildWorkspaceNodes` becomes synchronous over `_trees`:
+- [ ] **Step 3: Wire `MainViewModel`.** `RefreshWorkspacesAsync` fetches runtimes as today, then `GetWorkspaceTreesAsync(group)` for the current mode, stores the response in a `_trees` field, reads the shared expansion, and calls `RebuildWorkspaceNodes()`. `RebuildWorkspaceNodes` becomes synchronous over `_trees`:
 
   ```csharp
-  MemoryWorkspaceTree.CaptureExpansion(_workspaceRoots, _workspaceExpansion);
-  _workspaceRoots = WorkspaceTreeMapper.ToMemoryNodes(_trees[WorkspaceGroupMode], LookupWorkspace);
-  MemoryWorkspaceTree.RestoreExpansion(_workspaceRoots, _workspaceExpansion);
+  _workspaceRoots = _trees is null ? [] : WorkspaceTreeMapper.ToMemoryNodes(_trees.Nodes, LookupWorkspace);
+  MemoryWorkspaceTree.ApplyExpansion(_workspaceRoots, _workspaceExpansion);
   MemoryWorkspaceTree.RefreshAggregates(_workspaceRoots);
   ```
 
-  `WorkspaceGroupMode` becomes `Eling.Core.Workspaces.WorkspaceGroupMode`, so the mode setter keeps working without an async hop and no request is issued on a toggle. When the fetch fails, keep the last good `_trees` rather than blanking the sidebar.
+  `WorkspaceGroupMode` becomes `Eling.Core.Workspaces.WorkspaceGroupMode`. A mode change re-requests that mode's tree, cancelling any request still in flight so a slow old answer can never overwrite the new one. When the fetch fails, keep the last good `_trees` rather than blanking the sidebar. A toggle records the node in `WorkspaceExpansionState` and PUTs `{ expanded, collapsed }` to the shared endpoint.
 
 - [ ] **Step 4: Run green.** `dotnet test tests/Eling.Desktop.Tests`
 
@@ -239,16 +242,16 @@
 - Edit: `tests/Eling.Desktop.Tests/MemoryWorkspaceTreeTests.cs`
 
 **Interfaces:**
-- Consumes: `GetWorkspaceTreesAsync(status, q)`, `WorkspaceTreeMapper.ToFolderNodes`.
+- Consumes: `GetWorkspaceTreesAsync(group, status, q)`, `WorkspaceTreeMapper.ToFolderNodes`.
 - Produces: `FoldersViewModel` with no local grouping and no local filter predicate. `Workspaces` is the server's `Rows` joined to `_allWorkspaces`; `GroupedNodes` is the server's tree for the current mode.
 
-- [ ] **Step 1: Rewrite `MemoryWorkspaceTreeTests`.** Its `Build` cases are now covered by `WorkspaceTreeTests` in Core. Keep only `FlattenVisible`, `CaptureExpansion`/`RestoreExpansion`, and `RefreshAggregates`, constructing `MemoryWorkspaceNode`s directly through a small helper. Run: `dotnet test tests/Eling.Desktop.Tests` → red until `Build` is gone.
+- [ ] **Step 1: Rewrite `MemoryWorkspaceTreeTests`.** Its `Build` cases are now covered by `WorkspaceTreeTests` in Core. Keep only `FlattenVisible`, `ApplyExpansion`, and `RefreshAggregates`, constructing `MemoryWorkspaceNode`s directly through a small helper, and add a `WorkspaceExpansionStateTests` covering defaults, explicit choices and `Replace`. Run: `dotnet test tests/Eling.Desktop.Tests` → red until `Build` is gone.
 
 - [ ] **Step 2: Replace `ApplyFilter`.** Rename to `ApplyFilterAsync` with a `CancellationTokenSource` field: cancel the previous filter, wait ~150 ms (debounce), fetch, then on the UI thread rebuild `Workspaces` and `GroupedNodes`. `SearchQuery`/`FilterStatus` setters fire-and-forget it. `LoadAsync` awaits it after the aggregator runs.
 
   Join: `Workspaces` is filled from the response `Rows`, mapping each root to the matching `_allWorkspaces` item (ordinal-ignore-case); a root the aggregator does not know becomes a minimal `WorkspaceItemDto` from the row (`Root`, `IsRunning = Alive`) so nothing the server reports goes invisible. Counters keep coming from the aggregator over the unfiltered set.
 
-- [ ] **Step 3: Switch the mode type.** `FoldersViewModel` and `SettingsStore` use `Eling.Core.Workspaces.WorkspaceGroupMode`; a mode change re-maps `GroupedNodes` from the cached response with no request.
+- [ ] **Step 3: Switch the mode type.** `FoldersViewModel` and `SettingsStore` use `Eling.Core.Workspaces.WorkspaceGroupMode`; a mode change re-requests that mode's tree and re-maps `GroupedNodes` from the answer.
 
 - [ ] **Step 4: Delete `WorkspaceGrouping.cs`.** `grep -rn "WorkspaceGrouping" src/` must return only the settings-store migration note, if any.
 
@@ -275,6 +278,6 @@
 ## Self-Review
 
 - **Spec coverage:** design doc §2 (single owner) → Tasks 1–2; §3 (endpoint contract) → Task 2; §4 (dashboard) → Task 3; §5 (desktop) → Tasks 4–5; §6 (deletions) → Tasks 3.2, 4, 5.4; §7 (verification) → Task 6.
-- **Deviation:** the design's `group` parameter and per-mode client caches are replaced by one response carrying all three arrangements. Cheaper in client code, one request per filter change, no cache invalidation on toggle. Recorded in the design doc in Task 6.
+- **Deviation:** an earlier draft of this plan returned all three arrangements in one response. It ships instead as the design's single-arrangement request (`?group=…`): one tree per answer, so a mode switch is a fresh request and no client can render a tree that no longer matches its rows. Recorded in the design doc §12.
 - **Type consistency:** `WorkspaceTreeRow`/`WorkspaceTreeNode` (Core) → `WorkspaceTreeRowDto`/`WorkspaceTreeNodeDto` (Backend, Desktop) → `WorkspaceRow`/`WorkspaceTreeNode` (TS). Same field names on the wire; `root` is nullable everywhere the entry may not stand for a workspace.
 - **Out of scope:** folding `WorkspaceAggregator` into the endpoint (the counters and process metrics it computes are desktop-only and much larger than this change); `status`-based *sorting*; caching the response server-side.

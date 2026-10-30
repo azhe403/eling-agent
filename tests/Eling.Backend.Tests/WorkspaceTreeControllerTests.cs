@@ -45,6 +45,8 @@ public sealed class WorkspaceTreeControllerTests : IAsyncLifetime
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton(_registry);
         builder.Services.AddSingleton(new MemoryChangeBroadcaster());
+        builder.Services.AddSingleton(new Eling.Core.Workspaces.WorkspaceExpansionStore(
+            Path.Combine(_root, "workspace-expansion.json")));
         builder.Services
             .AddControllers()
             .AddApplicationPart(typeof(CoordinatorController).Assembly)
@@ -82,9 +84,9 @@ public sealed class WorkspaceTreeControllerTests : IAsyncLifetime
         StartTime = DateTimeOffset.UtcNow,
     };
 
-    private async Task<JsonElement[]> GetWorkspaces(string query = "")
+    private async Task<JsonElement[]> GetRows(string query = "")
     {
-        var path = $"/api/coordinator/workspaces{query}";
+        var path = $"/api/coordinator/workspaces?{query}";
         using var response = await _client.GetAsync(path, HttpCompletionOption.ResponseContentRead);
         var body = await response.Content.ReadAsStringAsync();
         if (response.StatusCode != HttpStatusCode.OK)
@@ -100,8 +102,21 @@ public sealed class WorkspaceTreeControllerTests : IAsyncLifetime
         return [.. roots];
     }
 
+    private async Task<JsonElement> GetNodes(string group, string extra = "")
+    {
+        var path = $"/api/coordinator/workspaces?group={group}{extra}";
+        using var response = await _client.GetAsync(path, HttpCompletionOption.ResponseContentRead);
+        var body = await response.Content.ReadAsStringAsync();
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            throw new InvalidOperationException($"{path} → {(int)response.StatusCode}: {body}");
+        }
+        using var doc = JsonDocument.Parse(body);
+        return doc.RootElement.GetProperty("nodes").Clone();
+    }
+
     [Fact]
-    public async Task Workspaces_ReturnsAllThreeTreesAndRows()
+    public async Task Workspaces_ReturnsRowsAndSingleNodeArrangement()
     {
         var live = Workspace("alpha");
         var closed = Workspace("beta");
@@ -109,22 +124,28 @@ public sealed class WorkspaceTreeControllerTests : IAsyncLifetime
         _registry.Register(Registration(closed, 802));
         _registry.Unregister(802);
 
+        var flat = await GetNodes("flat");
+        Assert.Equal(2, flat.EnumerateArray().Count());
+
+        var repo = await GetNodes("repo");
+        Assert.Equal(2, repo.EnumerateArray().Count());
+
+        var folder = await GetNodes("folder");
+        Assert.Equal(2, folder.EnumerateArray().Count());
+    }
+
+    [Fact]
+    public async Task Workspaces_MissingGroup_Returns400()
+    {
         using var response = await _client.GetAsync("/api/coordinator/workspaces");
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(body);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 
-        var rows = doc.RootElement.GetProperty("rows").EnumerateArray().ToList();
-        Assert.Equal(2, rows.Count);
-
-        var flat = doc.RootElement.GetProperty("flat").EnumerateArray().ToList();
-        Assert.Equal(2, flat.Count);
-
-        var repo = doc.RootElement.GetProperty("repo").EnumerateArray().ToList();
-        Assert.Equal(2, repo.Count);
-
-        var folder = doc.RootElement.GetProperty("folder").EnumerateArray().ToList();
-        Assert.Equal(2, folder.Count);
+    [Fact]
+    public async Task Workspaces_InvalidGroup_Returns400()
+    {
+        using var response = await _client.GetAsync("/api/coordinator/workspaces?group=bogus");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
@@ -140,13 +161,8 @@ public sealed class WorkspaceTreeControllerTests : IAsyncLifetime
             StartTime = DateTimeOffset.UtcNow,
         });
 
-        using var response = await _client.GetAsync("/api/coordinator/workspaces");
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(body);
-
-        var rows = doc.RootElement.GetProperty("rows");
-        Assert.Equal(0, rows.GetArrayLength());
+        var rows = await GetRows("group=flat");
+        Assert.Empty(rows);
     }
 
     [Fact]
@@ -163,13 +179,8 @@ public sealed class WorkspaceTreeControllerTests : IAsyncLifetime
             StartTime = DateTimeOffset.UtcNow,
         });
 
-        using var response = await _client.GetAsync("/api/coordinator/workspaces");
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(body);
-
-        var rows = doc.RootElement.GetProperty("rows");
-        Assert.Equal(0, rows.GetArrayLength());
+        var rows = await GetRows("group=flat");
+        Assert.Empty(rows);
     }
 
     [Fact]
@@ -181,14 +192,9 @@ public sealed class WorkspaceTreeControllerTests : IAsyncLifetime
         _registry.Register(Registration(closed, 832));
         _registry.Unregister(832);
 
-        using var response = await _client.GetAsync("/api/coordinator/workspaces?status=active");
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(body);
-
-        var rows = doc.RootElement.GetProperty("rows").EnumerateArray().ToList();
-        Assert.Single(rows);
-        Assert.Equal(live, rows[0].GetProperty("root").GetString());
+        var rows = await GetRows("group=flat&status=active");
+        var single = Assert.Single(rows);
+        Assert.Equal(live, single.GetProperty("root").GetString());
     }
 
     [Fact]
@@ -200,20 +206,15 @@ public sealed class WorkspaceTreeControllerTests : IAsyncLifetime
         _registry.Register(Registration(closed, 842));
         _registry.Unregister(842);
 
-        using var response = await _client.GetAsync("/api/coordinator/workspaces?status=offline");
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(body);
-
-        var rows = doc.RootElement.GetProperty("rows").EnumerateArray().ToList();
-        Assert.Single(rows);
-        Assert.Equal(closed, rows[0].GetProperty("root").GetString());
+        var rows = await GetRows("group=flat&status=offline");
+        var single = Assert.Single(rows);
+        Assert.Equal(closed, single.GetProperty("root").GetString());
     }
 
     [Fact]
     public async Task Workspaces_InvalidStatus_Returns400()
     {
-        using var response = await _client.GetAsync("/api/coordinator/workspaces?status=bogus");
+        using var response = await _client.GetAsync("/api/coordinator/workspaces?group=flat&status=bogus");
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
@@ -226,26 +227,14 @@ public sealed class WorkspaceTreeControllerTests : IAsyncLifetime
         _registry.Register(Registration(ws2, 902));
 
         // Match by name fragment.
-        using (var response = await _client.GetAsync("/api/coordinator/workspaces?q=alph"))
-        {
-            response.EnsureSuccessStatusCode();
-            var body = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(body);
-            var rows = doc.RootElement.GetProperty("rows").EnumerateArray().ToList();
-            Assert.Single(rows);
-            Assert.Equal(ws1, rows[0].GetProperty("root").GetString());
-        }
+        var byName = await GetRows("group=flat&q=alph");
+        var nameRow = Assert.Single(byName);
+        Assert.Equal(ws1, nameRow.GetProperty("root").GetString());
 
         // Match by PID.
-        using (var response = await _client.GetAsync("/api/coordinator/workspaces?q=902"))
-        {
-            response.EnsureSuccessStatusCode();
-            var body = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(body);
-            var rows = doc.RootElement.GetProperty("rows").EnumerateArray().ToList();
-            Assert.Single(rows);
-            Assert.Equal(ws2, rows[0].GetProperty("root").GetString());
-        }
+        var byPid = await GetRows("group=flat&q=902");
+        var pidRow = Assert.Single(byPid);
+        Assert.Equal(ws2, pidRow.GetProperty("root").GetString());
     }
 
     [Fact]
@@ -255,12 +244,7 @@ public sealed class WorkspaceTreeControllerTests : IAsyncLifetime
         _registry.Register(Registration(ws, 951));
         _registry.Register(Registration(ws, 952));
 
-        using var response = await _client.GetAsync("/api/coordinator/workspaces");
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(body);
-
-        var rows = doc.RootElement.GetProperty("rows").EnumerateArray().ToList();
+        var rows = await GetRows("group=flat");
         var row = Assert.Single(rows);
         Assert.Equal(ws, row.GetProperty("root").GetString());
         Assert.Equal(2, row.GetProperty("processCount").GetInt32());
@@ -274,13 +258,8 @@ public sealed class WorkspaceTreeControllerTests : IAsyncLifetime
         _registry.Register(Registration(zeta, 961));
         _registry.Register(Registration(alpha, 962));
 
-        using var response = await _client.GetAsync("/api/coordinator/workspaces");
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(body);
-
-        var flat = doc.RootElement.GetProperty("flat").EnumerateArray().ToList();
-        Assert.Equal(["alpha", "zeta"], flat.Select(n => n.GetProperty("label").GetString()));
+        var flat = await GetNodes("flat");
+        Assert.Equal(["alpha", "zeta"], flat.EnumerateArray().Select(n => n.GetProperty("label").GetString()));
     }
 
     [Fact]
@@ -292,13 +271,76 @@ public sealed class WorkspaceTreeControllerTests : IAsyncLifetime
         _registry.Register(Registration(mainWs, 971));
         _registry.Register(Registration(wtWs, 972));
 
-        using var response = await _client.GetAsync("/api/coordinator/workspaces");
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(body);
-
-        var repo = doc.RootElement.GetProperty("repo").EnumerateArray().ToList();
+        var repo = await GetNodes("repo");
         // Without a git repo, both are their own group; both are top-level.
-        Assert.Equal(2, repo.Count);
+        Assert.Equal(2, repo.EnumerateArray().Count());
+    }
+
+    [Fact]
+    public async Task Workspaces_RepoTree_RepositoryWithoutMainCheckoutHasNullRoot()
+    {
+        // A linked worktree whose main checkout is not registered: the resolver
+        // still finds the repository, but there is no row to stand for it, so the
+        // repository node has no root to select and clients join on its roots.
+        var main = Workspace("main");
+        var mainGit = Path.Combine(main, ".git");
+        var worktreeGit = Path.Combine(mainGit, "worktrees", "linked");
+        Directory.CreateDirectory(worktreeGit);
+        File.WriteAllText(Path.Combine(worktreeGit, "commondir"), "../..");
+
+        var linked = Workspace("linked");
+        File.WriteAllText(Path.Combine(linked, ".git"), $"gitdir: {worktreeGit}");
+
+        _registry.Register(Registration(linked, 981));
+
+        var nodes = await GetNodes("repo");
+        var repoNode = Assert.Single(nodes.EnumerateArray());
+        Assert.True(repoNode.GetProperty("isRepository").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, repoNode.GetProperty("root").ValueKind);
+        Assert.Contains(linked, repoNode.GetProperty("roots").EnumerateArray().Select(r => r.GetString()));
+    }
+
+    [Fact]
+    public async Task WorkspaceExpansion_EmptyStore_ReturnsEmptyLists()
+    {
+        using var response = await _client.GetAsync("/api/coordinator/workspaces/expanded");
+        response.EnsureSuccessStatusCode();
+        var dto = await response.Content.ReadFromJsonAsync<WorkspaceExpansionDto>(Json);
+
+        Assert.NotNull(dto);
+        Assert.Empty(dto!.Expanded);
+        Assert.Empty(dto.Collapsed);
+    }
+
+    [Fact]
+    public async Task WorkspaceExpansion_PutThenGet_RoundTripsExpandedAndCollapsed()
+    {
+        var payload = new WorkspaceExpansionDto(
+            ["repo:C:/work/main", "ws:C:/work/main"],
+            ["ws:C:/work/other"]);
+        using var put = await _client.PutAsJsonAsync("/api/coordinator/workspaces/expanded", payload, Json);
+        Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);
+
+        var dto = await _client.GetFromJsonAsync<WorkspaceExpansionDto>(
+            "/api/coordinator/workspaces/expanded", Json);
+
+        Assert.NotNull(dto);
+        Assert.Equal(payload.Expanded, dto!.Expanded);
+        Assert.Equal(payload.Collapsed, dto.Collapsed);
+    }
+
+    [Fact]
+    public async Task WorkspaceExpansion_Put_DropsDuplicateAndBlankIds()
+    {
+        var payload = new WorkspaceExpansionDto(
+            ["ws:a", "ws:a", "", "  ", "ws:b"],
+            []);
+        using var put = await _client.PutAsJsonAsync("/api/coordinator/workspaces/expanded", payload, Json);
+        Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);
+
+        var dto = await _client.GetFromJsonAsync<WorkspaceExpansionDto>(
+            "/api/coordinator/workspaces/expanded", Json);
+
+        Assert.Equal(["ws:a", "ws:b"], dto!.Expanded);
     }
 }

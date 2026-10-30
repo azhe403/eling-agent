@@ -16,6 +16,7 @@ using Eling.Core.Database;
 using Eling.Core.Memory;
 using Eling.Core.Projects;
 using Eling.Core.Scope;
+using Eling.Core.Workspaces;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,6 +48,12 @@ public static class DashboardServices
 
         services.TryAddSingleton<Services.ProjectScopeCatalog>();
         services.TryAddSingleton<Services.ProcessMetricsTracker>();
+
+        // The workspace tree's open/closed shape belongs to the user, not to one
+        // process: both the desktop app and the dashboard read and write it here.
+        services.TryAddSingleton(sp => new Eling.Core.Workspaces.WorkspaceExpansionStore(
+            Path.Combine(context.UserScope.ConfigDirectory, "workspace-expansion.json"),
+            sp.GetService<ILogger<WorkspaceExpansionStore>>()));
 
         if (shared != null)
         {

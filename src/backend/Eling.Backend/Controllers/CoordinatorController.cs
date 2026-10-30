@@ -4,6 +4,7 @@ using Eling.Backend.Services;
 using Eling.Core.Git;
 using Eling.Core.Runtime;
 using Eling.Core.Scope;
+using Eling.Core.Workspaces;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Eling.Backend.Controllers;
@@ -40,6 +41,7 @@ namespace Eling.Backend.Controllers;
 public sealed class CoordinatorController(
     RuntimeRegistry registry,
     MemoryChangeBroadcaster broadcaster,
+    WorkspaceExpansionStore expansionStore,
     ProcessMetricsTracker? metricsTracker = null) : ControllerBase
 {
     /// <summary>
@@ -56,6 +58,34 @@ public sealed class CoordinatorController(
     /// live process covers.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The workspace tree's open/closed shape, so the desktop app and the
+    /// dashboard render the same tree. A missing store answers with an empty
+    /// shape, which means "every node keeps its default".
+    /// </summary>
+    [HttpGet("workspaces/expanded")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<WorkspaceExpansionDto> GetWorkspaceExpansion()
+    {
+        var expansion = expansionStore.Load();
+        return Ok(new WorkspaceExpansionDto(expansion.Expanded, expansion.Collapsed));
+    }
+
+    /// <summary>
+    /// Replaces the workspace tree's open/closed shape. Both clients write here
+    /// after a toggle, so the other one picks the same shape up on its next
+    /// read. Answers <c>204</c> once the shape is stored.
+    /// </summary>
+    [HttpPut("workspaces/expanded")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public IActionResult SetWorkspaceExpansion([FromBody] WorkspaceExpansionDto request)
+    {
+        expansionStore.Save(new WorkspaceExpansion(
+            request.Expanded ?? [],
+            request.Collapsed ?? []));
+        return NoContent();
+    }
+
     [HttpGet("runtimes")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyCollection<RuntimeInfoDto>>> GetRuntimesAsync(
@@ -241,17 +271,31 @@ public sealed class CoordinatorController(
     }
 
     /// <summary>
-    /// The workspace list pre-arranged in all three view modes (flat, repo,
-    /// folder), so a client switch never costs a request.
+    /// The workspace list, arranged one way per request. <paramref name="group"/>
+    /// picks the arrangement (<c>flat</c>, <c>repo</c>, or <c>folder</c>) and the
+    /// answer carries the deduplicated rows plus that single arrangement, so
+    /// switching the view is a fresh request rather than a client-side regroup.
+    /// <para>
+    /// <paramref name="status"/> and <paramref name="q"/> filter before the
+    /// arrangement is built, so a filtered list is still a server-computed tree.
+    /// <paramref name="q"/> matches the workspace name, its root, or any owning
+    /// process id.
+    /// </para>
     /// </summary>
     [HttpGet("workspaces")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<WorkspaceTreesDto>> GetWorkspacesAsync(
+        [FromQuery] string? group,
         [FromQuery] string? status = null,
         [FromQuery] string? q = null,
         CancellationToken cancellationToken = default)
     {
+        if (!WorkspaceGroupModes.TryParse(group, out var mode))
+        {
+            return BadRequest(new { error = $"Invalid group value '{group}'. Expected 'flat', 'repo', or 'folder'." });
+        }
+
         var normalizedStatus = status?.Trim().ToLowerInvariant() ?? "all";
         if (normalizedStatus is not ("all" or "active" or "offline"))
         {
@@ -286,7 +330,7 @@ public sealed class CoordinatorController(
 
         var coreRows = rows.Select(r => new WorkspaceTreeRowDto(
             r.Root, r.Name, r.RepositoryRoot, r.Alive, r.ProcessCount)).ToList();
-        return Ok(WorkspaceTreeDtoMapper.Map(coreRows));
+        return Ok(WorkspaceTreeDtoMapper.Map(coreRows, mode));
     }
 
     private sealed record WorkspaceRow(

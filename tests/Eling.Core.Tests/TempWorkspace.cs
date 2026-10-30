@@ -17,6 +17,9 @@ internal sealed class TempWorkspace : IDisposable
         Directory.CreateDirectory(_root);
     }
 
+    /// <summary>The workspace root.</summary>
+    public string Root => _root;
+
     /// <summary>
     /// Creates a directory under the workspace root and returns its full path.
     /// </summary>

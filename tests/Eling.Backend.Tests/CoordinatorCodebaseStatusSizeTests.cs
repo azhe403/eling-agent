@@ -60,6 +60,8 @@ public sealed class CoordinatorCodebaseStatusSizeTests : IAsyncLifetime
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton(_registry);
         builder.Services.AddSingleton(new MemoryChangeBroadcaster());
+        builder.Services.AddSingleton(new Eling.Core.Workspaces.WorkspaceExpansionStore(
+            Path.Combine(_root, "workspace-expansion.json")));
         builder.Services
             .AddControllers()
             .AddApplicationPart(typeof(CoordinatorController).Assembly)

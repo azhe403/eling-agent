@@ -3,13 +3,15 @@ using Eling.Core.Workspaces;
 namespace Eling.Backend.Dtos;
 
 /// <summary>
-/// Turns the endpoint's rows into the three arrangements, by calling the one
-/// implementation in <see cref="WorkspaceTree"/>. Kept apart from the DTOs so
-/// the wire shape stays readable on its own.
+/// Turns the endpoint's rows into a single arrangement for the requested mode,
+/// by calling the one implementation in <see cref="WorkspaceTree"/>. Kept apart
+/// from the DTOs so the wire shape stays readable on its own.
 /// </summary>
-internal static class WorkspaceTreeDtoMapper
+public static class WorkspaceTreeDtoMapper
 {
-    public static WorkspaceTreesDto Map(IReadOnlyList<WorkspaceTreeRowDto> rows)
+    public static WorkspaceTreesDto Map(
+        IReadOnlyList<WorkspaceTreeRowDto> rows,
+        WorkspaceGroupMode mode)
     {
         var coreRows = rows
             .Select(r => new WorkspaceTreeRow(r.Root, r.Alive, r.RepositoryRoot))
@@ -17,9 +19,8 @@ internal static class WorkspaceTreeDtoMapper
 
         return new WorkspaceTreesDto(
             rows,
-            Arrange(coreRows, WorkspaceGroupMode.Flat),
-            Arrange(coreRows, WorkspaceGroupMode.Repo),
-            Arrange(coreRows, WorkspaceGroupMode.Folder));
+            mode.ToWireValue(),
+            Arrange(coreRows, mode));
     }
 
     private static List<WorkspaceTreeNodeDto> Arrange(
