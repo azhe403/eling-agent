@@ -123,19 +123,32 @@ function Stop-SmokeProcess {
 }
 
 try {
+    # Poll until the backend answers. A fixed sleep plus a single attempt made
+    # this flaky: a cold Release start has to open the runtime store, register
+    # itself and build the host before Kestrel binds 4317, and on a slower
+    # machine that is well past 15s. One attempt then reported "did not answer
+    # /health" for a backend that came up a few seconds later, failing pushes
+    # for reasons unrelated to the code being pushed.
     $health = $null
-    try {
-        Start-Sleep -Seconds 15
-        $response = Invoke-WebRequest -Uri "http://127.0.0.1:4317/health" -UseBasicParsing -TimeoutSec 3
-        $health = $response.Content
-    } catch {
-        $health = $null
+    $deadline = (Get-Date).AddSeconds(90)
+    $attempt = 0
+    while ((Get-Date) -lt $deadline) {
+        $attempt++
+        try {
+            $response = Invoke-WebRequest -Uri "http://127.0.0.1:4317/health" -UseBasicParsing -TimeoutSec 3
+            $health = $response.Content
+            break
+        } catch {
+            # Not up yet: expected while the host is still starting.
+            $health = $null
+            Start-Sleep -Milliseconds 500
+        }
     }
 
     if (-not $health) {
-        throw "Smoke test FAILED: dashboard did not answer /health."
+        throw "Smoke test FAILED: dashboard did not answer /health after 90s ($attempt attempts)."
     }
-    Write-Host "  health: $health"
+    Write-Host "  health: $health (after $attempt attempt(s))"
 
     Write-Host "== Smoke test: MCP memory read/write =="
     function Send-Mcp($object) {
