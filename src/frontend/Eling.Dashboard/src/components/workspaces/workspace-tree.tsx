@@ -1,12 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { ChevronRight, FolderGit2, GitBranch } from "lucide-react"
 
 import { cn } from "cn"
 import type { WorkspaceNode } from "./grouping"
 import { useWorkspaceTrees } from "./use-workspace-rows"
 import { useWorkspaceGroupMode } from "./use-workspace-group-mode"
+import { useWorkspaceExpansion } from "./use-workspace-expansion"
 import type { WorkspaceSelection } from "./selection"
 
 /**
@@ -16,9 +17,10 @@ import type { WorkspaceSelection } from "./selection"
  * repository, one entry per git repository with its worktrees nested under it;
  * and by folder, one entry per workspace nested by the folders that hold it.
  * The arrangement comes from the coordinator, so this component renders a
- * tree and never computes one; switching mode is a lookup on the same answer,
- * not a request. The selection underneath stays a flat list of workspace
- * roots, so grouping changes what the list looks like and nothing else.
+ * tree and never computes one; switching mode is a fresh request, because the
+ * server owns the arrangement. The selection underneath stays a flat list of
+ * workspace roots, so grouping changes what the list looks like and nothing
+ * else.
  */
 export function WorkspaceTree({
   selection,
@@ -29,14 +31,13 @@ export function WorkspaceTree({
   onSelectOnly: (root: string) => void
   onToggleRoots: (roots: readonly string[]) => void
 }) {
-  const { rows, trees } = useWorkspaceTrees()
   const { mode } = useWorkspaceGroupMode()
-  const nodes = trees[mode]
+  const { rows, nodes, error } = useWorkspaceTrees(mode)
   // Expansion is a user override on top of a default: a repository with
   // several checkouts starts open, because that grouping is the point of the
-  // mode; everything else starts closed until asked for.
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  // mode; everything else starts closed until asked for. The shape is shared
+  // with the desktop app through the coordinator's store.
+  const { expanded, collapsed, setOpen } = useWorkspaceExpansion()
   const included = useMemo(
     () =>
       selection.kind === "all"
@@ -45,22 +46,10 @@ export function WorkspaceTree({
     [rows, selection],
   )
 
-  const toggleOpen = (id: string, open: boolean) => {
-    if (open) {
-      setExpanded((prev) => new Set(prev).add(id))
-      setCollapsed((prev) => {
-        const next = new Set(prev)
-        next.delete(id)
-        return next
-      })
-      return
-    }
-    setCollapsed((prev) => new Set(prev).add(id))
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      next.delete(id)
-      return next
-    })
+  if (error !== null) {
+    return (
+      <p className="p-2 text-sm text-muted-foreground">{error}</p>
+    )
   }
 
   if (rows.length === 0) {
@@ -79,7 +68,7 @@ export function WorkspaceTree({
           included={included}
           expanded={expanded}
           collapsed={collapsed}
-          onToggleOpen={toggleOpen}
+          onToggleOpen={setOpen}
           onSelectOnly={onSelectOnly}
           onToggleRoots={onToggleRoots}
         />

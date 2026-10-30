@@ -1,10 +1,10 @@
 // The coordinator's workspace list, shaped for the shared workspace-list
-// surfaces. Mirrors GET /api/coordinator/workspaces.
+// surfaces. Mirrors GET /api/coordinator/workspaces?group=flat|repo|folder.
 //
-// The coordinator owns the arrangement: it answers with the deduplicated rows
-// AND the same list pre-arranged three ways (flat, by repository, by folder).
-// Nothing here groups anything — the client picks one arrangement and renders
-// it, so the dashboard and the desktop cannot drift apart again.
+// The coordinator owns the arrangement. The client asks for ONE mode at a
+// time via the `group` parameter and receives the deduplicated rows plus that
+// single arrangement, so switching the view is a fresh request — never
+// client-side grouping.
 //
 // The payload type is deliberately tolerant — every field past the root is
 // optional — because payloads from older binaries omit newer fields, and a
@@ -43,12 +43,14 @@ export type WorkspaceTreeNodePayload = {
   children?: readonly WorkspaceTreeNodePayload[] | null
 }
 
-/** The whole answer: the rows plus all three arrangements. */
+/** How the workspace list is arranged. */
+export type WorkspaceGroupMode = "flat" | "repo" | "folder"
+
+/** The answer for one arrangement: the rows plus that mode's tree. */
 export type WorkspaceTreesPayload = {
   rows?: readonly WorkspaceRowPayload[] | null
-  flat?: readonly WorkspaceTreeNodePayload[] | null
-  repo?: readonly WorkspaceTreeNodePayload[] | null
-  folder?: readonly WorkspaceTreeNodePayload[] | null
+  group?: string | null
+  nodes?: readonly WorkspaceTreeNodePayload[] | null
 }
 
 /** One row in a workspace list. */
@@ -65,8 +67,48 @@ export type WorkspaceRow = {
 // just asks for the list.
 export const WORKSPACE_TREES_URL = "/api/coordinator/workspaces"
 
-export async function fetchWorkspaceTrees(): Promise<WorkspaceTreesPayload> {
-  const res = await fetch(WORKSPACE_TREES_URL, { cache: "no-store" })
+export const WORKSPACE_EXPANDED_URL = "/api/coordinator/workspaces/expanded"
+
+/**
+ * The workspace tree's open/closed shape, as the backend stores it. Both the
+ * desktop app and the dashboard read and write this one document, so they
+ * render the same tree.
+ */
+export type WorkspaceExpansion = {
+  expanded: readonly string[]
+  collapsed: readonly string[]
+}
+
+export async function fetchWorkspaceExpansion(): Promise<WorkspaceExpansion> {
+  const res = await fetch(WORKSPACE_EXPANDED_URL, { cache: "no-store" })
+  if (!res.ok) throw new Error(`API returned ${res.status}`)
+  const data = (await res.json()) as
+    | { expanded?: readonly string[] | null; collapsed?: readonly string[] | null }
+    | null
+  return {
+    expanded: data?.expanded ?? [],
+    collapsed: data?.collapsed ?? [],
+  }
+}
+
+export async function saveWorkspaceExpansion(
+  expansion: WorkspaceExpansion,
+): Promise<void> {
+  const res = await fetch(WORKSPACE_EXPANDED_URL, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(expansion),
+  })
+  if (!res.ok) throw new Error(`API returned ${res.status}`)
+}
+
+export async function fetchWorkspaceTrees(
+  group: WorkspaceGroupMode,
+): Promise<WorkspaceTreesPayload> {
+  const res = await fetch(
+    `${WORKSPACE_TREES_URL}?group=${group}`,
+    { cache: "no-store" },
+  )
   if (!res.ok) throw new Error(`API returned ${res.status}`)
   const data = (await res.json()) as WorkspaceTreesPayload | null
   return data ?? {}
