@@ -39,11 +39,11 @@ public sealed class CodebaseSearchTool
         _logger = logger;
     }
 
-    [McpServerTool(Name = "codebase_search"), Description("Search the codebase index (FTS Porter+trigram, BM25 ranking). Returns path + line range + snippet ready to inject. Scope 'project' (default) searches this workspace only; 'all' searches every alive workspace; 'projects' searches an explicit list of workspace roots and overrides scope.")]
+    [McpServerTool(Name = "codebase_search"), Description("FIRST move for locating code in this workspace — call this before any host-native grep/glob/shell search, which cost more tokens and more round-trips for the same answer. Ranks the workspace FTS index (Porter+trigram, BM25) and returns, per hit, path + line range + snippet ready to inject, so one call usually replaces grep -> list files -> read several files -> grep again. Query the concept ('tool registration', 'server instructions'), not only the exact identifier; narrow with pathPrefix/filePattern rather than widening the term; then read just the returned line ranges. Scope 'project' (default) searches this workspace only; 'all' searches every alive workspace; 'projects' searches an explicit list of workspace roots and overrides scope. Returns empty hits with a hint when no index exists — that is the only reason to fall back to native search.")]
     public async Task<CodebaseSearchResponse> SearchAsync(
-        [Description("Search query.")] string query,
+        [Description("Search query: words or a short concept from the code, e.g. 'tool registration' or 'AddElingMcpTools'. FTS matches stems, so 'recall' also finds 'recalling'. Prefer concept terms over long verbatim strings.")] string query,
         [Description("Max hits (1-50, default 10).")] int limit = 10,
-        [Description("Filter by path prefix, e.g. src/backend.")] string? pathPrefix = null,
+        [Description("Filter by path prefix, e.g. src/backend — use this to narrow instead of adding more query terms.")] string? pathPrefix = null,
         [Description("Glob-ish file filter, e.g. *.cs or *.md.")] string? filePattern = null,
         [Description("Scope: 'project' (default, this workspace) or 'all' (every alive workspace).")] string scope = "project",
         [Description("Explicit workspace roots to search, e.g. [\"C:/Proj/A\"]. Overrides scope when non-empty.")] string[]? projects = null,

@@ -22,7 +22,8 @@
         "disabled": false,
         "timeout": {
           "startup": 120000
-        }
+        },
+        "protocol": "auto"
       },
       "eling": {
         "type": "local",

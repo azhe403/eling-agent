@@ -61,7 +61,7 @@ public sealed class FileSystemTools
         => Execute(() => JsonSerializer.Serialize(
             _fs.ListDirectory(path, recursive, Clamp(maxDepth, 0, 5), pattern, allowExternal), JsonOptions), nameof(ListDirectory));
 
-    [McpServerTool(Name = "glob"), Description("Search for files/directories under a base path matching a glob pattern. Supports *, ?, ** and [abc]; matches files and directories; symlinks are never expanded. Preferred for in-workspace file discovery (audited via telemetry). Sandboxed to project root unless allowExternal=true (default true, still capped). Prefer in-workspace use.")]
+    [McpServerTool(Name = "glob"), Description("List files/directories under a base path matching a glob pattern. Supports *, ?, ** and [abc]; matches files and directories; symlinks are never expanded. Use for file discovery when you already know the shape of the path ('src/**/*.csproj', 'tests/**/*.cs'); when you are hunting where a symbol or concept lives, codebase_search answers it in one call instead. Sandboxed to project root unless allowExternal=true (default true, still capped). Prefer in-workspace use.")]
     public string Glob(
         [Description("Absolute or project-relative root to search under.")] string basePath,
         [Description("Glob pattern matched against entry names, e.g. '**/*.cs'.")] string pattern,
@@ -194,7 +194,7 @@ public sealed class FileSystemTools
         [Description("Text to append (as-is, no newline added).")] string content)
         => Execute(() => JsonSerializer.Serialize(_fs.AppendFile(path, content), JsonOptions), nameof(AppendFile));
 
-    [McpServerTool(Name = "file_search"), Description("Search file contents under a base path. Literal substring by default, regex with useRegex=true. Skips binary and oversized files. Returns file, line number, and trimmed line per hit. Preferred for in-workspace content search (audited via telemetry). Sandboxed to project root unless allowExternal=true (default true, still capped). Prefer in-workspace use.")]
+    [McpServerTool(Name = "file_search"), Description("Search file contents under a base path. Literal substring by default, regex with useRegex=true. Skips binary and oversized files. Returns file, line number, and trimmed line per hit. Second choice after codebase_search: use this when you need an exact literal/regex match (a constant, a GUID, a config key, a regex SQLite FTS cannot express), not when you are locating where a feature lives — codebase_search returns ranked snippets with line ranges and costs far fewer tokens. Sandboxed to project root unless allowExternal=true (default true, still capped). Prefer in-workspace use.")]
     public string SearchFiles(
         [Description("Absolute or project-relative root to search under.")] string basePath,
         [Description("Substring or regex pattern to find.")] string pattern,
