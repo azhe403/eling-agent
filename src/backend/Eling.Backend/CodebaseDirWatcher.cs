@@ -20,7 +20,15 @@ namespace Eling.Backend;
 /// </summary>
 public sealed class CodebaseDirWatcher : IDisposable
 {
-    private static readonly TimeSpan DebounceWindow = TimeSpan.FromMilliseconds(500);
+    // WAL checkpoint and any read connection touching the -wal/-shm sidecars
+    // fire FileSystemWatcher.Changed on the .db file itself (Windows treats
+    // the sidecar writes as a LastWrite change on the parent .db). A 500 ms
+    // window is not enough to suppress the resulting burst when the dashboard
+    // polls: the next poll lands just after the debounce fires and a new
+    // frame arrives before the viewer has settled. 5000 ms suppresses the
+    // polling-driven loop; genuine bursts from a real rebuild (thousands of
+    // file writes) still coalesce into one broadcast, five seconds later.
+    private static readonly TimeSpan DebounceWindow = TimeSpan.FromSeconds(5);
 
     private readonly object _sync = new();
     private readonly MemoryChangeBroadcaster _broadcaster;
