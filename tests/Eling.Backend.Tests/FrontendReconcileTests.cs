@@ -16,7 +16,7 @@ public sealed class FrontendReconcileTests
     [Fact]
     public void Decide_WhenNothingListening_StartsFrontend()
     {
-        var action = FrontendReconcile.Decide(portListening: false, responding: false);
+        var action = FrontendReconcile.Decide(portListening: false, responding: false, starting: false);
 
         Assert.Equal(FrontendAction.Start, action);
     }
@@ -24,15 +24,43 @@ public sealed class FrontendReconcileTests
     [Fact]
     public void Decide_WhenListeningButNotResponding_RestartsFrontend()
     {
-        var action = FrontendReconcile.Decide(portListening: true, responding: false);
+        var action = FrontendReconcile.Decide(portListening: true, responding: false, starting: false);
 
         Assert.Equal(FrontendAction.Restart, action);
     }
 
     [Fact]
+    public void Decide_WhenListeningButNotResponding_DuringStartupGrace_LeavesFrontendAlone()
+    {
+        // Next.js binds 4427 before it can answer, so a fresh spawn is
+        // "listening but silent" for a while. Killing it there is what kept the
+        // dashboard from ever coming up.
+        var action = FrontendReconcile.Decide(portListening: true, responding: false, starting: true);
+
+        Assert.Equal(FrontendAction.None, action);
+    }
+
+    [Fact]
+    public void Decide_WhenNothingListening_DuringStartupGrace_DoesNotSpawnAgain()
+    {
+        // A second pnpm would race the first one into EADDRINUSE.
+        var action = FrontendReconcile.Decide(portListening: false, responding: false, starting: true);
+
+        Assert.Equal(FrontendAction.None, action);
+    }
+
+    [Fact]
+    public void Decide_WhenHealthy_DuringStartupGrace_LeavesFrontendAlone()
+    {
+        var action = FrontendReconcile.Decide(portListening: true, responding: true, starting: true);
+
+        Assert.Equal(FrontendAction.None, action);
+    }
+
+    [Fact]
     public void Decide_WhenListeningAndResponding_LeavesFrontendAlone()
     {
-        var action = FrontendReconcile.Decide(portListening: true, responding: true);
+        var action = FrontendReconcile.Decide(portListening: true, responding: true, starting: false);
 
         Assert.Equal(FrontendAction.None, action);
     }

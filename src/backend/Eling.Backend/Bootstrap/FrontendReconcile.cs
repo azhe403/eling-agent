@@ -28,13 +28,30 @@ internal static class FrontendReconcile
 
     /// <summary>
     /// A frontend that holds the port but does not answer is hung rather than
-    /// not yet started, so it has to be killed before being respawned.
+    /// not yet started, so it has to be killed before being respawned - unless
+    /// the loop itself spawned it moments ago.
     /// </summary>
-    public static FrontendAction Decide(bool portListening, bool responding) =>
+    /// <param name="starting">
+    /// True while a spawn of our own is still inside its startup grace period.
+    /// Next.js binds 4427 before it can answer anything and compiles routes on
+    /// demand, so "listening but silent" is the expected startup shape. Without
+    /// this the loop killed its own fresh spawn every few seconds and never let
+    /// a dashboard come up.
+    /// <para>
+    /// Also true when the port is still silent: a second <c>pnpm</c> would race
+    /// the first into EADDRINUSE, so a round inside the grace window decides
+    /// nothing at all rather than spawning a competitor. No default here on
+    /// purpose - every caller has to state which side of the grace window it
+    /// is on.
+    /// </para>
+    /// </param>
+    public static FrontendAction Decide(bool portListening, bool responding, bool starting) =>
         (portListening, responding) switch
         {
             (true, true) => FrontendAction.None,
+            (true, false) when starting => FrontendAction.None,
             (true, false) => FrontendAction.Restart,
+            _ when starting => FrontendAction.None,
             _ => FrontendAction.Start,
         };
 
