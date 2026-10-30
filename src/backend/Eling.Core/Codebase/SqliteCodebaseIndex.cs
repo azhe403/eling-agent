@@ -79,7 +79,15 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
         {
             DataSource = _dbPath,
             Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
+            // Shared cache is deliberately NOT used: with SQLite's in-process
+            // shared-cache mode, a read-only connection and a write connection
+            // to the same file share one pager, and the shared cache applies
+            // the most restrictive open mode to every writer — so a
+            // readOnly instance (the federated multi-project read path)
+            // poisons the owning writer with
+            // "attempt to write a readonly database". Concurrent access is
+            // already handled by WAL, so Private cache is the correct mode.
+            Cache = SqliteCacheMode.Private,
         }.ToString();
     }
 
