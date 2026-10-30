@@ -138,8 +138,6 @@ public sealed class DesktopSettingsStore(ILogger<DesktopSettingsStore> logger)
 
     private static string SettingsDirectory()
     {
-        // Project convention: all user config lives under ~/.config/eling.
-        // Honors ELING_USER_SCOPE like the backend (ProjectContext).
         var userScope = UserScope.Resolve(Environment.GetEnvironmentVariable("ELING_USER_SCOPE"));
         return userScope.ConfigDirectory;
     }

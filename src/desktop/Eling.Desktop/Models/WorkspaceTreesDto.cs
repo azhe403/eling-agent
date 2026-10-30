@@ -3,14 +3,13 @@ using System.Collections.Generic;
 namespace Eling.Desktop.Models;
 
 /// <summary>
-/// The workspace list, pre-arranged in all three view modes, as returned by
-/// GET /api/coordinator/workspaces.
+/// The workspace list, pre-arranged for ONE view mode, as returned by
+/// GET /api/coordinator/workspaces?group=flat|repo|folder.
 /// </summary>
 public sealed record WorkspaceTreesDto(
     IReadOnlyList<WorkspaceTreeRowDto> Rows,
-    IReadOnlyList<WorkspaceTreeNodeDto> Flat,
-    IReadOnlyList<WorkspaceTreeNodeDto> Repo,
-    IReadOnlyList<WorkspaceTreeNodeDto> Folder);
+    string Group,
+    IReadOnlyList<WorkspaceTreeNodeDto> Nodes);
 
 public sealed record WorkspaceTreeRowDto(
     string Root,

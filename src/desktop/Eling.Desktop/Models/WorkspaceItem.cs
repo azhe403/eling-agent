@@ -18,16 +18,37 @@ namespace Eling.Desktop.Models;
 public sealed class WorkspaceItem : ReactiveObject
 {
     private bool _isSelected;
+    private bool _isAlive;
 
-    public WorkspaceItem(string root, string dataDirectory)
+    public WorkspaceItem(string root, string dataDirectory, string? repositoryRoot = null)
     {
         Root = root;
         DataDirectory = dataDirectory;
+        RepositoryRoot = repositoryRoot;
     }
 
     public string Root { get; }
 
-    public string DataDirectory { get; }
+    public string? RepositoryRoot { get; private set; }
+
+    public string DataDirectory { get; private set; }
+
+    public bool IsAlive
+    {
+        get => _isAlive;
+        set => this.RaiseAndSetIfChanged(ref _isAlive, value);
+    }
+
+    public void UpdateRuntime(string dataDirectory, string? repositoryRoot, bool isAlive)
+    {
+        DataDirectory = dataDirectory;
+        if (!string.Equals(RepositoryRoot, repositoryRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            RepositoryRoot = repositoryRoot;
+            this.RaisePropertyChanged(nameof(RepositoryRoot));
+        }
+        IsAlive = isAlive;
+    }
 
     public string Name => Path.GetFileName(Root.TrimEnd('\\', '/')) is { Length: > 0 } n ? n : Root;
 

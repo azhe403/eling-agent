@@ -98,7 +98,9 @@ public class FoldersViewModel : ViewModelBase
         set
         {
             this.RaiseAndSetIfChanged(ref _groupMode, value);
-            RebuildGroupedNodes();
+            // A mode change is a fresh request for that mode's arrangement, so
+            // the rows are rebuilt from the same answer the tree is built from.
+            _ = ApplyFilterAsync(debounce: false);
         }
     }
 
@@ -241,8 +243,9 @@ public class FoldersViewModel : ViewModelBase
 
             var status = FilterStatus == "all" ? null : FilterStatus;
             var q = string.IsNullOrWhiteSpace(_searchQuery) ? null : _searchQuery.Trim();
+            var group = WorkspaceGroupModes.ToWireValue(_groupMode);
 
-            var trees = await _apiClient.GetWorkspaceTreesAsync(status, q, cts.Token);
+            var trees = await _apiClient.GetWorkspaceTreesAsync(group, status, q, cts.Token);
             if (cts.IsCancellationRequested || trees is null) return;
 
             _trees = trees;
@@ -305,14 +308,7 @@ public class FoldersViewModel : ViewModelBase
         GroupedNodes.Clear();
         if (_trees is null) return;
 
-        var nodes = GroupMode switch
-        {
-            WorkspaceGroupMode.Flat => _trees.Flat,
-            WorkspaceGroupMode.Folder => _trees.Folder,
-            _ => _trees.Repo
-        };
-
-        foreach (var node in WorkspaceTreeMapper.ToFolderNodes(nodes, LookupWorkspace))
+        foreach (var node in WorkspaceTreeMapper.ToFolderNodes(_trees.Nodes, LookupWorkspace))
         {
             GroupedNodes.Add(node);
         }

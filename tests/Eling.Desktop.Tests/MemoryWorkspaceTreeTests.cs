@@ -53,23 +53,32 @@ public class MemoryWorkspaceTreeTests
     }
 
     [Fact]
-    public void CaptureAndRestoreExpansion_PreservesUserOverrides()
+    public void ApplyExpansion_ExplicitChoiceWins_AndDefaultSurvivesForUntouchedNodes()
     {
         var main = Workspace("repo", "repo");
         var worktree = Workspace("feature", "repo");
         var childNode = Leaf(worktree, isWorktree: true);
         var repo = RepoNode("repo", main, [main, worktree], [childNode], isExpanded: true);
 
-        var state = new Dictionary<string, bool>();
-        repo.IsExpanded = false;
-        MemoryWorkspaceTree.CaptureExpansion([repo], state);
+        // The user closed the repository; the child keeps its own default.
+        var state = new WorkspaceExpansionState(expanded: [], collapsed: ["repo:repo"]);
+        MemoryWorkspaceTree.ApplyExpansion([repo], state);
 
-        var freshChild = Leaf(worktree, isWorktree: true);
-        var fresh = RepoNode("repo", main, [main, worktree], [freshChild], isExpanded: true);
-        Assert.True(fresh.IsExpanded);
+        Assert.False(repo.IsExpanded);
+        Assert.False(childNode.IsExpanded);
+    }
 
-        MemoryWorkspaceTree.RestoreExpansion([fresh], state);
-        Assert.False(fresh.IsExpanded);
+    [Fact]
+    public void ApplyExpansion_ExplicitOpen_OverridesTheDefault()
+    {
+        var main = Workspace("repo", "repo");
+        var childNode = Leaf(main, isWorktree: false);
+        var repo = RepoNode("repo", main, [main], [childNode], isExpanded: false);
+
+        var state = new WorkspaceExpansionState(expanded: ["repo:repo"], collapsed: []);
+        MemoryWorkspaceTree.ApplyExpansion([repo], state);
+
+        Assert.True(repo.IsExpanded);
     }
 
     [Fact]

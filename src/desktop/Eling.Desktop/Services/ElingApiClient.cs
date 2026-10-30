@@ -317,6 +317,7 @@ public sealed class ElingApiClient
     }
 
     public async Task<WorkspaceTreesDto?> GetWorkspaceTreesAsync(
+        string group,
         string? status = null,
         string? q = null,
         CancellationToken cancellationToken = default)
@@ -324,12 +325,10 @@ public sealed class ElingApiClient
         try
         {
             using var client = GetClient();
-            var query = new List<string>();
+            var query = new List<string> { $"group={Uri.EscapeDataString(group.Trim().ToLowerInvariant())}" };
             if (!string.IsNullOrWhiteSpace(status)) query.Add($"status={Uri.EscapeDataString(status.Trim())}");
             if (!string.IsNullOrWhiteSpace(q)) query.Add($"q={Uri.EscapeDataString(q.Trim())}");
-            var url = query.Count > 0
-                ? $"api/coordinator/workspaces?{string.Join("&", query)}"
-                : "api/coordinator/workspaces";
+            var url = $"api/coordinator/workspaces?{string.Join("&", query)}";
 
             var response = await client.GetAsync(url, cancellationToken);
             if (response.IsSuccessStatusCode)
@@ -343,6 +342,54 @@ public sealed class ElingApiClient
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Reads the workspace tree's open/closed shape from the shared backend
+    /// store. Returns null when the backend cannot answer, so the caller can
+    /// keep whatever it already knows instead of treating a failure as "the
+    /// user closed everything".
+    /// </summary>
+    public async Task<WorkspaceExpansionDto?> GetWorkspaceExpansionAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var client = GetClient();
+            var response = await client.GetAsync("api/coordinator/workspaces/expanded", cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                return await response.Content.ReadFromJsonAsync<WorkspaceExpansionDto>(JsonOptions, cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error loading the workspace expansion");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Writes the workspace tree's open/closed shape to the shared backend
+    /// store, so the other client shows the same tree.
+    /// </summary>
+    public async Task SetWorkspaceExpansionAsync(
+        WorkspaceExpansionDto expansion,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var client = GetClient();
+            await client.PutAsJsonAsync(
+                "api/coordinator/workspaces/expanded",
+                expansion,
+                JsonOptions,
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error saving the workspace expansion");
+        }
     }
 
     public async Task<IReadOnlyList<ProjectCodebaseStatusDto>> GetProjectCodebaseStatusesAsync(CancellationToken cancellationToken = default)

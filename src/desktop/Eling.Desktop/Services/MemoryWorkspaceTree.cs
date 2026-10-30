@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using Eling.Desktop.Models;
 
@@ -18,25 +17,18 @@ public static class MemoryWorkspaceTree
         return Flatten(roots, 0).ToList();
     }
 
-    public static void CaptureExpansion(
+    /// <summary>
+    /// Applies the user's open/closed choices to a freshly mapped tree. A node
+    /// the user never touched keeps the default the mapper gave it.
+    /// </summary>
+    public static void ApplyExpansion(
         IEnumerable<MemoryWorkspaceNode> roots,
-        IDictionary<string, bool> state)
+        WorkspaceExpansionState state)
     {
         foreach (var node in roots)
         {
-            state[node.Id] = node.IsExpanded;
-            CaptureExpansion(node.Children, state);
-        }
-    }
-
-    public static void RestoreExpansion(
-        IEnumerable<MemoryWorkspaceNode> roots,
-        IReadOnlyDictionary<string, bool> state)
-    {
-        foreach (var node in roots)
-        {
-            if (state.TryGetValue(node.Id, out var expanded)) node.IsExpanded = expanded;
-            RestoreExpansion(node.Children, state);
+            node.IsExpanded = state.IsExpanded(node.Id, node.IsExpanded);
+            ApplyExpansion(node.Children, state);
         }
     }
 

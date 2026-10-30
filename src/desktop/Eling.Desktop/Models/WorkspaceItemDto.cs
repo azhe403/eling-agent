@@ -10,6 +10,7 @@ public sealed class WorkspaceItemDto : ReactiveObject
     private bool _isExpanded;
 
     public string Root { get; }
+    public string? RepositoryRoot { get; }
     public string Name { get; }
     public bool IsRunning { get; }
     public int ProcessCount { get; }
@@ -37,6 +38,7 @@ public sealed class WorkspaceItemDto : ReactiveObject
 
     public WorkspaceItemDto(
         string root,
+        string? repositoryRoot,
         string name,
         bool isRunning,
         int processCount,
@@ -55,6 +57,7 @@ public sealed class WorkspaceItemDto : ReactiveObject
         IReadOnlyList<WorkspaceProcessItem> processes)
     {
         Root = root;
+        RepositoryRoot = repositoryRoot;
         Name = name;
         IsRunning = isRunning;
         ProcessCount = processCount;

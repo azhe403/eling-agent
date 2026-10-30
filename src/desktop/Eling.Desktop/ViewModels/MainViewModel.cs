@@ -19,11 +19,12 @@ public class MainViewModel : ViewModelBase, IDisposable
     private readonly ILogger<MainViewModel> _logger;
     private readonly ILoggerFactory _loggerFactory;
     private readonly DesktopSettingsStore? _settingsStore;
-    private readonly Dictionary<string, bool> _workspaceExpansion = new(StringComparer.Ordinal);
+    private readonly WorkspaceExpansionState _workspaceExpansion = new();
     private List<MemoryWorkspaceNode> _workspaceRoots = [];
     private WorkspaceTreesDto? _trees;
     private SseClient? _sseClient;
     private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _workspaceTreesCts;
 
     private string _statusText = "Starting...";
     private bool _isLoading;
@@ -205,17 +206,17 @@ public class MainViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<MemoryWorkspaceNode, System.Reactive.Unit> ToggleWorkspaceGroupCommand { get; }
     public ReactiveCommand<MemoryWorkspaceNode, System.Reactive.Unit> ToggleWorkspaceExpansionCommand { get; }
 
-    private int _workspaceGroupMode = (int)WorkspaceGrouping.Mode.Repo;
+    private int _workspaceGroupMode = (int)Eling.Core.Workspaces.WorkspaceGroupMode.Repo;
     public int WorkspaceGroupMode
     {
         get => _workspaceGroupMode;
         set
         {
-            if (value < (int)WorkspaceGrouping.Mode.Flat || value > (int)WorkspaceGrouping.Mode.Folder) return;
+            if (value < (int)Eling.Core.Workspaces.WorkspaceGroupMode.Flat || value > (int)Eling.Core.Workspaces.WorkspaceGroupMode.Folder) return;
             if (_workspaceGroupMode == value) return;
             this.RaiseAndSetIfChanged(ref _workspaceGroupMode, value);
-            _settingsStore?.SetWorkspaceGroupMode((WorkspaceGrouping.Mode)value);
-            RebuildWorkspaceNodes();
+            _settingsStore?.SetWorkspaceGroupMode((Eling.Core.Workspaces.WorkspaceGroupMode)value);
+            _ = LoadWorkspaceTreesAsync();
         }
     }
 
@@ -273,7 +274,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         _logger = logger;
         _loggerFactory = loggerFactory;
         _settingsStore = settingsStore;
-        _workspaceGroupMode = (int)(_settingsStore?.GetWorkspaceGroupMode() ?? WorkspaceGrouping.Mode.Repo);
+        _workspaceGroupMode = (int)(_settingsStore?.GetWorkspaceGroupMode() ?? Eling.Core.Workspaces.WorkspaceGroupMode.Repo);
 
         RefreshCommand = ReactiveCommand.CreateFromTask(() => LoadMemoriesAsync());
         ClearSearchCommand = ReactiveCommand.Create(() => { SearchQuery = ""; });
@@ -295,13 +296,14 @@ public class MainViewModel : ViewModelBase, IDisposable
         ToggleWorkspaceGroupCommand = ReactiveCommand.Create<MemoryWorkspaceNode>(node =>
         {
             if (node is null) return;
-            ApplyWorkspaceSelection(() => MemoryWorkspaceSelection.ToggleGroup(Workspaces, node.Group));
+            ApplyWorkspaceSelection(() => MemoryWorkspaceSelection.ToggleGroup(node.Group));
         });
         ToggleWorkspaceExpansionCommand = ReactiveCommand.Create<MemoryWorkspaceNode>(node =>
         {
             if (node is null) return;
             node.IsExpanded = !node.IsExpanded;
-            _workspaceExpansion[node.Id] = node.IsExpanded;
+            _workspaceExpansion.Set(node.Id, node.IsExpanded);
+            _ = PersistWorkspaceExpansionAsync();
             RebuildVisibleWorkspaces();
         });
 
@@ -528,8 +530,10 @@ public class MainViewModel : ViewModelBase, IDisposable
                 present.Add(row.Root, row);
             }
 
-            var trees = await _apiClient.GetWorkspaceTreesAsync();
+            var trees = await LoadWorkspaceTreesCoreAsync();
             if (trees is not null) _trees = trees;
+
+            await LoadWorkspaceExpansionAsync();
 
             RebuildWorkspaceNodes();
         }
@@ -539,36 +543,85 @@ public class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Loads the tree for the current mode. Every mode switch is a fresh
+    /// request, so the rendered tree is always the server's current answer.
+    /// </summary>
+    private async Task<WorkspaceTreesDto?> LoadWorkspaceTreesCoreAsync()
+    {
+        var group = Eling.Core.Workspaces.WorkspaceGroupModes.ToWireValue((Eling.Core.Workspaces.WorkspaceGroupMode)WorkspaceGroupMode);
+        return await _apiClient.GetWorkspaceTreesAsync(group);
+    }
+
+    /// <summary>
+    /// Reads the workspace tree's open/closed shape from the shared backend
+    /// store, so the desktop and the dashboard show the same tree. A failed
+    /// read keeps the shape already in memory — the tree falls back to its
+    /// defaults rather than pretending the user closed everything.
+    /// </summary>
+    private async Task LoadWorkspaceExpansionAsync()
+    {
+        var expansion = await _apiClient.GetWorkspaceExpansionAsync();
+        if (expansion is null) return;
+
+        _workspaceExpansion.Replace(expansion.Expanded, expansion.Collapsed);
+    }
+
+    /// <summary>
+    /// Writes the workspace tree's open/closed shape to the shared backend
+    /// store, so the dashboard picks the same shape up.
+    /// </summary>
+    private async Task PersistWorkspaceExpansionAsync()
+    {
+        var (expanded, collapsed) = _workspaceExpansion.ToLists();
+        await _apiClient.SetWorkspaceExpansionAsync(
+            new WorkspaceExpansionDto(expanded, collapsed));
+    }
+
     private WorkspaceItem? LookupWorkspace(string root)
     {
         return Workspaces.FirstOrDefault(w => string.Equals(w.Root, root, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Loads the tree for the current mode. A mode switch is always a fresh
+    /// request; the previous request is cancelled so a slow answer for the old
+    /// mode can never replace the new one.
+    /// </summary>
+    private async Task LoadWorkspaceTreesAsync()
+    {
+        _workspaceTreesCts?.Cancel();
+        _workspaceTreesCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _workspaceTreesCts = cts;
+
+        try
+        {
+            var group = Eling.Core.Workspaces.WorkspaceGroupModes.ToWireValue((Eling.Core.Workspaces.WorkspaceGroupMode)WorkspaceGroupMode);
+            var trees = await _apiClient.GetWorkspaceTreesAsync(group, cancellationToken: cts.Token);
+            if (cts.IsCancellationRequested || trees is null) return;
+            _trees = trees;
+            RebuildWorkspaceNodes();
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer mode switch superseded this request.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load the workspace tree");
+        }
+    }
+
     private void RebuildWorkspaceNodes()
     {
-        if (_trees is not null)
-        {
-            var nodes = WorkspaceGroupMode switch
-            {
-                (int)Eling.Core.Workspaces.WorkspaceGroupMode.Flat => _trees.Flat,
-                (int)Eling.Core.Workspaces.WorkspaceGroupMode.Folder => _trees.Folder,
-                _ => _trees.Repo
-            };
+        _workspaceRoots = _trees is null
+            ? []
+            : WorkspaceTreeMapper.ToMemoryNodes(_trees.Nodes, LookupWorkspace);
 
-            MemoryWorkspaceTree.CaptureExpansion(_workspaceRoots, _workspaceExpansion);
-            _workspaceRoots = WorkspaceTreeMapper.ToMemoryNodes(nodes, LookupWorkspace);
-            MemoryWorkspaceTree.RestoreExpansion(_workspaceRoots, _workspaceExpansion);
-            MemoryWorkspaceTree.RefreshAggregates(_workspaceRoots);
-        }
-        else
-        {
-            MemoryWorkspaceTree.CaptureExpansion(_workspaceRoots, _workspaceExpansion);
-            _workspaceRoots = MemoryWorkspaceTree.Build(
-                Workspaces.ToList(),
-                (WorkspaceGrouping.Mode)WorkspaceGroupMode);
-            MemoryWorkspaceTree.RestoreExpansion(_workspaceRoots, _workspaceExpansion);
-            MemoryWorkspaceTree.RefreshAggregates(_workspaceRoots);
-        }
+        MemoryWorkspaceTree.ApplyExpansion(_workspaceRoots, _workspaceExpansion);
+        MemoryWorkspaceTree.RefreshAggregates(_workspaceRoots);
+
         RebuildVisibleWorkspaces();
         this.RaisePropertyChanged(nameof(HasNoWorkspaces));
     }

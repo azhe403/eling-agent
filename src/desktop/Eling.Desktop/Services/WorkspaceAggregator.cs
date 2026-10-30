@@ -112,8 +112,10 @@ public static class WorkspaceAggregator
             totalFiles += files;
             totalDbBytes += dbSize;
 
+            var repoRoot = rows.FirstOrDefault(r => !string.IsNullOrWhiteSpace(r.RepositoryRoot))?.RepositoryRoot;
             var item = new WorkspaceItemDto(
                 root,
+                repoRoot,
                 name,
                 isRunning,
                 liveRows.Count,
