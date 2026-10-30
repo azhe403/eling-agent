@@ -25,7 +25,7 @@ public sealed class CacheFileGateTests : IDisposable
         Directory.CreateDirectory(_dir);
         return new CacheFileGate(
             Path.Combine(_dir, $"{name}.json"),
-            $"Global\eling-test-gate-{name}-{Guid.NewGuid():N}",
+            $@"Global\eling-test-gate-{name}-{Guid.NewGuid():N}",
             null);
     }
 
@@ -94,7 +94,7 @@ public sealed class CacheFileGateTests : IDisposable
     public void TwoGatesWithTheSameName_SeeTheSameFile()
     {
         var name = "shared";
-        var lockName = $"Global\eling-test-gate-shared-{Guid.NewGuid():N}";
+        var lockName = $@"Global\eling-test-gate-shared-{Guid.NewGuid():N}";
         var first = new CacheFileGate(Path.Combine(_dir, $"{name}.json"), lockName, null);
         var second = new CacheFileGate(Path.Combine(_dir, $"{name}.json"), lockName, null);
 

@@ -15,7 +15,7 @@ namespace Eling.Core.Tests;
 /// </summary>
 public sealed class CacheFileLockTests
 {
-    private static string UniqueName(string prefix) => $"Global\eling-test-{prefix}-{Guid.NewGuid():N}";
+    private static string UniqueName(string prefix) => $@"Global\eling-test-{prefix}-{Guid.NewGuid():N}";
 
     [Fact]
     public void TwoLocksWithTheSameName_AreTheSameMutex()

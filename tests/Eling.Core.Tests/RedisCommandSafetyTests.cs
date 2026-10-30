@@ -176,11 +176,16 @@ public sealed class RedisCommandSafetyTests
     }
 
     [Fact]
-    public void Scan_IsNeverExecutedRaw_AsACommand()
+    public void Scan_IsAllowedByTheClassifier_ButNeverExecutedRaw()
     {
-        // SCAN appears in the whitelist so the dashboard can issue it, but
-        // the service rewrites every scan into its own cursor loop; the
-        // classifier allows it only as a read.
+        // SCAN appears in the whitelist so the console can issue it, but spec 6
+        // rule 6 says the service rewrites every scan into its own bounded
+        // paging loop. The classifier says "allowed" and that is the whole of
+        // its job; the rewrite lives in RedisKeyReadService.ExecuteCommandAsync,
+        // which returns before the raw ExecuteAsync whenever the command is
+        // SCAN. This test pins the classifier half only - it deliberately does
+        // NOT claim SCAN never reaches the server, because proving that needs
+        // the service, not the guard.
         var verdict = RedisCommandSafety.Classify("SCAN", ["0", "MATCH", "*"]);
         Assert.Equal(RedisVerdict.Allowed, verdict.Verdict);
     }

@@ -8,6 +8,9 @@ namespace Eling.Core.Database;
 
 public sealed class RedisKeyReadService : IRedisKeyReadService
 {
+    /// <summary>Spec 4.2's default page size, also the scan budget for a console SCAN.</summary>
+    private const int DefaultPageSize = 200;
+
     private readonly IRedisConnectionPool _pool;
     private readonly IRedisReadCache _cache;
     private readonly ILogger<RedisKeyReadService>? _logger;
@@ -428,6 +431,70 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
         return new KeyInspectPreview(type.ToString().ToLowerInvariant(), entries, truncated);
     }
 
+    /// <summary>
+    /// Answers a console <c>SCAN</c> from the service's own bounded paging path
+    /// (spec 6 rule 6) instead of executing it. The console may name a
+    /// <c>MATCH</c> pattern and a <c>COUNT</c>; the <c>COUNT</c> is ignored
+    /// because the page size is the budget, which is the whole point of not
+    /// running the command raw. A cursor argument is honoured so a multi-page
+    /// walk still works, but the reply carries the cursor to use next.
+    /// </summary>
+    private async Task<RedisCommandResult> ScanAsCommandAsync(
+        DatabaseConnection connection,
+        RedisDatabaseIndex database,
+        IReadOnlyList<string>? args,
+        CancellationToken ct)
+    {
+        long cursor = 0;
+        var pattern = string.Empty;
+
+        for (var i = 1; i < (args?.Count ?? 0); i++)
+        {
+            var arg = args![i];
+            if (arg.Equals("MATCH", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Count)
+            {
+                pattern = args[++i];
+            }
+            else if (arg.Equals("COUNT", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Count)
+            {
+                // Deliberately not read: the page size is the budget.
+                i++;
+            }
+            else if (i == 1 && long.TryParse(arg, out var parsedCursor))
+            {
+                cursor = parsedCursor;
+            }
+        }
+
+        // "user:*" and "user:" are the two shapes a console user types; the
+        // paging path takes a prefix and appends its own wildcard.
+        //
+        // The glob check runs BEFORE the service asks the pool for a
+        // connection. Validating after the await would make the refusal depend
+        // on the server being reachable, so a bad pattern would surface as a
+        // timeout instead of the message telling the caller where to go.
+        var prefix = pattern.TrimEnd('*');
+        if (prefix.Contains('?') || prefix.Contains('[') || (pattern.Contains('*') && !pattern.EndsWith('*')))
+            throw new ArgumentException("SCAN via the console supports a prefix pattern only; use the key tree for globs");
+
+        var page = await ScanAsync(connection, database, prefix, cursor, 0, DefaultPageSize, ct);
+
+        // Spec 5.2: these nodes are not a complete level, only the ones this
+        // one page's scan happened to cross - the rest arrive on a later page.
+        // Concatenating them with the identical segment from another page would
+        // list one folder twice.
+        var keys = new List<object?>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var leaf in page.Keys)
+        {
+            if (seen.Add(leaf.Key)) keys.Add(leaf.Key);
+        }
+
+        return new RedisCommandResult(
+            "scan",
+            new { cursor = page.Complete ? 0 : page.Cursor, keys, complete = page.Complete });
+    }
+
     public async Task<RedisCommandResult> ExecuteCommandAsync(
         DatabaseConnection connection, RedisDatabaseIndex database, string command, IReadOnlyList<string> args, CancellationToken ct = default)
     {
@@ -437,12 +504,26 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
             throw new ArgumentException(classification.Reason ?? "command not allowed");
         }
 
+        var cmd = command.Trim().ToUpperInvariant();
+
+        // Spec 6 rule 6: SCAN never runs raw through the console. Executed as
+        // written, "SCAN 0 COUNT 100000000" is a denial of service, and the
+        // cursor it returns is meaningless to a client that does not own the
+        // paging loop. It is answered from the service's own bounded scan
+        // instead, so the console gets a real page and cannot ask for more.
+        //
+        // This branch sits ahead of the pool lookup on purpose: below it, a bad
+        // MATCH pattern would ask for a connection first and surface the pool's
+        // failure instead of the message telling the caller where to go.
+        if (cmd == "SCAN")
+            return await ScanAsCommandAsync(connection, database, args, ct);
+
         var mux = await _pool.GetAsync(connection, ct);
         var server = GetServer(mux);
+
         EnsureStandalone(server);
 
         // INFO section restriction
-        var cmd = command.Trim().ToUpperInvariant();
         var execArgs = args?.ToList() ?? new List<string>();
         if (cmd == "INFO")
         {

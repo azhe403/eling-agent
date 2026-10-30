@@ -71,11 +71,17 @@ internal static class FrontendDevSpawner
     };
 
     /// <summary>
-    /// One loop per process. TrySpawn is called from inside the HTTP host's own
-    /// restart loop, so without this guard each restart would start another
-    /// reconcile loop and they would contend for port 4427.
+    /// The loop this process is running, or null when none is. Identity, not a
+    /// flag: <see cref="TrySpawn"/> is called from inside the HTTP host's own
+    /// restart loop, so two callers can overlap with the previous loop's exit.
+    /// A plain flag cannot say who owns it - the exiting loop would clear a flag
+    /// the new loop already set (starting a third loop), or clear its own flag
+    /// after the new caller had already been turned away (leaving none at all,
+    /// which is the silent auto-spawn disable this guard exists to prevent).
     /// </summary>
-    private static int _loopStarted;
+    private static Task? _loop;
+
+    private static readonly object LoopGate = new();
 
     /// <summary>
     /// State carried across rounds. A class rather than a struct because async
@@ -96,10 +102,19 @@ internal static class FrontendDevSpawner
         var repoRoot = DevModeDetector.FindRepoRootWithPnpm();
         if (repoRoot is null) return;
 
-        if (Interlocked.Exchange(ref _loopStarted, 1) == 1)
+        // Declared and constructed before the lock so the lambda below captures
+        // a non-null local: a nullable captured by a closure is a real way for
+        // this to NRE, and the compiler cannot prove the assignment happened.
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (LoopGate)
         {
-            logger.LogDebug("Frontend dev reconcile loop already running in this process; not starting another");
-            return;
+            if (_loop is { IsCompleted: false })
+            {
+                logger.LogDebug("Frontend dev reconcile loop already running in this process; not starting another");
+                return;
+            }
+
+            _loop = started.Task;
         }
 
         // CancellationToken.None for the scheduling call: a cancelled token
@@ -113,11 +128,16 @@ internal static class FrontendDevSpawner
             }
             finally
             {
-                // Release the guard when the loop exits. Without this a loop
-                // that ended for any reason switched auto-spawn off for the
-                // rest of the process's life: every later TrySpawn only logged
-                // "already running" and returned.
-                Interlocked.Exchange(ref _loopStarted, 0);
+                lock (LoopGate)
+                {
+                    // Only the loop that owns the slot may release it. Whoever
+                    // replaced us owns the slot now, and clearing it would hand
+                    // the same slot to a third loop while theirs still runs.
+                    if (ReferenceEquals(_loop, started.Task))
+                        _loop = null;
+                }
+
+                started.TrySetResult();
             }
         }, CancellationToken.None);
     }
@@ -177,11 +197,16 @@ internal static class FrontendDevSpawner
 
         if (action == FrontendAction.None)
         {
-            // Only a healthy round clears the backoff. A round that was left
-            // alone because our own spawn is still alive is not evidence of
-            // health, and resetting here would let a crashing spawn retry at
-            // full speed forever.
-            if (!childAlive)
+            // Only a healthy round clears the backoff. A round left alone only
+            // because our own spawn is still coming up is not evidence of
+            // health, and resetting there would let a crashing spawn retry at
+            // full speed forever. A round where the frontend answers - our own
+            // spawn or not - is the healthy case, and it must reset: without
+            // this, the counter climbed for the whole life of a correctly
+            // working process and the next restart waited the 60s ceiling.
+            if (listening && responding)
+                session.ConsecutiveFailures = 0;
+            else if (!childAlive)
                 session.ConsecutiveFailures = 0;
         }
         else
@@ -225,6 +250,11 @@ internal static class FrontendDevSpawner
             await WaitForPortFreeAsync(logger, cancellationToken);
         }
 
+        // A cancelled round must not spawn: StartFrontend runs on
+        // CancellationToken.None, so it would start a real pnpm while the
+        // process is shutting down.
+        cancellationToken.ThrowIfCancellationRequested();
+
         StartFrontend(session, repoRoot, backendPort, logger);
         session.ConsecutiveFailures++;
     }
@@ -233,6 +263,12 @@ internal static class FrontendDevSpawner
     /// Blocks until 4427 is released, so the replacement <c>next dev</c> does
     /// not race the process that was just killed into EADDRINUSE.
     /// </summary>
+    /// <remarks>
+    /// Cancelling does not mean "stop waiting, carry on": the caller spawns the
+    /// replacement next, and that spawn runs on <see cref="CancellationToken.None"/>.
+    /// Swallowing the cancellation here would start a real <c>pnpm</c> during
+    /// shutdown, so it is rethrown and the round ends instead.
+    /// </remarks>
     private static async Task WaitForPortFreeAsync(ILogger logger, CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow + PortFreeTimeout;
@@ -242,14 +278,7 @@ internal static class FrontendDevSpawner
             if (!await DevModeDetector.IsPortListeningAsync(FrontendPort, cancellationToken: cancellationToken))
                 return;
 
-            try
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
+            await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
         }
 
         logger.LogWarning(
