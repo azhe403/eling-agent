@@ -37,6 +37,14 @@ import { utcToLocal } from "@/lib/date-utils"
 import { formatBytes, formatMegabytes } from "@/lib/format"
 import { PathText } from "@/components/path-text"
 import { group, uptime, type RuntimeDto, type WorkspaceGroup } from "./aggregate"
+import {
+  DEFAULT_SORT,
+  SORT_COPY,
+  SORT_KEYS,
+  parseDirection,
+  parseSort,
+  sortWorkspaces,
+} from "./sorting"
 
 type CodebaseStatusDto = {
   files: number
@@ -75,6 +83,9 @@ function fileNameOf(path: string) {
 
 type FilterStatus = "all" | "active" | "offline"
 
+/** The URL keys the toolbar owns. Absent means the default view. */
+type ToolbarParam = "status" | "q" | "sort" | "dir"
+
 async function fetchWorkspacesAndStatuses() {
   // allProcesses: every live eling process, not the old single deduped row per
   // workspace — one folder can host several sessions at once. Grouping and the
@@ -108,9 +119,9 @@ export function WorkspacesList() {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [reindexingRoot, setReindexingRoot] = useState<string | null>(null)
-  // Filter and search live in the URL (?status=active&q=...), so a reload, a
-  // shared link, and the back button all land on the same view. Absent params
-  // mean the default view, which keeps shared URLs clean.
+  // Filter, search and order live in the URL (?status=active&q=...&sort=...), so
+  // a reload, a shared link, and the back button all land on the same view.
+  // Absent params mean the default view, which keeps shared URLs clean.
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -119,9 +130,11 @@ export function WorkspacesList() {
   const filter: FilterStatus =
     statusParam === "active" || statusParam === "offline" ? statusParam : "all"
   const query = searchParams.get("q") ?? ""
+  const sort = parseSort(searchParams.get("sort"))
+  const dir = parseDirection(searchParams.get("dir"))
 
   const setParam = useCallback(
-    (key: "status" | "q", value: string | null) => {
+    (key: ToolbarParam, value: string | null) => {
       const params = new URLSearchParams(searchParams.toString())
       if (value === null || value === "") params.delete(key)
       else params.set(key, value)
@@ -135,6 +148,15 @@ export function WorkspacesList() {
   const setFilter = useCallback(
     (f: FilterStatus) => setParam("status", f === "all" ? null : f),
     [setParam]
+  )
+  const setSort = useCallback(
+    (s: (typeof SORT_KEYS)[number]) =>
+      setParam("sort", s === DEFAULT_SORT ? null : s),
+    [setParam]
+  )
+  const toggleDir = useCallback(
+    () => setParam("dir", dir === "natural" ? "flipped" : null),
+    [setParam, dir]
   )
   const [error, setError] = useState<string | null>(null)
 
@@ -247,7 +269,7 @@ export function WorkspacesList() {
 
   const normalizedQuery = query.trim().toLowerCase()
   const filtered = useMemo(() => {
-    return groups.filter((g) => {
+    const matching = groups.filter((g) => {
       const name = workspaceName(g.root).toLowerCase()
       const matchesQuery =
         !normalizedQuery ||
@@ -261,7 +283,16 @@ export function WorkspacesList() {
       if (filter === "offline") return !g.running
       return true
     })
-  }, [groups, normalizedQuery, filter])
+    // The order is applied last, to what survives the filter: sorting the whole
+    // list first and filtering after would give the same rows, but this keeps
+    // the comparator's job to the rows that are actually on screen.
+    return sortWorkspaces(
+      matching,
+      sort,
+      dir,
+      (root) => statusMap[root.toLowerCase()]
+    )
+  }, [groups, normalizedQuery, filter, sort, dir, statusMap])
 
   const activeWorkspaces = groups.filter((g) => g.running).length
   // Processes, not rows: several sessions can share one workspace, and that
@@ -439,6 +470,58 @@ export function WorkspacesList() {
                   {s === "all" ? "All" : s === "active" ? "Active" : "Offline"}
                 </button>
               ))}
+            </div>
+
+            {/*
+              The order of the cards. Same segmented shape as the status
+              filter, because it is the same kind of answer — one of a small,
+              fixed set — and the two sit side by side as the toolbar's two
+              questions: which workspaces, and in what order.
+            */}
+            <div
+              className="flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 p-1"
+              role="group"
+              aria-label="Sort workspaces"
+            >
+              {SORT_KEYS.map((key) => (
+                <button
+                  key={key}
+                  onClick={() => setSort(key)}
+                  aria-pressed={sort === key}
+                  title={SORT_COPY[key].title}
+                  className={
+                    (sort === key
+                      ? "rounded-md bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm"
+                      : "rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground") +
+                    " whitespace-nowrap"
+                  }
+                >
+                  {SORT_COPY[key].label}
+                </button>
+              ))}
+              {/*
+                The direction of the chosen key: a small arrow that mirrors the
+                whole list when flipped, next to the key it acts on rather than
+                buried in the label it would rename six times.
+              */}
+              <button
+                type="button"
+                onClick={toggleDir}
+                aria-pressed={dir === "flipped"}
+                aria-label={
+                  dir === "flipped"
+                    ? "Reversed order — click to restore the natural order"
+                    : "Natural order — click to reverse it"
+                }
+                title={
+                  dir === "flipped"
+                    ? "Reversed — the natural order, mirrored"
+                    : "Natural order for the chosen key"
+                }
+                className="ml-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/50 bg-background text-xs font-medium text-foreground shadow-sm hover:bg-muted"
+              >
+                {dir === "flipped" ? "↓" : "↑"}
+              </button>
             </div>
           </div>
         </div>
