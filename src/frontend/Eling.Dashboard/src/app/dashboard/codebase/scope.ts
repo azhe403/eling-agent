@@ -19,6 +19,7 @@ import { selectAll } from "@/components/workspaces/selection"
 const PROJECT_PARAM = "project"
 const SEARCH_PARAM = "search"
 const QUERY_PARAM = "q"
+const TAB_PARAM = "tab"
 
 /**
  * What a codebase search matches the query against.
@@ -97,6 +98,17 @@ export function queryFromParams(params: URLSearchParams): string {
 export function queryParam(query: string): string {
   const trimmed = query.trim()
   return trimmed ? `${QUERY_PARAM}=${encodeURIComponent(trimmed)}` : ""
+}
+
+/** The active tab id, as the URL carries it. */
+export function tabFromParams(params: URLSearchParams): string | null {
+  return params.get(TAB_PARAM)?.trim() || null
+}
+
+/** The active tab id as a URL param. */
+export function tabParam(tabId: string): string {
+  const trimmed = tabId.trim()
+  return trimmed ? `${TAB_PARAM}=${encodeURIComponent(trimmed)}` : ""
 }
 
 /** The search scope in the URL. The default stays out of it, like the tier on the memories page. */

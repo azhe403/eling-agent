@@ -36,8 +36,17 @@ import {
   type FileResult,
 } from "./FileResultList"
 import type { SelectedFile } from "./fileDetailApi"
-import { readQuery, rememberQuery } from "./searchPrefs"
+import { rememberQuery } from "./searchPrefs"
 import { SearchScopeToggle } from "./SearchScopeToggle"
+import { SearchTabsBar } from "./SearchTabsBar"
+import {
+  createTab,
+  closeTab,
+  updateTab,
+  loadTabs,
+  saveTabs,
+  type SearchTab,
+} from "./searchTabs"
 import {
   rebuildUrl,
   queryFromParams,
@@ -48,6 +57,8 @@ import {
   selectionFromParams,
   selectionQuery,
   statusUrl,
+  tabFromParams,
+  tabParam,
   SEARCH_SCOPE_COPY,
   type SearchScope,
 } from "./scope"
@@ -133,37 +144,52 @@ export function CodebaseList() {
   const [results, setResults] = useState<CodebaseHit[]>([])
   const [fileResults, setFileResults] = useState<FileResult[]>([])
   const [searchError, setSearchError] = useState<string | null>(null)
-  // The URL query is the selection's source of truth: no project params means
-  // "all", otherwise the explicit root list, so reload, back/forward and shared
-  // links all land on the same scope the tiles and rebuild describe.
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
-  const selection = useMemo(
-    () => selectionFromParams(searchParams),
-    [searchParams]
+
+  const urlTabId = useMemo(() => tabFromParams(searchParams), [searchParams])
+  const [tabsState, setTabsState] = useState(() => {
+    const urlSelection = selectionFromParams(searchParams)
+    const urlScope = searchScopeFromParams(searchParams)
+    const urlQuery = queryFromParams(searchParams)
+    const loaded = loadTabs(urlQuery, urlScope, urlSelection)
+    if (urlTabId && loaded.tabs.some((t) => t.id === urlTabId)) {
+      return { tabs: loaded.tabs, activeId: urlTabId }
+    }
+    if (urlTabId) {
+      const newTab = createTab({
+        id: urlTabId,
+        query: urlQuery,
+        scope: urlScope,
+        selection: urlSelection,
+      })
+      return { tabs: [...loaded.tabs, newTab], activeId: newTab.id }
+    }
+    return loaded
+  })
+  const { tabs, activeId: activeTabId } = tabsState
+  const activeTab = useMemo(
+    () => tabs.find((t) => t.id === activeTabId) ?? tabs[0],
+    [tabs, activeTabId]
   )
-  // The search scope is the second piece of URL state on this page. It
-  // answers a different question: not which workspaces are read, but what
-  // the query is matched against — the file contents, the file's path, or
-  // the file's name.
-  const searchScope = useMemo(
-    () => searchScopeFromParams(searchParams),
-    [searchParams]
-  )
-  // The query comes from the URL, and a bare address — a fresh visit, or the
-  // sidebar link — falls back to the last query this browser ran, so the box
-  // is not empty every time. Read during the first render, like the
-  // selection and the scope: the page sits behind a Suspense boundary, so
-  // this subtree is client-rendered and the server never produced a
-  // different box to disagree with.
-  const [query, setQuery] = useState(
-    () => queryFromParams(searchParams) || readQuery()
-  )
-  // The query as it was when the last search went out. The URL carries this
-  // one, not the raw text: a request only goes out once the reader pauses,
-  // so the address bar should settle on the value that was actually
-  // searched.
+  const selection = activeTab.selection
+  const searchScope = activeTab.scope
+
+  // The query comes from the active tab.
+  const [query, setQuery] = useState(() => activeTab.query)
+
+  // Persist tab state whenever tabs or active tab changes, kept out of state updaters.
+  useEffect(() => {
+    saveTabs(tabsState.tabs, tabsState.activeId)
+  }, [tabsState])
+
+  // Tracks in-flight tab navigation initiated by user interaction to prevent
+  // the URL back/forward sync effect from reverting back to the old URL tab id
+  // before router.replace finishes updating searchParams.
+  const pendingNavTabId = useRef<string | null>(null)
+
+  // The query as it was when the last search went out.
   const [issuedQuery, setIssuedQuery] = useState("")
   const { rows, error: runtimesError, reload } = useWorkspaceRows()
   const allRoots = useMemo(() => rows.map((r) => r.root), [rows])
@@ -180,12 +206,15 @@ export function CodebaseList() {
   // the file keeps the scope, and a new query keeps the scope.
   const writeUrl = useCallback(
     (next: {
+      tab?: string
       selection: WorkspaceSelection
       scope: SearchScope
       query: string
       file: SelectedFile | null
     }) => {
+      const tabId = next.tab ?? activeTab.id
       const parts = [
+        tabParam(tabId),
         selectionQuery(next.selection),
         searchScopeQuery(next.scope),
         queryParam(next.query),
@@ -194,30 +223,38 @@ export function CodebaseList() {
       const qs = parts.join("&")
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
     },
-    [pathname, router]
+    [pathname, router, activeTab.id]
   )
   // Selection changes flip the skeleton on right in the event handler — before
   // the router round-trip — so tiles react to the click, not to the next commit.
   const applySelection = useCallback(
     (next: WorkspaceSelection) => {
       setStatusLoading(true)
+      setTabsState((prev) => {
+        const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
+        return {
+          ...prev,
+          tabs: updateTab(prev.tabs, { ...current, selection: next }),
+        }
+      })
       writeUrl({
+        tab: activeTab.id,
         selection: next,
         scope: searchScope,
         query,
         file: selectedFile,
       })
     },
-    [writeUrl, searchScope, query, selectedFile]
+    [writeUrl, searchScope, query, selectedFile, activeTab.id]
   )
   const openFile = useCallback(
     (file: SelectedFile) =>
-      writeUrl({ selection, scope: searchScope, query, file }),
-    [writeUrl, selection, searchScope, query]
+      writeUrl({ tab: activeTab.id, selection, scope: searchScope, query, file }),
+    [writeUrl, activeTab.id, selection, searchScope, query]
   )
   const closeFile = useCallback(
-    () => writeUrl({ selection, scope: searchScope, query, file: null }),
-    [writeUrl, selection, searchScope, query]
+    () => writeUrl({ tab: activeTab.id, selection, scope: searchScope, query, file: null }),
+    [writeUrl, activeTab.id, selection, searchScope, query]
   )
   // Wide screens get the docked file panel; narrow ones keep the centered
   // dialog. Mirrors Tailwind's xl breakpoint, which FileDetailPanel's own
@@ -423,7 +460,11 @@ export function CodebaseList() {
   // The scope travels with the query rather than being read from the
   // callback's closure: every request states which scope it is for, so a
   // response can never be filed under the wrong one.
-  const doSearch = useCallback(async (q: string, scope: SearchScope, opts?: { silent?: boolean }) => {
+  const doSearch = useCallback(async (
+    q: string,
+    scope: SearchScope,
+    opts?: { silent?: boolean; selection?: WorkspaceSelection }
+  ) => {
     const trimmed = q.trim()
     const seq = ++searchSeq.current
     if (!trimmed) {
@@ -433,11 +474,12 @@ export function CodebaseList() {
       setSearching(false)
       return
     }
+    const targetSelection = opts?.selection ?? selection
     const silent = opts?.silent ?? false
     if (!silent) setSearching(true)
     setSearchError(null)
     try {
-      const res = await fetch(searchUrl(trimmed, selection, scope), {
+      const res = await fetch(searchUrl(trimmed, targetSelection, scope), {
         cache: "no-store",
       })
       if (!res.ok) throw new Error(`API returned ${res.status}`)
@@ -469,17 +511,22 @@ export function CodebaseList() {
 
   // Switching the scope drops the rows on screen and puts the new scope in
   // the URL; the search that follows belongs to the debounce effect, which
-  // sees the changed scope. The rows go right away — they belong to the
-  // scope that was just left, and showing them under the new scope would
-  // read as if the search had been ignored.
+  // sees the changed scope.
   const applySearchScope = useCallback(
     (next: SearchScope) => {
       if (next === searchScope) return
       setResults([])
       setFileResults([])
-      writeUrl({ selection, scope: next, query, file: selectedFile })
+      setTabsState((prev) => {
+        const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
+        return {
+          ...prev,
+          tabs: updateTab(prev.tabs, { ...current, scope: next }),
+        }
+      })
+      writeUrl({ tab: activeTab.id, selection, scope: next, query, file: selectedFile })
     },
-    [searchScope, selection, query, selectedFile, writeUrl]
+    [searchScope, activeTab.id, selection, query, selectedFile, writeUrl]
   )
 
   // Clearing the box resets the list immediately (in the event handler,
@@ -487,15 +534,17 @@ export function CodebaseList() {
   const handleQueryChange = useCallback(
     (value: string) => {
       setQuery(value)
-      // Remembered on every keystroke, not on the debounce: the point is to
-      // have the text back when the reader comes back, and coming back can
-      // happen before the debounce ever fired.
       rememberQuery(value)
+      setTabsState((prev) => {
+        const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
+        return {
+          ...prev,
+          tabs: updateTab(prev.tabs, { ...current, query: value }),
+        }
+      })
       if (!value.trim()) {
         if (debounceTimer.current) clearTimeout(debounceTimer.current)
         searchSeq.current++
-        // The issued query goes with it, so the URL drops the `q` too —
-        // otherwise a reload would bring the cleared query back.
         setIssuedQuery("")
         setResults([])
         setFileResults([])
@@ -505,6 +554,74 @@ export function CodebaseList() {
     },
     []
   )
+
+  const activateTab = useCallback(
+    (target: SearchTab, opts?: { file?: SelectedFile | null; newTabs?: SearchTab[] }) => {
+      pendingNavTabId.current = target.id
+      if (debounceTimer.current) clearTimeout(debounceTimer.current)
+      searchSeq.current++
+      setTabsState((prev) => ({
+        tabs: opts?.newTabs ?? prev.tabs,
+        activeId: target.id,
+      }))
+      setQuery(target.query)
+      setIssuedQuery(target.query)
+      rememberQuery(target.query)
+      writeUrl({
+        tab: target.id,
+        selection: target.selection,
+        scope: target.scope,
+        query: target.query,
+        file: opts?.file ?? null,
+      })
+      if (target.query.trim()) {
+        void doSearch(target.query, target.scope, { selection: target.selection })
+      } else {
+        setResults([])
+        setFileResults([])
+      }
+    },
+    [doSearch, writeUrl]
+  )
+
+  const selectTab = useCallback(
+    (targetId: string) => {
+      if (targetId === activeTabId) return
+      const target = tabs.find((t) => t.id === targetId)
+      if (target) activateTab(target, { file: selectedFile })
+    },
+    [activeTabId, tabs, selectedFile, activateTab]
+  )
+
+  const addSearchTab = useCallback(() => {
+    const newTab = createTab({ selection: activeTab.selection })
+    activateTab(newTab, { file: null, newTabs: [...tabs, newTab] })
+  }, [tabs, activeTab.selection, activateTab])
+
+  const closeSearchTab = useCallback(
+    (closeId: string) => {
+      const res = closeTab(tabs, closeId, activeTabId)
+      const nextActive = res.tabs.find((t) => t.id === res.activeId) ?? res.tabs[0]
+      activateTab(nextActive, { file: null, newTabs: res.tabs })
+    },
+    [tabs, activeTabId, activateTab]
+  )
+
+  // Sync active tab on browser back/forward navigation (popstate).
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search)
+      const tabId = tabFromParams(params)
+      if (tabId && tabId !== activeTabId) {
+        const target = tabs.find((t) => t.id === tabId)
+        if (target) {
+          activateTab(target, { file: selectedFile })
+        }
+      }
+    }
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
+  }, [tabs, activeTabId, activateTab, selectedFile])
 
   // Tiles follow the selection: load on mount and on every scope change, so
   // the numbers, the result list and the rebuild target can never drift apart.
@@ -565,14 +682,16 @@ export function CodebaseList() {
       urlSyncReady.current = true
       return
     }
+    if (pendingNavTabId.current) return
     if (queryFromParams(searchParams) === issuedQuery) return
     writeUrl({
+      tab: activeTab.id,
       selection,
       scope: searchScope,
       query: issuedQuery,
       file: selectedFile,
     })
-  }, [issuedQuery, searchParams, selection, searchScope, selectedFile, writeUrl])
+  }, [issuedQuery, searchParams, selection, searchScope, selectedFile, writeUrl, activeTab.id])
 
   // Live refresh via SSE: the backend broadcasts "codebase" on every index
   // rebuild (button, MCP call, or background watcher, any process) and
@@ -926,47 +1045,57 @@ export function CodebaseList() {
           · watcher {status?.watcherActive ? "on" : "off"}
         </div>
 
-        <form
-          className="sticky top-16 z-10 flex flex-wrap gap-2 bg-background py-1"
-          onSubmit={(e) => {
-            e.preventDefault()
-            // Enter searches immediately instead of waiting for the debounce.
-            if (debounceTimer.current) clearTimeout(debounceTimer.current)
-            void doSearch(query, searchScope)
-          }}
-        >
-          <SearchScopeToggle
-            scope={searchScope}
-            onChange={applySearchScope}
+        <div className="sticky top-16 z-10 flex flex-col gap-2.5 bg-background py-1.5">
+          <SearchTabsBar
+            tabs={tabs}
+            activeId={activeTabId}
+            onSelectTab={selectTab}
+            onCloseTab={closeSearchTab}
+            onAddTab={addSearchTab}
           />
-          <Input
-            placeholder={SEARCH_SCOPE_COPY[searchScope].placeholder}
-            aria-label="Codebase search query"
-            value={query}
-            onChange={(e) => handleQueryChange(e.target.value)}
-            className="min-w-0 flex-1"
-          />
-          {/* Narrow screens keep the dropdown; the panel covers wide ones. */}
-          <div className="lg:hidden">
-            <WorkspaceSelect
-              rows={rows}
-              selection={selection}
-              onSelectAll={() => applySelection(selectAll())}
-              onSelectOnly={(root) => applySelection(selectOnly(root))}
-              onToggleRoots={(roots) =>
-                applySelection(toggleRoots(selection, roots, allRoots))
-              }
-            />
-          </div>
-          <Button
-            type="submit"
-            size="icon"
-            aria-label="Search"
-            disabled={searching || !query.trim()}
+
+          <form
+            className="flex flex-wrap gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              // Enter searches immediately instead of waiting for the debounce.
+              if (debounceTimer.current) clearTimeout(debounceTimer.current)
+              void doSearch(query, searchScope)
+            }}
           >
-            <Search className={searching ? "size-4 animate-pulse" : "size-4"} />
-          </Button>
-        </form>
+            <SearchScopeToggle
+              scope={searchScope}
+              onChange={applySearchScope}
+            />
+            <Input
+              placeholder={SEARCH_SCOPE_COPY[searchScope].placeholder}
+              aria-label="Codebase search query"
+              value={query}
+              onChange={(e) => handleQueryChange(e.target.value)}
+              className="min-w-0 flex-1"
+            />
+            {/* Narrow screens keep the dropdown; the panel covers wide ones. */}
+            <div className="lg:hidden">
+              <WorkspaceSelect
+                rows={rows}
+                selection={selection}
+                onSelectAll={() => applySelection(selectAll())}
+                onSelectOnly={(root) => applySelection(selectOnly(root))}
+                onToggleRoots={(roots) =>
+                  applySelection(toggleRoots(selection, roots, allRoots))
+                }
+              />
+            </div>
+            <Button
+              type="submit"
+              size="icon"
+              aria-label="Search"
+              disabled={searching || !query.trim()}
+            >
+              <Search className={searching ? "size-4 animate-pulse" : "size-4"} />
+            </Button>
+          </form>
+        </div>
         <p className="-mt-2 text-xs text-muted-foreground">
           {SEARCH_SCOPE_COPY[searchScope].hint}
         </p>
