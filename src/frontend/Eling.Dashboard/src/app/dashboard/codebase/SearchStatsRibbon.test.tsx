@@ -21,11 +21,12 @@ describe("SearchStatsRibbon", () => {
 
     expect(screen.getByText("14 matches")).toBeDefined()
     expect(screen.getByText("4")).toBeDefined()
-    expect(screen.getByText("25")).toBeDefined()
+    expect(screen.getByText("25ms")).toBeDefined()
     expect(screen.getByText("3")).toBeDefined()
     expect(screen.getByText(/workspaces/)).toBeDefined()
-    expect(screen.getByText(/\(2 with hits\)/)).toBeDefined()
-    expect(screen.getByText("Scope: Content (top 20)")).toBeDefined()
+    expect(screen.getByText("2 hits")).toBeDefined()
+    expect(screen.getByText("Content")).toBeDefined()
+    expect(screen.getByText("top 20")).toBeDefined()
   })
 
   it("handles 0 matches gracefully", () => {
@@ -45,6 +46,7 @@ describe("SearchStatsRibbon", () => {
     )
 
     expect(screen.getByText("No matches")).toBeDefined()
-    expect(screen.getByText("Scope: File (top 20)")).toBeDefined()
+    expect(screen.getByText("File")).toBeDefined()
+    expect(screen.getByText("top 20")).toBeDefined()
   })
 })

@@ -1137,16 +1137,20 @@ export function CodebaseList() {
             </Button>
           </form>
         </div>
-        <p className="-mt-2 text-xs text-muted-foreground">
-          {SEARCH_SCOPE_COPY[searchScope].hint}
-        </p>
+        {!query.trim() && (
+          <p className="-mt-2 text-xs text-muted-foreground">
+            {SEARCH_SCOPE_COPY[searchScope].hint}
+          </p>
+        )}
 
         {activeTab.lastStats && query.trim() && (
-          <SearchStatsRibbon
-            stats={activeTab.lastStats}
-            scope={searchScope}
-            limit={20}
-          />
+          <div className="-mt-1">
+            <SearchStatsRibbon
+              stats={activeTab.lastStats}
+              scope={searchScope}
+              limit={20}
+            />
+          </div>
         )}
 
         {searchError && (
