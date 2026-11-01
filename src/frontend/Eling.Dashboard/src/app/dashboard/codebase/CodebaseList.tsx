@@ -38,6 +38,7 @@ import {
 import type { SelectedFile } from "./fileDetailApi"
 import { rememberQuery } from "./searchPrefs"
 import { SearchScopeToggle } from "./SearchScopeToggle"
+import { SearchStatsRibbon } from "./SearchStatsRibbon"
 import { SearchTabsBar } from "./SearchTabsBar"
 import {
   createTab,
@@ -46,6 +47,7 @@ import {
   loadTabs,
   saveTabs,
   type SearchTab,
+  type SearchStats,
 } from "./searchTabs"
 import {
   rebuildUrl,
@@ -472,6 +474,13 @@ export function CodebaseList() {
       setFileResults([])
       setSearchError(null)
       setSearching(false)
+      setTabsState((prev) => {
+        const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
+        return {
+          ...prev,
+          tabs: updateTab(prev.tabs, { ...current, lastStats: undefined }),
+        }
+      })
       return
     }
     const targetSelection = opts?.selection ?? selection
@@ -485,6 +494,27 @@ export function CodebaseList() {
       if (!res.ok) throw new Error(`API returned ${res.status}`)
       const data = await res.json()
       if (searchSeq.current !== seq) return
+
+      const stats: SearchStats | undefined = data.stats
+        ? {
+            tookMs: Number(data.stats.tookMs) || 0,
+            hits: Number(data.stats.hits) || 0,
+            files: Number(data.stats.files) || 0,
+            chunks: Number(data.stats.chunks) || 0,
+            workspaces: Number(data.stats.workspaces) || 1,
+            workspacesWithHits: Number(data.stats.workspacesWithHits) || 0,
+            mode: data.mode === "files" ? "files" : "search",
+          }
+        : undefined
+
+      setTabsState((prev) => {
+        const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
+        return {
+          ...prev,
+          tabs: updateTab(prev.tabs, { ...current, lastStats: stats }),
+        }
+      })
+
       // Each scope has its own row shape and only one of them is ever on
       // screen, so they live in separate lists instead of one list the
       // renderer has to inspect.
@@ -499,6 +529,13 @@ export function CodebaseList() {
         setResults([])
         setFileResults([])
         setSearchError(e instanceof Error ? e.message : "Search failed")
+        setTabsState((prev) => {
+          const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
+          return {
+            ...prev,
+            tabs: updateTab(prev.tabs, { ...current, lastStats: undefined }),
+          }
+        })
       }
     } finally {
       // Always clear on the latest sequence, even for silent refreshes:
@@ -521,7 +558,7 @@ export function CodebaseList() {
         const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
         return {
           ...prev,
-          tabs: updateTab(prev.tabs, { ...current, scope: next }),
+          tabs: updateTab(prev.tabs, { ...current, scope: next, lastStats: undefined }),
         }
       })
       writeUrl({ tab: activeTab.id, selection, scope: next, query, file: selectedFile })
@@ -539,7 +576,11 @@ export function CodebaseList() {
         const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
         return {
           ...prev,
-          tabs: updateTab(prev.tabs, { ...current, query: value }),
+          tabs: updateTab(prev.tabs, {
+            ...current,
+            query: value,
+            ...(!value.trim() ? { lastStats: undefined } : {}),
+          }),
         }
       })
       if (!value.trim()) {
@@ -1099,6 +1140,14 @@ export function CodebaseList() {
         <p className="-mt-2 text-xs text-muted-foreground">
           {SEARCH_SCOPE_COPY[searchScope].hint}
         </p>
+
+        {activeTab.lastStats && query.trim() && (
+          <SearchStatsRibbon
+            stats={activeTab.lastStats}
+            scope={searchScope}
+            limit={20}
+          />
+        )}
 
         {searchError && (
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
