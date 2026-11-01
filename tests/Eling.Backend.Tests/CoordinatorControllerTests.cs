@@ -391,4 +391,143 @@ public sealed class CoordinatorControllerTests : IAsyncLifetime
         Assert.Contains(entries, e => RootOf(e) == workspace);
         Assert.False(Directory.Exists(dotEling));
     }
+
+    /// <summary>
+    /// The delete must actually remove the index file.
+    /// <para>
+    /// The order here is the one the dashboard produces: the Workspaces page
+    /// loads <c>/api/coordinator/projects/codebase-statuses</c> first, which
+    /// opens the index read-only, and the user then deletes the workspace. A
+    /// read that leaves the file handle open makes the file undeletable on
+    /// Windows, so the index survived a delete that the UI reported as
+    /// successful.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task DeleteProject_WithDeleteCodebaseIndex_ActuallyDeletesDatabaseFile()
+    {
+        var workspace = Workspace("delete-codebase-index");
+        _registry.Register(Registration(workspace, 602));
+
+        var dbPath = ElingPaths.ResolveCodebaseDbPath(workspace);
+        Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+        var writer = new Eling.Core.Codebase.SqliteCodebaseIndex(dbPath);
+        await writer.ReplaceChunksAsync(
+            "src/App.cs", "h1", 1, 42,
+            [new Eling.Core.Codebase.CodebaseChunk("src/App.cs", 1, 42, "public sealed class App { }")]);
+        writer.Dispose();
+        Assert.True(File.Exists(dbPath));
+
+        // The dashboard's status read: the same read that used to hold the file.
+        var statuses = await _client.GetAsync("/api/coordinator/projects/codebase-statuses");
+        Assert.Equal(HttpStatusCode.OK, statuses.StatusCode);
+
+        // Delete the codebase index only, keeping the registry row.
+        var deletePayload = new DeleteProjectRequest(
+            workspace,
+            DeleteCodebaseIndex: true,
+            DeleteDotEling: false,
+            DeleteRegistry: false);
+        var postRes = await _client.PostAsJsonAsync("/api/coordinator/project/delete", deletePayload);
+
+        Assert.Equal(HttpStatusCode.OK, postRes.StatusCode);
+        Assert.False(File.Exists(dbPath), $"Expected {dbPath} to be deleted, but it still exists!");
+        Assert.False(File.Exists(dbPath + "-wal"), $"Expected {dbPath}-wal to be deleted, but it still exists!");
+    }
+
+    /// <summary>
+    /// The delete is best-effort per component, so a component that could not
+    /// be removed has to be reported. A response that claims success while
+    /// the index is still on disk is what made this look like "the delete
+    /// does nothing".
+    /// </summary>
+    [Fact]
+    public async Task DeleteProject_ReportsSuccessAndNoWarnings_WhenEverythingWasRemoved()
+    {
+        var workspace = Workspace("delete-clean");
+        _registry.Register(Registration(workspace, 603));
+
+        var dbPath = ElingPaths.ResolveCodebaseDbPath(workspace);
+        Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+        var writer = new Eling.Core.Codebase.SqliteCodebaseIndex(dbPath);
+        await writer.EnsureCreatedAsync();
+        writer.Dispose();
+
+        var deletePayload = new DeleteProjectRequest(
+            workspace,
+            DeleteCodebaseIndex: true,
+            DeleteDotEling: false,
+            DeleteRegistry: true);
+        var postRes = await _client.PostAsJsonAsync("/api/coordinator/project/delete", deletePayload);
+
+        Assert.Equal(HttpStatusCode.OK, postRes.StatusCode);
+        var body = await postRes.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(body.GetProperty("success").GetBoolean());
+        Assert.Empty(body.GetProperty("warnings").EnumerateArray());
+        Assert.False(File.Exists(dbPath));
+    }
+
+    /// <summary>
+    /// The delete works even when another process holds the index file open.
+    /// <para>
+    /// This is the case the user hits in practice: another eling session is
+    /// running IN this workspace, so its indexer holds the database open, and
+    /// Windows refuses to delete an open file. The file cannot be removed
+    /// then — but the CONTENT can, through SQLite, and the content is what
+    /// "delete the codebase index" means.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task DeleteProject_WithTheIndexHeldOpen_StillEmptiesTheIndex()
+    {
+        var workspace = Workspace("delete-locked-index");
+        _registry.Register(Registration(workspace, 604));
+
+        var dbPath = ElingPaths.ResolveCodebaseDbPath(workspace);
+        Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+        var writer = new Eling.Core.Codebase.SqliteCodebaseIndex(dbPath);
+        await writer.ReplaceChunksAsync(
+            "src/App.cs", "h1", 1, 42,
+            [new Eling.Core.Codebase.CodebaseChunk("src/App.cs", 1, 42, "public sealed class App { }")]);
+        writer.Dispose();
+
+        // Another process holds the file open, exactly like a live eling
+        // session running in this workspace.
+        var holder = new Microsoft.Data.Sqlite.SqliteConnection(
+            $"Data Source={dbPath};Pooling=False");
+        await holder.OpenAsync();
+        await using (var cmd = holder.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM codebase_files;";
+            await cmd.ExecuteScalarAsync();
+        }
+
+        try
+        {
+            var deletePayload = new DeleteProjectRequest(
+                workspace,
+                DeleteCodebaseIndex: true,
+                DeleteDotEling: false,
+                DeleteRegistry: false);
+            var postRes = await _client.PostAsJsonAsync("/api/coordinator/project/delete", deletePayload);
+
+            Assert.Equal(HttpStatusCode.OK, postRes.StatusCode);
+            var body = await postRes.Content.ReadFromJsonAsync<JsonElement>();
+
+            // The user asked for a delete; a delete happened. The file may
+            // remain (the other process holds it), but the index is empty.
+            Assert.True(body.GetProperty("success").GetBoolean(),
+                "the delete should succeed: " + body.GetProperty("warnings").ToString());
+            Assert.Empty(body.GetProperty("warnings").EnumerateArray());
+
+            using var check = new Eling.Core.Codebase.SqliteCodebaseIndex(dbPath, readOnly: true);
+            var stats = await check.GetStatsAsync();
+            Assert.Equal(0, stats.FileCount);
+            Assert.Equal(0, stats.ChunkCount);
+        }
+        finally
+        {
+            await holder.DisposeAsync();
+        }
+    }
 }

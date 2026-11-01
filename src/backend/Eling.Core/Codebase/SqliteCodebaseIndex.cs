@@ -56,9 +56,42 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
 
     private readonly string _dbPath;
     private readonly string _connectionString;
+    private readonly string _readOnlyConnectionString;
+    private readonly bool _readOnly;
     private readonly ILogger<SqliteCodebaseIndex>? _logger;
 
     public string DbPath => _dbPath;
+
+    /// <summary>
+    /// Releases this database's pooled connection handles, so the file can be
+    /// deleted on Windows.
+    /// </summary>
+    /// <remarks>
+    /// A pooled connection keeps its file handle open after the connection
+    /// object is disposed, and on Windows an open handle makes the file
+    /// undeletable. The index is read far more often than it is written, so
+    /// pooling is kept for its speed — but the delete path has to give the
+    /// handles back first, or "delete the codebase index" silently leaves the
+    /// file on disk.
+    /// <para>
+    /// The pool is cleared for this one database, not for every open
+    /// connection in the process: another workspace's index belongs to another
+    /// workspace, and clearing its pool would disturb work in flight.
+    /// </para>
+    /// </remarks>
+    public void ReleasePooledHandles()
+    {
+        // ClearPool needs a connection that points at the same data source;
+        // it is opened and closed without being used for any query. Both
+        // pools are cleared: the read-only one (the dashboard's status read)
+        // and the read-write one (the indexer's own writes) are separate
+        // pools, and either one keeps the file open.
+        foreach (var connectionString in new[] { _connectionString, _readOnlyConnectionString })
+        {
+            using var connection = new SqliteConnection(connectionString);
+            SqliteConnection.ClearPool(connection);
+        }
+    }
 
     /// <summary>
     /// Opens the index at <paramref name="dbPath"/>.
@@ -75,6 +108,7 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(dbPath);
         _dbPath = Path.GetFullPath(dbPath);
         _logger = logger;
+        _readOnly = readOnly;
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = _dbPath,
@@ -88,6 +122,33 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
             // "attempt to write a readonly database". Concurrent access is
             // already handled by WAL, so Private cache is the correct mode.
             Cache = SqliteCacheMode.Private,
+            // A READ-ONLY handle never pools. Pooling keeps the file handle
+            // open after the connection is disposed, and on Windows an open
+            // handle makes the file undeletable — so a reader that pooled its
+            // handle would lock every sibling's index against that sibling's
+            // own "delete the codebase index". The dashboard's status read
+            // touches every registered workspace, so a pooled read-only handle
+            // held a lock on all of them at once, and no delete could ever
+            // remove one. A read that is about to be closed must not keep the
+            // file hostage.
+            //
+            // The read-write path keeps its pool: that is this workspace's
+            // own index, opened by the indexer, and pooling is worth its cost
+            // there. Its handle is released by
+            // <see cref="ReleasePooledHandles"/> when the file is deleted.
+            Pooling = !readOnly,
+        }.ToString();
+
+        // The read-only variant is a DIFFERENT pool: SQLite pools by
+        // connection string, and the mode is part of it. The dashboard's
+        // status read opens this one, so releasing the file's handles has to
+        // cover both.
+        _readOnlyConnectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Cache = SqliteCacheMode.Private,
+            Pooling = false,
         }.ToString();
     }
 
@@ -245,6 +306,72 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
 
     public async Task<IReadOnlyList<CodebaseHit>> SearchTrigramAsync(string ftsQuery, int limit, string? pathPrefix = null, string? filePattern = null, CancellationToken ct = default)
         => await SearchFtsAsync("codebase_fts_trigram", ftsQuery, limit, pathPrefix, filePattern, ct);
+
+    /// <summary>
+    /// Empties the index, leaving an empty but valid database behind.
+    /// </summary>
+    /// <remarks>
+    /// This is the delete that works when the FILE cannot be removed: another
+    /// eling process may be running in this workspace, holding its index open,
+    /// and on Windows an open file cannot be deleted. The CONTENT can still be
+    /// removed — through SQLite itself, from a connection this process owns —
+    /// so the index stops holding the workspace's code and the file becomes an
+    /// empty shell that the next index pass rebuilds.
+    /// <para>
+    /// The rows are deleted rather than the file, so this does not free disk
+    /// space on its own; a VACUUM does that, and it is attempted but not
+    /// required. The point is that the index's CONTENT is gone, which is what
+    /// "delete the codebase index" means to the user.
+    /// </para>
+    /// </remarks>
+    /// <returns>True when the index is empty afterwards.</returns>
+    public async Task<bool> ClearAsync(CancellationToken ct = default)
+    {
+        if (!File.Exists(_dbPath)) return true;
+
+        try
+        {
+            await EnsureCreatedAsync(ct);
+            await using var c = await OpenAsync(ct);
+
+            await using (var cmd = c.CreateCommand())
+            {
+                // Every table that holds indexed content, in one transaction so
+                // a reader never sees the index half-empty.
+                cmd.CommandText = """
+                    DELETE FROM codebase_fts_porter;
+                    DELETE FROM codebase_fts_trigram;
+                    DELETE FROM codebase_chunks;
+                    DELETE FROM codebase_files;
+                    """;
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            // VACUUM reclaims the space the deleted rows occupied. It rewrites
+            // the whole database, so it needs exclusive access — another
+            // process holding the file may refuse it. That is fine: the
+            // content is already gone, and the space is reclaimed by the next
+            // index pass or by the file's own deletion.
+            try
+            {
+                await using var vacuum = c.CreateCommand();
+                vacuum.CommandText = "VACUUM;";
+                await vacuum.ExecuteNonQueryAsync(ct);
+            }
+            catch (SqliteException ex)
+            {
+                _logger?.LogDebug(ex, "VACUUM after clearing index {DbPath} was refused; the content is cleared regardless.", _dbPath);
+            }
+
+            var stats = await GetStatsAsync(ct);
+            return stats.FileCount == 0 && stats.ChunkCount == 0;
+        }
+        catch (SqliteException ex) when (IsMissingSchema(ex))
+        {
+            // No schema yet: there is nothing indexed, so it is already empty.
+            return true;
+        }
+    }
 
     public async Task<CodebaseStats> GetStatsAsync(CancellationToken ct = default)
     {
@@ -519,7 +646,13 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
     {
-        var conn = new SqliteConnection(_connectionString);
+        // A read-only index opens with the READ-ONLY connection string, which
+        // does not pool. Pooling would keep the file handle open after the
+        // connection is disposed, and on Windows that makes the file
+        // undeletable — so a federated read would lock every sibling's index
+        // against that sibling's own "delete the codebase index".
+        var connectionString = _readOnly ? _readOnlyConnectionString : _connectionString;
+        var conn = new SqliteConnection(connectionString);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;";

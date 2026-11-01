@@ -209,6 +209,12 @@ public sealed class CoordinatorController(
         var normalized = Path.GetFullPath(request.WorkspaceRoot)
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
+        // What could not be removed. The delete is best-effort per component,
+        // but a component that failed must be said out loud: reporting
+        // success for a database that is still on disk is what made this
+        // look like "the delete does nothing".
+        var warnings = new List<string>();
+
         // 1. Delete from workspaces database and unregister if active —
         //    one component of the delete, not its mandatory core.
         if (request.DeleteRegistry)
@@ -222,11 +228,14 @@ public sealed class CoordinatorController(
             try
             {
                 var dbPath = ElingPaths.ResolveCodebaseDbPath(normalized);
-                DeleteDatabaseAndSidecars(dbPath);
+                if (!await DeleteCodebaseIndexAsync(dbPath, cancellationToken))
+                {
+                    warnings.Add($"The codebase index at '{dbPath}' could not be deleted.");
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                // Best-effort index deletion
+                warnings.Add($"The codebase index could not be deleted: {ex.Message}");
             }
         }
 
@@ -241,32 +250,115 @@ public sealed class CoordinatorController(
                     Directory.Delete(dotEling, recursive: true);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Best-effort dotEling deletion
+                warnings.Add($"The .eling folder could not be deleted: {ex.Message}");
             }
         }
 
         broadcaster.Notify("runtimes");
         broadcaster.Notify("codebase");
 
-        return Ok(new { success = true, workspaceRoot = normalized });
+        return Ok(new
+        {
+            success = warnings.Count == 0,
+            workspaceRoot = normalized,
+            warnings,
+        });
     }
 
     /// <summary>
-    /// Deletes a SQLite database and its WAL sidecar files (-wal, -shm, -journal).
-    /// Leaving sidecars behind causes SQLite to open a stale or corrupt DB on next access.
+    /// Deletes a workspace's codebase index.
     /// </summary>
-    private static void DeleteDatabaseAndSidecars(string dbPath)
+    /// <remarks>
+    /// Two ways out, in order. The file is removed when it can be: that is
+    /// the clean result, and it frees the disk at once. When it cannot — the
+    /// file is held open by another eling process running in this workspace,
+    /// and Windows does not allow deleting an open file — the index's CONTENT
+    /// is deleted instead, from inside SQLite. The workspace's code stops
+    /// being indexed either way, which is what "delete the codebase index"
+    /// means; only an empty file is left behind for the other process to keep
+    /// writing to.
+    /// </remarks>
+    /// <returns>True when the index is gone or empty afterwards.</returns>
+    private static async Task<bool> DeleteCodebaseIndexAsync(string dbPath, CancellationToken cancellationToken)
     {
-        if (System.IO.File.Exists(dbPath))
-            System.IO.File.Delete(dbPath);
+        // Give this database's pooled handles back first: the read path pools
+        // a read-write handle, and one that is still open makes the file
+        // undeletable even when no other process is involved. Only this
+        // database's pool is cleared — another workspace's index must not be
+        // disturbed.
+        try
+        {
+            using var index = new Core.Codebase.SqliteCodebaseIndex(dbPath);
+            index.ReleasePooledHandles();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Best-effort: the delete below is still attempted, and its own
+            // outcome is what gets reported.
+        }
 
+        if (TryDeleteFile(dbPath))
+        {
+            TryDeleteSidecars(dbPath);
+            return true;
+        }
+
+        // The file is still there. Empty it instead: the content is what the
+        // user asked to delete, and SQLite can do that from a connection this
+        // process owns even while another process holds the file open.
+        try
+        {
+            using var index = new Core.Codebase.SqliteCodebaseIndex(dbPath);
+            return await index.ClearAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Removes the database file. Leaving sidecars behind causes SQLite to
+    /// open a stale or corrupt DB on next access.
+    /// </summary>
+    /// <returns>True when the database file is gone afterwards.</returns>
+    private static bool TryDeleteFile(string dbPath)
+    {
+        try
+        {
+            if (System.IO.File.Exists(dbPath))
+                System.IO.File.Delete(dbPath);
+        }
+        catch (IOException)
+        {
+            // Another process holds the file open. The caller falls back to
+            // clearing the content instead.
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        return !System.IO.File.Exists(dbPath);
+    }
+
+    private static void TryDeleteSidecars(string dbPath)
+    {
         foreach (var suffix in new[] { "-wal", "-shm", "-journal" })
         {
             var sidecarPath = dbPath + suffix;
-            if (System.IO.File.Exists(sidecarPath))
-                System.IO.File.Delete(sidecarPath);
+            try
+            {
+                if (System.IO.File.Exists(sidecarPath))
+                    System.IO.File.Delete(sidecarPath);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
         }
     }
 

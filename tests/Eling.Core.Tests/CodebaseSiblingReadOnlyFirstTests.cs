@@ -46,7 +46,10 @@ public sealed class CodebaseSiblingReadOnlyFirstTests : IDisposable
     /// </summary>
     private async Task SeedSiblingIndexAsync()
     {
-        await using var conn = new SqliteConnection($"Data Source={_dbPath}");
+        // Pooling=false: the seed must not hold the file handle itself, or
+        // the assertions about "no handle left behind" would be measuring
+        // this test's own connection rather than the code under test.
+        await using var conn = new SqliteConnection($"Data Source={_dbPath};Pooling=False");
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -86,5 +89,58 @@ public sealed class CodebaseSiblingReadOnlyFirstTests : IDisposable
 
         var hits = await writer.SearchPorterAsync("Widget", 10);
         Assert.Contains(hits, h => h.Path == "src/Widget.cs");
+    }
+
+    /// <summary>
+    /// A federated read must not keep the sibling's index file hostage.
+    /// <para>
+    /// The dashboard's status read opens EVERY registered workspace's index
+    /// read-only, on every poll. When those reads pooled their connection, the
+    /// handle stayed open after the connection was disposed, and on Windows an
+    /// open handle makes the file undeletable — so the owner of the index
+    /// could never delete it, and "delete the codebase index" silently did
+    /// nothing.
+    /// </para>
+    /// <para>
+    /// The assertion is an exclusive open of the file: if anything in this
+    /// process still holds it, the open fails.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task FederatedRead_LeavesNoFileHandleBehind()
+    {
+        await SeedSiblingIndexAsync();
+
+        using (var reader = new SqliteCodebaseIndex(_dbPath, readOnly: true))
+        {
+            await reader.GetStatsAsync();
+        }
+
+        // An exclusive open succeeds only when no handle is held.
+        await using var exclusive = new FileStream(
+            _dbPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        Assert.True(exclusive.CanRead);
+    }
+
+    /// <summary>
+    /// The same rule for the read-write path: an index that is about to be
+    /// deleted must be deletable, and its own pooled handle is released for
+    /// exactly that reason.
+    /// </summary>
+    [Fact]
+    public async Task ReleasePooledHandles_LetsTheIndexFileBeDeleted()
+    {
+        await SeedSiblingIndexAsync();
+
+        using (var writer = new SqliteCodebaseIndex(_dbPath))
+        {
+            await writer.EnsureCreatedAsync();
+            await writer.GetStatsAsync();
+            writer.ReleasePooledHandles();
+        }
+
+        // The point of the release: the file can be deleted now.
+        File.Delete(_dbPath);
+        Assert.False(File.Exists(_dbPath));
     }
 }

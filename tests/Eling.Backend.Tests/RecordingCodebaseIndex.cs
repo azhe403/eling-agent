@@ -76,6 +76,8 @@ internal sealed class RecordingCodebaseIndex : ICodebaseIndex
 
     public Task DeleteFileAsync(string path, CancellationToken ct = default) => Task.CompletedTask;
 
+    public Task<bool> ClearAsync(CancellationToken ct = default) => Task.FromResult(true);
+
     public Task<CodebaseStats> GetStatsAsync(CancellationToken ct = default)
         => Task.FromResult(new CodebaseStats(0, 0, null, DbPath));
 
