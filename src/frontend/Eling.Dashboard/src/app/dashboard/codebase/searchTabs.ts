@@ -2,11 +2,22 @@ import type { WorkspaceSelection } from "@/components/workspaces/selection"
 import { selectAll } from "@/components/workspaces/selection"
 import type { SearchScope } from "./scope"
 
+export type SearchStats = {
+  tookMs: number
+  hits: number
+  files: number
+  chunks: number
+  workspaces: number
+  workspacesWithHits: number
+  mode?: "search" | "files"
+}
+
 export type SearchTab = {
   id: string
   query: string
   scope: SearchScope
   selection: WorkspaceSelection
+  lastStats?: SearchStats
 }
 
 export const STORAGE_KEY = "eling.codebase.tabs"
@@ -27,6 +38,7 @@ export function createTab(existing?: Partial<SearchTab>): SearchTab {
     query: existing?.query ?? "",
     scope: existing?.scope ?? "content",
     selection: existing?.selection ?? selectAll(),
+    lastStats: existing?.lastStats,
   }
 }
 
@@ -97,15 +109,33 @@ export function loadTabs(
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<StoredState>
       if (Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
-        const validTabs: SearchTab[] = parsed.tabs.map((t) => ({
-          id: t.id || generateId(),
-          query: typeof t.query === "string" ? t.query : "",
-          scope: t.scope === "path" || t.scope === "file" ? t.scope : "content",
-          selection:
-            t.selection && typeof t.selection === "object"
-              ? t.selection
-              : selectAll(),
-        }))
+        const validTabs: SearchTab[] = parsed.tabs.map((t) => {
+          const lastStats: SearchStats | undefined =
+            t.lastStats && typeof t.lastStats === "object"
+              ? {
+                  tookMs: Number(t.lastStats.tookMs) || 0,
+                  hits: Number(t.lastStats.hits) || 0,
+                  files: Number(t.lastStats.files) || 0,
+                  chunks: Number(t.lastStats.chunks) || 0,
+                  workspaces: Number(t.lastStats.workspaces) || 1,
+                  workspacesWithHits: Number(t.lastStats.workspacesWithHits) || 0,
+                  ...(t.lastStats.mode === "search" || t.lastStats.mode === "files"
+                    ? { mode: t.lastStats.mode }
+                    : {}),
+                }
+              : undefined
+
+          return {
+            id: t.id || generateId(),
+            query: typeof t.query === "string" ? t.query : "",
+            scope: t.scope === "path" || t.scope === "file" ? t.scope : "content",
+            selection:
+              t.selection && typeof t.selection === "object"
+                ? t.selection
+                : selectAll(),
+            ...(lastStats ? { lastStats } : {}),
+          }
+        })
         const activeExists = validTabs.some((t) => t.id === parsed.activeId)
         const activeId = activeExists ? (parsed.activeId as string) : validTabs[0].id
         return { tabs: validTabs, activeId }

@@ -128,6 +128,15 @@ describe("loadTabs & saveTabs", () => {
       query: "search 2",
       scope: "path",
       selection: { kind: "workspaces", roots: ["/r1"] },
+      lastStats: {
+        tookMs: 42,
+        hits: 7,
+        files: 3,
+        chunks: 7,
+        workspaces: 2,
+        workspacesWithHits: 1,
+        mode: "files",
+      },
     })
     saveTabs([t1, t2], "t2")
 
@@ -140,5 +149,15 @@ describe("loadTabs & saveTabs", () => {
       kind: "workspaces",
       roots: ["/r1"],
     })
+    expect(loaded.tabs[1].lastStats).toEqual({
+      tookMs: 42,
+      hits: 7,
+      files: 3,
+      chunks: 7,
+      workspaces: 2,
+      workspacesWithHits: 1,
+      mode: "files",
+    })
+    expect(loaded.tabs[0].lastStats).toBeUndefined()
   })
 })
