@@ -57,16 +57,33 @@ export function SearchTabsBar({
                 }
               }}
               className={cn(
-                "group relative flex h-7 w-36 shrink-0 cursor-pointer items-center justify-between gap-1.5 rounded-md border px-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "group relative flex h-7 w-38 shrink-0 cursor-pointer items-center justify-between gap-1.5 rounded-md border px-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 isActive
                   ? "border-border bg-background font-medium text-foreground shadow-xs"
                   : "border-transparent bg-muted/40 text-muted-foreground hover:bg-muted/80 hover:text-foreground"
               )}
-              title={`${label} (${tab.scope})`}
+              title={
+                tab.lastStats !== undefined && tab.query.trim() !== ""
+                  ? `${label} (${tab.scope}) · ${tab.lastStats.hits} match(es) (${tab.lastStats.tookMs}ms)`
+                  : `${label} (${tab.scope})`
+              }
             >
               <div className="flex min-w-0 flex-1 items-center gap-1.5">
                 <ScopeIcon scope={tab.scope} />
                 <span className="truncate">{label}</span>
+                {tab.lastStats !== undefined && tab.query.trim() !== "" && (
+                  <span
+                    className={cn(
+                      "shrink-0 rounded-xs px-1 py-0.2 text-[10px] font-medium leading-none tabular-nums",
+                      isActive
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground group-hover:text-foreground"
+                    )}
+                    title={`${tab.lastStats.hits} match(es) in ${tab.lastStats.files} file(s)`}
+                  >
+                    {tab.lastStats.hits}
+                  </span>
+                )}
                 {workspaceCount > 0 && (
                   <span
                     className="shrink-0 rounded-xs bg-muted px-1 py-0.2 text-[10px] text-muted-foreground"
