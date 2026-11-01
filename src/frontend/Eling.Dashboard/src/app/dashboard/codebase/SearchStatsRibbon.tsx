@@ -1,6 +1,6 @@
 "use client"
 
-import { Zap, Clock } from "lucide-react"
+import { Zap, Clock, FileText } from "lucide-react"
 import type { SearchStats } from "./searchTabs"
 import { SEARCH_SCOPE_COPY, type SearchScope } from "./scope"
 
@@ -20,6 +20,7 @@ export function SearchStatsRibbon({
   limit,
 }: SearchStatsRibbonProps) {
   const scopeLabel = SEARCH_SCOPE_COPY[scope]?.label ?? scope
+  const isTopMode = stats.mode === "top"
   const hasMatches = stats.hits > 0
 
   return (
@@ -30,20 +31,27 @@ export function SearchStatsRibbon({
     >
       <div className="flex flex-wrap items-center gap-2.5">
         {/* Accent match pill */}
-        <div
-          className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-semibold tracking-tight ${
-            hasMatches
-              ? "border border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
-              : "border border-muted-foreground/20 bg-muted/60 text-muted-foreground"
-          }`}
-        >
-          <Zap className="size-3 shrink-0" />
-          <span>
-            {stats.hits === 0
-              ? "No matches"
-              : `${stats.hits} ${stats.hits === 1 ? "match" : "matches"}`}
-          </span>
-        </div>
+        {isTopMode ? (
+          <div className="inline-flex items-center gap-1.5 rounded-md border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-xs font-semibold tracking-tight text-sky-400">
+            <FileText className="size-3 shrink-0" />
+            <span>Recent files</span>
+          </div>
+        ) : (
+          <div
+            className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-semibold tracking-tight ${
+              hasMatches
+                ? "border border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                : "border border-muted-foreground/20 bg-muted/60 text-muted-foreground"
+            }`}
+          >
+            <Zap className="size-3 shrink-0" />
+            <span>
+              {stats.hits === 0
+                ? "No matches"
+                : `${stats.hits} ${stats.hits === 1 ? "match" : "matches"}`}
+            </span>
+          </div>
+        )}
 
         <div className="h-3.5 w-px bg-border/60" aria-hidden="true" />
 
@@ -73,10 +81,10 @@ export function SearchStatsRibbon({
           {stats.workspacesWithHits > 0 && (
             <span
               className="inline-flex items-center rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.2 text-[10px] font-medium text-emerald-400"
-              title={`${stats.workspacesWithHits} workspace(s) produced search hits`}
+              title={`${stats.workspacesWithHits} workspace(s) represented`}
             >
               {stats.workspacesWithHits}{" "}
-              {stats.workspacesWithHits === 1 ? "hit" : "hits"}
+              {isTopMode ? "active" : stats.workspacesWithHits === 1 ? "hit" : "hits"}
             </span>
           )}
         </div>
@@ -92,7 +100,9 @@ export function SearchStatsRibbon({
 
       {/* Scope info */}
       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <span className="font-medium text-foreground/80">{scopeLabel}</span>
+        <span className="font-medium text-foreground/80">
+          {isTopMode ? "Recent" : scopeLabel}
+        </span>
         <span className="text-border" aria-hidden="true">
           ·
         </span>

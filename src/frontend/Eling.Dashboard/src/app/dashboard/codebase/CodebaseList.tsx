@@ -263,6 +263,7 @@ export function CodebaseList() {
   // `xl:flex` class also encodes, so the JS gate and CSS agree by construction.
   const wide = useMediaQuery(`(min-width: ${XL_BREAKPOINT}px)`)
   const [topFiles, setTopFiles] = useState<FileResult[]>([])
+  const [topStats, setTopStats] = useState<SearchStats | null>(null)
   const [topLoading, setTopLoading] = useState(true)
   // With the panel docked, the list column is the fixed-width one and the
   // panel takes the rest — the list keeps its width whether the panel is open
@@ -325,6 +326,17 @@ export function CodebaseList() {
       if (!res.ok) throw new Error(`API returned ${res.status}`)
       const data = await res.json()
       setTopFiles(Array.isArray(data.results) ? data.results : [])
+      if (data.stats) {
+        setTopStats({
+          tookMs: Number(data.stats.tookMs) || 0,
+          hits: Number(data.stats.hits) || 0,
+          files: Number(data.stats.files) || 0,
+          chunks: Number(data.stats.chunks) || 0,
+          workspaces: Number(data.stats.workspaces) || 1,
+          workspacesWithHits: Number(data.stats.workspacesWithHits) || 0,
+          mode: "top",
+        })
+      }
     } catch {
       if (!silent) setTopFiles([])
     } finally {
@@ -1143,10 +1155,10 @@ export function CodebaseList() {
           </p>
         )}
 
-        {activeTab.lastStats && query.trim() && (
+        {((query.trim() && activeTab.lastStats) || (!query.trim() && topStats)) && (
           <div className="-mt-1">
             <SearchStatsRibbon
-              stats={activeTab.lastStats}
+              stats={query.trim() ? activeTab.lastStats! : topStats!}
               scope={searchScope}
               limit={20}
             />

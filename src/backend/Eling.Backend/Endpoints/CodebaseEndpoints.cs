@@ -239,7 +239,16 @@ public static class CodebaseEndpoints
             if (string.IsNullOrWhiteSpace(q))
             {
                 var files = await svc.GetRecentFilesAsync(limit ?? 20, roots);
-                return TypedResults.Ok(new { query = q, limit = limit, scope = effectiveScope, mode = "top", results = files.Select(f => new { f.ProjectRoot, f.Path, f.ChunkCount, f.LastIndexedAt }) });
+                var stats = new
+                {
+                    tookMs = (int)sw.ElapsedMilliseconds,
+                    hits = files.Count,
+                    files = files.Count,
+                    chunks = files.Sum(f => f.ChunkCount),
+                    workspaces = roots?.Count ?? 1,
+                    workspacesWithHits = files.Select(f => f.ProjectRoot).Distinct(StringComparer.OrdinalIgnoreCase).Count()
+                };
+                return TypedResults.Ok(new { query = q, limit = limit, scope = effectiveScope, mode = "top", results = files.Select(f => new { f.ProjectRoot, f.Path, f.ChunkCount, f.LastIndexedAt }), stats });
             }
 
             // The path and file scopes match the query against the indexed

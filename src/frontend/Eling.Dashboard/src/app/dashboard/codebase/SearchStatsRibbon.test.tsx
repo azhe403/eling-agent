@@ -49,4 +49,31 @@ describe("SearchStatsRibbon", () => {
     expect(screen.getByText("File")).toBeDefined()
     expect(screen.getByText("top 20")).toBeDefined()
   })
+
+  it("renders recent files stats in top mode", () => {
+    render(
+      <SearchStatsRibbon
+        stats={{
+          tookMs: 12,
+          hits: 20,
+          files: 20,
+          chunks: 95,
+          workspaces: 48,
+          workspacesWithHits: 3,
+          mode: "top",
+        }}
+        scope="content"
+        limit={20}
+      />
+    )
+
+    expect(screen.getByText("Recent files")).toBeDefined()
+    expect(screen.getByText("20")).toBeDefined()
+    expect(screen.getByText("95")).toBeDefined()
+    expect(screen.getByText("48")).toBeDefined()
+    expect(screen.getByText("3 active")).toBeDefined()
+    expect(screen.getByText("12ms")).toBeDefined()
+    expect(screen.getByText("Recent")).toBeDefined()
+    expect(screen.getByText("top 20")).toBeDefined()
+  })
 })

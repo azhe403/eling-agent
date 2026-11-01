@@ -9,7 +9,7 @@ export type SearchStats = {
   chunks: number
   workspaces: number
   workspacesWithHits: number
-  mode?: "search" | "files"
+  mode?: "search" | "files" | "top"
 }
 
 export type SearchTab = {
@@ -119,7 +119,9 @@ export function loadTabs(
                   chunks: Number(t.lastStats.chunks) || 0,
                   workspaces: Number(t.lastStats.workspaces) || 1,
                   workspacesWithHits: Number(t.lastStats.workspacesWithHits) || 0,
-                  ...(t.lastStats.mode === "search" || t.lastStats.mode === "files"
+                  ...(t.lastStats.mode === "search" ||
+                  t.lastStats.mode === "files" ||
+                  t.lastStats.mode === "top"
                     ? { mode: t.lastStats.mode }
                     : {}),
                 }

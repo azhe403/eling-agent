@@ -113,7 +113,7 @@ public sealed class CodebaseSearchStatsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TopMode_OmitsStatsBlock()
+    public async Task TopMode_IncludesStatsBlock()
     {
         var res = await _client.GetAsync($"/api/codebase/search?q=&project={Uri.EscapeDataString(_workspace)}");
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
@@ -121,6 +121,10 @@ public sealed class CodebaseSearchStatsTests : IAsyncLifetime
         using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync());
         var root = doc.RootElement;
         Assert.Equal("top", root.GetProperty("mode").GetString());
-        Assert.False(root.TryGetProperty("stats", out _));
+        Assert.True(root.TryGetProperty("stats", out var stats));
+        Assert.True(stats.GetProperty("tookMs").GetInt32() >= 0);
+        Assert.True(stats.GetProperty("files").GetInt32() >= 1);
+        Assert.True(stats.GetProperty("chunks").GetInt32() >= 1);
+        Assert.Equal(1, stats.GetProperty("workspaces").GetInt32());
     }
 }
