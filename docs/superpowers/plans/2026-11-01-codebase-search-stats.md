@@ -36,11 +36,11 @@
 **Interfaces:**
 - Produces: `stats: { tookMs, hits, files, chunks, workspaces, workspacesWithHits }` in `/api/codebase/search` response JSON.
 
-- [ ] **Step 1: Write backend unit test verifying `stats` payload in search responses**
-- [ ] **Step 2: Run test to verify failure**
-- [ ] **Step 3: Modify `CodebaseEndpoints.cs` to add `stats` in `SearchAsync` for `searchScope != Content` and `Content` modes**
-- [ ] **Step 4: Run test to verify it passes**
-- [ ] **Step 5: Commit backend changes**
+- [x] **Step 1: Write backend unit test verifying `stats` payload in search responses**
+- [x] **Step 2: Run test to verify failure**
+- [x] **Step 3: Modify `CodebaseEndpoints.cs` to add `stats` in `SearchAsync` for `searchScope != Content` and `Content` modes**
+- [x] **Step 4: Run test to verify it passes**
+- [x] **Step 5: Commit backend changes**
 
 ---
 
@@ -54,11 +54,11 @@
 - Produces: `export type SearchStats = { tookMs: number; hits: number; files: number; chunks: number; workspaces: number; workspacesWithHits: number; mode?: "search" | "files" }`
 - Updates: `SearchTab` has `lastStats?: SearchStats`
 
-- [ ] **Step 1: Write unit tests in `searchTabs.test.ts` for `lastStats` loading, saving, and updating**
-- [ ] **Step 2: Run tests via `pnpm test` to verify failure**
-- [ ] **Step 3: Update `searchTabs.ts` with `SearchStats` type, `lastStats` field in `SearchTab`, `createTab`, and `loadTabs` validation**
-- [ ] **Step 4: Run tests via `pnpm test` to verify it passes**
-- [ ] **Step 5: Commit tab state changes**
+- [x] **Step 1: Write unit tests in `searchTabs.test.ts` for `lastStats` loading, saving, and updating**
+- [x] **Step 2: Run tests via `pnpm test` to verify failure**
+- [x] **Step 3: Update `searchTabs.ts` with `SearchStats` type, `lastStats` field in `SearchTab`, `createTab`, and `loadTabs` validation**
+- [x] **Step 4: Run tests via `pnpm test` to verify it passes**
+- [x] **Step 5: Commit tab state changes**
 
 ---
 
@@ -70,9 +70,9 @@
 **Interfaces:**
 - Consumes: `tab.lastStats?.hits` from `SearchTab`
 
-- [ ] **Step 1: Update `SearchTabsBar.tsx` to render a match count badge beside the label and workspace count**
-- [ ] **Step 2: Verify tab bar renders cleanly and match badge shows only when `lastStats` is present and query is not empty**
-- [ ] **Step 3: Commit tab bar changes**
+- [x] **Step 1: Update `SearchTabsBar.tsx` to render a match count badge beside the label and workspace count**
+- [x] **Step 2: Verify tab bar renders cleanly and match badge shows only when `lastStats` is present and query is not empty**
+- [x] **Step 3: Commit tab bar changes**
 
 ---
 
@@ -84,9 +84,9 @@
 **Interfaces:**
 - Produces: `<SearchStatsRibbon stats={SearchStats} scope={SearchScope} limit={number} />`
 
-- [ ] **Step 1: Create `SearchStatsRibbon.tsx` with ribbon layout (Option A): matches, files, chunks, execution time, workspaces, and scope/limit**
-- [ ] **Step 2: Add visual styling matching Tailwind tokens and responsive wrapping**
-- [ ] **Step 3: Commit `SearchStatsRibbon.tsx`**
+- [x] **Step 1: Create `SearchStatsRibbon.tsx` with ribbon layout (Option A): matches, files, chunks, execution time, workspaces, and scope/limit**
+- [x] **Step 2: Add visual styling matching Tailwind tokens and responsive wrapping**
+- [x] **Step 3: Commit `SearchStatsRibbon.tsx`**
 
 ---
 
@@ -98,16 +98,16 @@
 **Interfaces:**
 - Consumes: `SearchStatsRibbon`, `data.stats` from `/api/codebase/search`, and `updateTab`
 
-- [ ] **Step 1: Update `doSearch` in `CodebaseList.tsx` to update `activeTab.lastStats` from `data.stats`**
-- [ ] **Step 2: Clear `lastStats` when query is empty or cleared**
-- [ ] **Step 3: Mount `<SearchStatsRibbon />` directly below the query hint and above the results list**
-- [ ] **Step 4: Verify tab switching updates the displayed ribbon and query**
-- [ ] **Step 5: Commit `CodebaseList.tsx` changes**
+- [x] **Step 1: Update `doSearch` in `CodebaseList.tsx` to update `activeTab.lastStats` from `data.stats`**
+- [x] **Step 2: Clear `lastStats` when query is empty or cleared**
+- [x] **Step 3: Mount `<SearchStatsRibbon />` directly below the query hint and above the results list**
+- [x] **Step 4: Verify tab switching updates the displayed ribbon and query**
+- [x] **Step 5: Commit `CodebaseList.tsx` changes**
 
 ---
 
 ### Task 6: Verification & Quality Checks
 
-- [ ] **Step 1: Run frontend tests via `pnpm test`**
-- [ ] **Step 2: Run frontend build via `pnpm build`**
-- [ ] **Step 3: Run backend build and tests**
+- [x] **Step 1: Run frontend tests via `pnpm test`**
+- [x] **Step 2: Run frontend build via `pnpm build`**
+- [x] **Step 3: Run backend build and tests**
