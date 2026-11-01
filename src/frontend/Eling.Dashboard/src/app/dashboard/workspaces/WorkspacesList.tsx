@@ -258,7 +258,17 @@ export function WorkspacesList() {
         }),
       })
       if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`)
+      // The backend reports a component it could not remove. The warning is
+      // shown only when something actually survived — a successful delete
+      // says nothing.
+      const body = (await res.json().catch(() => null)) as {
+        success?: boolean
+        warnings?: string[]
+      } | null
       setDeleteTarget(null)
+      if (body?.warnings?.length) {
+        setError(body.warnings.join(" "))
+      }
       await loadData()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete workspace")
