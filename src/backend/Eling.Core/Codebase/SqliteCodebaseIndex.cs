@@ -349,8 +349,22 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
             Add(cmd, "$lim", Math.Min(Math.Max(limit, 1), 100));
             var rows = new List<CodebaseFileEntry>();
             await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct)) rows.Add(new CodebaseFileEntry(r.GetString(0), r.GetInt32(1), r.GetString(2)));
-            return rows;
+            while (await r.ReadAsync(ct))
+            {
+                rows.Add(new CodebaseFileEntry(r.GetString(0), r.GetInt32(1), r.GetString(2)));
+            }
+
+            var totalCount = rows.Count;
+            if (rows.Count == limit)
+            {
+                await using var countCmd = c.CreateCommand();
+                Add(countCmd, "$needle", needle.Trim());
+                countCmd.CommandText = $"SELECT count(*) FROM codebase_files f WHERE instr(lower({target}), lower($needle)) > 0;";
+                var scalar = await countCmd.ExecuteScalarAsync(ct);
+                totalCount = scalar is not null ? Convert.ToInt32(scalar) : rows.Count;
+            }
+
+            return rows.Select(row => new CodebaseFileEntry(row.Path, row.ChunkCount, row.LastIndexedAt, totalCount)).ToList();
         }
         catch (SqliteException ex) when (IsMissingSchema(ex))
         {
@@ -431,7 +445,30 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
                 var score = r.IsDBNull(4) ? 0 : -r.GetDouble(4);
                 hits.Add(new CodebaseHit(r.GetString(0), r.GetInt32(1), r.GetInt32(2), r.GetString(3), score));
             }
-            return hits;
+
+            var totalCount = hits.Count;
+            if (hits.Count == limit)
+            {
+                await using var countCmd = c.CreateCommand();
+                if (!string.IsNullOrWhiteSpace(pathPrefix))
+                {
+                    Add(countCmd, "$pf", EscapeLike(pathPrefix.Trim()) + "%");
+                }
+                if (fileSql is not null)
+                {
+                    Add(countCmd, "$fp", fileSql);
+                }
+                Add(countCmd, "$q", ftsQuery);
+                countCmd.CommandText = $"""
+                    SELECT count(*)
+                    FROM {table} f JOIN codebase_chunks c ON c.id=f.id
+                    WHERE {table} MATCH $q{where};
+                    """;
+                var scalar = await countCmd.ExecuteScalarAsync(ct);
+                totalCount = scalar is not null ? Convert.ToInt32(scalar) : hits.Count;
+            }
+
+            return hits.Select(h => new CodebaseHit(h.Path, h.StartLine, h.EndLine, h.Content, h.Score, totalCount)).ToList();
         }
         catch (SqliteException ex) when (IsMissingSchema(ex))
         {

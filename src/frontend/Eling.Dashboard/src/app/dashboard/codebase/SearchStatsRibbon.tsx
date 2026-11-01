@@ -8,6 +8,7 @@ interface SearchStatsRibbonProps {
   stats: SearchStats
   scope: SearchScope
   limit: number
+  onLimitChange?: (limit: number) => void
 }
 
 /**
@@ -18,6 +19,7 @@ export function SearchStatsRibbon({
   stats,
   scope,
   limit,
+  onLimitChange,
 }: SearchStatsRibbonProps) {
   const scopeLabel = SEARCH_SCOPE_COPY[scope]?.label ?? scope
   const isTopMode = stats.mode === "top"
@@ -48,6 +50,8 @@ export function SearchStatsRibbon({
             <span>
               {stats.hits === 0
                 ? "No matches"
+                : stats.totalHits && stats.totalHits > stats.hits
+                ? `${stats.hits} of ${stats.totalHits} matches`
                 : `${stats.hits} ${stats.hits === 1 ? "match" : "matches"}`}
             </span>
           </div>
@@ -98,15 +102,34 @@ export function SearchStatsRibbon({
         </div>
       </div>
 
-      {/* Scope info */}
-      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      {/* Scope info & interactive limit selector */}
+      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
         <span className="font-medium text-foreground/80">
           {isTopMode ? "Recent" : scopeLabel}
         </span>
         <span className="text-border" aria-hidden="true">
           ·
         </span>
-        <span>top {limit}</span>
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-muted-foreground">limit:</span>
+          <div className="inline-flex rounded-md border border-border/50 bg-background/50 p-0.5">
+            {[20, 50, 100].map((val) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => onLimitChange?.(val)}
+                className={`rounded px-1.5 py-0.2 text-[10px] font-medium transition-colors ${
+                  limit === val
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                }`}
+                title={`Set search limit to ${val}`}
+              >
+                {val}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   )

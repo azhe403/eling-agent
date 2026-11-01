@@ -113,18 +113,25 @@ public sealed class CodebaseSearchStatsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TopMode_IncludesStatsBlock()
+    public async Task ContentSearch_WhenHitsExceedLimit_ReportsHitsAndTotalHits()
     {
-        var res = await _client.GetAsync($"/api/codebase/search?q=&project={Uri.EscapeDataString(_workspace)}");
+        for (int i = 0; i < 25; i++)
+        {
+            File.WriteAllText(Path.Combine(_workspace, $"Test{i}.cs"), $"class Test{i} {{ void Run() {{ }} }}\n");
+        }
+        var index = new CodebaseIndexService(
+            _workspace,
+            new SqliteCodebaseIndex(ElingPaths.ResolveCodebaseDbPath(_workspace)));
+        await index.IndexAsync(full: true);
+
+        var res = await _client.GetAsync($"/api/codebase/search?q=Run&limit=10&project={Uri.EscapeDataString(_workspace)}");
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
 
         using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync());
         var root = doc.RootElement;
-        Assert.Equal("top", root.GetProperty("mode").GetString());
         Assert.True(root.TryGetProperty("stats", out var stats));
-        Assert.True(stats.GetProperty("tookMs").GetInt32() >= 0);
-        Assert.True(stats.GetProperty("files").GetInt32() >= 1);
-        Assert.True(stats.GetProperty("chunks").GetInt32() >= 1);
-        Assert.Equal(1, stats.GetProperty("workspaces").GetInt32());
+
+        Assert.Equal(10, stats.GetProperty("hits").GetInt32());
+        Assert.True(stats.GetProperty("totalHits").GetInt32() >= 25);
     }
 }

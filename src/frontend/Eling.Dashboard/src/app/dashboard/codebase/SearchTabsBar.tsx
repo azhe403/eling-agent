@@ -64,7 +64,11 @@ export function SearchTabsBar({
               )}
               title={
                 tab.lastStats !== undefined && tab.query.trim() !== ""
-                  ? `${label} (${tab.scope}) · ${tab.lastStats.hits} match(es) (${tab.lastStats.tookMs}ms)`
+                  ? `${label} (${tab.scope}) · ${
+                      tab.lastStats.totalHits && tab.lastStats.totalHits > tab.lastStats.hits
+                        ? `${tab.lastStats.hits} of ${tab.lastStats.totalHits}`
+                        : tab.lastStats.hits
+                    } match(es) (${tab.lastStats.tookMs}ms)`
                   : `${label} (${tab.scope})`
               }
             >
@@ -79,9 +83,15 @@ export function SearchTabsBar({
                         ? "bg-primary text-primary-foreground"
                         : "bg-muted text-muted-foreground group-hover:text-foreground"
                     )}
-                    title={`${tab.lastStats.hits} match(es) in ${tab.lastStats.files} file(s)`}
+                    title={`${
+                      tab.lastStats.totalHits && tab.lastStats.totalHits > tab.lastStats.hits
+                        ? `${tab.lastStats.hits} of ${tab.lastStats.totalHits}`
+                        : tab.lastStats.hits
+                    } match(es) in ${tab.lastStats.files} file(s)`}
                   >
-                    {tab.lastStats.hits}
+                    {tab.lastStats.totalHits && tab.lastStats.totalHits > tab.lastStats.hits
+                      ? `${tab.lastStats.hits}/${tab.lastStats.totalHits}`
+                      : tab.lastStats.hits}
                   </span>
                 )}
                 {workspaceCount > 0 && (

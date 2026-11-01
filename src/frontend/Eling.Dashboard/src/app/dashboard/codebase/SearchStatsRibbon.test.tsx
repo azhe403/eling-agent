@@ -26,7 +26,7 @@ describe("SearchStatsRibbon", () => {
     expect(screen.getByText(/workspaces/)).toBeDefined()
     expect(screen.getByText("2 hits")).toBeDefined()
     expect(screen.getByText("Content")).toBeDefined()
-    expect(screen.getByText("top 20")).toBeDefined()
+    expect(screen.getByText("limit:")).toBeDefined()
   })
 
   it("handles 0 matches gracefully", () => {
@@ -47,7 +47,7 @@ describe("SearchStatsRibbon", () => {
 
     expect(screen.getByText("No matches")).toBeDefined()
     expect(screen.getByText("File")).toBeDefined()
-    expect(screen.getByText("top 20")).toBeDefined()
+    expect(screen.getByText("limit:")).toBeDefined()
   })
 
   it("renders recent files stats in top mode", () => {
@@ -68,12 +68,40 @@ describe("SearchStatsRibbon", () => {
     )
 
     expect(screen.getByText("Recent files")).toBeDefined()
-    expect(screen.getByText("20")).toBeDefined()
+    expect(screen.getAllByText("20").length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText("95")).toBeDefined()
     expect(screen.getByText("48")).toBeDefined()
     expect(screen.getByText("3 active")).toBeDefined()
     expect(screen.getByText("12ms")).toBeDefined()
     expect(screen.getByText("Recent")).toBeDefined()
-    expect(screen.getByText("top 20")).toBeDefined()
+    expect(screen.getByText("limit:")).toBeDefined()
+  })
+
+  it("renders '20 of 142 matches' when totalHits exceeds hits", () => {
+    let clickedLimit: number | null = null
+    render(
+      <SearchStatsRibbon
+        stats={{
+          tookMs: 45,
+          hits: 20,
+          totalHits: 142,
+          files: 12,
+          chunks: 20,
+          workspaces: 5,
+          workspacesWithHits: 3,
+        }}
+        scope="content"
+        limit={20}
+        onLimitChange={(l) => {
+          clickedLimit = l
+        }}
+      />
+    )
+
+    expect(screen.getByText("20 of 142 matches")).toBeDefined()
+    const btn50 = screen.getByRole("button", { name: "50" })
+    expect(btn50).toBeDefined()
+    btn50.click()
+    expect(clickedLimit).toBe(50)
   })
 })

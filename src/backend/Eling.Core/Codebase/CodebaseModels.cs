@@ -18,7 +18,8 @@ public sealed record CodebaseHit(
     int StartLine,
     int EndLine,
     string Content,
-    double Score);
+    double Score,
+    int TotalMatches = 0);
 
 /// <summary>
 /// A codebase hit with its owning project attached, so multi-project
@@ -30,7 +31,8 @@ public sealed record ScopedCodebaseHit(
     int StartLine,
     int EndLine,
     string Content,
-    double Score);
+    double Score,
+    int TotalMatches = 0);
 
 /// <summary>
 /// One indexed file with its chunk count — the storage-level shape.
@@ -40,7 +42,8 @@ public sealed record ScopedCodebaseHit(
 public sealed record CodebaseFileEntry(
     string Path,
     int ChunkCount,
-    string LastIndexedAt);
+    string LastIndexedAt,
+    int TotalMatches = 0);
 
 /// <summary>
 /// One indexed file with its chunk count — used for the "top files" listing.
@@ -49,7 +52,8 @@ public sealed record CodebaseFileSummary(
     string ProjectRoot,
     string Path,
     int ChunkCount,
-    string LastIndexedAt);
+    string LastIndexedAt,
+    int TotalMatches = 0);
 
 /// <summary>
 /// Stats for a single index DB: file/chunk counts, newest write, DB path.

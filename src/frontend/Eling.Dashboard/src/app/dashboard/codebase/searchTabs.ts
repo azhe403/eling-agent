@@ -5,6 +5,7 @@ import type { SearchScope } from "./scope"
 export type SearchStats = {
   tookMs: number
   hits: number
+  totalHits?: number
   files: number
   chunks: number
   workspaces: number
@@ -115,6 +116,9 @@ export function loadTabs(
               ? {
                   tookMs: Number(t.lastStats.tookMs) || 0,
                   hits: Number(t.lastStats.hits) || 0,
+                  ...(t.lastStats.totalHits !== undefined
+                    ? { totalHits: Number(t.lastStats.totalHits) || 0 }
+                    : {}),
                   files: Number(t.lastStats.files) || 0,
                   chunks: Number(t.lastStats.chunks) || 0,
                   workspaces: Number(t.lastStats.workspaces) || 1,

@@ -125,14 +125,13 @@ function scopeSuffix(sel: WorkspaceSelection): string {
 // place — the read (search/status) and the write (rebuild) share it by
 // construction.
 
-const SEARCH_LIMIT = 20
-
 export function searchUrl(
   q: string,
   sel: WorkspaceSelection,
   scope: SearchScope,
+  limit: number = 20,
 ): string {
-  const base = `/api/codebase/search?limit=${SEARCH_LIMIT}`
+  const base = `/api/codebase/search?limit=${limit}`
   const selection = scopeSuffix(sel)
   const search = searchScopeQuery(scope)
   const scopePart = search ? `&${search}` : ""

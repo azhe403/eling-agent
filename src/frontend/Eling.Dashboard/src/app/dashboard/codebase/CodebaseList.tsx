@@ -262,6 +262,7 @@ export function CodebaseList() {
   // dialog. Mirrors Tailwind's xl breakpoint, which FileDetailPanel's own
   // `xl:flex` class also encodes, so the JS gate and CSS agree by construction.
   const wide = useMediaQuery(`(min-width: ${XL_BREAKPOINT}px)`)
+  const [searchLimit, setSearchLimit] = useState(20)
   const [topFiles, setTopFiles] = useState<FileResult[]>([])
   const [topStats, setTopStats] = useState<SearchStats | null>(null)
   const [topLoading, setTopLoading] = useState(true)
@@ -317,10 +318,11 @@ export function CodebaseList() {
   }, [selection])
 
   // Empty box shows the most recently indexed files instead of nothing.
-  const loadTop = useCallback(async (silent: boolean) => {
+  const loadTop = useCallback(async (silent: boolean, limitToUse?: number) => {
     if (!silent) setTopLoading(true)
+    const effectiveLimit = limitToUse ?? searchLimit
     try {
-      const res = await fetch(searchUrl("", selection, searchScope), {
+      const res = await fetch(searchUrl("", selection, searchScope, effectiveLimit), {
         cache: "no-store",
       })
       if (!res.ok) throw new Error(`API returned ${res.status}`)
@@ -330,6 +332,7 @@ export function CodebaseList() {
         setTopStats({
           tookMs: Number(data.stats.tookMs) || 0,
           hits: Number(data.stats.hits) || 0,
+          totalHits: Number(data.stats.totalHits) || Number(data.stats.hits) || 0,
           files: Number(data.stats.files) || 0,
           chunks: Number(data.stats.chunks) || 0,
           workspaces: Number(data.stats.workspaces) || 1,
@@ -342,7 +345,7 @@ export function CodebaseList() {
     } finally {
       if (!silent) setTopLoading(false)
     }
-  }, [selection, searchScope])
+  }, [selection, searchScope, searchLimit])
 
   // Starts a rebuild over the selected scope/mode. The 202 body is already a
   // progress snapshot, so the UI has something to render before the first SSE
@@ -477,7 +480,7 @@ export function CodebaseList() {
   const doSearch = useCallback(async (
     q: string,
     scope: SearchScope,
-    opts?: { silent?: boolean; selection?: WorkspaceSelection }
+    opts?: { silent?: boolean; selection?: WorkspaceSelection; limit?: number }
   ) => {
     const trimmed = q.trim()
     const seq = ++searchSeq.current
@@ -497,10 +500,11 @@ export function CodebaseList() {
     }
     const targetSelection = opts?.selection ?? selection
     const silent = opts?.silent ?? false
+    const effectiveLimit = opts?.limit ?? searchLimit
     if (!silent) setSearching(true)
     setSearchError(null)
     try {
-      const res = await fetch(searchUrl(trimmed, targetSelection, scope), {
+      const res = await fetch(searchUrl(trimmed, targetSelection, scope, effectiveLimit), {
         cache: "no-store",
       })
       if (!res.ok) throw new Error(`API returned ${res.status}`)
@@ -511,6 +515,7 @@ export function CodebaseList() {
         ? {
             tookMs: Number(data.stats.tookMs) || 0,
             hits: Number(data.stats.hits) || 0,
+            totalHits: Number(data.stats.totalHits) || Number(data.stats.hits) || 0,
             files: Number(data.stats.files) || 0,
             chunks: Number(data.stats.chunks) || 0,
             workspaces: Number(data.stats.workspaces) || 1,
@@ -556,7 +561,19 @@ export function CodebaseList() {
       // because the superseded manual search skips its own reset above.
       if (searchSeq.current === seq) setSearching(false)
     }
-  }, [selection])
+  }, [selection, searchLimit])
+
+  const handleLimitChange = useCallback(
+    (newLimit: number) => {
+      setSearchLimit(newLimit)
+      if (query.trim()) {
+        void doSearch(query, searchScope, { limit: newLimit })
+      } else {
+        void loadTop(false, newLimit)
+      }
+    },
+    [query, searchScope, doSearch, loadTop]
+  )
 
   // Switching the scope drops the rows on screen and puts the new scope in
   // the URL; the search that follows belongs to the debounce effect, which
@@ -1160,7 +1177,8 @@ export function CodebaseList() {
             <SearchStatsRibbon
               stats={query.trim() ? activeTab.lastStats! : topStats!}
               scope={searchScope}
-              limit={20}
+              limit={searchLimit}
+              onLimitChange={handleLimitChange}
             />
           </div>
         )}

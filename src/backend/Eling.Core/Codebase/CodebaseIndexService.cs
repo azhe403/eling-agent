@@ -409,7 +409,7 @@ public sealed class CodebaseIndexService
                 }
                 var bias = local ? 1.1 : 1.0;
                 _logger.LogDebug("Searched workspace {Root} (local={IsLocal}): got {HitCount} hits.", root, local, hits.Count);
-                all.AddRange(hits.Select(h => new ScopedCodebaseHit(root, h.Path, h.StartLine, h.EndLine, h.Content, h.Score * bias)));
+                all.AddRange(hits.Select(h => new ScopedCodebaseHit(root, h.Path, h.StartLine, h.EndLine, h.Content, h.Score * bias, h.TotalMatches)));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -422,7 +422,7 @@ public sealed class CodebaseIndexService
                 continue;
             }
         }
-        var merged = all.OrderByDescending(h => h.Score).Take(Math.Min(Math.Max(limit, 1), 50)).ToList();
+        var merged = all.OrderByDescending(h => h.Score).Take(Math.Min(Math.Max(limit, 1), 100)).ToList();
         _logger.LogDebug("Federated search for '{Query}' completed across {RootCount} roots: {TotalHits} total hits returned.", query, roots.Count, merged.Count);
         return merged;
     }
@@ -513,7 +513,7 @@ public sealed class CodebaseIndexService
                     using var index = new SqliteCodebaseIndex(dbPath, readOnly: true);
                     files = await index.SearchFilesAsync(needle, capped, match, ct);
                 }
-                all.AddRange(files.Select(f => new CodebaseFileSummary(root, f.Path, f.ChunkCount, f.LastIndexedAt)));
+                all.AddRange(files.Select(f => new CodebaseFileSummary(root, f.Path, f.ChunkCount, f.LastIndexedAt, f.TotalMatches)));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

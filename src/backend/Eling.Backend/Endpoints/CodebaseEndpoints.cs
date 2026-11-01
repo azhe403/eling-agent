@@ -223,7 +223,7 @@ public static class CodebaseEndpoints
         using var _actor = AuditActorContext.Begin(DashboardActor());
         var audit = AuditFor(context);
         var logger = loggerFactory.CreateLogger("Eling.Backend.Endpoints.CodebaseEndpoints");
-        if (limit is < 1 or > 50)
+        if (limit is < 1 or > 100)
             limit = 20;
         var sw = Stopwatch.StartNew();
         try
@@ -243,6 +243,7 @@ public static class CodebaseEndpoints
                 {
                     tookMs = (int)sw.ElapsedMilliseconds,
                     hits = files.Count,
+                    totalHits = files.Count,
                     files = files.Count,
                     chunks = files.Sum(f => f.ChunkCount),
                     workspaces = roots?.Count ?? 1,
@@ -260,10 +261,14 @@ public static class CodebaseEndpoints
                 var match = searchScope == SearchScope.Path ? CodebaseFileMatch.Path : CodebaseFileMatch.FileName;
                 var matched = await svc.SearchFilesAsync(q, limit ?? 20, match, roots);
                 await audit.RecordSearchAsync(q, matched.Count, svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
+                var totalMatches = matched.Count > 0
+                    ? Math.Max(matched.Count, matched.GroupBy(f => f.ProjectRoot).Sum(g => g.First().TotalMatches))
+                    : 0;
                 var stats = new
                 {
                     tookMs = (int)sw.ElapsedMilliseconds,
                     hits = matched.Count,
+                    totalHits = totalMatches,
                     files = matched.Count,
                     chunks = matched.Sum(f => f.ChunkCount),
                     workspaces = roots?.Count ?? 1,
@@ -280,14 +285,18 @@ public static class CodebaseEndpoints
             else
             {
                 hits = (await svc.SearchAsync(q, limit ?? 20, pathPrefix))
-                    .Select(h => new ScopedCodebaseHit(svc.ProjectRoot, h.Path, h.StartLine, h.EndLine, h.Content, h.Score))
+                    .Select(h => new ScopedCodebaseHit(svc.ProjectRoot, h.Path, h.StartLine, h.EndLine, h.Content, h.Score, h.TotalMatches))
                     .ToList();
             }
             await audit.RecordSearchAsync(q, hits.Count, svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
+            var totalContentMatches = hits.Count > 0
+                ? Math.Max(hits.Count, hits.GroupBy(h => h.ProjectRoot).Sum(g => g.First().TotalMatches))
+                : 0;
             var contentStats = new
             {
                 tookMs = (int)sw.ElapsedMilliseconds,
                 hits = hits.Count,
+                totalHits = totalContentMatches,
                 files = hits.Select(h => (h.ProjectRoot, h.Path)).Distinct().Count(),
                 chunks = hits.Count,
                 workspaces = roots?.Count ?? 1,
