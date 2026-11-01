@@ -251,7 +251,16 @@ public static class CodebaseEndpoints
                 var match = searchScope == SearchScope.Path ? CodebaseFileMatch.Path : CodebaseFileMatch.FileName;
                 var matched = await svc.SearchFilesAsync(q, limit ?? 20, match, roots);
                 await audit.RecordSearchAsync(q, matched.Count, svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
-                return TypedResults.Ok(new { query = q, limit = limit, scope = effectiveScope, mode = "files", results = matched.Select(f => new { f.ProjectRoot, f.Path, f.ChunkCount, f.LastIndexedAt }) });
+                var stats = new
+                {
+                    tookMs = (int)sw.ElapsedMilliseconds,
+                    hits = matched.Count,
+                    files = matched.Count,
+                    chunks = matched.Sum(f => f.ChunkCount),
+                    workspaces = roots?.Count ?? 1,
+                    workspacesWithHits = matched.Select(f => f.ProjectRoot).Distinct(StringComparer.OrdinalIgnoreCase).Count()
+                };
+                return TypedResults.Ok(new { query = q, limit = limit, scope = effectiveScope, mode = "files", results = matched.Select(f => new { f.ProjectRoot, f.Path, f.ChunkCount, f.LastIndexedAt }), stats });
             }
 
             IReadOnlyList<ScopedCodebaseHit> hits;
@@ -266,7 +275,16 @@ public static class CodebaseEndpoints
                     .ToList();
             }
             await audit.RecordSearchAsync(q, hits.Count, svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
-            return TypedResults.Ok(new { query = q, limit = limit, scope = effectiveScope, mode = "search", results = hits.Select(h => new { h.ProjectRoot, h.Path, h.StartLine, h.EndLine, h.Content, h.Score }) });
+            var contentStats = new
+            {
+                tookMs = (int)sw.ElapsedMilliseconds,
+                hits = hits.Count,
+                files = hits.Select(h => (h.ProjectRoot, h.Path)).Distinct().Count(),
+                chunks = hits.Count,
+                workspaces = roots?.Count ?? 1,
+                workspacesWithHits = hits.Select(h => h.ProjectRoot).Distinct(StringComparer.OrdinalIgnoreCase).Count()
+            };
+            return TypedResults.Ok(new { query = q, limit = limit, scope = effectiveScope, mode = "search", results = hits.Select(h => new { h.ProjectRoot, h.Path, h.StartLine, h.EndLine, h.Content, h.Score }), stats = contentStats });
         }
         catch (ArgumentException ex)
         {
