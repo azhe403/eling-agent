@@ -428,7 +428,18 @@ public sealed class ElingApiClient
         }
     }
 
-    public async Task<bool> DeleteProjectAsync(string projectRoot, bool deleteRegistry = true, bool deleteCodebaseIndex = true, bool deleteDotEling = false, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// The outcome of a workspace delete, including what could not be removed.
+    /// The backend reports the components it failed to delete, and a delete
+    /// that left the codebase index on disk is not a success — the caller has
+    /// to be able to say so.
+    /// </summary>
+    public async Task<DeleteProjectResult> DeleteProjectDetailedAsync(
+        string projectRoot,
+        bool deleteRegistry = true,
+        bool deleteCodebaseIndex = true,
+        bool deleteDotEling = false,
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -441,15 +452,28 @@ public sealed class ElingApiClient
                 deleteDotEling
             };
             var response = await client.PostAsJsonAsync("api/coordinator/project/delete", payload, JsonOptions, cancellationToken);
-            return response.IsSuccessStatusCode;
+            if (!response.IsSuccessStatusCode)
+            {
+                return new DeleteProjectResult(false, [$"Delete failed (HTTP {(int)response.StatusCode})."]);
+            }
+
+            var body = await response.Content.ReadFromJsonAsync<DeleteProjectResponse>(JsonOptions, cancellationToken);
+            var warnings = body?.Warnings ?? [];
+            return new DeleteProjectResult(warnings.Count == 0, warnings);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting project {Project}", projectRoot);
-            return false;
+            return new DeleteProjectResult(false, [ex.Message]);
         }
     }
 
+    /// <summary>The backend's delete answer: whether everything was removed, and what was not.</summary>
+    private sealed class DeleteProjectResponse
+    {
+        public bool Success { get; set; }
+        public List<string> Warnings { get; set; } = [];
+    }
     public sealed class ProviderConfig
     {
         public string? BaseUrl { get; set; }

@@ -359,20 +359,21 @@ public class FoldersViewModel : ViewModelBase
         StatusText = $"Deleting {target.Name}...";
         try
         {
-            var ok = await _apiClient.DeleteProjectAsync(
+            var result = await _apiClient.DeleteProjectDetailedAsync(
                 target.Root,
                 deleteRegistry: DeleteRegistry,
                 deleteCodebaseIndex: DeleteCodebaseIndex,
                 deleteDotEling: DeleteDotEling);
 
-            if (ok)
+            if (result.Succeeded)
             {
                 StatusText = $"Deleted {target.Name}";
                 await LoadAsync();
             }
             else
             {
-                StatusText = $"Delete failed for {target.Name}";
+                // A partial delete must say what survived, not just "failed".
+                StatusText = $"Delete incomplete for {target.Name}: {result.WarningText}";
             }
         }
         catch (Exception ex)
