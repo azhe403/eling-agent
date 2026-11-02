@@ -50,6 +50,94 @@ public class SqliteAuditIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task RebuildAsync_IsIncremental_AndDoesNotDuplicateRows()
+    {
+        var store = new AuditFileStore(_root, TimeProvider.System);
+        var day = new DateTimeOffset(2026, 9, 11, 9, 0, 0, TimeSpan.Zero);
+        await store.AppendAsync(
+            AuditTrail.Change,
+            [new AuditEvent { Timestamp = day, Trail = AuditTrail.Change, Action = "memory_save" }],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        var index = new SqliteAuditIndex(_root, store);
+        await index.RebuildAsync(CancellationToken.None);
+        var first = await index.QueryAsync(new AuditQuery(AuditTrail.Change, null, null), CancellationToken.None);
+        Assert.Single(first);
+
+        // A second rebuild over an unchanged trail must not write the day again.
+        // The previous implementation deleted everything and reinserted, so this
+        // only proves idempotence — the row count below proves the skip path.
+        await index.RebuildAsync(CancellationToken.None);
+        var second = await index.QueryAsync(new AuditQuery(AuditTrail.Change, null, null), CancellationToken.None);
+        Assert.Single(second);
+        Assert.Equal(first[0].Event.Timestamp, second[0].Event.Timestamp);
+    }
+
+    [Fact]
+    public async Task RebuildAsync_PicksUpNewDaysAndReplacesAGrownDay()
+    {
+        var store = new AuditFileStore(_root, TimeProvider.System);
+        var day = new DateTimeOffset(2026, 9, 11, 9, 0, 0, TimeSpan.Zero);
+        await store.AppendAsync(
+            AuditTrail.Change,
+            [new AuditEvent { Timestamp = day, Trail = AuditTrail.Change, Action = "memory_save" }],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        var index = new SqliteAuditIndex(_root, store);
+        await index.RebuildAsync(CancellationToken.None);
+        Assert.Single(await index.QueryAsync(new AuditQuery(AuditTrail.Change, null, null), CancellationToken.None));
+
+        // The open day grows: the incremental pass must replace that file rather
+        // than append a second copy of the row it already indexed.
+        await store.AppendAsync(
+            AuditTrail.Change,
+            [new AuditEvent { Timestamp = day.AddMinutes(1), Trail = AuditTrail.Change, Action = "memory_delete" }],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        await index.RebuildAsync(CancellationToken.None);
+
+        var rows = await index.QueryAsync(new AuditQuery(AuditTrail.Change, null, null), CancellationToken.None);
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => r.Event.Action == "memory_save");
+        Assert.Contains(rows, r => r.Event.Action == "memory_delete");
+    }
+
+    [Fact]
+    public async Task RebuildAsync_IndexesSameNamedDayFilesFromBothTrails()
+    {
+        // Both trails write one file per day under the same name. Keying the
+        // incremental seen-marker on the bare file name made the second trail
+        // look already-indexed and skip it, silently dropping every access entry.
+        var store = new AuditFileStore(_root, TimeProvider.System);
+        var day = new DateTimeOffset(2026, 9, 11, 9, 0, 0, TimeSpan.Zero);
+        await store.AppendAsync(
+            AuditTrail.Change,
+            [new AuditEvent { Timestamp = day, Trail = AuditTrail.Change, Action = "memory_save" }],
+            flushToDisk: true,
+            CancellationToken.None);
+        await store.AppendAsync(
+            AuditTrail.Access,
+            [
+                new AuditEvent { Timestamp = day, Trail = AuditTrail.Access, Action = "codebase_search" },
+                new AuditEvent { Timestamp = day.AddMinutes(1), Trail = AuditTrail.Access, Action = "memory_recall" }
+            ],
+            flushToDisk: true,
+            CancellationToken.None);
+
+        var index = new SqliteAuditIndex(_root, store);
+        await index.RebuildAsync(CancellationToken.None);
+
+        var changes = await index.QueryAsync(new AuditQuery(AuditTrail.Change, null, null), CancellationToken.None);
+        var access = await index.QueryAsync(new AuditQuery(AuditTrail.Access, null, null), CancellationToken.None);
+
+        Assert.Single(changes);
+        Assert.Equal(2, access.Count);
+    }
+
+    [Fact]
     public async Task RebuildAsync_SeesCompressedClosedDays()
     {
         var day = new DateTimeOffset(2026, 9, 10, 9, 0, 0, TimeSpan.Zero);

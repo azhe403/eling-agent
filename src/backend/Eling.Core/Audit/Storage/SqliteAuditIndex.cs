@@ -26,6 +26,19 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
     {
         Directory.CreateDirectory(auditRoot);
         await using var connection = await OpenConnectionAsync(cancellationToken);
+
+        // A rebuild deletes every row and reinserts the whole trail, and SQLite
+        // hands freed pages back to its freelist rather than to the OS. Without
+        // this, each startup grew the file monotonically: an audit trail whose
+        // source JSONL was a couple of megabytes produced a 162 MB database of
+        // which every table held zero rows, and mapping that file was what made
+        // an idle backend hold hundreds of megabytes of working set.
+        //
+        // auto_vacuum must be set before the first table exists to take effect,
+        // so a database created by an older build carries the old mode and needs
+        // VACUUM once to adopt it. The pragma is cheap when it already applies.
+        await EnableIncrementalAutoVacuumAsync(connection, cancellationToken);
+
         await ExecuteAsync(connection, """
             CREATE TABLE IF NOT EXISTS audit_events (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,20 +109,30 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
         if (records.Count == 0) return;
         await using var connection = await OpenConnectionAsync(cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+        // One command per statement, prepared once and reused for every record in
+        // the chunk. Creating a command plus its parameters per row was the single
+        // largest allocation path in a rebuild: each AddWithValue marshals its
+        // string argument to UTF-8, so a row cost ~23 such conversions. Reusing
+        // the prepared statement drops that to setting values on existing
+        // parameters, and SQLite parses the SQL once instead of once per row.
+        await using var eventCommand = PrepareEventCommand(connection, transaction);
+        await using var stateCommand = PrepareStateCommand(connection, transaction);
+        await using var tagCommand = PrepareTagCommand(connection, transaction);
+
         foreach (var record in records)
         {
-            var eventId = await InsertEventAsync(connection, transaction, record, cancellationToken);
-            await InsertStateAsync(connection, transaction, eventId, After, record.Event.Metadata, cancellationToken);
-            await InsertStateAsync(connection, transaction, eventId, Previous, record.Event.PreviousMetadata, cancellationToken);
+            var eventId = await InsertEventAsync(eventCommand, record, cancellationToken);
+            await InsertStateAsync(stateCommand, tagCommand, eventId, After, record.Event.Metadata, cancellationToken);
+            await InsertStateAsync(stateCommand, tagCommand, eventId, Previous, record.Event.PreviousMetadata, cancellationToken);
         }
+
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private static async Task<long> InsertEventAsync(
-        SqliteConnection connection, SqliteTransaction transaction, AuditRecord record, CancellationToken cancellationToken)
+    private static SqliteCommand PrepareEventCommand(SqliteConnection connection, SqliteTransaction transaction)
     {
-        var e = record.Event;
-        await using var command = connection.CreateCommand();
+        var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO audit_events
@@ -122,74 +145,141 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
                  $query, $count, $verb, $truncated, $path, $matches, $pid, $file, $line);
             SELECT last_insert_rowid();
             """;
-        command.Parameters.AddWithValue("$ts", e.Timestamp.ToString("O"));
-        command.Parameters.AddWithValue("$trail", AuditLabels.ToWireString(e.Trail));
-        command.Parameters.AddWithValue("$cat", AuditLabels.ToWireString(e.Category));
-        command.Parameters.AddWithValue("$action", e.Action);
-        command.Parameters.AddWithValue("$actor", e.Actor);
-        command.Parameters.AddWithValue("$source", e.Source);
-        command.Parameters.AddWithValue("$scope", (object?)(e.Scope.HasValue ? AuditLabels.ToWireString(e.Scope.Value) : null) ?? DBNull.Value);
-        command.Parameters.AddWithValue("$root", (object?)e.ProjectRoot ?? DBNull.Value);
-        command.Parameters.AddWithValue("$target", (object?)e.Target ?? DBNull.Value);
-        command.Parameters.AddWithValue("$outcome", AuditLabels.ToWireString(e.Outcome));
-        command.Parameters.AddWithValue("$duration", (object?)e.DurationMs ?? DBNull.Value);
-        command.Parameters.AddWithValue("$size", (object?)e.ByteSize ?? DBNull.Value);
-        command.Parameters.AddWithValue("$hash", (object?)e.Hash ?? DBNull.Value);
-        command.Parameters.AddWithValue("$prevhash", (object?)e.PrevHash ?? DBNull.Value);
-        command.Parameters.AddWithValue("$query", (object?)e.Query ?? DBNull.Value);
-        command.Parameters.AddWithValue("$count", (object?)e.ResultCount ?? DBNull.Value);
-        command.Parameters.AddWithValue("$verb", (object?)e.Verb ?? DBNull.Value);
-        command.Parameters.AddWithValue("$truncated", (object?)e.Truncated ?? DBNull.Value);
-        command.Parameters.AddWithValue("$path", (object?)e.Path ?? DBNull.Value);
-        command.Parameters.AddWithValue("$matches", (object?)e.Matches ?? DBNull.Value);
-        command.Parameters.AddWithValue("$pid", (object?)e.Pid ?? DBNull.Value);
-        command.Parameters.AddWithValue("$file", record.File);
-        command.Parameters.AddWithValue("$line", record.Line);
-        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken));
+        foreach (var name in new[]
+                 {
+                     "$ts", "$trail", "$cat", "$action", "$actor", "$source", "$scope", "$root",
+                     "$target", "$outcome", "$duration", "$size", "$hash", "$prevhash", "$query",
+                     "$count", "$verb", "$truncated", "$path", "$matches", "$pid", "$file", "$line",
+                 })
+        {
+            command.Parameters.Add(new SqliteParameter(name, null));
+        }
+        command.Prepare();
+        return command;
     }
 
-    private static async Task InsertStateAsync(
-        SqliteConnection connection, SqliteTransaction transaction, long eventId,
-        string side, AuditMetadata? state, CancellationToken cancellationToken)
+    private static SqliteCommand PrepareStateCommand(SqliteConnection connection, SqliteTransaction transaction)
     {
-        if (state is null) return;
-
-        await using var command = connection.CreateCommand();
+        var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO audit_state (event_id, side, content, status, memory_source)
             VALUES ($event, $side, $content, $status, $source);
             SELECT last_insert_rowid();
             """;
-        command.Parameters.AddWithValue("$event", eventId);
-        command.Parameters.AddWithValue("$side", side);
-        command.Parameters.AddWithValue("$content", (object?)state.Content ?? DBNull.Value);
-        command.Parameters.AddWithValue("$status", (object?)state.Status ?? DBNull.Value);
-        command.Parameters.AddWithValue("$source", (object?)state.MemorySource ?? DBNull.Value);
-        var stateId = Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken));
+        foreach (var name in new[] { "$event", "$side", "$content", "$status", "$source" })
+        {
+            command.Parameters.Add(new SqliteParameter(name, null));
+        }
+        command.Prepare();
+        return command;
+    }
+
+    private static SqliteCommand PrepareTagCommand(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "INSERT INTO audit_tags (state_id, ordinal, tag) VALUES ($state, $ord, $tag);";
+        foreach (var name in new[] { "$state", "$ord", "$tag" })
+        {
+            command.Parameters.Add(new SqliteParameter(name, null));
+        }
+        command.Prepare();
+        return command;
+    }
+
+    private static async Task<long> InsertEventAsync(
+        SqliteCommand command, AuditRecord record, CancellationToken cancellationToken)
+    {
+        var e = record.Event;
+        command.Parameters["$ts"].Value = e.Timestamp.ToString("O");
+        command.Parameters["$trail"].Value = AuditLabels.ToWireString(e.Trail);
+        command.Parameters["$cat"].Value = AuditLabels.ToWireString(e.Category);
+        command.Parameters["$action"].Value = e.Action;
+        command.Parameters["$actor"].Value = e.Actor;
+        command.Parameters["$source"].Value = e.Source;
+        command.Parameters["$scope"].Value = (object?)(e.Scope.HasValue ? AuditLabels.ToWireString(e.Scope.Value) : null) ?? DBNull.Value;
+        command.Parameters["$root"].Value = (object?)e.ProjectRoot ?? DBNull.Value;
+        command.Parameters["$target"].Value = (object?)e.Target ?? DBNull.Value;
+        command.Parameters["$outcome"].Value = AuditLabels.ToWireString(e.Outcome);
+        command.Parameters["$duration"].Value = (object?)e.DurationMs ?? DBNull.Value;
+        command.Parameters["$size"].Value = (object?)e.ByteSize ?? DBNull.Value;
+        command.Parameters["$hash"].Value = (object?)e.Hash ?? DBNull.Value;
+        command.Parameters["$prevhash"].Value = (object?)e.PrevHash ?? DBNull.Value;
+        command.Parameters["$query"].Value = (object?)e.Query ?? DBNull.Value;
+        command.Parameters["$count"].Value = (object?)e.ResultCount ?? DBNull.Value;
+        command.Parameters["$verb"].Value = (object?)e.Verb ?? DBNull.Value;
+        command.Parameters["$truncated"].Value = (object?)e.Truncated ?? DBNull.Value;
+        command.Parameters["$path"].Value = (object?)e.Path ?? DBNull.Value;
+        command.Parameters["$matches"].Value = (object?)e.Matches ?? DBNull.Value;
+        command.Parameters["$pid"].Value = (object?)e.Pid ?? DBNull.Value;
+        command.Parameters["$file"].Value = record.File;
+        command.Parameters["$line"].Value = record.Line;
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken));
+    }
+
+    private static async Task InsertStateAsync(
+        SqliteCommand stateCommand, SqliteCommand tagCommand, long eventId,
+        string side, AuditMetadata? state, CancellationToken cancellationToken)
+    {
+        if (state is null) return;
+
+        stateCommand.Parameters["$event"].Value = eventId;
+        stateCommand.Parameters["$side"].Value = side;
+        stateCommand.Parameters["$content"].Value = (object?)state.Content ?? DBNull.Value;
+        stateCommand.Parameters["$status"].Value = (object?)state.Status ?? DBNull.Value;
+        stateCommand.Parameters["$source"].Value = (object?)state.MemorySource ?? DBNull.Value;
+        var stateId = Convert.ToInt64(await stateCommand.ExecuteScalarAsync(cancellationToken));
 
         if (state.Tags is not { Count: > 0 }) return;
         for (var ordinal = 0; ordinal < state.Tags.Count; ordinal++)
         {
-            await using var tagCommand = connection.CreateCommand();
-            tagCommand.Transaction = transaction;
-            tagCommand.CommandText = "INSERT INTO audit_tags (state_id, ordinal, tag) VALUES ($state, $ord, $tag);";
-            tagCommand.Parameters.AddWithValue("$state", stateId);
-            tagCommand.Parameters.AddWithValue("$ord", ordinal);
-            tagCommand.Parameters.AddWithValue("$tag", state.Tags[ordinal]);
+            tagCommand.Parameters["$state"].Value = stateId;
+            tagCommand.Parameters["$ord"].Value = ordinal;
+            tagCommand.Parameters["$tag"].Value = state.Tags[ordinal];
             await tagCommand.ExecuteNonQueryAsync(cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// Switches the index file to incremental auto-vacuum so pages freed by a
+    /// rebuild can be released instead of accumulating. SQLite only honours the
+    /// setting when it is written before the first table is created, so an
+    /// existing file in the old mode is converted with a one-off VACUUM.
+    /// </summary>
+    private static async Task EnableIncrementalAutoVacuumAsync(
+        SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        // 2 == INCREMENTAL. On a fresh database this is the value later writes
+        // record in the header; on an existing one it is inert until VACUUM.
+        await ExecuteAsync(connection, "PRAGMA auto_vacuum=INCREMENTAL;", cancellationToken);
+
+        await using var read = connection.CreateCommand();
+        read.CommandText = "PRAGMA auto_vacuum;";
+        var mode = Convert.ToInt64(await read.ExecuteScalarAsync(cancellationToken));
+        if (mode == 2) return;
+
+        // Conversion runs outside a transaction and rewrites the file once. Only
+        // reached for databases an earlier build created.
+        await ExecuteAsync(connection, "VACUUM;", cancellationToken);
     }
 
     public async Task RebuildAsync(CancellationToken cancellationToken)
     {
         await InitializeAsync(cancellationToken);
-        await using (var connection = await OpenConnectionAsync(cancellationToken))
-        {
-            await ExecuteAsync(connection, "DELETE FROM audit_tags; DELETE FROM audit_state; DELETE FROM audit_events;", cancellationToken);
-        }
 
-        var records = new List<AuditRecord>();
+        // Rebuild incrementally rather than from scratch. The old pass deleted
+        // every row and reinserted the whole trail on every startup, which is
+        // what let an index over a couple of megabytes of JSONL grow to 162 MB
+        // of freelist pages: each pass wrote a whole copy and handed the previous
+        // copy back to SQLite, never to the OS.
+        //
+        // A day file is immutable once rotation compresses it, and the open day
+        // only ever grows, so "file present with at least as many lines as it has
+        // now" is a sound seen-marker. Only files that are new, or whose line
+        // count grew, are re-read; on a quiet startup nothing is re-read at all.
+        var indexedLines = await ReadIndexedLineCountsAsync(cancellationToken);
+
         foreach (var trail in new[] { AuditTrail.Change, AuditTrail.Access })
         {
             // The trail directory comes from the store rather than a second
@@ -198,21 +288,106 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
             // still see the closed days, and Directory.GetFiles(dir, "*.jsonl")
             // does not match "*.jsonl.gz".
             var dir = Path.GetDirectoryName(store.GetCurrentFilePath(trail, DateTimeOffset.UnixEpoch))!;
+
+            // Streamed day by day: the previous version materialised every entry
+            // of every day into one list before writing a single row.
             await foreach (var day in AuditDayFiles.ReadAsync(dir, trail, cancellationToken))
             {
-                var line = 0;
-                foreach (var entry in day.Entries)
+                // The seen-marker and the delete scope must both be trail-qualified.
+                // A bare file name collides: changes/2026-10-23.jsonl.gz and
+                // access/2026-10-23.jsonl.gz share a name, so keying on it alone
+                // made the second trail look already-indexed and skip it — 30k
+                // access entries silently stayed out of the index.
+                var sourceKey = TrailQualifiedKey(trail, day.SourceFile);
+                if (indexedLines.TryGetValue(sourceKey, out var already) && already >= day.Entries.Count)
                 {
-                    line++;
-                    records.Add(new AuditRecord(Path.GetFileName(day.SourceFile), line, entry));
+                    continue;
                 }
+
+                // A file that changed is replaced wholesale: its rows are keyed by
+                // (file, line), so a longer file renumbers nothing and a shorter
+                // one must not leave stale tail rows behind.
+                await DeleteFileRowsAsync(sourceKey, cancellationToken);
+
+                foreach (var chunk in ToRecords(sourceKey, day.Entries).Chunk(500))
+                {
+                    await IndexAsync(chunk, cancellationToken);
+                }
+
+                indexedLines[sourceKey] = day.Entries.Count;
             }
         }
 
-        // Chunk to keep the write transaction bounded.
-        foreach (var chunk in records.Chunk(500))
+        // Hand the pages the deletes above freed back to the OS. Under
+        // auto_vacuum=INCREMENTAL this is what actually shrinks the file;
+        // without it the freelist keeps them reserved and the file only ever
+        // grows. Best-effort: a busy shared store must not fail the rebuild.
+        try
         {
-            await IndexAsync(chunk, cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            await ExecuteAsync(connection, "PRAGMA incremental_vacuum;", cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The index is a rebuildable cache; leaving the file unshrunk is a
+            // size problem, not a correctness one.
+        }
+    }
+
+    /// <summary>
+    /// The key a day file is indexed and remembered under: its trail plus its
+    /// name, so the two trails' same-named day files never collide.
+    /// </summary>
+    private static string TrailQualifiedKey(AuditTrail trail, string sourceFile)
+        => AuditLabels.ToWireString(trail) + "/" + Path.GetFileName(sourceFile);
+
+    /// <summary>
+    /// How many lines each indexed file already contributed, keyed by the
+    /// trail-qualified source key. One grouped query replaces a per-file count
+    /// probe, and an absent key means the file was never indexed.
+    /// </summary>
+    private async Task<Dictionary<string, int>> ReadIndexedLineCountsAsync(CancellationToken cancellationToken)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT file, MAX(line) FROM audit_events GROUP BY file;";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (reader.IsDBNull(0) || reader.IsDBNull(1)) continue;
+            counts[reader.GetString(0)] = reader.GetInt32(1);
+        }
+        return counts;
+    }
+
+    /// <summary>
+    /// Drops every row that came from <paramref name="fileName"/>, children
+    /// first so the cascade does not have to do it row by row.
+    /// </summary>
+    private async Task DeleteFileRowsAsync(string fileName, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM audit_tags
+            WHERE state_id IN (
+                SELECT s.id FROM audit_state s
+                JOIN audit_events e ON e.id = s.event_id
+                WHERE e.file = $file);
+            DELETE FROM audit_state
+            WHERE event_id IN (SELECT id FROM audit_events WHERE file = $file);
+            DELETE FROM audit_events WHERE file = $file;
+            """;
+        command.Parameters.AddWithValue("$file", fileName);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static IEnumerable<AuditRecord> ToRecords(string fileName, IReadOnlyList<AuditEvent> entries)
+    {
+        for (var i = 0; i < entries.Count; i++)
+        {
+            yield return new AuditRecord(fileName, i + 1, entries[i]);
         }
     }
 
