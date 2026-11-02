@@ -11,10 +11,12 @@ namespace Eling.Backend.Mcp.Tools;
 
 /// <summary>
 /// Search the codebase index (FTS Porter+trigram, BM25 ranking).
-/// Returns path + line range + snippet ready to inject. Scope "project"
-/// searches this project only; "all" federates over every alive runtime
-/// project (read-only, missing indexes skipped). Never throws on a
-/// missing index — returns empty hits with a hint to run codebase_index.
+/// Returns path + line range + snippet ready to inject. Scope "all" (the
+/// default) federates over every indexed workspace, closed ones included
+/// (read-only, missing indexes skipped), and each hit carries its root so the
+/// caller can tell projects apart; "project" reads this workspace only.
+/// Never throws on a missing index — returns empty hits with a hint to run
+/// codebase_index.
 /// Each completed search records one <c>codebase_search</c> access entry with
 /// the query text and the hit count; file contents never enter the trail
 /// (design §3: metadata only).
@@ -39,13 +41,14 @@ public sealed class CodebaseSearchTool
         _logger = logger;
     }
 
-    [McpServerTool(Name = "codebase_search"), Description("FIRST move for locating code in this workspace — call this before any host-native grep/glob/shell search, which cost more tokens and more round-trips for the same answer. Ranks the workspace FTS index (Porter+trigram, BM25) and returns, per hit, path + line range + snippet ready to inject, so one call usually replaces grep -> list files -> read several files -> grep again. Query the concept ('tool registration', 'server instructions'), not only the exact identifier; narrow with pathPrefix/filePattern rather than widening the term; then read just the returned line ranges. Scope 'project' (default) searches this workspace only; 'all' searches every alive workspace; 'projects' searches an explicit list of workspace roots and overrides scope. Returns empty hits with a hint when no index exists — that is the only reason to fall back to native search.")]
+    [McpServerTool(Name = "codebase_search"), Description("FIRST move for locating code — call this before any host-native grep/glob/shell search, which cost more tokens and more round-trips for the same answer. Ranks the FTS index (Porter+trigram, BM25) and returns, per hit, path + line range + snippet ready to inject, so one call usually replaces grep -> list files -> read several files -> grep again. Searches GLOBALLY by default: every indexed workspace, closed ones included, so a hit from another project tells you which root it came from. Narrow the search instead of widening the term: pathPrefix/filePattern for a folder or file type inside a workspace, projectFilter for a workspace by folder name, scope 'project' for this workspace only, and projects for exact roots. Query the concept ('tool registration', 'server instructions'), not only the exact identifier; then read just the returned line ranges. Returns empty hits with a hint when no index exists — that is the only reason to fall back to native search.")]
     public async Task<CodebaseSearchResponse> SearchAsync(
         [Description("Search query: words or a short concept from the code, e.g. 'tool registration' or 'AddElingMcpTools'. FTS matches stems, so 'recall' also finds 'recalling'. Prefer concept terms over long verbatim strings.")] string query,
         [Description("Max hits (1-50, default 10).")] int limit = 10,
         [Description("Filter by path prefix, e.g. src/backend — use this to narrow instead of adding more query terms.")] string? pathPrefix = null,
         [Description("Glob-ish file filter, e.g. *.cs or *.md.")] string? filePattern = null,
-        [Description("Scope: 'project' (default, this workspace) or 'all' (every alive workspace).")] string scope = "project",
+        [Description("Narrow the search by workspace folder name, e.g. 'eling-agent'. Case-insensitive substring of the root's last segment; use it to keep a global search to one or two workspaces without knowing their absolute paths.")] string? projectFilter = null,
+        [Description("Scope: 'all' (default, every indexed workspace) or 'project' (this workspace only, do this to keep a search local).")] string scope = "all",
         [Description("Explicit workspace roots to search, e.g. [\"C:/Proj/A\"]. Overrides scope when non-empty.")] string[]? projects = null,
         CancellationToken cancellationToken = default)
     {
@@ -71,20 +74,36 @@ public sealed class CodebaseSearchTool
                 searchedRoots = explicitRoots;
                 hits = await _svc.SearchAllAsync(query, clamped, explicitRoots, prefix, filePattern, cancellationToken);
             }
-            else if (string.Equals(scope, "all", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(scope, "project", StringComparison.OrdinalIgnoreCase))
             {
-                var roots = _registry?.Alive().Where(r => r.CodebaseEnabled).Select(r => r.CodebaseRoot()).ToList()
-                    ?? [_svc.ProjectRoot];
-                if (!roots.Any(r => string.Equals(Path.GetFullPath(r), _svc.ProjectRoot, StringComparison.OrdinalIgnoreCase)))
-                    roots.Insert(0, _svc.ProjectRoot);
-                searchedRoots = roots;
-                hits = await _svc.SearchAllAsync(query, clamped, roots, prefix, filePattern, cancellationToken);
-            }
-            else
-            {
+                // The narrow case. Explicitly asked for, so the index of one
+                // workspace is read directly instead of being federated.
+                searchedRoots = null;
                 hits = (await _svc.SearchAsync(query, clamped, prefix, filePattern, cancellationToken))
                     .Select(h => new ScopedCodebaseHit(_svc.ProjectRoot, h.Path, h.StartLine, h.EndLine, h.Content, h.Score))
                     .ToList();
+            }
+            else
+            {
+                // Global by default: every indexed workspace, not only the
+                // ones a live runtime happens to cover. A codebase index is a
+                // read-only file in the global store, so a closed workspace's
+                // index is still fully readable — the same reasoning
+                // AliveOrRegisteredAsync documents. Searching only Alive()
+                // would make a "global" default silently miss closed projects.
+                var roots = await SearchableRootsAsync(cancellationToken);
+                roots = ApplyProjectFilter(roots, projectFilter);
+                if (roots.Count == 0)
+                {
+                    // The filter excluded everything — report that plainly
+                    // rather than returning a misleading "no hits".
+                    sw.Stop();
+                    var reason = $"No indexed workspace matches projectFilter '{projectFilter}'.";
+                    await _audit.RecordSearchAsync(query, 0, _svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
+                    return new CodebaseSearchResponse([], new CodebaseSearchStats(0, sw.ElapsedMilliseconds, false, reason));
+                }
+                searchedRoots = roots;
+                hits = await _svc.SearchAllAsync(query, clamped, roots, prefix, filePattern, cancellationToken);
             }
             // filePattern rides down into SQL, so the limit is already taken
             // from the filtered set — trimming here again would only hide rows.
@@ -122,6 +141,57 @@ public sealed class CodebaseSearchTool
             await _audit.RecordSearchAsync(query, 0, _svc.ProjectRoot, (int)sw.ElapsedMilliseconds, AuditOutcome.Error);
             return new CodebaseSearchResponse([], new CodebaseSearchStats(0, sw.ElapsedMilliseconds, false, "Search failed or index missing. Run codebase_index first."));
         }
+    }
+
+    /// <summary>
+    /// Every workspace root the global default should read: the live ones plus
+    /// the registered-but-closed ones, de-duplicated and always including this
+    /// project first so ties favor local code.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> SearchableRootsAsync(CancellationToken ct)
+    {
+        if (_registry is null)
+            return [_svc.ProjectRoot];
+
+        // AliveOrRegisteredAsync already drops the excluded/never-indexed roots
+        // and gives live processes precedence over remembered rows.
+        var all = await _registry.AliveOrRegisteredAsync(ct).ConfigureAwait(false);
+        var roots = all
+            .Where(r => r.CodebaseEnabled && File.Exists(ElingPaths.ResolveCodebaseDbPath(r.CodebaseRoot())))
+            .Select(r => r.CodebaseRoot())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (!roots.Any(r => string.Equals(Path.GetFullPath(r), _svc.ProjectRoot, StringComparison.OrdinalIgnoreCase)))
+            roots.Insert(0, _svc.ProjectRoot);
+        return roots;
+    }
+
+    /// <summary>
+    /// Narrows a global search to workspaces whose folder name contains
+    /// <paramref name="filter"/> (case-insensitive). A null/blank filter keeps
+    /// every root, and the current project always survives so a filter typo
+    /// never hides the workspace the caller is standing in.
+    /// </summary>
+    private IReadOnlyList<string> ApplyProjectFilter(IReadOnlyList<string> roots, string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter)) return roots;
+
+        var needle = filter.Trim();
+        var kept = roots
+            .Where(r => string.Equals(Path.GetFullPath(r), _svc.ProjectRoot, StringComparison.OrdinalIgnoreCase)
+                        || Path.GetFileName(Path.TrimEndingDirectorySeparator(r))
+                            .Contains(needle, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        // Only the current project survived: the filter matched nothing else,
+        // which is worth saying out loud instead of searching anyway.
+        return kept.Count == 1
+               && string.Equals(Path.GetFullPath(kept[0]), _svc.ProjectRoot, StringComparison.OrdinalIgnoreCase)
+               && !Path.GetFileName(Path.TrimEndingDirectorySeparator(_svc.ProjectRoot))
+                   .Contains(needle, StringComparison.OrdinalIgnoreCase)
+            ? []
+            : kept;
     }
 
     /// <summary>

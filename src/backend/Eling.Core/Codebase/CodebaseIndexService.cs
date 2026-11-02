@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
@@ -307,6 +308,13 @@ public sealed class CodebaseIndexService
     private const int MinHits = 3;
 
     /// <summary>
+    /// Upper bound on sibling indexes read at once by a federated search. Each
+    /// worker opens its own read-only DB and runs the FTS ladder, so this caps
+    /// open file handles and disk contention rather than CPU.
+    /// </summary>
+    private const int MaxFederatedSearchConcurrency = 4;
+
+    /// <summary>
     /// Searches this project's index. Relaxation walks the spec's ladder
     /// (§4.4) in order — Porter AND, Porter OR, trigram AND, trigram OR —
     /// stopping at the first pass that clears the threshold. Precision is spent
@@ -383,45 +391,59 @@ public sealed class CodebaseIndexService
         var roots = NormalizeRoots(projectRoots);
         _logger.LogDebug("Starting federated search for query '{Query}' across {Count} workspace roots.", query, roots.Count);
 
-        var all = new List<ScopedCodebaseHit>();
-        foreach (var root in roots)
-        {
-            ct.ThrowIfCancellationRequested();
-            try
+        var all = new ConcurrentBag<ScopedCodebaseHit>();
+        // One workspace per worker, capped: each root runs the full four-pass
+        // FTS ladder against its own DB file, and a search is read-only, so the
+        // only shared resource is disk. Uncapped would let a machine indexing
+        // dozens of workspaces open dozens of DBs at once and thrash the page
+        // cache; serial is what made "all" take ~18s for six roots.
+        var parallel = Math.Clamp(roots.Count, 1, MaxFederatedSearchConcurrency);
+        await Parallel.ForEachAsync(
+            roots,
+            new ParallelOptions { MaxDegreeOfParallelism = parallel, CancellationToken = ct },
+            async (root, token) =>
             {
-                var local = string.Equals(root, _projectRoot, StringComparison.OrdinalIgnoreCase);
-                IReadOnlyList<CodebaseHit> hits;
-                if (local)
+                try
                 {
-                    hits = await SearchAsync(query, limit, pathPrefix, filePattern, ct);
-                }
-                else
-                {
-                    var dbPath = Scope.ElingPaths.ResolveCodebaseDbPath(root);
-                    if (!File.Exists(dbPath))
+                    var local = string.Equals(root, _projectRoot, StringComparison.OrdinalIgnoreCase);
+                    IReadOnlyList<CodebaseHit> hits;
+                    if (local)
                     {
-                        _logger.LogDebug("Skipping workspace {Root} in federated search: index file not found at {DbPath}.", root, dbPath);
-                        continue;
+                        hits = await SearchAsync(query, limit, pathPrefix, filePattern, token);
                     }
-                    using var index = new SqliteCodebaseIndex(dbPath, readOnly: true);
-                    var svc = new CodebaseIndexService(root, index, _logger);
-                    hits = await svc.SearchAsync(query, limit, pathPrefix, filePattern, ct);
+                    else
+                    {
+                        // Each worker owns its index for this search: the
+                        // service holds no connection (OpenAsync opens per
+                        // operation), so sibling reads never share state.
+                        var dbPath = Scope.ElingPaths.ResolveCodebaseDbPath(root);
+                        if (!File.Exists(dbPath))
+                        {
+                            _logger.LogDebug("Skipping workspace {Root} in federated search: index file not found at {DbPath}.", root, dbPath);
+                            return;
+                        }
+                        using var index = new SqliteCodebaseIndex(dbPath, readOnly: true);
+                        var svc = new CodebaseIndexService(root, index, _logger);
+                        hits = await svc.SearchAsync(query, limit, pathPrefix, filePattern, token);
+                    }
+                    var bias = local ? 1.1 : 1.0;
+                    _logger.LogDebug("Searched workspace {Root} (local={IsLocal}): got {HitCount} hits.", root, local, hits.Count);
+                    foreach (var h in hits)
+                        all.Add(new ScopedCodebaseHit(root, h.Path, h.StartLine, h.EndLine, h.Content, h.Score * bias, h.TotalMatches));
                 }
-                var bias = local ? 1.1 : 1.0;
-                _logger.LogDebug("Searched workspace {Root} (local={IsLocal}): got {HitCount} hits.", root, local, hits.Count);
-                all.AddRange(hits.Select(h => new ScopedCodebaseHit(root, h.Path, h.StartLine, h.EndLine, h.Content, h.Score * bias, h.TotalMatches)));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // Stale, locked, or corrupt sibling index: skip, never throw —
-                // but say so, or that project's hits silently vanish.
-                // Cancellation is excluded on purpose: these calls take the
-                // caller's token, so swallowing it would keep walking every
-                // remaining root after the caller already asked to stop.
-                _logger.LogWarning(ex, "Sibling search failed for {Root}; its hits are absent from this result.", root);
-                continue;
-            }
-        }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Stale, locked, or corrupt sibling index: skip, never throw —
+                    // but say so, or that project's hits silently vanish.
+                    // Cancellation is excluded on purpose: these calls take the
+                    // caller's token, so swallowing it would keep walking every
+                    // remaining root after the caller already asked to stop.
+                    _logger.LogWarning(ex, "Sibling search failed for {Root}; its hits are absent from this result.", root);
+                }
+            });
+        // OrderByDescending is a stable sort, so equal scores keep the
+        // completion-order-independence the serial version had: parallel
+        // workers must never reorder the hit list.
         var merged = all.OrderByDescending(h => h.Score).Take(Math.Min(Math.Max(limit, 1), 100)).ToList();
         _logger.LogDebug("Federated search for '{Query}' completed across {RootCount} roots: {TotalHits} total hits returned.", query, roots.Count, merged.Count);
         return merged;
