@@ -153,6 +153,7 @@ public class BufferedAuditLoggerTests : IDisposable
         // a DropWrite channel does — never written, their confirmation never
         // set, and every caller long since returned as if the write happened.
         index.Release();
+        await Task.Delay(200);
         await logger.DisposeAsync();
 
         Assert.Equal(total, (await File.ReadAllLinesAsync(path)).Length);
