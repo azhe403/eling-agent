@@ -147,10 +147,10 @@ public static class DatabaseEndpoints
             // The credentials are the ones just typed into the form, not a
             // saved connection: this answers "which databases are on that
             // server" before anything is registered.
+            var connStr = ResolveConnectionString(req.Provider, req.ConnectionString, req.Manual, null);
             DatabaseConnection conn;
             try
             {
-                var connStr = ResolveConnectionString(req.Provider, req.ConnectionString, req.Manual, null);
                 conn = DatabaseConnection.Create(
                     "list@local",
                     req.Provider,
@@ -165,16 +165,14 @@ public static class DatabaseEndpoints
                 return Results.BadRequest(ex.Message);
             }
 
+            var adapterResult = TryCreateAdapter(conn, logger);
+            if (adapterResult.Error is not null) return adapterResult.Error;
+            var adapter = adapterResult.Adapter!;
+
             try
             {
-                var adapter = DatabaseAdapterFactory.CreateAdapter(conn);
-                var databases = await adapter.ListDatabasesAsync(ct);
+                var databases = await adapter!.ListDatabasesAsync(ct);
                 return Results.Ok(databases);
-            }
-            catch (NotSupportedException ex)
-            {
-                logger.LogWarning(ex, "Database adapter not supported");
-                return Results.BadRequest(ex.Message);
             }
             catch (Exception ex)
             {
@@ -210,6 +208,10 @@ public static class DatabaseEndpoints
                 return Results.BadRequest(ex.Message);
             }
 
+            var adapterResult = TryCreateAdapter(conn, logger);
+            if (adapterResult.Error is not null) return adapterResult.Error;
+            var adapter = adapterResult.Adapter!;
+
             try
             {
                 if (conn.Provider == DatabaseProvider.Redis)
@@ -217,14 +219,8 @@ public static class DatabaseEndpoints
                     return Results.Ok(await TestRedisAsync(redisPool, conn, logger, ct));
                 }
 
-                var adapter = DatabaseAdapterFactory.CreateAdapter(conn);
-                var result = await adapter.TestAsync(ct);
+                var result = await adapter!.TestAsync(ct);
                 return Results.Ok(new DatabaseTestResponse(result.Ok, result.Message, result.LatencyMs));
-            }
-            catch (NotSupportedException ex)
-            {
-                logger.LogWarning(ex, "Database adapter not supported");
-                return Results.BadRequest(ex.Message);
             }
             catch (Exception ex)
             {
@@ -263,6 +259,10 @@ public static class DatabaseEndpoints
                 }
             }
 
+            var adapterResult = TryCreateAdapter(row with { ConnectionString = connectionString }, logger);
+            if (adapterResult.Error is not null) return adapterResult.Error;
+            var adapter = adapterResult.Adapter!;
+
             try
             {
                 if (row.Provider == DatabaseProvider.Redis)
@@ -276,18 +276,12 @@ public static class DatabaseEndpoints
                     return Results.Ok(tested);
                 }
 
-                var adapter = DatabaseAdapterFactory.CreateAdapter(row with { ConnectionString = connectionString });
-                var result = await adapter.TestAsync(ct);
+                var result = await adapter!.TestAsync(ct);
                 if (result.Ok)
                 {
                     await store.MarkConnectedAsync(id, DateTimeOffset.UtcNow, ct);
                 }
                 return Results.Ok(new DatabaseTestResponse(result.Ok, result.Message, result.LatencyMs));
-            }
-            catch (NotSupportedException ex)
-            {
-                logger.LogWarning(ex, "Database adapter not supported for {Id}", id);
-                return Results.BadRequest(ex.Message);
             }
             catch (Exception ex)
             {
@@ -313,6 +307,10 @@ public static class DatabaseEndpoints
             {
                 return Results.BadRequest(RedisRequirement.NotSql(row, "use /keys"));
             }
+
+            var adapterResult = TryCreateAdapter(row, logger);
+            if (adapterResult.Error is not null) return adapterResult.Error;
+            var adapter = adapterResult.Adapter!;
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
@@ -387,16 +385,14 @@ public static class DatabaseEndpoints
                 }
             }
 
+            var adapterResult = TryCreateAdapter(row with { ConnectionString = connectionString }, logger);
+            if (adapterResult.Error is not null) return adapterResult.Error;
+            var adapter = adapterResult.Adapter!;
+
             try
             {
-                var adapter = DatabaseAdapterFactory.CreateAdapter(row with { ConnectionString = connectionString });
-                var databases = await adapter.ListDatabasesAsync(ct);
+                var databases = await adapter!.ListDatabasesAsync(ct);
                 return Results.Ok(databases);
-            }
-            catch (NotSupportedException ex)
-            {
-                logger.LogWarning(ex, "Database adapter not supported for {Id}", id);
-                return Results.BadRequest(ex.Message);
             }
             catch (Exception ex)
             {
@@ -669,10 +665,29 @@ public static class DatabaseEndpoints
             fields.FilePath);
     }
 
+    internal sealed record AdapterResult(
+        IDatabaseAdapter? Adapter,
+        IResult? Error);
+
     /// <summary>
-    /// A connection that names no database reaches every database on the
-    /// server, so the dashboard lists them instead of the tables of one.
+    /// Creates an adapter for an already-resolved connection, translating the
+    /// provider's "not supported" failure into a 400. Returns the adapter or
+    /// an error result; never both.
     /// </summary>
+    private static AdapterResult TryCreateAdapter(
+        DatabaseConnection connection, ILogger logger)
+    {
+        try
+        {
+            return new AdapterResult(DatabaseAdapterFactory.CreateAdapter(connection), null);
+        }
+        catch (NotSupportedException ex)
+        {
+            logger.LogWarning(ex, "Database adapter not supported");
+            return new AdapterResult(null, Results.BadRequest(ex.Message));
+        }
+    }
+
     /// <summary>
     /// Works out which connection string to use. An explicit connection string
     /// wins; otherwise the fields the person typed are built into one, layered
