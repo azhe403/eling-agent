@@ -36,15 +36,27 @@ public sealed class AgentBuiltinMcpToolTests : IDisposable
         using var scope = _provider.CreateScope();
         var tools = scope.ServiceProvider.GetServices<IAgentTool>().ToList();
 
-        Assert.Equal(9, tools.Count);
+        Assert.Equal(21, tools.Count);
         Assert.Contains(tools, t => t.Name == "memory_recall");
         Assert.Contains(tools, t => t.Name == "memory_save");
         Assert.Contains(tools, t => t.Name == "memory_search");
         Assert.Contains(tools, t => t.Name == "file_read");
         Assert.Contains(tools, t => t.Name == "file_write");
+        Assert.Contains(tools, t => t.Name == "file_edit");
+        Assert.Contains(tools, t => t.Name == "file_append");
+        Assert.Contains(tools, t => t.Name == "file_delete");
         Assert.Contains(tools, t => t.Name == "directory_list");
+        Assert.Contains(tools, t => t.Name == "directory_create");
         Assert.Contains(tools, t => t.Name == "glob");
         Assert.Contains(tools, t => t.Name == "file_search");
+        Assert.Contains(tools, t => t.Name == "path_test");
+        Assert.Contains(tools, t => t.Name == "codebase_search");
+        Assert.Contains(tools, t => t.Name == "codebase_index");
+        Assert.Contains(tools, t => t.Name == "db_list_connections");
+        Assert.Contains(tools, t => t.Name == "db_get_schema");
+        Assert.Contains(tools, t => t.Name == "db_query");
+        Assert.Contains(tools, t => t.Name == "log_list");
+        Assert.Contains(tools, t => t.Name == "log_read");
         Assert.Contains(tools, t => t.Name == "shell");
     }
 
@@ -73,6 +85,20 @@ public sealed class AgentBuiltinMcpToolTests : IDisposable
 
         var readOutput = await readTool.ExecuteAsync(readArgs, CancellationToken.None);
         Assert.Contains("Hello built-in MCP!", readOutput);
+
+        var editTool = scope.ServiceProvider.GetServices<IAgentTool>().First(t => t.Name == "file_edit");
+        var editArgs = JsonSerializer.Serialize(new
+        {
+            path = "hello.txt",
+            oldString = "Hello built-in MCP!",
+            newString = "Hello edited MCP!"
+        });
+        var editOutput = await editTool.ExecuteAsync(editArgs, CancellationToken.None);
+        var editDoc = JsonDocument.Parse(editOutput);
+        Assert.True(editDoc.RootElement.GetProperty("replacements").GetInt32() == 1);
+
+        var verifyOutput = await readTool.ExecuteAsync(readArgs, CancellationToken.None);
+        Assert.Contains("Hello edited MCP!", verifyOutput);
     }
 
     [Fact]

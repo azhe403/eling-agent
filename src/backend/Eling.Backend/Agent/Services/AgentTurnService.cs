@@ -1,5 +1,6 @@
 using Eling.Backend.Agent.Ports;
 using Eling.Backend.Dtos;
+using Eling.Backend.Mcp;
 using Eling.Core.Codebase;
 using Eling.Core.MemoryRecall;
 using Microsoft.Extensions.Logging;
@@ -18,15 +19,13 @@ public sealed class AgentTurnService(
 {
     private const int HistoryCap = 40;
 
-    private const string SystemPromptTemplate =
+    private const string AgentIdentity =
         "You are Eling, an intelligent coding and persistent memory assistant.\n" +
         "Your current working directory (CWD) is: {0}\n" +
         "You must strictly operate within this active workspace directory: {0}\n" +
-        "You have direct access to Eling's official MCP tools: memory_recall, memory_save, file_read, file_write, directory_list, glob, file_search, etc. " +
-        "Always prefer recalling relevant memories with memory_recall and checking files before answering. " +
-"Hard rule: file_write is preferred for creating NEW files; overwriting an existing file is allowed only when truly necessary, otherwise modify existing files surgically with file_edit. " +
-        "Mandatory session-start behavior: in the first user turn of every new session, call memory_recall before any other tool call or reply — with a BROAD topic set (the opening message's topics plus standing rules, preferences, decisions, lessons, and recent work), passed as context: {{ topics: [...] }} or the top-level topics alias; if stats.recallCount is 0, re-issue before answering — even when the message looks casual or ambiguous. " +
-        "If a tool reports an error, state it honestly.";
+        "You have direct access to Eling's tools: memory_recall, memory_save, file_read, file_write, file_edit, directory_list, glob, file_search, shell, and the rest of the Eling tool set. " +
+        "If a tool reports an error, state it honestly.\n\n";
+
 
     public Task<TurnResponse> SendAsync(string workspace, string? chatId, string message, CancellationToken ct) =>
         RunTurnAsync(workspace, chatId, message, ct, onEvent: null);
@@ -46,7 +45,7 @@ public sealed class AgentTurnService(
         await Emit(new TurnStarted(chat.Id));
 
         var toolList = tools.ToList();
-        var systemPrompt = string.Format(SystemPromptTemplate, workspace);
+        var systemPrompt = string.Format(AgentIdentity, workspace) + ServerInstructions.Default;
 
         // Server-side auto-recall on the first turn of a new chat: do not rely
         // on the model remembering to call memory_recall. Hydrate context here

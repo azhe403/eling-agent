@@ -309,6 +309,10 @@ public static class McpServiceExtensions
             // filter, so a rejected call still carries the actor it was made as.
             filters.AddCallToolFilter(AuditActorFilter.Create());
             filters.AddCallToolFilter(ToolPolicyFilters.CreateCallFilter());
+            // Advisory only: after a stretch of productive calls with no
+            // memory_save yet this session, appends a short harvest reminder
+            // to the result. Never blocks or rewrites anything.
+            filters.AddCallToolFilter(HarvestNudgeFilter.Create());
             filters.AddListToolsFilter(ToolPolicyFilters.CreateListFilter());
             // The first tools/list after the initialize handshake is the
             // in-process MCP-ready milestone for the startup stopwatch.
