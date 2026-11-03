@@ -11,6 +11,7 @@ public static class ToolCatalog
     public const string CodebaseGroup = "codebase";
     public const string FilesystemGroup = "filesystem";
     public const string DiagnosticsGroup = "diagnostics";
+    public const string DatabaseGroup = "database";
 
     public static readonly IReadOnlyList<ToolDefinition> All = new List<ToolDefinition>
     {
@@ -49,6 +50,13 @@ public static class ToolCatalog
         new("file_search", FilesystemGroup, "Search file contents under a base path."),
         new("log_list", DiagnosticsGroup, "List available Eling log files (active + rotated archives)."),
         new("log_read", DiagnosticsGroup, "Read recent entries from an Eling log file for diagnosis."),
+        new("db_list_connections", DatabaseGroup, "List registered database connections and any unimported ones found in the workspace."),
+        new("db_detect_connections", DatabaseGroup, "Preview database connection strings found in the workspace appsettings*.json files."),
+        new("db_import_connections", DatabaseGroup, "Import approved connection strings into the registry as read-only connections."),
+        new("db_get_schema", DatabaseGroup, "Get schema (tables, columns, foreign keys, indexes) for a registered database connection."),
+        new("db_query", DatabaseGroup, "Run a read-only SQL query (SELECT, EXPLAIN, PRAGMA) against a registered database connection."),
+        new("redis_scan", DatabaseGroup, "Browse a Redis connection as a lazy key tree, one page at a time."),
+        new("redis_inspect", DatabaseGroup, "Inspect a single Redis key: type, TTL, length, encoding, and a capped value preview."),
     }.AsReadOnly();
 
     public static bool Exists(string toolName)
