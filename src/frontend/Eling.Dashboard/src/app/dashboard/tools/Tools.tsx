@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Wrench, X } from "lucide-react"
 
 import { DashboardHeader } from "@/components/dashboard-header"
@@ -82,13 +82,14 @@ function ToastItem({
   )
 }
 
-const GROUP_ORDER = ["memory", "codebase", "filesystem", "diagnostics"] as const
+const GROUP_ORDER = ["memory", "codebase", "filesystem", "diagnostics", "database"] as const
 
 const GROUP_TITLES: Record<string, string> = {
   memory: "Memory Tools",
   codebase: "Codebase Tools",
   filesystem: "Filesystem Tools",
   diagnostics: "Diagnostics Tools",
+  database: "Database Tools",
 }
 
 export function Tools() {
@@ -97,6 +98,7 @@ export function Tools() {
   const [query, setQuery] = useState("")
   const [pending, setPending] = useState<Record<string, boolean>>({})
   const [notifications, setNotifications] = useState<Notification[]>([])
+  const stickyRef = useRef<HTMLDivElement>(null)
 
   const dismissNotification = useCallback((id: number) => {
     setNotifications((current) => current.filter((item) => item.id !== id))
@@ -217,6 +219,15 @@ export function Tools() {
     }
   }
 
+  const scrollToGroup = useCallback((group: string) => {
+    const el = document.getElementById(`group-${group}`)
+    if (!el) return
+    // Dynamic bottom edge of sticky bar + 10px consistent breathing space
+    const stickyBottom = stickyRef.current?.getBoundingClientRect().bottom ?? 146
+    const delta = el.getBoundingClientRect().top - (stickyBottom + 10)
+    window.scrollBy({ top: delta, behavior: "smooth" })
+  }, [])
+
   const enabledCount = tools.filter((tool) => tool.enabled).length
 
   return (
@@ -224,17 +235,43 @@ export function Tools() {
       <DashboardHeader label="Tools" />
 
       <div className="flex flex-col gap-4 p-4">
-        <div className="sticky top-16 z-10 flex items-center gap-2 bg-background py-1">
-          <Input
-            placeholder="Search tools by name or description…"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className="sm:max-w-sm"
-          />
-          <Button variant="outline" size="sm" onClick={() => void reload()} disabled={loading} className="sm:ml-auto">
-            <RefreshCw className="size-4" />
-            Refresh
-          </Button>
+        <div ref={stickyRef} className="sticky top-16 z-10 flex flex-col gap-2 border-b bg-background/95 py-2 backdrop-blur">
+          <div className="flex items-center gap-2">
+            <Input
+              placeholder="Search tools by name or description…"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="sm:max-w-sm"
+            />
+            <Button variant="outline" size="sm" onClick={() => void reload()} disabled={loading} className="sm:ml-auto">
+              <RefreshCw className="size-4" />
+              Refresh
+            </Button>
+          </div>
+
+          {!loading && groups.length > 0 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs">
+              <span className="mr-1 shrink-0 text-xs font-medium text-muted-foreground">Jump to:</span>
+              {groups.map((group) => {
+                const count = filtered.filter((t) => t.group === group).length
+                return (
+                  <Button
+                    key={group}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs"
+                    onClick={() => scrollToGroup(group)}
+                  >
+                    <span>{GROUP_TITLES[group] ?? group}</span>
+                    <Badge variant="secondary" className="h-4 rounded-full px-1.5 py-0 text-[10px]">
+                      {count}
+                    </Badge>
+                  </Button>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         <Card>
@@ -273,7 +310,7 @@ export function Tools() {
             const allEnabled = toggleable.length > 0 && enabledCount === toggleable.length
             const isMixed = enabledCount > 0 && enabledCount < toggleable.length
             return (
-              <Card key={group}>
+              <Card key={group} id={`group-${group}`} className="scroll-mt-48">
                 <CardHeader>
                   <div className="flex items-center gap-2">
                     <CardTitle className="text-base">{GROUP_TITLES[group] ?? group}</CardTitle>
@@ -297,6 +334,8 @@ export function Tools() {
                     {group === "memory" && "Recall, save, search, and maintenance operations."}
                     {group === "codebase" && "Indexing and full-text search over the workspace."}
                     {group === "filesystem" && "Sandboxed file and directory operations."}
+                    {group === "diagnostics" && "Inspect Eling log files for diagnosis."}
+                    {group === "database" && "Read-only SQL and Redis access to registered connections."}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">

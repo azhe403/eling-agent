@@ -2,7 +2,16 @@
 
 All notable changes to Eling are documented here. Follows [Keep a Changelog](https://keepachangelog.com/) and [Conventional Commits](https://www.conventionalcommits.org/).
 
-## [Unreleased] - 2026-10-16
+## [Unreleased] - 2026-11-03
+
+### Fixed
+- **Port cleanup in FrontendDevSpawner matches any TCP state (backend)**: on Windows, a stuck Next.js dev server holding port 4427 drops its listening socket or gets stuck in `CLOSE_WAIT`/`TIME_WAIT`, or shows with a blank state (4 parts in `netstat -ano -p TCP`). The cleaner only matched 5-column rows with `LISTENING`, causing `KillProcessTreeOnPort` to find 0 PIDs, log "port 4427 still bound; spawning anyway", and trigger an infinite `EADDRINUSE` crash-loop every 15–20s. It now matches any local TCP endpoint on port 4427 and reads the PID from the last column.
+- **Register database and Redis MCP tools in ToolCatalog and dashboard (backend + dashboard)**: 7 registered MCP tools (`db_list_connections`, `db_detect_connections`, `db_import_connections`, `db_get_schema`, `db_query`, `redis_scan`, `redis_inspect`) were absent from `ToolCatalog.All`, meaning they did not appear in `/dashboard/tools` or in group-based `tools_policy` actions. Added `DatabaseGroup = "database"` to `ToolCatalog`, mapped descriptions in the dashboard, and added `ToolCatalogTests` to enforce complete parity between `[McpServerTool]` attributes and `ToolCatalog.All`.
+
+### Added
+- **Quick navigation jump pills on tools page (dashboard)**: `/dashboard/tools` gained a row of rounded filter pills in the sticky header with live tool counters per group. Clicking a pill smoothly scrolls directly to that section with a dynamic offset matching the sticky bar's rendered bottom edge (`el.top - (stickyBottom + 10)`), landing consistently across mobile and wide viewports.
+
+## [0.8.0] - 2026-10-16
 
 ### Fixed
 - **The codebase page's search tabs size to their content (dashboard)**: every tab in the search tab strip was a fixed 152px wide, so a query like `resignation` was cut to `resign...` while a one-character query still occupied the same 152px of empty space. The tabs now take their width from what they hold - the scope icon, the query text, the match count and the workspace count - and the label is shown in full, with the strip scrolling instead of clipping. The tab strip also scrolls on its own while the **new tab** button stays pinned to the right: the button used to sit inside the scrolling area, so it was pushed out of sight as soon as the tabs overflowed, and on the codebase page there was no way to open a new tab without scrolling the strip back. Moving it out also fixed the tab list's markup - the tab list now owns its tabs directly, where before the new-tab button sat inside it as an invalid child. The active tab's match-count badge no longer sits on the primary colour either: `--primary` is near-white in dark mode, so the badge read as a glaring white block against the dark strip. It now keeps the muted background and earns the active state from brighter text. Verified: 80/80 frontend tests (9 of them new, covering the tab strip), the frontend typecheck and lint clean, and the strip checked live in the browser at desktop and phone widths.
