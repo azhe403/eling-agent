@@ -422,12 +422,16 @@ internal static class FrontendDevSpawner
                 var trimmed = line.Trim();
                 if (!trimmed.StartsWith("TCP", StringComparison.Ordinal)) continue;
                 var parts = Regex.Split(trimmed, @"\s+");
-                if (parts.Length < 5) continue;
-                if (!parts[3].Equals("LISTENING", StringComparison.OrdinalIgnoreCase)) continue;
+                if (parts.Length < 4) continue;
                 var local = parts[1];
                 var localPort = local.Split(':').Last();
                 if (!int.TryParse(localPort, out var lp) || lp != port) continue;
-                if (int.TryParse(parts[4], out var pid)) pids.Add(pid);
+                // PID is always last: LISTENING lines have 5 parts, but a bound
+                // line without a state (blank state) has only 4 parts, and a
+                // half-dead holder shows up as ESTABLISHED/CLOSE_WAIT/TIME_WAIT
+                // on 4427. Matching only LISTENING missed exactly the stuck
+                // process we most need to kill, so match any local endpoint.
+                if (int.TryParse(parts[^1], out var pid) && pid > 0 && pid != Environment.ProcessId) pids.Add(pid);
             }
         }
         catch (Exception ex)
