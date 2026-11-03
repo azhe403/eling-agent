@@ -36,15 +36,51 @@ public static class DashboardPort
 
     /// <summary>
     /// True when something is already listening on <paramref name="port"/> on the
-    /// loopback interface. Used at startup to decide whether to skip Kestrel
-    /// entirely (assume a peer dashboard is serving).
+    /// loopback interface. Probes via a non-blocking TCP socket connect on IPv4
+    /// and IPv6 loopback, falling back to active listeners inspection.
     /// </summary>
     public static bool IsLoopbackListening(int port)
     {
-        var listeners = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners();
-        return listeners.Any(ep =>
-            ep.AddressFamily == AddressFamily.InterNetwork
-            && IPAddress.IsLoopback(ep.Address)
-            && ep.Port == port);
+        if (CanConnectToLoopback(IPAddress.Loopback, port))
+            return true;
+
+        if (Socket.OSSupportsIPv6 && CanConnectToLoopback(IPAddress.IPv6Loopback, port))
+            return true;
+
+        try
+        {
+            var listeners = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners();
+            if (listeners.Any(ep => IPAddress.IsLoopback(ep.Address) && ep.Port == port))
+                return true;
+        }
+        catch
+        {
+            // Best-effort inspection fallback
+        }
+
+        return false;
+    }
+
+    private static bool CanConnectToLoopback(IPAddress address, int port)
+    {
+        try
+        {
+            using var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            socket.NoDelay = true;
+            var endpoint = new IPEndPoint(address, port);
+            var result = socket.BeginConnect(endpoint, null, null);
+            var completed = result.AsyncWaitHandle.WaitOne(150);
+            if (!completed)
+            {
+                socket.Close();
+                return false;
+            }
+            socket.EndConnect(result);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

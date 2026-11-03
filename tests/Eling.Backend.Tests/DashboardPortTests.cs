@@ -155,23 +155,24 @@ public sealed class DashboardPortTests
         Assert.False(actual);
     }
 
-    // IsLoopbackListening_True_WhenBound was removed.
-    //
-    // It bound a loopback port in this process and asserted that
-    // IPGlobalProperties.GetActiveTcpListeners() reported it. Measured on
-    // Windows with this runtime, that table does not list a listener the
-    // calling process just bound: 0 of 60 freshly bound loopback ports
-    // appeared in it, while connecting to those same ports succeeded. Binding
-    // the listener in a child process did not help either — the entry still
-    // never showed up (waited 20 s).
-    //
-    // So the assertion could only pass by luck, when some unrelated process
-    // happened to hold the same ephemeral port. It failed deterministically
-    // here, and it failed the same way at e1c24cc with no Redis code present.
-    //
-    // The behaviour it meant to cover — "a peer dashboard is already serving
-    // this port" — needs DashboardPort.IsLoopbackListening to stop depending
-    // on that table (a short connect probe answers the real question). Until
-    // that change is made, a green test here would be asserting something the
-    // production code cannot do on this platform.
+    [Fact]
+    public void IsLoopbackListening_True_WhenBound()
+    {
+        // Arrange
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        try
+        {
+            // Act
+            var actual = DashboardPort.IsLoopbackListening(port);
+
+            // Assert
+            Assert.True(actual);
+        }
+        finally
+        {
+            probe.Stop();
+        }
+    }
 }

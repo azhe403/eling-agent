@@ -87,16 +87,38 @@ public static class HttpLoop
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
             {
                 logger.LogWarning(
-                    "Port {Port} occupied (attempt #{Attempt}); retrying after jitter",
+                    "Port {Port} occupied (attempt #{Attempt}); checking for peer or zombie",
                     dashboardPort, attempt);
-                await DelayWithJitterAsync(cancellationToken);
+
+                var clearedZombie = await ZombieProcessCleaner.TryClearZombieOnPortAsync(dashboardPort, logger, cancellationToken);
+                if (clearedZombie)
+                {
+                    logger.LogInformation(
+                        "[ZombieRecovery] Port {Port} reclaimed from zombie process(es); promoting current backend (PID {CurrentPid}) to owner",
+                        dashboardPort, Environment.ProcessId);
+                    continue;
+                }
+
+                var takeoverInterval = DashboardPort.ResolveTakeoverMs();
+                await PortMonitor.WaitForPortFreeAsync(dashboardPort, takeoverInterval, logger, cancellationToken);
             }
             catch (IOException ex) when (BindFailure.IsAddressInUse(ex))
             {
                 logger.LogWarning(
                     "Port {Port} bound by peer (attempt #{Attempt}, IOException): {Message}",
                     dashboardPort, attempt, ex.Message);
-                await DelayWithJitterAsync(cancellationToken);
+
+                var clearedZombie = await ZombieProcessCleaner.TryClearZombieOnPortAsync(dashboardPort, logger, cancellationToken);
+                if (clearedZombie)
+                {
+                    logger.LogInformation(
+                        "[ZombieRecovery] Port {Port} reclaimed from zombie process(es); promoting current backend (PID {CurrentPid}) to owner",
+                        dashboardPort, Environment.ProcessId);
+                    continue;
+                }
+
+                var takeoverInterval = DashboardPort.ResolveTakeoverMs();
+                await PortMonitor.WaitForPortFreeAsync(dashboardPort, takeoverInterval, logger, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
