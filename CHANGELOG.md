@@ -2,6 +2,16 @@
 
 All notable changes to Eling are documented here. Follows [Keep a Changelog](https://keepachangelog.com/) and [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [Unreleased] - 2026-11-04
+
+### Fixed
+- **A read-only SQL query with a semicolon inside a string literal is no longer rejected (core)**: the single-statement check read the raw statement, so `SELECT * FROM users WHERE note = 'hello;world'` was refused as a stacked statement. It now checks the statement with string literals and comments stripped, which the classifier already had. The read-only vocabulary also grew to cover `SHOW`, `DESCRIBE`/`DESC`, and `WITH` CTEs, and `SHOW CREATE TABLE/VIEW` is exempted from the mutation-keyword scan because `CREATE` there belongs to `SHOW`'s own syntax.
+
+### Added
+- **MCP tool exception pipeline filter (backend)**: `ToolExceptionFilter` intercepts unhandled exceptions from MCP tools and returns a standard `CallToolResult` with `IsError = true` and `ex.Message`, avoiding unhandled transport faults while logging errors and preserving cancellation.
+- **Execution time in MCP tool result metadata (backend)**: `ToolTelemetryFilter` records tool execution duration into JSON-RPC protocol metadata (`_meta.executionTimeMs`) for all successful and errored tool calls without altering text content.
+- **Actionable database query rejection (backend)**: `db_query` answered a refused statement with the bare word `rejected`, which tells an agent nothing about why. It now names the statement verb and the tool's read-only scope — `SQL rejected: 'DELETE' is a mutation statement. db_query is strictly read-only (SELECT, EXPLAIN, PRAGMA, SHOW, DESCRIBE, WITH).` — and keeps the classifier's own reason when there is one, such as `only a single statement is allowed`. The read-only statement list is synced across the tool description, the agent tool, the tool catalog, and the server instructions.
+
 ## [Unreleased] - 2026-11-03
 
 ### Fixed
