@@ -14,11 +14,21 @@ public static class DatabaseEndpoints
     {
         var group = app.MapGroup("/api/databases");
 
-        group.MapGet("/", async (IDatabaseConnectionStore store, IAuditLogger auditLogger, CancellationToken ct) =>
+        group.MapGet("/", async (
+            IDatabaseConnectionStore store,
+            IAuditLogger auditLogger,
+            CancellationToken ct,
+            string? sort = null,
+            string? order = null) =>
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var rows = await store.ListAsync(ct);
-            var views = rows.Select(ToView).ToList();
+            // The server owns the order: an unknown sort or direction falls
+            // back to the default rather than refusing the request.
+            DatabaseConnectionSort.TryParseKey(sort, out var sortKey);
+            DatabaseConnectionSort.TryParseOrder(order, out var sortOrder);
+            var ordered = DatabaseConnectionSort.Apply(rows, sortKey, sortOrder);
+            var views = ordered.Select(ToView).ToList();
             sw.Stop();
             await auditLogger.RecordAsync(new AuditEvent
             {
