@@ -309,6 +309,10 @@ public static class McpServiceExtensions
             // filter, so a rejected call still carries the actor it was made as.
             filters.AddCallToolFilter(AuditActorFilter.Create());
             filters.AddCallToolFilter(ToolPolicyFilters.CreateCallFilter());
+            // Catches any unhandled exception from the tool handler or inner filters
+            // and translates it into CallToolResult with IsError = true, so outer filters
+            // (telemetry, audit actor) still record the completed call and duration.
+            filters.AddCallToolFilter(ToolExceptionFilter.Create());
             // Advisory only: after a stretch of productive calls with no
             // memory_save yet this session, appends a short harvest reminder
             // to the result. Never blocks or rewrites anything.
