@@ -8,6 +8,11 @@ public static class SqlSafety
         "replace", "grant", "revoke", "attach", "detach", "vacuum"
     };
 
+    private static readonly HashSet<string> ReadOnlyStartKeywords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "select", "explain", "pragma", "show", "describe", "desc", "with"
+    };
+
     public static SqlClassification Classify(string? sql)
     {
         if (string.IsNullOrWhiteSpace(sql))
@@ -97,14 +102,32 @@ public static class SqlSafety
         }
 
         // Read-only statements.
-        if (string.Equals(firstLower, "select", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(firstLower, "explain", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(firstLower, "pragma", StringComparison.OrdinalIgnoreCase))
+        if (ReadOnlyStartKeywords.Contains(firstLower))
         {
+            // Single-statement statements only: the adapters run CommandText
+            // which allows stacked queries, so any text after a real statement
+            // boundary must be treated as an additional statement. A semicolon
+            // followed by more tokens means stacked statements — check against
+            // stripped text so semicolons inside string literals are ignored.
+            var semicolonIndex = text.IndexOf(';');
+            if (semicolonIndex >= 0 && text[(semicolonIndex + 1)..].Any(ch => ch != ';' && !char.IsWhiteSpace(ch)))
+            {
+                return new SqlClassification(SqlVerdict.Rejected, "only a single statement is allowed");
+            }
+
             // Secondary scan: reject mixed statements (e.g. SELECT ...; DROP ...).
+            // Exempt "SHOW CREATE TABLE/VIEW ..." where CREATE is part of SHOW's
+            // own syntax rather than a separate mutating statement.
+            var skipCreateKeyword = firstLower is "show"
+                && tokens.Length > 1
+                && string.Equals(tokens[1].TrimEnd(')', ']', '}', ';', ',', '.'), "create", StringComparison.OrdinalIgnoreCase);
             foreach (var token in tokens)
             {
                 var t = token.TrimEnd(')', ']', '}', ';', ',', '.');
+                if (skipCreateKeyword && string.Equals(t, "create", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
                 if (MutationKeywords.Contains(t))
                 {
                     return new SqlClassification(SqlVerdict.Rejected, $"statement contains mutation keyword '{t.ToLowerInvariant()}'");
