@@ -62,6 +62,8 @@ public class ToolTelemetryFilterTests
         var result = await handler(requestContext, CancellationToken.None);
 
         Assert.NotNull(result);
+        Assert.NotNull(result.Meta);
+        Assert.True(result.Meta.ContainsKey("executionTimeMs"));
         Assert.Contains(testLogger.Logs, l => l.Level == LogLevel.Debug && l.Message.Contains("ToolTelemetry: START tool=memory_recall"));
         Assert.Contains(testLogger.Logs, l => l.Level == LogLevel.Information && l.Message.Contains("ToolTelemetry: END tool=memory_recall") && l.Message.Contains("status=success"));
     }
@@ -89,6 +91,8 @@ public class ToolTelemetryFilterTests
 
         Assert.NotNull(result);
         Assert.True(result.IsError);
+        Assert.NotNull(result.Meta);
+        Assert.True(result.Meta.ContainsKey("executionTimeMs"));
         Assert.Contains(testLogger.Logs, l => l.Level == LogLevel.Information && l.Message.Contains("status=tool_error") && l.Message.Contains("Content cannot be empty"));
     }
 

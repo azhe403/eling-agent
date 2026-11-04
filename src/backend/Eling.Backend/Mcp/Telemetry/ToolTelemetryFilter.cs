@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -93,6 +94,12 @@ public static class ToolTelemetryFilter
         finally
         {
             stopwatch.Stop();
+
+            if (result is not null)
+            {
+                result.Meta ??= new JsonObject();
+                result.Meta["executionTimeMs"] = stopwatch.ElapsedMilliseconds;
+            }
 
             var responsePayload = result is not null
                 ? JsonSerializer.Serialize(result, JsonOptions)
