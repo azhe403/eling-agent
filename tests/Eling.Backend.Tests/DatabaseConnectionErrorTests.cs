@@ -161,6 +161,42 @@ public sealed class DatabaseConnectionErrorTests : IAsyncLifetime
         Assert.Equal("query failed", error.Message);
     }
 
+    [Fact]
+    public async Task AgentQuery_WhenMutationStatement_ThrowsActionableRejectionMessage()
+    {
+        var connection = DatabaseConnection.Create(
+            "test@local",
+            DatabaseProvider.Sqlite,
+            "Data Source=:memory:",
+            DatabaseEnvironment.ReadOnly);
+        await _store.UpsertAsync(connection, CancellationToken.None);
+
+        var tool = new DatabaseQueryTool(_store, new DatabaseReadService(new JsonDatabaseReadCache(_root)), logger: NullLogger<DatabaseQueryTool>.Instance);
+
+        var thrown = await Record.ExceptionAsync(() => tool.QueryAsync(connection.Id, "DELETE FROM users WHERE id = 1", 100));
+
+        var error = Assert.IsType<InvalidOperationException>(thrown);
+        Assert.Equal("SQL rejected: 'DELETE' is a mutation statement. db_query is strictly read-only (SELECT, EXPLAIN, PRAGMA, SHOW, DESCRIBE, WITH).", error.Message);
+    }
+
+    [Fact]
+    public async Task AgentQuery_WhenStackedStatements_ThrowsActionableRejectionMessage()
+    {
+        var connection = DatabaseConnection.Create(
+            "test@local",
+            DatabaseProvider.Sqlite,
+            "Data Source=:memory:",
+            DatabaseEnvironment.ReadOnly);
+        await _store.UpsertAsync(connection, CancellationToken.None);
+
+        var tool = new DatabaseQueryTool(_store, new DatabaseReadService(new JsonDatabaseReadCache(_root)), logger: NullLogger<DatabaseQueryTool>.Instance);
+
+        var thrown = await Record.ExceptionAsync(() => tool.QueryAsync(connection.Id, "SELECT 1; DROP TABLE users", 100));
+
+        var error = Assert.IsType<InvalidOperationException>(thrown);
+        Assert.Equal("SQL rejected: only a single statement is allowed.", error.Message);
+    }
+
     /// <summary>
     /// Registers a connection whose stored string the provider cannot read, and
     /// returns its id.

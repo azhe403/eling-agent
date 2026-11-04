@@ -14,7 +14,7 @@ public sealed class DatabaseQueryAgentTool(DatabaseQueryTool tool) : IAgentTool
 
     public string Name => "db_query";
 
-    public string Description => "Run a read-only SQL query (SELECT/EXPLAIN/PRAGMA only) against a registered database connection.";
+    public string Description => "Run a read-only SQL query (SELECT, EXPLAIN, PRAGMA, SHOW, DESCRIBE/DESC, and WITH CTEs) against a registered database connection.";
 
     public string ParametersJsonSchema => """
     {
@@ -22,7 +22,7 @@ public sealed class DatabaseQueryAgentTool(DatabaseQueryTool tool) : IAgentTool
       "required": ["connectionId", "sql"],
       "properties": {
         "connectionId": { "type": "string", "description": "Connection id." },
-        "sql": { "type": "string", "description": "SQL statement (SELECT/EXPLAIN/PRAGMA only)." },
+        "sql": { "type": "string", "description": "SQL statement (SELECT, EXPLAIN, PRAGMA, SHOW, DESCRIBE/DESC, and WITH CTEs only)." },
         "maxRows": { "type": "integer", "description": "Max rows (default 100)." },
         "database": { "type": "string", "description": "Optional database name for server-level connection." }
       }

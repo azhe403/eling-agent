@@ -54,7 +54,7 @@ public static class ToolCatalog
         new("db_detect_connections", DatabaseGroup, "Preview database connection strings found in the workspace appsettings*.json files."),
         new("db_import_connections", DatabaseGroup, "Import approved connection strings into the registry as read-only connections."),
         new("db_get_schema", DatabaseGroup, "Get schema (tables, columns, foreign keys, indexes) for a registered database connection."),
-        new("db_query", DatabaseGroup, "Run a read-only SQL query (SELECT, EXPLAIN, PRAGMA) against a registered database connection."),
+        new("db_query", DatabaseGroup, "Run a read-only SQL query (SELECT, EXPLAIN, PRAGMA, SHOW, DESCRIBE/DESC, and WITH CTEs) against a registered database connection."),
         new("redis_scan", DatabaseGroup, "Browse a Redis connection as a lazy key tree, one page at a time."),
         new("redis_inspect", DatabaseGroup, "Inspect a single Redis key: type, TTL, length, encoding, and a capped value preview."),
     }.AsReadOnly();

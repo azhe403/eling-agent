@@ -32,7 +32,7 @@ public sealed class DatabaseQueryTool
         _audit = audit;
     }
 
-    [McpServerTool(Name = "db_query"), Description("Run a read-only SQL query (SELECT/EXPLAIN/PRAGMA only) against a registered database connection. If the database cannot be reached, the last cached result is returned with fromCache=true and cachedAt set; a cached answer is never returned for a statement that was never run. If the connection is not registered, detect any unimported connections from appsettings.json and report them so they can be imported (with approval) before retrying.")]
+    [McpServerTool(Name = "db_query"), Description("Run a read-only SQL query (SELECT, EXPLAIN, PRAGMA, SHOW, DESCRIBE/DESC, and WITH CTEs) against a registered database connection. If the database cannot be reached, the last cached result is returned with fromCache=true and cachedAt set; a cached answer is never returned for a statement that was never run. If the connection is not registered, detect any unimported connections from appsettings.json and report them so they can be imported (with approval) before retrying.")]
     public async Task<QueryResult> QueryAsync(
         [Description("Connection id.")] string connectionId,
         [Description("SQL statement.")] string sql,
@@ -67,7 +67,12 @@ public sealed class DatabaseQueryTool
                 Query = sql,
                 Verb = classification.MutationVerb
             }, cancellationToken) ?? ValueTask.CompletedTask);
-            throw new InvalidOperationException(classification.Reason ?? "rejected");
+            var rejectionMessage = !string.IsNullOrWhiteSpace(classification.Reason)
+                ? $"SQL rejected: {classification.Reason}."
+                : classification.MutationVerb is not null
+                    ? $"SQL rejected: '{classification.MutationVerb}' is a mutation statement. db_query is strictly read-only (SELECT, EXPLAIN, PRAGMA, SHOW, DESCRIBE, WITH)."
+                    : "SQL rejected: statement is not a recognized read-only query. db_query only executes read-only operations.";
+            throw new InvalidOperationException(rejectionMessage);
         }
 
         var sw = Stopwatch.StartNew();
