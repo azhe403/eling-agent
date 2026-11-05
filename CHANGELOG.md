@@ -2,6 +2,11 @@
 
 All notable changes to Eling are documented here. Follows [Keep a Changelog](https://keepachangelog.com/) and [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [Unreleased] - 2026-11-05
+
+### Fixed
+- **A malformed appsettings.json in the workspace no longer stops the MCP server from starting (backend)**: the MCP host is launched in the user's workspace, and the .NET generic host takes its content root from there - so `Host.CreateDefaultBuilder()` loaded the workspace's own `appsettings.json` and `appsettings.{Environment}.json` as host configuration. A file that was not valid JSON (an unclosed brace, an unquoted key, single quotes, an empty file) made `builder.Build()` throw `InvalidDataException` - `Could not parse the JSON file` - and the exception escaped `Program.Main`, so the server never started and every tool call failed. Eling reads no configuration key at all, so those files contributed nothing it needed. The MCP host now clears the configuration sources and keeps environment variables, the same isolation the HTTP host already applied.
+
 ## [Unreleased] - 2026-11-04
 
 ### Fixed

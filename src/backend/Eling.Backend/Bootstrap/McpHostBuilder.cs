@@ -22,6 +22,19 @@ public static class McpHostBuilder
 
         var builder = Host.CreateDefaultBuilder();
 
+        // The default host configuration reads appsettings.json and
+        // appsettings.{Environment}.json from the content root, and the MCP host's
+        // content root is the directory the server was launched in — the user's
+        // workspace. That file belongs to the workspace, not to Eling, which
+        // reads no configuration keys at all; a malformed one threw out of
+        // builder.Build() (InvalidDataException) and killed the whole MCP server.
+        // The HTTP host applies the same isolation in HttpLoop.BuildWebApplication.
+        builder.ConfigureAppConfiguration((_, config) =>
+        {
+            config.Sources.Clear();
+            config.AddEnvironmentVariables();
+        });
+
         builder.ConfigureServices(services =>
         {
             services.AddElingLogging(projectId: ProjectId.FromScope(effectiveContext.ProjectScope, effectiveContext.IsUserHome));
