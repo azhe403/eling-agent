@@ -34,7 +34,7 @@ public static class DashboardServices
         AppServices? shared = null,
         bool isOwnerMode = true)
     {
-        services.AddElingLogging(projectId: ProjectId.FromScope(context.ProjectScope, context.IsUserHome));
+        services.AddElingLogging(projectId: ProjectId.FromWorkspace(context.Chain.Cwd, context.IsUserHome));
         services.AddElingCoreServices(context.Chain, context.UserScope);
 
         services.TryAddSingleton(sp =>

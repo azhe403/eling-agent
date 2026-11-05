@@ -3,6 +3,7 @@ using Eling.Backend.Mcp;
 using Eling.Core;
 using Eling.Core.Database;
 using Eling.Core.Memory;
+using Eling.Core.Projects;
 using Eling.Core.Scope;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -37,7 +38,7 @@ public static class McpHostBuilder
 
         builder.ConfigureServices(services =>
         {
-            services.AddElingLogging(projectId: ProjectId.FromScope(effectiveContext.ProjectScope, effectiveContext.IsUserHome));
+            services.AddElingLogging(projectId: ProjectId.FromWorkspace(effectiveContext.Chain.Cwd, effectiveContext.IsUserHome));
             // This callback runs during builder.Build(), microseconds before the
             // provider is constructed — and Serilog's logger itself materializes
             // with the provider, after this point. The mark therefore measures
@@ -125,9 +126,15 @@ public static class McpHostBuilder
             .GetService<ILoggerFactory>()
             ?.CreateLogger("Eling.Backend.Bootstrap.McpHostBuilder")
             .LogInformation(
-                "Eling started - Opened folder: {Cwd}; Project root: {ProjectRoot}; Effective data dir: {DataDir}; User-home session: {IsUserHome}",
-                Environment.CurrentDirectory,
-                effectiveContext.ProjectScope.Root,
+                "Eling started - Opened folder: {Cwd}; Scope root: {ScopeRoot}; Effective data dir: {DataDir}; User-home session: {IsUserHome}",
+                // The opened folder and the scope root are two different facts,
+                // and each is reported from the one source that owns it: the
+                // chain for the workspace it was opened in, the chain head for
+                // the scope that owns the memories. The scope root is the head
+                // and nothing else — an uninitialized workspace has no scope,
+                // and saying so beats printing the workspace as if it were one.
+                effectiveContext.Chain.Cwd,
+                effectiveContext.Chain.Head?.Root ?? "(none)",
                 effectiveContext.EffectiveDataDir,
                 effectiveContext.IsUserHome);
 
