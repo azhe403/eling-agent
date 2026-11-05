@@ -34,13 +34,11 @@ namespace Eling.Backend.Tests;
 public sealed class McpHostConfigurationIsolationTests : IDisposable
 {
     private readonly string _tempDir;
-    private readonly string _originalCwd;
 
     public McpHostConfigurationIsolationTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), "eling-mcpcfg-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_tempDir);
-        _originalCwd = Environment.CurrentDirectory;
     }
 
     /// <summary>
@@ -100,6 +98,22 @@ public sealed class McpHostConfigurationIsolationTests : IDisposable
     }
 
     /// <summary>
+    /// The content root the caller names is the one the host uses. This is the
+    /// seam that lets the tests above build a host over a scratch workspace
+    /// without moving the process working directory, and it is the hook the
+    /// connection scanner falls back to, so it is pinned here rather than left
+    /// to the default the generic host would pick.
+    /// </summary>
+    [Fact]
+    public void McpHost_UsesTheContentRootItWasGiven()
+    {
+        using var host = BuildMcpHost();
+
+        var environment = host.Services.GetRequiredService<IHostEnvironment>();
+        Assert.Equal(_tempDir, environment.ContentRootPath);
+    }
+
+    /// <summary>
     /// Environment variables must survive the isolation: the host still reads
     /// them, and they are the supported way to configure a run.
     /// </summary>
@@ -121,16 +135,18 @@ public sealed class McpHostConfigurationIsolationTests : IDisposable
     }
 
     /// <summary>
-    /// Builds the MCP host the way <c>Program.Main</c> does: the workspace is
-    /// the process working directory, and the generic host takes its content
-    /// root from there — which is exactly how a malformed workspace
-    /// appsettings.json reached the configuration. The user scope stays
-    /// isolated the way <see cref="HttpLoopConfigurationIsolationTests"/> does,
-    /// so the build never touches the developer's real scopes.
+    /// Builds the MCP host the way <c>Program.Main</c> does: the generic host
+    /// takes its content root from the process working directory, which for the
+    /// MCP server is the workspace - and that is exactly how a malformed
+    /// workspace appsettings.json reached the configuration. The content root
+    /// is named explicitly instead of moving the process working directory:
+    /// that value is process-global, and xUnit runs other collections in
+    /// parallel, so a test that changed it would break its neighbours. The user
+    /// scope stays isolated the way <see cref="HttpLoopConfigurationIsolationTests"/>
+    /// does, so the build never touches the developer's real scopes.
     /// </summary>
     private IHost BuildMcpHost()
     {
-        Environment.CurrentDirectory = _tempDir;
         var chain = ScopeChain.Discover(_tempDir);
         var userScope = UserScope.Resolve(Path.Combine(_tempDir, "user_scope"));
         var context = new ProjectContext(
@@ -138,12 +154,11 @@ public sealed class McpHostConfigurationIsolationTests : IDisposable
             userScope,
             Path.Combine(_tempDir, ".eling"),
             IsUserHome: false);
-        return McpHostBuilder.Build(context, dashboardPort: 0);
+        return McpHostBuilder.Build(context, dashboardPort: 0, contentRoot: _tempDir);
     }
 
     public void Dispose()
     {
-        Environment.CurrentDirectory = _originalCwd;
         try
         {
             if (Directory.Exists(_tempDir))

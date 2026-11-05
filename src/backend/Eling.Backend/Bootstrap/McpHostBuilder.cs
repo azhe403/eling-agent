@@ -13,15 +13,30 @@ namespace Eling.Backend.Bootstrap;
 
 public static class McpHostBuilder
 {
+    /// <param name="context">The project to serve; discovered from the process when omitted.</param>
+    /// <param name="dashboardPort">The coordinator port; resolved from the environment when omitted.</param>
+    /// <param name="contentRoot">
+    /// The directory the generic host treats as its content root - the one it
+    /// would otherwise take from the process working directory. Tests point it
+    /// at a scratch workspace instead of moving the process-global working
+    /// directory, which xUnit shares across every collection running in
+    /// parallel. Production passes nothing and keeps the default.
+    /// </param>
     public static IHost Build(
         ProjectContext? context = null,
-        int? dashboardPort = null)
+        int? dashboardPort = null,
+        string? contentRoot = null)
     {
         var effectiveContext = context ?? ProjectContext.Discover();
         var effectivePort = dashboardPort ?? DashboardPort.Resolve();
         var shared = AppServices.Create(effectiveContext);
 
         var builder = Host.CreateDefaultBuilder();
+
+        if (!string.IsNullOrWhiteSpace(contentRoot))
+        {
+            builder.UseContentRoot(contentRoot);
+        }
 
         // The default host configuration reads appsettings.json and
         // appsettings.{Environment}.json from the content root, and the MCP host's
@@ -79,8 +94,15 @@ public static class McpHostBuilder
             // environment files next to it. It used to point at appsettings.json
             // alone, which is why an appsettings.Staging.json never showed up as
             // unimported here while the dashboard's REST detect already listed it.
+            // The scanner reads the workspace the host opened, named here rather
+            // than left to the resolver's default: that default is the process
+            // working directory, a process-global value, and this host already
+            // knows its workspace from the context. The content root stays the
+            // fallback for a workspace that holds no appsettings file.
             services.AddSingleton(sp => new AppSettingsConnectionScanner(
-                AppSettingsSourceResolver.Resolve(sp.GetRequiredService<IHostEnvironment>().ContentRootPath),
+                AppSettingsSourceResolver.Resolve(
+                    sp.GetRequiredService<IHostEnvironment>().ContentRootPath,
+                    effectiveContext.Chain.Cwd),
                 sp.GetRequiredService<ILogger<AppSettingsConnectionScanner>>()));
             services.AddSingleton<DatabaseConnectionImporter>();
 
