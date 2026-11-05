@@ -3,7 +3,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Play, RefreshCw, Plus, AlertCircle, X, CheckCircle2 } from "lucide-react"
+import { Play, RefreshCw, Plus, AlertCircle, X, CheckCircle2, ArrowUp, ArrowDown, Loader2 } from "lucide-react"
 
 import { DashboardHeader } from "@/components/dashboard-header"
 import { DbTab, REDIS_TAB_TABLE, isRedisTab, tabKey } from "./db-tabs"
@@ -21,6 +21,16 @@ import {
 import { Input } from "@/components/ui/input"
 import { copyText } from "@/lib/clipboard"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
+import {
+  CONN_SORT_KEYS,
+  CONN_SORT_COPY,
+  DEFAULT_CONN_ORDER,
+  DEFAULT_CONN_SORT,
+  connSortQuery,
+  resolveConnSort,
+  type ConnSortKey,
+  type ConnSortOrder,
+} from "./conn-sorting"
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table"
 import { DatePicker } from "@/components/ui/date-picker"
 import {
@@ -270,10 +280,45 @@ function DbToastItem({
   )
 }
 
+/**
+ * The pair the first fetch should ask for: the URL, then the remembered pair,
+ * then the default. Reads the URL and the localStorage blob directly, so it
+ * can run during the first render and never reads another state variable.
+ * Returns the default pair while rendering on the server, where neither
+ * `window` nor `localStorage` exists.
+ */
+function initialConnSort(): { sort: ConnSortKey; order: ConnSortOrder } {
+  if (typeof window === "undefined") {
+    return { sort: DEFAULT_CONN_SORT, order: DEFAULT_CONN_ORDER }
+  }
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const raw = localStorage.getItem("db.explorer.state")
+    const st = raw ? JSON.parse(raw) : null
+    return resolveConnSort({
+      urlSort: params.get("sort"),
+      urlOrder: params.get("order"),
+      savedSort: st?.sort,
+      savedOrder: st?.order,
+    })
+  } catch {
+    return { sort: DEFAULT_CONN_SORT, order: DEFAULT_CONN_ORDER }
+  }
+}
+
 export function Databases() {
   const [conns, setConns] = useState<DbConn[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // The order the connections list is drawn in. The pair lives in the URL
+  // (a shared link or the back button is a deliberate choice) and in
+  // localStorage (the choice the reader made last time). It is resolved in a
+  // lazy initializer rather than the restore effect: the restore effect runs
+  // after the first load(), so resolving there would fetch the default order
+  // and then visibly reorder the list on every reload.
+  const [connSort, setConnSort] = useState<ConnSortKey>(() => initialConnSort().sort)
+  const [connOrder, setConnOrder] = useState<ConnSortOrder>(() => initialConnSort().order)
  
   // create form
   const [showCreate, setShowCreate] = useState(false)
@@ -611,10 +656,24 @@ export function Databases() {
   const [pickerEntries, setPickerEntries] = useState<{ path: string; isDirectory: boolean }[]>([])
   const [pickerLoading, setPickerLoading] = useState(false)
 
+  // The list fades out, the new order is painted into it, and it fades back
+  // in. Everything else (an error, a refresh, the initial load) goes through
+  // the same path, so "sort" and "reload" never look different. Two phases are
+  // needed because the DOM cannot both show the old rows fading out and the
+  // new rows at the same instant.
+  const [isListFading, setIsListFading] = useState(false)
+  const fadeOutMs = 150
+
   const load = useCallback(async () => {
     setLoading(true)
+    const reducedMotion = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    // Fade the visible connections out before the request starts, so the list
+    // never re-flows under a reader mid-glance.
+    if (!reducedMotion) setIsListFading(true)
     try {
-      const res = await fetch(API, { cache: "no-store" })
+      if (!reducedMotion) await new Promise((resolve) => setTimeout(resolve, fadeOutMs))
+
+      const res = await fetch(API + connSortQuery(connSort, connOrder), { cache: "no-store" })
       if (!res.ok) throw new Error(parseApiError(await res.text()))
       const data = await res.json()
       setConns(data)
@@ -622,8 +681,9 @@ export function Databases() {
       notifyDb("error", e instanceof Error ? e.message : "failed")
     } finally {
       setLoading(false)
+      setIsListFading(false)
     }
-  }, [notifyDb])
+  }, [notifyDb, connSort, connOrder])
 
   useEffect(() => {
     const id = setTimeout(() => { void load() }, 0)
@@ -828,12 +888,21 @@ export function Databases() {
         schemaConnId,
         activeTable,
         openTabs,
+        sort: connSort,
+        order: connOrder,
       }))
       const params = new URLSearchParams()
       if (schemaConnId) params.set("connectionId", schemaConnId)
       if (activeTable?.table) params.set("table", activeTable.table)
       if (activeTable?.database) params.set("database", activeTable.database)
       if (rightTab) params.set("tab", rightTab)
+      // The chosen pair travels in the URL only when it differs from the
+      // default, so a shared link stays as short as it was before sorting
+      // existed.
+      if (connSort !== DEFAULT_CONN_SORT || connOrder !== DEFAULT_CONN_ORDER) {
+        params.set("sort", connSort)
+        params.set("order", connOrder)
+      }
       // The Redis panel's db selection is part of the view, so it belongs in
       // the URL: without it a refresh dropped back to db0 while the tree above
       // still showed the keys of the db that was actually selected.
@@ -843,7 +912,7 @@ export function Databases() {
     } catch {
       // ignore
     }
-  }, [expandedConns, rightTab, selectedId, schemaConnId, activeTable, openTabs])
+  }, [expandedConns, rightTab, selectedId, schemaConnId, activeTable, openTabs, connSort, connOrder])
 
   /** The body the create form and the create test share. */
   const createPayload = () => {
@@ -1803,9 +1872,48 @@ export function Databases() {
        <div className="flex flex-1 min-h-0 gap-4 overflow-hidden">
         <aside ref={(el) => { asideRef.current = el }} className="w-72 shrink-0 min-h-0 overflow-y-auto">
       <Card>
-        <CardHeader><CardTitle>Connections</CardTitle></CardHeader>
-        <CardContent className="space-y-1 p-2">
-          {loading ? <p className="text-sm text-muted-foreground">Loading.</p> : null}
+        <CardHeader className="space-y-2 pb-2">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="flex items-center gap-2">
+              Connections
+              {loading ? <Loader2 className="size-3.5 animate-spin text-muted-foreground" aria-label="Loading." /> : null}
+            </CardTitle>
+            <span className="text-xs text-muted-foreground">{conns.length}</span>
+          </div>
+          {/* The list is arranged by the server, so picking a key or a
+              direction here only sets the pair the next fetch asks for. The
+              control sits under the panel header and above the rows, so it
+              stays in place while a long tree scrolls. */}
+          <div role="group" aria-label="Sort connections" className="flex flex-wrap items-center gap-1">
+            {CONN_SORT_KEYS.map(key => (
+              <Button
+                key={key}
+                size="sm"
+                variant={connSort === key ? "default" : "outline"}
+                className="h-6 px-2 text-xs"
+                aria-pressed={connSort === key}
+                title={CONN_SORT_COPY[key].title}
+                onClick={() => setConnSort(key)}
+              >
+                {CONN_SORT_COPY[key].label}
+              </Button>
+            ))}
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-xs"
+              aria-pressed={connOrder === "desc"}
+              aria-label={connOrder === "asc" ? "Sort descending" : "Sort ascending"}
+              title={connOrder === "asc" ? "Sort descending" : "Sort ascending"}
+              onClick={() => setConnOrder(connOrder === "asc" ? "desc" : "asc")}
+            >
+              {connOrder === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent
+          className={`space-y-1 p-2 transition-opacity duration-150 ease-out ${isListFading ? "opacity-0" : "opacity-100"}`}
+        >
           {/* Tree rows stay plain <button>s on purpose: shadcn's Button bakes in
               a minimum height and text-sm, and these rows are one line at 20px
               (db rows) and 28px (connection rows) so a deep tree stays readable.
