@@ -46,7 +46,7 @@ One endpoint = one commit. New endpoints must follow the standard from birth.
 
 | Endpoint | Status |
 |---|---|
-| `GET /api/databases` (`name`, `provider`, `created`, `lastUsed`) | Design only — `docs/superpowers/specs/2026-11-04-database-connection-sorting-design.md`, not yet implemented |
+| `GET /api/databases` (`name`, `provider`, `created`, `lastUsed`) | **Adopted** — `DatabaseConnectionSort` (core), `GET /api/databases?sort=&order=` (backend), connections panel (dashboard). Design: `docs/superpowers/specs/2026-11-04-database-connection-sorting-design.md` |
 | Dashboard workspaces `?sort=&dir=` (`natural`/`flipped`) | Not yet standard — migrate `dir` → `order=asc/desc` (keep old alias for one release) |
 
 MCP tools (`db_list_connections` etc.) read the store directly — **unchanged**.
