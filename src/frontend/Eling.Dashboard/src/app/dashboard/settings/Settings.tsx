@@ -43,11 +43,14 @@ const FORMATS: Array<{
   },
 ]
 
+function asFormat(value: string | undefined): LogFormat {
+  return value === "jsonl" ? "jsonl" : "text"
+}
+
 export function Settings() {
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const [saving, setSaving] = useState<LogFormat | null>(null)
   const [format, setFormat] = useState<LogFormat>("text")
-  const [pending, setPending] = useState<LogFormat>("text")
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
 
   const reload = useCallback(async () => {
@@ -57,9 +60,7 @@ export function Settings() {
       const res = await fetch("/api/logs/config")
       if (!res.ok) throw new Error(`Failed to load settings (HTTP ${res.status})`)
       const data = (await res.json()) as LogConfigView
-      const next: LogFormat = data.format === "jsonl" ? "jsonl" : "text"
-      setFormat(next)
-      setPending(next)
+      setFormat(asFormat(data.format))
     } catch (err) {
       setMessage({
         type: "error",
@@ -77,41 +78,48 @@ export function Settings() {
     return () => clearTimeout(t)
   }, [reload])
 
-  const dirty = pending !== format
+  // Selection applies immediately: there is one setting and one writer, so a
+  // Save step would only add a way to leave the page in a state that is not
+  // what the server has. The badge moves at once and rolls back on failure.
+  const applyFormat = useCallback(
+    async (next: LogFormat) => {
+      if (next === format || saving) return
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSaving(true)
-    setMessage(null)
-    try {
-      const res = await fetch("/api/logs/config", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ format: pending }),
-      })
-      if (!res.ok) throw new Error(`Failed to save (HTTP ${res.status})`)
-      const updated = (await res.json()) as LogConfigView
-      const next: LogFormat = updated.format === "jsonl" ? "jsonl" : "text"
+      const previous = format
       setFormat(next)
-      setPending(next)
-      setMessage({
-        type: "success",
-        text: `Log format saved as ${next}. This host switched immediately; running MCP sessions keep their current format until they end.`,
-      })
-    } catch (err) {
-      setMessage({
-        type: "error",
-        text: err instanceof Error ? err.message : "Failed to save settings.",
-      })
-    } finally {
-      setSaving(false)
-    }
-  }
+      setSaving(next)
+      setMessage(null)
+      try {
+        const res = await fetch("/api/logs/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ format: next }),
+        })
+        if (!res.ok) throw new Error(`Failed to save (HTTP ${res.status})`)
+        const updated = (await res.json()) as LogConfigView
+        const applied = asFormat(updated.format)
+        setFormat(applied)
+        setMessage({
+          type: "success",
+          text: `Log format is now ${applied}. This host switched immediately; running MCP sessions keep their format until they end.`,
+        })
+      } catch (err) {
+        setFormat(previous)
+        setMessage({
+          type: "error",
+          text: err instanceof Error ? err.message : "Failed to save settings.",
+        })
+      } finally {
+        setSaving(null)
+      }
+    },
+    [format, saving]
+  )
 
   return (
     <>
       <DashboardHeader label="Settings">
-        <Button variant="outline" size="sm" onClick={() => void reload()} disabled={loading || saving}>
+        <Button variant="outline" size="sm" onClick={() => void reload()} disabled={loading || !!saving}>
           <RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} />
           <span className="hidden sm:inline-block">Refresh</span>
         </Button>
@@ -154,79 +162,65 @@ export function Settings() {
           </CardContent>
         </Card>
 
-        <form onSubmit={handleSave}>
-          <Card>
-            <CardHeader className="border-b">
-              <CardTitle className="text-sm font-medium">File format</CardTitle>
-              <CardDescription className="text-xs">
-                Switching mid-day does not rewrite history: the outgoing file is archived under its own
-                date and the new one starts clean.
-              </CardDescription>
-            </CardHeader>
+        <Card>
+          <CardHeader className="border-b">
+            <CardTitle className="text-sm font-medium">File format</CardTitle>
+            <CardDescription className="text-xs">
+              Switching mid-day does not rewrite history: the outgoing file is archived under its own
+              date and the new one starts clean.
+            </CardDescription>
+          </CardHeader>
 
-            <CardContent className="flex flex-col gap-2">
-              {FORMATS.map((option) => {
-                const Icon = option.icon
-                const selected = pending === option.value
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setPending(option.value)}
-                    disabled={loading || saving}
-                    aria-pressed={selected}
-                    className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
-                      selected
-                        ? "border-primary/60 bg-primary/5"
-                        : "border-border hover:bg-muted/50"
-                    }`}
-                  >
-                    <Icon
-                      className={`mt-0.5 size-4 shrink-0 ${
-                        selected ? "text-primary" : "text-muted-foreground"
-                      }`}
-                    />
-                    <div className="flex min-w-0 flex-1 flex-col gap-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium">{option.title}</span>
-                        <code className="bg-muted rounded px-1 py-0.5 text-[11px] text-muted-foreground">
-                          {option.ext}
-                        </code>
-                        {format === option.value && (
-                          <span className="rounded-full border border-border/50 bg-muted/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                            current
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-xs text-muted-foreground">{option.description}</span>
-                    </div>
-                  </button>
-                )
-              })}
-            </CardContent>
-
-            <CardFooter className="flex flex-col gap-3 border-t sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-xs text-muted-foreground">
-                Applies to new MCP sessions immediately; this dashboard applies it now.
-              </span>
-              <div className="flex items-center gap-2">
-                <Button
+          <CardContent className="flex flex-col gap-2">
+            {FORMATS.map((option) => {
+              const Icon = option.icon
+              const selected = format === option.value
+              const applying = saving === option.value
+              return (
+                <button
+                  key={option.value}
                   type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPending(format)}
-                  disabled={!dirty || saving}
+                  onClick={() => void applyFormat(option.value)}
+                  disabled={loading || !!saving}
+                  aria-pressed={selected}
+                  className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed ${
+                    selected
+                      ? "border-primary/60 bg-primary/5"
+                      : "border-border hover:bg-muted/50"
+                  }`}
                 >
-                  Discard
-                </Button>
-                <Button type="submit" size="sm" disabled={!dirty || saving || loading}>
-                  {saving ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                  Save
-                </Button>
-              </div>
-            </CardFooter>
-          </Card>
-        </form>
+                  <Icon
+                    className={`mt-0.5 size-4 shrink-0 ${
+                      selected ? "text-primary" : "text-muted-foreground"
+                    }`}
+                  />
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium">{option.title}</span>
+                      <code className="bg-muted rounded px-1 py-0.5 text-[11px] text-muted-foreground">
+                        {option.ext}
+                      </code>
+                      {selected && (
+                        <span className="rounded-full border border-border/50 bg-muted/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                          current
+                        </span>
+                      )}
+                      {applying && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+                    </div>
+                    <span className="text-xs text-muted-foreground">{option.description}</span>
+                  </div>
+                </button>
+              )
+            })}
+          </CardContent>
+
+          <CardFooter className="border-t">
+            <span className="text-xs text-muted-foreground">
+              Choosing a format applies it right away — no Save step. New MCP sessions pick it up at
+              their next start.
+            </span>
+          </CardFooter>
+        </Card>
       </div>
     </>
   )
