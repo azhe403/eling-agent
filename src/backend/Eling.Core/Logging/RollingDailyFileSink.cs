@@ -54,6 +54,15 @@ public sealed class RollingDailyFileSink : ILogEventSink, IDisposable
         EnsureActiveStreamOpen();
     }
 
+    /// <summary>
+    /// The format this sink writes, which also selects the active file's
+    /// extension and the date pattern used to split archived lines.
+    /// </summary>
+    public LogFormat Format => _format;
+
+    /// <summary>Absolute path of the active file this sink appends to.</summary>
+    public string ActiveFilePath => Path.Combine(_logsDirectory, _activeFileName);
+
     public void Emit(LogEvent logEvent)
     {
         if (_disposed) return;
