@@ -21,6 +21,7 @@ public sealed class RollingDailyFileSink : ILogEventSink, IDisposable
     private readonly string _archivePrefix;
     private readonly int _retainedDays;
     private readonly ITextFormatter _formatter;
+    private readonly LogFormat _format;
     private readonly object _syncRoot = new();
 
     private DateTime _currentDate;
@@ -28,14 +29,16 @@ public sealed class RollingDailyFileSink : ILogEventSink, IDisposable
     private StreamWriter? _writer;
     private bool _disposed;
 
-    private static readonly Regex TimestampRegex = new(@"^\d{4}-\d{2}-\d{2}", RegexOptions.Compiled);
+    private static readonly Regex TextDateRegex = new(@"^\d{4}-\d{2}-\d{2}", RegexOptions.Compiled);
+    private static readonly Regex JsonlDateRegex = new(@"^\{?""@t"":""(?<date>\d{4}-\d{2}-\d{2})", RegexOptions.Compiled);
 
     public RollingDailyFileSink(
         string logsDirectory,
         string activeFileName = DefaultActiveFileName,
         string archivePrefix = DefaultArchivePrefix,
         int retainedDays = DefaultRetainedDays,
-        ITextFormatter? formatter = null
+        ITextFormatter? formatter = null,
+        LogFormat format = LogFormat.Text
     )
     {
         _logsDirectory = logsDirectory;
@@ -43,6 +46,7 @@ public sealed class RollingDailyFileSink : ILogEventSink, IDisposable
         _archivePrefix = archivePrefix;
         _retainedDays = retainedDays;
         _formatter = formatter ?? new MessageTemplateTextFormatter(DefaultOutputTemplate);
+        _format = format;
         _currentDate = DateTime.Today;
 
         Directory.CreateDirectory(_logsDirectory);
@@ -213,12 +217,15 @@ public sealed class RollingDailyFileSink : ILogEventSink, IDisposable
             var todayLines = new List<string>();
             string? currentLineDate = null;
 
+            var dateRegex = _format == LogFormat.Jsonl ? JsonlDateRegex : TextDateRegex;
+            var archiveExtension = _format == LogFormat.Jsonl ? ".jsonl" : ".log";
+
             foreach (var line in lines)
             {
-                var match = TimestampRegex.Match(line);
+                var match = dateRegex.Match(line);
                 if (match.Success)
                 {
-                    currentLineDate = match.Value;
+                    currentLineDate = _format == LogFormat.Jsonl ? match.Groups["date"].Value : match.Value;
                 }
 
                 if (currentLineDate != null && DateTime.TryParse(currentLineDate, out var parsedDate) && parsedDate.Date < today.Date)
@@ -242,7 +249,7 @@ public sealed class RollingDailyFileSink : ILogEventSink, IDisposable
                 // Write prior day lines to their respective archive files
                 foreach (var (dateKey, groupLines) in priorDayGroups)
                 {
-                    var archivePath = Path.Combine(_logsDirectory, $"{_archivePrefix}-{dateKey}.log");
+                    var archivePath = Path.Combine(_logsDirectory, $"{_archivePrefix}-{dateKey}{archiveExtension}");
                     File.AppendAllLines(archivePath, groupLines, Encoding.UTF8);
                 }
 
@@ -270,7 +277,11 @@ public sealed class RollingDailyFileSink : ILogEventSink, IDisposable
             if (!Directory.Exists(_logsDirectory)) return;
 
             var cutoff = today.Date.AddDays(-_retainedDays);
-            foreach (var filePath in Directory.GetFiles(_logsDirectory, $"{_archivePrefix}-*.log"))
+            var globs = _format == LogFormat.Jsonl
+                ? new[] { $"{_archivePrefix}-*.log", $"{_archivePrefix}-*.jsonl" }
+                : new[] { $"{_archivePrefix}-*.log" };
+            foreach (var glob in globs)
+            foreach (var filePath in Directory.GetFiles(_logsDirectory, glob))
             {
                 var fileName = Path.GetFileNameWithoutExtension(filePath);
                 if (fileName.StartsWith($"{_archivePrefix}-", StringComparison.OrdinalIgnoreCase))
