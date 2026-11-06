@@ -79,7 +79,6 @@ export function Logs() {
   const [newLinesCount, setNewLinesCount] = useState(0)
   const [wrap, setWrap] = useState(false)
   const [format, setFormat] = useState<LogFormat>("text")
-  const [savingFormat, setSavingFormat] = useState(false)
 
   const activeFileName = `${stream}.${format === "jsonl" ? "jsonl" : "log"}`
 
@@ -108,6 +107,8 @@ export function Logs() {
     }
   }, [stream])
 
+  // The format is edited on the Settings page; this page only reads it, to know
+  // which active file name to leave out of the date picker.
   const fetchFormat = useCallback(async () => {
     try {
       const res = await fetch("/api/logs/config")
@@ -119,34 +120,6 @@ export function Logs() {
       setError(e instanceof Error ? e.message : String(e))
     }
   }, [])
-
-  const changeFormat = useCallback(
-    async (next: LogFormat) => {
-      setSavingFormat(true)
-      setError(null)
-      try {
-        const res = await fetch("/api/logs/config", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ format: next }),
-        })
-        if (!res.ok) {
-          setError(`Failed to save log format (${res.status})`)
-          return
-        }
-        const data = (await res.json()) as { format?: string }
-        setFormat(data.format === "jsonl" ? "jsonl" : "text")
-        // The list gains the new active file and loses none: refetch so the
-        // date dropdown reflects what is actually on disk now.
-        void fetchFiles()
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
-      } finally {
-        setSavingFormat(false)
-      }
-    },
-    [fetchFiles]
-  )
 
   const fetchHistory = useCallback(async () => {
     setLoading(true)
@@ -296,22 +269,6 @@ export function Logs() {
             <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="backend">backend</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Select
-            value={format}
-            onValueChange={(v) => v && !savingFormat && void changeFormat(v as LogFormat)}
-          >
-            <SelectTrigger
-              className="w-36"
-              title="Writes new log lines as text (.log) or JSON Lines (.jsonl). Applies to new MCP sessions immediately; this dashboard applies now."
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="text">Text (.log)</SelectItem>
-              <SelectItem value="jsonl">JSON Lines (.jsonl)</SelectItem>
             </SelectContent>
           </Select>
 

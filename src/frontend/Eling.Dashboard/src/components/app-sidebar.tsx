@@ -13,6 +13,7 @@ import {
   ScrollText,
   Wrench,
   FileText,
+  Settings,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -75,6 +76,11 @@ const navMain = [
     title: "Tools",
     url: "/dashboard/tools",
     icon: <Wrench className="size-4" />,
+  },
+  {
+    title: "Settings",
+    url: "/dashboard/settings",
+    icon: <Settings className="size-4" />,
   },
 ]
 
