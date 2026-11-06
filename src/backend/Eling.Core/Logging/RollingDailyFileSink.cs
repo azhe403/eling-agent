@@ -30,7 +30,7 @@ public sealed class RollingDailyFileSink : ILogEventSink, IDisposable
     private bool _disposed;
 
     private static readonly Regex TextDateRegex = new(@"^\d{4}-\d{2}-\d{2}", RegexOptions.Compiled);
-    private static readonly Regex JsonlDateRegex = new(@"^\{?""@t"":""(?<date>\d{4}-\d{2}-\d{2})", RegexOptions.Compiled);
+    private static readonly Regex JsonlDateRegex = new(@"^\{?""Timestamp"":""(?<date>\d{4}-\d{2}-\d{2})", RegexOptions.Compiled);
 
     public RollingDailyFileSink(
         string logsDirectory,

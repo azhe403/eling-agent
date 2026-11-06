@@ -45,10 +45,12 @@ public sealed class RollingDailyFileSinkJsonlTests : IDisposable
         var yesterdayKey = yesterday.ToString("yyyy-MM-dd");
 
         // Seed an active backend.jsonl that holds a prior-day JSONL line plus today's.
+        // JsonFormatter (Serilog 4.4 core) emits "Timestamp"/"Level"/"MessageTemplate"
+        // (NOT the @t/@lt OTel-compact names), so the seed uses real field names.
         var activePath = Path.Combine(_tempLogsDir, "backend.jsonl");
         File.WriteAllText(activePath,
-            $"{{\"@t\":\"{yesterdayKey}T10:00:00.000Z\",\"@m\":\"Yesterday jsonl line\"}}\n" +
-            $"{{\"@t\":\"{DateTime.Today:yyyy-MM-dd}T10:00:00.000Z\",\"@m\":\"Today jsonl line\"}}\n",
+            $"{{\"Timestamp\":\"{yesterdayKey}T10:00:00.0000000+07:00\",\"Level\":\"Information\",\"MessageTemplate\":\"Yesterday jsonl line\"}}\n" +
+            $"{{\"Timestamp\":\"{DateTime.Today:yyyy-MM-dd}T10:00:00.0000000+07:00\",\"Level\":\"Information\",\"MessageTemplate\":\"Today jsonl line\"}}\n",
             Encoding.UTF8);
 
         using var sink = ElingLoggingConfig.CreateSink(
@@ -71,10 +73,10 @@ public sealed class RollingDailyFileSinkJsonlTests : IDisposable
         var yesterday = DateTime.Today.AddDays(-1);
         var yesterdayKey = yesterday.Date.ToString("yyyy-MM-dd");
 
-        // Seed the active file with one JSONL line carrying yesterday's @t date.
+        // Seed the active file with one JSONL line carrying yesterday's Timestamp date.
         var activePath = Path.Combine(_tempLogsDir, "backend.jsonl");
         File.WriteAllText(activePath,
-            $"{{\"@t\":\"{yesterdayKey}T10:00:00.000Z\",\"@m\":\"Yesterday jsonl line\"}}\n",
+            $"{{\"Timestamp\":\"{yesterdayKey}T10:00:00.0000000+07:00\",\"Level\":\"Information\",\"MessageTemplate\":\"Yesterday jsonl line\"}}\n",
             Encoding.UTF8);
 
         using var sink = ElingLoggingConfig.CreateSink(
@@ -102,6 +104,41 @@ public sealed class RollingDailyFileSinkJsonlTests : IDisposable
 
         Assert.False(File.Exists(oldLog), "Old .log archive should be pruned");
         Assert.False(File.Exists(oldJsonl), "Old .jsonl archive should be pruned");
+    }
+
+    [Fact]
+    public void RealJsonFormatterOutput_RolloverPicksUpTimestampField()
+    {
+        // Prove the sink works against real JsonFormatter output, not just
+        // hand-seeded lines: emit a yesterday-dated event through the actual
+        // formatter, trigger rollover, assert the archive captured it.
+        var yesterday = DateTime.Today.AddDays(-1);
+        var yesterdayKey = yesterday.Date.ToString("yyyy-MM-dd");
+
+        using var sink = ElingLoggingConfig.CreateSink(
+            _tempLogsDir, "backend.jsonl", "backend", 7, LogFormat.Jsonl);
+
+        var parser = new Serilog.Parsing.MessageTemplateParser();
+        // Build a DateTimeOffset stamped yesterday (local) so the emitted
+        // JSONL line's "Timestamp" field carries yesterday's date.
+        var yesterdayDto = new DateTimeOffset(yesterday.Date.AddHours(10), TimeSpan.FromHours(7));
+        var yesterdayEvt = new LogEvent(
+            yesterdayDto,
+            LogEventLevel.Information,
+            null,
+            parser.Parse("Real formatter yesterday line {X}"),
+            new[] { new LogEventProperty("X", new ScalarValue(1)) });
+
+        sink.Emit(yesterdayEvt);
+
+        // Force rollover to today's date to move the yesterday-dated line to archive.
+        sink.CheckRollover(DateTime.Today);
+
+        var archivePath = Path.Combine(_tempLogsDir, $"backend-{yesterdayKey}.jsonl");
+        var activePath = Path.Combine(_tempLogsDir, "backend.jsonl");
+        Assert.True(File.Exists(archivePath), "Yesterday line should be archived after real-emit rollover");
+        Assert.Contains("Real formatter yesterday line", ReadFileShared(archivePath));
+        Assert.DoesNotContain("Real formatter yesterday line", ReadFileShared(activePath));
     }
 
     [Fact]
