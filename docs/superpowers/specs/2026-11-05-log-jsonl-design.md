@@ -28,8 +28,12 @@ is the point: this change must stay cheap and reversible.
   (`backend-2026-11-05.log` / `.jsonl`).
 - **G3.** Readers (`LogReader`, MCP `LogTools`, dashboard SSE tail) work
   for both formats: `ListFiles` picks up both `*.log` and `*.jsonl`;
-  level filter understands `@lt` tokens in JSONL lines; `contains` is a
-  raw substring over the line in both formats.
+  level filter understands the JSONL `Level` field (full Serilog names:
+  `Verbose`, `Debug`, `Information`, `Warning`, `Error`, `Fatal` —
+  verified probe of `Serilog.Formatting.Json.JsonFormatter` on 4.4.0,
+  which emits plain `Timestamp`/`Level` fields, not the OTel-compact
+  `@t`/`@lt` names); `contains` is a raw substring over the line in
+  both formats.
 - **G4.** JSONL events carry structured properties (existing enrichers
   `ProcessId`, `ProjectId`, `CorrelationId`, `AspNetEnvironment` plus
   any `{Prop}` message-template properties) — free from
@@ -150,10 +154,11 @@ re-evaluated per line. `PruneOldLogs` globs `{prefix}-*.log` **and**
 - `ListFiles(dir, stream)` → `*.log` **and** `*.jsonl`.
 - `ResolvePath(dir, "backend", date, format)` → extension from format;
   no date + no explicit format → active file for the *current* config.
-- Level filter: JSONL lines match on `"@lt":"Err"`-style tokens
-  (existing `LevelTokens` table extended with the JSONL variants); text
-  lines match exactly as today. A file's format is known from its
-  extension, so no per-line guessing.
+- **Level filter:** JSONL lines match on the `"Level":"Error"`-style
+  field (full Serilog level names; the verified `JsonFormatter` wire
+  shape uses plain `Timestamp`/`Level` fields); text lines match
+  exactly as today. A file's format is known from its extension, so no
+  per-line guessing.
 - `contains`: raw substring over the line, both formats (anti-goal).
 - SSE tail endpoint reads the active file per current config; on a
   format switch mid-stream the tail follows the new file (position
