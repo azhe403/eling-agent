@@ -127,7 +127,7 @@ export function Settings() {
 
       <div className="flex w-full flex-1 flex-col gap-4 p-4 pt-4">
         <Card>
-          <CardHeader>
+          <CardHeader className="border-b">
             <CardTitle className="text-base">Logs</CardTitle>
             <CardDescription>
               How Eling writes its rolling log files in{" "}
@@ -135,12 +135,12 @@ export function Settings() {
             </CardDescription>
           </CardHeader>
 
-          <CardContent className="flex flex-col gap-3">
+          <CardContent className="flex flex-col gap-4 pt-4">
             <div className="rounded-lg bg-muted/50 p-3 text-xs leading-relaxed text-muted-foreground">
               The format is a per-user setting stored in{" "}
               <code className="bg-muted rounded px-1 py-0.5 text-xs">config/log.json</code> and shared by
-              every Eling process. The console keeps the plain-text template in both modes, because it is
-              read by a person, not a tool.
+              every Eling process. Switching mid-day does not rewrite history: the outgoing file is
+              archived under its own date and the new one starts clean.
             </div>
 
             {message && (
@@ -159,65 +159,56 @@ export function Settings() {
                 <div className="flex-1">{message.text}</div>
               </div>
             )}
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader className="border-b">
-            <CardTitle className="text-sm font-medium">File format</CardTitle>
-            <CardDescription className="text-xs">
-              Switching mid-day does not rewrite history: the outgoing file is archived under its own
-              date and the new one starts clean.
-            </CardDescription>
-          </CardHeader>
-
-          <CardContent className="flex flex-col gap-2">
-            {FORMATS.map((option) => {
-              const Icon = option.icon
-              const selected = format === option.value
-              const applying = saving === option.value
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => void applyFormat(option.value)}
-                  disabled={loading || !!saving}
-                  aria-pressed={selected}
-                  className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed ${
-                    selected
-                      ? "border-primary/60 bg-primary/5"
-                      : "border-border hover:bg-muted/50"
-                  }`}
-                >
-                  <Icon
-                    className={`mt-0.5 size-4 shrink-0 ${
-                      selected ? "text-primary" : "text-muted-foreground"
+            <div className="flex flex-col gap-2">
+              {FORMATS.map((option) => {
+                const Icon = option.icon
+                const selected = format === option.value
+                const applying = saving === option.value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => void applyFormat(option.value)}
+                    disabled={loading || !!saving}
+                    aria-pressed={selected}
+                    className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed ${
+                      selected
+                        ? "border-primary/60 bg-primary/5"
+                        : "border-border hover:bg-muted/50"
                     }`}
-                  />
-                  <div className="flex min-w-0 flex-1 flex-col gap-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-medium">{option.title}</span>
-                      <code className="bg-muted rounded px-1 py-0.5 text-[11px] text-muted-foreground">
-                        {option.ext}
-                      </code>
-                      {selected && (
-                        <span className="rounded-full border border-border/50 bg-muted/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                          current
-                        </span>
-                      )}
-                      {applying && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+                  >
+                    <Icon
+                      className={`mt-0.5 size-4 shrink-0 ${
+                        selected ? "text-primary" : "text-muted-foreground"
+                      }`}
+                    />
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium">{option.title}</span>
+                        <code className="bg-muted rounded px-1 py-0.5 text-[11px] text-muted-foreground">
+                          {option.ext}
+                        </code>
+                        {selected && (
+                          <span className="rounded-full border border-border/50 bg-muted/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                            current
+                          </span>
+                        )}
+                        {applying && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+                      </div>
+                      <span className="text-xs text-muted-foreground">{option.description}</span>
                     </div>
-                    <span className="text-xs text-muted-foreground">{option.description}</span>
-                  </div>
-                </button>
-              )
-            })}
+                  </button>
+                )
+              })}
+            </div>
           </CardContent>
 
           <CardFooter className="border-t">
             <span className="text-xs text-muted-foreground">
               Choosing a format applies it right away — no Save step. New MCP sessions pick it up at
-              their next start.
+              their next start. The console keeps the plain-text template in both modes, because it is
+              read by a person, not a tool.
             </span>
           </CardFooter>
         </Card>
