@@ -57,3 +57,4 @@ opencode.json.openchamber.backup
 *.out.txt
 
 *.zip
+.worktrees/
