@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Eling.Backend.Logging;
 using Eling.Core.Logging;
 using Eling.Core.Scope;
 using Microsoft.AspNetCore.Builder;
@@ -116,8 +117,30 @@ public static class LogsEndpoints
             }
         });
 
+        group.MapGet("/config", (LogConfigStore store) =>
+        {
+            return Results.Ok(new { format = store.GetFormat().ToString().ToLowerInvariant() });
+        });
+
+        group.MapPut("/config", (LogConfigStore store, LogFormatSwitcher switcher, LogConfigRequest req) =>
+        {
+            var parsed = LogFormatExtensions.Resolve(req?.Format);
+            // Persist FIRST, then apply the live effect: a host that crashes
+            // mid-PUT still restarts with the stored value.
+            var updated = store.UpdateFormat(parsed);
+            switcher.Apply(updated);
+            return Results.Ok(new { format = updated.ToString().ToLowerInvariant() });
+        });
+
         return app;
     }
+
+    /// <summary>
+    /// The per-user log format view; the wire shape is always a lowercase
+    /// string so a missing/unknown value in the request body resolves
+    /// through <see cref="LogFormatExtensions.Resolve"/> instead of a 400.
+    /// </summary>
+    public sealed record LogConfigRequest(string? Format);
 
     private static async Task WriteEvent(HttpContext ctx, string line, CancellationToken ct)
     {
