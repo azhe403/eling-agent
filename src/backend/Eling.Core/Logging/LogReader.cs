@@ -58,6 +58,12 @@ public static class LogReader
     /// Read a tailed, filtered view of a single log file, resolving its
     /// extension from <paramref name="format"/>.
     /// </summary>
+    /// <remarks>
+    /// A dated archive can predate the current format setting: switching to
+    /// JSONL mid-day leaves earlier days as <c>.log</c> files. So a date read
+    /// falls back to the other extension when the preferred one is absent,
+    /// which keeps history readable whatever the user picked today.
+    /// </remarks>
     public static LogReadResult Read(
         string logsDirectory,
         string stream,
@@ -69,6 +75,19 @@ public static class LogReader
     {
         tail = Math.Clamp(tail, 1, 5000);
         var path = ResolvePath(logsDirectory, stream, date, format);
+
+        if (!File.Exists(path) && !string.IsNullOrWhiteSpace(date))
+        {
+            var alternate = ResolvePath(
+                logsDirectory,
+                stream,
+                date,
+                format == LogFormat.Jsonl ? LogFormat.Text : LogFormat.Jsonl);
+            if (File.Exists(alternate))
+            {
+                path = alternate;
+            }
+        }
         if (!File.Exists(path))
         {
             return new LogReadResult(Path.GetFileName(path), logsDirectory, false, 0, 0, 0, Array.Empty<string>());

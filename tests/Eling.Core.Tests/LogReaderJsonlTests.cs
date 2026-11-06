@@ -137,4 +137,41 @@ public sealed class LogReaderJsonlTests : IDisposable
 
         Assert.False(result.Exists);
     }
+
+    /// <summary>
+    /// A dated archive may predate today's format choice: switching to JSONL
+    /// mid-day leaves earlier days as <c>.log</c> files, and the date picker
+    /// must still open them.
+    /// </summary>
+    [Fact]
+    public void Read_DatedArchive_FallsBackToTheOtherExtension()
+    {
+        File.WriteAllText(
+            Path.Combine(_dir, "backend-2026-11-05.log"),
+            "2026-11-05 10:00:00.000 +07:00 [INF] archived text line\n",
+            Encoding.UTF8);
+
+        var result = LogReader.Read(_dir, "backend", "2026-11-05", "INFO", null, 10, LogFormat.Jsonl);
+
+        Assert.True(result.Exists);
+        Assert.Equal("backend-2026-11-05.log", result.File);
+        Assert.Contains("archived text line", result.Lines[0]);
+    }
+
+    /// <summary>
+    /// The active file never falls back: reading "today" must show the file the
+    /// sink is actually writing, not a stale leftover of the other format.
+    /// </summary>
+    [Fact]
+    public void Read_ActiveFile_DoesNotFallBackToTheOtherExtension()
+    {
+        File.WriteAllText(
+            Path.Combine(_dir, "backend.log"),
+            "2026-11-05 10:00:00.000 +07:00 [INF] stale active line\n",
+            Encoding.UTF8);
+
+        var result = LogReader.Read(_dir, "backend", null, null, null, 10, LogFormat.Jsonl);
+
+        Assert.False(result.Exists);
+    }
 }
