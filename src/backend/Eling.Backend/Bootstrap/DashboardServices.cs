@@ -23,6 +23,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Eling.Backend.Bootstrap;
 
@@ -34,7 +35,16 @@ public static class DashboardServices
         AppServices? shared = null,
         bool isOwnerMode = true)
     {
-        services.AddElingLogging(projectId: ProjectId.FromWorkspace(context.Chain.Cwd, context.IsUserHome));
+        // The host's first sink must already write the stored log format
+        // (text/jsonl): reading the user-scope setting here, before any logger
+        // is live, keeps every restart consistent with the last saved value.
+        var initialLogFormat = new Eling.Backend.Logging.LogConfigStore(
+                context.UserScope,
+                NullLogger<Eling.Backend.Logging.LogConfigStore>.Instance)
+            .GetFormat();
+        services.AddElingLogging(
+            projectId: ProjectId.FromWorkspace(context.Chain.Cwd, context.IsUserHome),
+            initialFormat: initialLogFormat);
         services.AddElingCoreServices(context.Chain, context.UserScope);
 
         services.TryAddSingleton(sp =>
@@ -54,6 +64,14 @@ public static class DashboardServices
         services.TryAddSingleton(sp => new Eling.Core.Workspaces.WorkspaceExpansionStore(
             Path.Combine(context.UserScope.ConfigDirectory, "workspace-expansion.json"),
             sp.GetService<ILogger<WorkspaceExpansionStore>>()));
+
+        // Per-user log format (text/jsonl) lives in <user-scope>/config/log.json,
+        // shared with every MCP host. The dashboard owner mutates it through the
+        // /api/logs/config endpoint; the switcher applies the change live.
+        services.TryAddSingleton(sp => new Eling.Backend.Logging.LogConfigStore(
+            context.UserScope,
+            sp.GetService<ILogger<Eling.Backend.Logging.LogConfigStore>>()
+                ?? NullLogger<Eling.Backend.Logging.LogConfigStore>.Instance));
 
         if (shared != null)
         {

@@ -1,5 +1,4 @@
-using Eling.Core;
-using Eling.Core.Logging;
+using Eling.Backend.Logging;
 using Microsoft.Extensions.Hosting;
 
 namespace Eling.Backend.Mcp;
@@ -7,9 +6,13 @@ namespace Eling.Backend.Mcp;
 public sealed class DailyLogRollerService : BackgroundService
 {
     private readonly string _logsDirectory;
-    private readonly RollingDailyFileSink? _sink;
+    private readonly LogFormatForwardingSink? _sink;
 
-    public DailyLogRollerService(string logsDirectory, RollingDailyFileSink? sink = null)
+    /// <param name="sink">
+    /// The DI-registered forwarder, not the inner sink: a format switch replaces
+    /// the inner, and the rollover must follow whatever is current.
+    /// </param>
+    public DailyLogRollerService(string logsDirectory, LogFormatForwardingSink? sink = null)
     {
         _logsDirectory = logsDirectory;
         _sink = sink;
@@ -35,7 +38,7 @@ public sealed class DailyLogRollerService : BackgroundService
                 }
             }
 
-            _sink?.CheckRollover(DateTime.Today);
+            _sink?.Inner?.CheckRollover(DateTime.Today);
         }
     }
 }

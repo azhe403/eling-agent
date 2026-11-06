@@ -28,6 +28,25 @@ public static class ElingLoggingConfig
             formatter);
     }
 
+    public static RollingDailyFileSink CreateSink(
+        string logsDirectory,
+        string activeFileName,
+        string archivePrefix,
+        int retainedDays,
+        LogFormat format)
+    {
+        Serilog.Formatting.ITextFormatter formatter = format == LogFormat.Jsonl
+            ? new Serilog.Formatting.Json.JsonFormatter()
+            : CreateDefaultFormatter();
+        return new RollingDailyFileSink(
+            logsDirectory,
+            activeFileName,
+            archivePrefix,
+            retainedDays,
+            formatter,
+            format);
+    }
+
     public static LoggerConfiguration ConfigureElingDefaults(
         this LoggerConfiguration configuration,
         RollingDailyFileSink sink,

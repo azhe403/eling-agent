@@ -6,8 +6,10 @@ using Eling.Core.Memory;
 using Eling.Core.Projects;
 using Eling.Core.Scope;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Eling.Backend.Bootstrap;
 
@@ -53,7 +55,19 @@ public static class McpHostBuilder
 
         builder.ConfigureServices(services =>
         {
-            services.AddElingLogging(projectId: ProjectId.FromWorkspace(effectiveContext.Chain.Cwd, effectiveContext.IsUserHome));
+            // The MCP host's initial sink matches the user's stored log format
+            // ("MCP hosts pick it up at next start" contract); in-session
+            // switches stay with the dashboard owner, no watcher here.
+            // The DI logger is not live yet in ConfigureServices, so the one-off
+            // store read uses a null logger; the store's own warnings would
+            // still surface on the host's logger once it resolves its singleton.
+            var initialLogFormat = new Eling.Backend.Logging.LogConfigStore(
+                    effectiveContext.UserScope,
+                    NullLogger<Eling.Backend.Logging.LogConfigStore>.Instance)
+                .GetFormat();
+            services.AddElingLogging(
+                projectId: ProjectId.FromWorkspace(effectiveContext.Chain.Cwd, effectiveContext.IsUserHome),
+                initialFormat: initialLogFormat);
             // This callback runs during builder.Build(), microseconds before the
             // provider is constructed — and Serilog's logger itself materializes
             // with the provider, after this point. The mark therefore measures

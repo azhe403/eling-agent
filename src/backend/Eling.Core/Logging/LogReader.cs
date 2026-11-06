@@ -17,9 +17,18 @@ public static class LogReader
     public static bool IsValidDate(string? date) => string.IsNullOrWhiteSpace(date) || DateRegex.IsMatch(date.Trim());
 
     public static string ResolvePath(string logsDirectory, string stream, string? date)
+        => ResolvePath(logsDirectory, stream, date, LogFormat.Text);
+
+    /// <summary>
+    /// Resolves the file for a stream, picking the extension from
+    /// <paramref name="format"/>: text logs stay <c>.log</c>, JSONL switches to
+    /// <c>.jsonl</c>.
+    /// </summary>
+    public static string ResolvePath(string logsDirectory, string stream, string? date, LogFormat format)
     {
         var s = stream.Trim();
-        var fileName = string.IsNullOrWhiteSpace(date) ? $"{s}.log" : $"{s}-{date.Trim()}.log";
+        var extension = format == LogFormat.Jsonl ? ".jsonl" : ".log";
+        var fileName = string.IsNullOrWhiteSpace(date) ? $"{s}{extension}" : $"{s}-{date.Trim()}{extension}";
         return Path.Combine(logsDirectory, fileName);
     }
 
@@ -28,6 +37,7 @@ public static class LogReader
         if (!Directory.Exists(logsDirectory)) return Array.Empty<LogFileInfo>();
 
         return Directory.GetFiles(logsDirectory, "*.log")
+            .Concat(Directory.GetFiles(logsDirectory, "*.jsonl"))
             .Select(p => new FileInfo(p))
             .Where(f => string.IsNullOrWhiteSpace(streamFilter)
                 || f.Name.StartsWith(streamFilter.Trim() + ".", StringComparison.OrdinalIgnoreCase)
@@ -42,9 +52,23 @@ public static class LogReader
     /// Read a tailed, filtered view of a single log file.
     /// </summary>
     public static LogReadResult Read(string logsDirectory, string stream, string? date, string? level, string? contains, int tail)
+        => Read(logsDirectory, stream, date, level, contains, tail, LogFormat.Text);
+
+    /// <summary>
+    /// Read a tailed, filtered view of a single log file, resolving its
+    /// extension from <paramref name="format"/>.
+    /// </summary>
+    public static LogReadResult Read(
+        string logsDirectory,
+        string stream,
+        string? date,
+        string? level,
+        string? contains,
+        int tail,
+        LogFormat format)
     {
         tail = Math.Clamp(tail, 1, 5000);
-        var path = ResolvePath(logsDirectory, stream, date);
+        var path = ResolvePath(logsDirectory, stream, date, format);
         if (!File.Exists(path))
         {
             return new LogReadResult(Path.GetFileName(path), logsDirectory, false, 0, 0, 0, Array.Empty<string>());
@@ -200,25 +224,31 @@ public static class LogReader
     // to the rolling log files, e.g. [ERR]/[INF]) to the set of bracketed tokens
     // that should count as a match. Serilog writes short tokens ([DBG]/[INF]/[WRN]/
     // [ERR]/[FTL]), while callers/tests often pass the long names (DEBUG/INFO/...).
+    //
+    // JSONL lines are matched on the "Level" field instead: Serilog core's
+    // JsonFormatter (verified on 4.4.0) emits plain field names with the full
+    // level name, e.g. {"Timestamp":"...","Level":"Warning","MessageTemplate":"..."}.
+    // Both spellings are kept in the same set so a caller never has to know
+    // which format a file has.
     private static readonly Dictionary<string, string[]> LevelTokens = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["DEBUG"] = new[] { "[DBG]", "[DEBUG]" },
-        ["DBG"] = new[] { "[DBG]", "[DEBUG]" },
-        ["TRACE"] = new[] { "[TRC]", "[TRACE]", "[VRB]", "[VERBOSE]" },
-        ["TRC"] = new[] { "[TRC]", "[TRACE]", "[VRB]", "[VERBOSE]" },
-        ["VERBOSE"] = new[] { "[TRC]", "[TRACE]", "[VRB]", "[VERBOSE]" },
-        ["VRB"] = new[] { "[TRC]", "[TRACE]", "[VRB]", "[VERBOSE]" },
-        ["INFO"] = new[] { "[INF]", "[INFO]" },
-        ["INF"] = new[] { "[INF]", "[INFO]" },
-        ["WARN"] = new[] { "[WRN]", "[WARN]", "[WARNING]" },
-        ["WRN"] = new[] { "[WRN]", "[WARN]", "[WARNING]" },
-        ["WARNING"] = new[] { "[WRN]", "[WARN]", "[WARNING]" },
-        ["ERROR"] = new[] { "[ERR]", "[ERROR]" },
-        ["ERR"] = new[] { "[ERR]", "[ERROR]" },
-        ["FATAL"] = new[] { "[FTL]", "[FATAL]", "[CRT]", "[CRITICAL]" },
-        ["FTL"] = new[] { "[FTL]", "[FATAL]", "[CRT]", "[CRITICAL]" },
-        ["CRITICAL"] = new[] { "[FTL]", "[FATAL]", "[CRT]", "[CRITICAL]" },
-        ["CRT"] = new[] { "[FTL]", "[FATAL]", "[CRT]", "[CRITICAL]" },
+        ["DEBUG"] = new[] { "[DBG]", "[DEBUG]", "\"Level\":\"Debug\"" },
+        ["DBG"] = new[] { "[DBG]", "[DEBUG]", "\"Level\":\"Debug\"" },
+        ["TRACE"] = new[] { "[TRC]", "[TRACE]", "[VRB]", "[VERBOSE]", "\"Level\":\"Verbose\"" },
+        ["TRC"] = new[] { "[TRC]", "[TRACE]", "[VRB]", "[VERBOSE]", "\"Level\":\"Verbose\"" },
+        ["VERBOSE"] = new[] { "[TRC]", "[TRACE]", "[VRB]", "[VERBOSE]", "\"Level\":\"Verbose\"" },
+        ["VRB"] = new[] { "[TRC]", "[TRACE]", "[VRB]", "[VERBOSE]", "\"Level\":\"Verbose\"" },
+        ["INFO"] = new[] { "[INF]", "[INFO]", "\"Level\":\"Information\"" },
+        ["INF"] = new[] { "[INF]", "[INFO]", "\"Level\":\"Information\"" },
+        ["WARN"] = new[] { "[WRN]", "[WARN]", "[WARNING]", "\"Level\":\"Warning\"" },
+        ["WRN"] = new[] { "[WRN]", "[WARN]", "[WARNING]", "\"Level\":\"Warning\"" },
+        ["WARNING"] = new[] { "[WRN]", "[WARN]", "[WARNING]", "\"Level\":\"Warning\"" },
+        ["ERROR"] = new[] { "[ERR]", "[ERROR]", "\"Level\":\"Error\"" },
+        ["ERR"] = new[] { "[ERR]", "[ERROR]", "\"Level\":\"Error\"" },
+        ["FATAL"] = new[] { "[FTL]", "[FATAL]", "[CRT]", "[CRITICAL]", "\"Level\":\"Fatal\"" },
+        ["FTL"] = new[] { "[FTL]", "[FATAL]", "[CRT]", "[CRITICAL]", "\"Level\":\"Fatal\"" },
+        ["CRITICAL"] = new[] { "[FTL]", "[FATAL]", "[CRT]", "[CRITICAL]", "\"Level\":\"Fatal\"" },
+        ["CRT"] = new[] { "[FTL]", "[FATAL]", "[CRT]", "[CRITICAL]", "\"Level\":\"Fatal\"" },
     };
 
     public static bool Matches(string line, string? level, string? contains)

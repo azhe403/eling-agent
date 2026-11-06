@@ -16,10 +16,26 @@ const LEVEL_TOKENS: Record<string, string[]> = {
   FATAL: ["FATAL", "FTL", "CRT", "CRITICAL"],
 }
 
+// JSONL lines carry the full Serilog level name in a "Level" field, so the
+// bracket tokens above never match them.
+const JSONL_LEVELS: Record<string, string[]> = {
+  DEBUG: ["Debug"],
+  INFO: ["Information"],
+  WARN: ["Warning"],
+  ERROR: ["Error"],
+  FATAL: ["Fatal"],
+}
+
 function matchesLevel(line: string, level: string): boolean {
   if (!level || level === "all") return true
-  const tokens = LEVEL_TOKENS[level.toUpperCase()] ?? [level.toUpperCase()]
   const upper = line.toUpperCase()
+  const key = level.toUpperCase()
+  if (line.trimStart().startsWith("{")) {
+    const names = JSONL_LEVELS[key]
+    if (!names) return true
+    return names.some((n) => line.includes(`"Level":"${n}"`))
+  }
+  const tokens = LEVEL_TOKENS[key] ?? [key]
   return tokens.some((t) => upper.includes(`[${t}]`))
 }
 
