@@ -213,6 +213,31 @@ public sealed class LogFormatSwitcherTests : IDisposable
             "with delete sharing available the active file is moved, not left behind");
     }
 
+    /// <summary>
+    /// When the outgoing file cannot be truncated, the next switch must not
+    /// append the whole thing again: observed live on 2026-11-06, the archive
+    /// and the active file were byte-identical in size, so a switch back and
+    /// forth would have duplicated every line in the archive.
+    /// </summary>
+    [Fact]
+    public void Apply_RepeatedSwitches_DoNotDuplicateArchiveLines()
+    {
+        _forwarder.Emit(Probe("once-only-line"));
+        var textActive = ActivePath(LogFormat.Text);
+
+        // Hold the file so the truncate is refused, forcing the watermark path.
+        using (var held = new FileStream(textActive, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            _switcher.Apply(LogFormat.Jsonl);
+            _switcher.Apply(LogFormat.Text);
+            _switcher.Apply(LogFormat.Jsonl);
+        }
+
+        var archive = ReadShared(ArchivePath(LogFormat.Text));
+        var occurrences = archive.Split("once-only-line").Length - 1;
+        Assert.Equal(1, occurrences);
+    }
+
     [Fact]
     public void Apply_SameDaySecondSwitch_AppendsToTheSameArchive()
     {

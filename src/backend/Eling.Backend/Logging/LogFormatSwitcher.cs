@@ -198,45 +198,54 @@ public sealed class LogFormatSwitcher : IDisposable
             return;
         }
 
-        if (content.Length == 0)
-        {
-            TryDeleteOrTruncate(activePath);
-            return;
-        }
-
         var extension = Path.GetExtension(activePath);
         var prefix = Path.GetFileNameWithoutExtension(activePath);
         var archivePath = Path.Combine(_logsDirectory, $"{prefix}-{DateTime.Today:yyyy-MM-dd}{extension}");
+        var watermarkPath = archivePath + ".archived";
 
-        try
+        // How many bytes of this active file already live in today's archive.
+        // When the outgoing file cannot be truncated (another process holds it),
+        // the next switch would otherwise append the whole file again and
+        // duplicate every line. A watermark makes the append idempotent; a
+        // shorter file means it was truncated or replaced, so start over.
+        var alreadyArchived = ReadWatermark(watermarkPath);
+        if (alreadyArchived > content.Length)
         {
-            // A second switch on the same day must keep what the first one
-            // already archived, so this appends rather than overwrites.
-            using (var archive = new FileStream(archivePath, FileMode.Append, FileAccess.Write, FileShare.Read))
+            alreadyArchived = 0;
+        }
+
+        var start = (int)alreadyArchived;
+        if (content.Length > start)
+        {
+            try
             {
-                archive.Write(content, 0, content.Length);
+                using var archive = new FileStream(archivePath, FileMode.Append, FileAccess.Write, FileShare.Read);
+                archive.Write(content, start, content.Length - start);
             }
-        }
-        catch (Exception ex)
-        {
-            // Nothing was copied out; keeping the active file is the only way
-            // not to lose the lines, so leave it alone.
-            _logger.LogWarning(ex, "Could not write the outgoing log archive {Path}.", archivePath);
-            return;
+            catch (Exception ex)
+            {
+                // Nothing was copied out; keeping the active file is the only
+                // way not to lose its lines.
+                _logger.LogWarning(ex, "Could not write the outgoing log archive {Path}.", archivePath);
+                return;
+            }
+
+            WriteWatermark(watermarkPath, content.Length);
         }
 
-        TryDeleteOrTruncate(activePath);
+        TryDeleteOrTruncate(activePath, watermarkPath);
     }
 
     /// <summary>
     /// Removes the now-archived active file, falling back to emptying it when
     /// another process holds the handle open.
     /// </summary>
-    private void TryDeleteOrTruncate(string activePath)
+    private void TryDeleteOrTruncate(string activePath, string watermarkPath)
     {
         try
         {
             File.Delete(activePath);
+            TryDeleteFile(watermarkPath);
             return;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -246,15 +255,59 @@ public sealed class LogFormatSwitcher : IDisposable
 
         try
         {
-            // Opening with no sharing excludes the writers long enough to
-            // truncate; it fails while a logging process still writes to it,
-            // which is fine: the lines are already in the archive.
-            using var stream = new FileStream(activePath, FileMode.Open, FileAccess.Write, FileShare.None);
+            // Share modes that match what a running sink asks for, so the
+            // truncate is allowed rather than refused as a sharing violation.
+            using var stream = new FileStream(
+                activePath,
+                FileMode.Open,
+                FileAccess.Write,
+                FileShare.ReadWrite | FileShare.Delete);
             stream.SetLength(0);
+            TryDeleteFile(watermarkPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // The watermark stays: the archive already holds these bytes, so the
+            // next switch appends only what was written after it.
             _logger.LogDebug(ex, "Could not empty the archived active file {Path}.", activePath);
+        }
+    }
+
+    private static long ReadWatermark(string path)
+    {
+        try
+        {
+            return File.Exists(path) && long.TryParse(File.ReadAllText(path).Trim(), out var value)
+                ? Math.Max(0, value)
+                : 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
+    }
+
+    private static void WriteWatermark(string path, long value)
+    {
+        try
+        {
+            File.WriteAllText(path, value.ToString());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A missing watermark only costs a duplicate on the next switch.
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Leftover watermark is harmless: a shorter file resets it.
         }
     }
 
