@@ -30,7 +30,7 @@ public static class LogsEndpoints
             return TypedResults.Ok(new { directory = dir, count = files.Count, files });
         });
 
-        group.MapGet("/read", (string? stream, string? date, string? level, string? contains, int? tail) =>
+        group.MapGet("/read", (string? stream, string? date, string? level, string? contains, int? tail, LogConfigStore store) =>
         {
             var s = string.IsNullOrWhiteSpace(stream) ? "backend" : stream.Trim();
             if (!LogReader.IsValidStream(s))
@@ -43,7 +43,10 @@ public static class LogsEndpoints
             }
 
             var dir = CentralLogDirectory.Resolve();
-            var result = LogReader.Read(dir, s, date, level, contains, tail ?? 500);
+            // Reads resolve the extension from the CURRENT format setting, so the
+            // page follows a format switch without any client-side state to migrate.
+            var format = store.GetFormat();
+            var result = LogReader.Read(dir, s, date, level, contains, tail ?? 500, format);
             if (!result.Exists)
             {
                 return Results.NotFound(new { ok = false, error = $"Log file not found: {result.File}", code = "not_found", directory = dir });
@@ -59,7 +62,7 @@ public static class LogsEndpoints
             });
         });
 
-        group.MapGet("/tail", async (HttpContext ctx, string? stream, string? level, string? contains, int? tail) =>
+        group.MapGet("/tail", async (HttpContext ctx, string? stream, string? level, string? contains, int? tail, LogConfigStore store) =>
         {
             var s = string.IsNullOrWhiteSpace(stream) ? "backend" : stream.Trim();
             if (!LogReader.IsValidStream(s))
@@ -70,7 +73,7 @@ public static class LogsEndpoints
             }
 
             var dir = CentralLogDirectory.Resolve();
-            var path = LogReader.ResolvePath(dir, s, null); // tail active file only
+            var path = LogReader.ResolvePath(dir, s, null, store.GetFormat()); // tail active file only
             var initialTail = Math.Clamp(tail ?? 50, 1, 5000);
 
             ctx.Response.Headers.ContentType = "text/event-stream";
