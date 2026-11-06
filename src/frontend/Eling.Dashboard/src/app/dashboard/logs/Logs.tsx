@@ -31,7 +31,22 @@ interface ReadResponse {
 
 const LEVELS = ["all", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"] as const
 
+type LogFormat = "text" | "jsonl"
+
 function levelOf(line: string): string {
+  // JSONL lines are objects. Serilog's core JsonFormatter (verified on 4.4.0)
+  // writes plain "Level" fields with the full name, e.g. "Level":"Warning" —
+  // not the OTel-compact "@lt":"WRN" form. The bracket-token regex below only
+  // understands the text template, so JSONL gets its own branch.
+  if (line.trimStart().startsWith("{")) {
+    const jm = line.match(/"Level":"(Verbose|Debug|Information|Warning|Error|Fatal)"/i)
+    if (!jm) return "info"
+    const t = jm[1].toLowerCase()
+    if (t === "error" || t === "fatal") return "error"
+    if (t === "warning") return "warn"
+    if (t === "debug" || t === "verbose") return "debug"
+    return "info"
+  }
   const m = line.match(/\[(DBG|INF|WRN|ERR|FTL|DEBUG|INFO|WARN|ERROR|FATAL)\]/i)
   if (!m) return "info"
   const t = m[1].toUpperCase()
@@ -63,6 +78,10 @@ export function Logs() {
   const autoLiveRef = useRef(false)
   const [newLinesCount, setNewLinesCount] = useState(0)
   const [wrap, setWrap] = useState(false)
+  const [format, setFormat] = useState<LogFormat>("text")
+  const [savingFormat, setSavingFormat] = useState(false)
+
+  const activeFileName = `${stream}.${format === "jsonl" ? "jsonl" : "log"}`
 
   const containerRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
@@ -88,6 +107,46 @@ export function Logs() {
       setError(e instanceof Error ? e.message : String(e))
     }
   }, [stream])
+
+  const fetchFormat = useCallback(async () => {
+    try {
+      const res = await fetch("/api/logs/config")
+      if (res.ok) {
+        const data = (await res.json()) as { format?: string }
+        setFormat(data.format === "jsonl" ? "jsonl" : "text")
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  const changeFormat = useCallback(
+    async (next: LogFormat) => {
+      setSavingFormat(true)
+      setError(null)
+      try {
+        const res = await fetch("/api/logs/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ format: next }),
+        })
+        if (!res.ok) {
+          setError(`Failed to save log format (${res.status})`)
+          return
+        }
+        const data = (await res.json()) as { format?: string }
+        setFormat(data.format === "jsonl" ? "jsonl" : "text")
+        // The list gains the new active file and loses none: refetch so the
+        // date dropdown reflects what is actually on disk now.
+        void fetchFiles()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setSavingFormat(false)
+      }
+    },
+    [fetchFiles]
+  )
 
   const fetchHistory = useCallback(async () => {
     setLoading(true)
@@ -122,6 +181,13 @@ export function Logs() {
     }, 0)
     return () => clearTimeout(t)
   }, [fetchFiles])
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void fetchFormat()
+    }, 0)
+    return () => clearTimeout(t)
+  }, [fetchFormat])
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -233,14 +299,30 @@ export function Logs() {
             </SelectContent>
           </Select>
 
+          <Select
+            value={format}
+            onValueChange={(v) => v && !savingFormat && void changeFormat(v as LogFormat)}
+          >
+            <SelectTrigger
+              className="w-36"
+              title="Writes new log lines as text (.log) or JSON Lines (.jsonl). Applies to new MCP sessions immediately; this dashboard applies now."
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="text">Text (.log)</SelectItem>
+              <SelectItem value="jsonl">JSON Lines (.jsonl)</SelectItem>
+            </SelectContent>
+          </Select>
+
           <Select value={date || "active"} onValueChange={(v) => v && setDate(v === "active" ? "" : v)}>
             <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="active">Today (active)</SelectItem>
               {files
-                .filter((f) => f.name !== `${stream}.log`)
+                .filter((f) => f.name !== activeFileName)
                 .map((f) => {
-                  const m = f.name.match(/-(\d{4}-\d{2}-\d{2})\.log$/)
+                  const m = f.name.match(/-(\d{4}-\d{2}-\d{2})\.(?:log|jsonl)$/)
                   return m ? <SelectItem key={f.name} value={m[1]}>{m[1]}</SelectItem> : null
                 })}
             </SelectContent>
