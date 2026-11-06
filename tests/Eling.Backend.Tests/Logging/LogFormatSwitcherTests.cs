@@ -154,6 +154,80 @@ public sealed class LogFormatSwitcherTests : IDisposable
         Assert.Contains("static-marker", ReadShared(ActivePath(LogFormat.Jsonl)));
     }
 
+    /// <summary>
+    /// Windows refuses to move or delete a file another process holds open, and
+    /// other Eling processes keep the shared active file open. Observed live on
+    /// 2026-11-06: the switch logged "Could not archive ... being used by
+    /// another process" and left a 44 MB active file that belonged to no
+    /// archive and was never pruned. The archive must be produced by copying
+    /// the bytes out, so the lines survive whatever the delete does.
+    /// </summary>
+    [Fact]
+    public void Apply_ArchivesOutgoingFile_EvenWhenAnotherProcessHoldsItOpen()
+    {
+        _forwarder.Emit(Probe("held-open-line"));
+        var textActive = ActivePath(LogFormat.Text);
+
+        // Hold the active file the way a second Eling process does: read/write
+        // sharing WITHOUT delete sharing, so Move and Delete both fail while a
+        // plain read still succeeds. (FileShare.Read would instead conflict
+        // with the writer that is already open, which is a different case.)
+        using (var held = new FileStream(textActive, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            _switcher.Apply(LogFormat.Jsonl);
+        }
+
+        // The point of the fix: the lines are archived regardless.
+        Assert.Contains("held-open-line", ReadShared(ArchivePath(LogFormat.Text)));
+        Assert.Equal(LogFormat.Jsonl, _forwarder.Inner!.Format);
+
+        _forwarder.Emit(Probe("after-held-switch"));
+        Assert.Contains("after-held-switch", ReadShared(ActivePath(LogFormat.Jsonl)));
+    }
+
+    /// <summary>
+    /// The counterpart of the held-open case: when the other process opens the
+    /// active file the way <see cref="RollingDailyFileSink"/> does now
+    /// (<c>FileShare.ReadWrite | FileShare.Delete</c>), the archive completes
+    /// the strong way — the outgoing active file is actually removed, not just
+    /// emptied, so nothing is left behind for retention to miss.
+    /// </summary>
+    [Fact]
+    public void Apply_RemovesOutgoingFile_WhenHolderAllowsDeleteSharing()
+    {
+        _forwarder.Emit(Probe("deletable-line"));
+        var textActive = ActivePath(LogFormat.Text);
+
+        using (var held = new FileStream(
+                   textActive,
+                   FileMode.Open,
+                   FileAccess.ReadWrite,
+                   FileShare.ReadWrite | FileShare.Delete))
+        {
+            _switcher.Apply(LogFormat.Jsonl);
+        }
+
+        Assert.Contains("deletable-line", ReadShared(ArchivePath(LogFormat.Text)));
+        Assert.False(
+            File.Exists(textActive),
+            "with delete sharing available the active file is moved, not left behind");
+    }
+
+    [Fact]
+    public void Apply_SameDaySecondSwitch_AppendsToTheSameArchive()
+    {
+        _forwarder.Emit(Probe("first-text-era"));
+        _switcher.Apply(LogFormat.Jsonl);
+
+        _switcher.Apply(LogFormat.Text);
+        _forwarder.Emit(Probe("second-text-era"));
+        _switcher.Apply(LogFormat.Jsonl);
+
+        var archive = ReadShared(ArchivePath(LogFormat.Text));
+        Assert.Contains("first-text-era", archive);
+        Assert.Contains("second-text-era", archive);
+    }
+
     [Fact]
     public void Apply_SecondSwitch_DisposesLoggerItInstalled()
     {

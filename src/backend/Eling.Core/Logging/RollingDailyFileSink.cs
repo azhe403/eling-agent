@@ -118,7 +118,16 @@ public sealed class RollingDailyFileSink : ILogEventSink, IDisposable
         var activePath = Path.Combine(_logsDirectory, _activeFileName);
         try
         {
-            _fileStream = new FileStream(activePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            // FileShare.Delete is what lets another Eling process archive or
+            // rotate this file while it is still open here. Without it the
+            // handle blocks Move and Delete outright on Windows, which is how
+            // a format switch (or a rollover) leaves a large active file that
+            // belongs to no archive and is therefore never pruned.
+            _fileStream = new FileStream(
+                activePath,
+                FileMode.Append,
+                FileAccess.Write,
+                FileShare.ReadWrite | FileShare.Delete);
             _writer = new StreamWriter(_fileStream, Encoding.UTF8) { AutoFlush = true };
         }
         catch (Exception ex)

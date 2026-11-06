@@ -1,4 +1,3 @@
-using System.Text;
 using Eling.Core.Logging;
 using Microsoft.Extensions.Logging;
 using Serilog;
@@ -163,8 +162,27 @@ public sealed class LogFormatSwitcher : IDisposable
         replacedByThisSwitcher?.Dispose();
     }
 
+    /// <summary>
+    /// Moves the outgoing active file into the archive for today, so the lines
+    /// it already holds are kept and retention can prune them later.
+    /// </summary>
+    /// <remarks>
+    /// Windows refuses to move or delete a file another process still holds
+    /// open, and other Eling processes (each MCP host keeps a
+    /// <see cref="RollingDailyFileSink"/>) hold the same active file. A plain
+    /// <see cref="File.Move(string, string)"/> therefore fails there with
+    /// "used by another process", and failing silently left a large active
+    /// file that belongs to no archive and is never pruned.
+    /// <para>
+    /// So the archive is always produced by copying the bytes out, and the
+    /// active file is only removed when the delete succeeds. When it does not,
+    /// the truncate below still gives the next switch a clean file whose lines
+    /// already live in the archive.
+    /// </para>
+    /// </remarks>
     private void ArchiveActiveFile(string activePath)
     {
+        byte[] content;
         try
         {
             if (!File.Exists(activePath))
@@ -172,42 +190,99 @@ public sealed class LogFormatSwitcher : IDisposable
                 return;
             }
 
-            var extension = Path.GetExtension(activePath);
-            var prefix = Path.GetFileNameWithoutExtension(activePath);
-            var archivePath = Path.Combine(_logsDirectory, $"{prefix}-{DateTime.Today:yyyy-MM-dd}{extension}");
+            content = ReadAllBytes(activePath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read the outgoing log file {Path} for archiving.", activePath);
+            return;
+        }
 
-            if (File.Exists(archivePath))
+        if (content.Length == 0)
+        {
+            TryDeleteOrTruncate(activePath);
+            return;
+        }
+
+        var extension = Path.GetExtension(activePath);
+        var prefix = Path.GetFileNameWithoutExtension(activePath);
+        var archivePath = Path.Combine(_logsDirectory, $"{prefix}-{DateTime.Today:yyyy-MM-dd}{extension}");
+
+        try
+        {
+            // A second switch on the same day must keep what the first one
+            // already archived, so this appends rather than overwrites.
+            using (var archive = new FileStream(archivePath, FileMode.Append, FileAccess.Write, FileShare.Read))
             {
-                // Append rather than overwrite: a second switch on the same day
-                // must keep the lines the first one already archived.
-                File.AppendAllLines(archivePath, ReadAllLines(activePath), Encoding.UTF8);
-                File.Delete(activePath);
-            }
-            else
-            {
-                // Move keeps the bytes identical (no BOM added to a fresh file).
-                File.Move(activePath, archivePath);
+                archive.Write(content, 0, content.Length);
             }
         }
         catch (Exception ex)
         {
-            // A concurrent host may still hold the file; losing the archive is
-            // not a reason to fail the switch that already took effect.
-            _logger.LogWarning(ex, "Could not archive the outgoing log file {Path}.", activePath);
+            // Nothing was copied out; keeping the active file is the only way
+            // not to lose the lines, so leave it alone.
+            _logger.LogWarning(ex, "Could not write the outgoing log archive {Path}.", archivePath);
+            return;
+        }
+
+        TryDeleteOrTruncate(activePath);
+    }
+
+    /// <summary>
+    /// Removes the now-archived active file, falling back to emptying it when
+    /// another process holds the handle open.
+    /// </summary>
+    private void TryDeleteOrTruncate(string activePath)
+    {
+        try
+        {
+            File.Delete(activePath);
+            return;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Could not delete the archived active file {Path}; emptying it instead.", activePath);
+        }
+
+        try
+        {
+            // Opening with no sharing excludes the writers long enough to
+            // truncate; it fails while a logging process still writes to it,
+            // which is fine: the lines are already in the archive.
+            using var stream = new FileStream(activePath, FileMode.Open, FileAccess.Write, FileShare.None);
+            stream.SetLength(0);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Could not empty the archived active file {Path}.", activePath);
         }
     }
 
-    private static IReadOnlyList<string> ReadAllLines(string path)
+    private static byte[] ReadAllBytes(string path)
     {
-        var lines = new List<string>();
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-        while (reader.ReadLine() is { } line)
+        // Other Eling processes open the shared active file with their own
+        // sharing mode, and a stricter one makes a plain read throw. Widen the
+        // request progressively: Delete-sharing is what a move/delete needs
+        // anyway, and ReadWrite-sharing is what a concurrent writer allows.
+        var shares = new[] { FileShare.ReadWrite | FileShare.Delete, FileShare.ReadWrite, FileShare.Read };
+
+        IOException? lastFailure = null;
+        foreach (var share in shares)
         {
-            lines.Add(line);
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, share);
+                using var buffer = new MemoryStream();
+                stream.CopyTo(buffer);
+                return buffer.ToArray();
+            }
+            catch (IOException ex)
+            {
+                lastFailure = ex;
+            }
         }
 
-        return lines;
+        throw lastFailure!;
     }
 
     private static string ActiveFileNameFor(LogFormat format) =>

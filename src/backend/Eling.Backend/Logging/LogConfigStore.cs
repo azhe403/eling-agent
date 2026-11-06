@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Eling.Core.Logging;
 using Eling.Core.Scope;
 using Microsoft.Extensions.Logging;
@@ -225,22 +224,3 @@ public sealed class LogConfigStore
         DateTime LastWriteTimeUtc,
         long Length);
 }
-
-/// <summary>
-/// The on-disk shape of <c>log.json</c>. The format stays a raw string so the
-/// file remains hand-editable; <see cref="LogConfigStore"/> resolves it through
-/// <see cref="LogFormatExtensions.Resolve"/>.
-/// </summary>
-public sealed record LogConfigDto(string? Format);
-
-/// <summary>
-/// Source-generated JSON metadata. The backend publishes with Native AOT, so
-/// every serialized type must be registered here.
-/// </summary>
-[JsonSourceGenerationOptions(
-    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    PropertyNameCaseInsensitive = true,
-    WriteIndented = true,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
-[JsonSerializable(typeof(LogConfigDto))]
-public sealed partial class LogConfigJsonContext : JsonSerializerContext;
