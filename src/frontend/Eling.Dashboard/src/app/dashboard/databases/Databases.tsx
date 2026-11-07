@@ -100,8 +100,8 @@ type SchemaInfo = {
   databases?: string[]
   fromCache?: boolean
   cachedAt?: string | null
-  /** How the answer was obtained: live, refreshing, or offline. */
-  source?: "live" | "refreshing" | "offline"
+  /** How the answer was obtained: live, or offline when the snapshot answered. */
+  source?: "live" | "offline"
 }
 
 type Detected = {
@@ -1181,11 +1181,14 @@ export function Databases() {
     label: retryLabel
   } = useExponentialRetry()
 
+  /** How often a tree that is on screen is read again. */
+  const KEEP_FRESH_MS = 30000
+
   const ensureSchema = useCallback(async (id: string, opts?: { force?: boolean; bypass?: boolean }) => {
     const force = opts?.force ?? false
     // A manual refresh asks the database; a retry asks for the best answer the
-    // backend can give, which is the cache plus the backend's own background
-    // probe. Only the first one skips the cache.
+    // backend can give, which is the snapshot when it is still current. Only
+    // the first one skips the cache.
     const bypass = opts?.bypass ?? false
     if (!force && connSchemasRef.current[id]?.source === "live") return
 
@@ -1193,8 +1196,11 @@ export function Databases() {
       const fresh = await fetchSchema(id, null, bypass)
       setConnSchemas((prev) => ({ ...prev, [id]: fresh }))
       if (schemaConnIdRef.current === id) setSchemaInfo(fresh)
-      if (fresh.source && fresh.source !== "live") {
-        scheduleRetry(id, fresh.source === "offline" ? "offline" : "refreshing", () => { void ensureSchema(id, { force: true }) })
+      // A cache answer paints at once and asks again for the real answer;
+      // offline keeps the countdown so a dead database is not probed
+      // repeatedly. Both ask for the real answer, so both skip the cache.
+      if (fresh.source === "cached" || fresh.source === "offline") {
+        scheduleRetry(id, fresh.source === "offline" ? "offline" : "revalidate", () => { void ensureSchema(id, { force: true, bypass: true }) })
       } else {
         cancelRetry(id)
       }
@@ -1203,7 +1209,7 @@ export function Databases() {
       // either, so the retry ladder runs on the same schedule. The error is
       // reported once - ten toasts for one dead database is noise.
       const first = retryAttemptOf(id) === 0
-      scheduleRetry(id, "offline", () => { void ensureSchema(id, { force: true }) })
+      scheduleRetry(id, "offline", () => { void ensureSchema(id, { force: true, bypass: true }) })
       if (first) notifyDb("error", e instanceof Error ? e.message : "schema failed")
     }
   }, [notifyDb, scheduleRetry, cancelRetry, retryAttemptOf])
@@ -1217,8 +1223,8 @@ export function Databases() {
     try {
       const fresh = await fetchSchema(connId, database)
       setDbSchemas((prev) => ({ ...prev, [key]: fresh }))
-      if (fresh.source && fresh.source !== "live") {
-        scheduleRetry(key, fresh.source === "offline" ? "offline" : "refreshing", () => { void ensureDbSchema(connId, database) })
+      if (fresh.source === "cached" || fresh.source === "offline") {
+        scheduleRetry(key, fresh.source === "offline" ? "offline" : "revalidate", () => { void ensureDbSchema(connId, database) })
       } else {
         cancelRetry(key)
       }
@@ -1230,6 +1236,22 @@ export function Databases() {
       if (first) notifyDb("error", e instanceof Error ? e.message : "schema failed")
     }
   }, [notifyDb, scheduleRetry, cancelRetry, retryAttemptOf])
+
+  // Keep what is on screen current: a tree left open a while should not go
+  // stale. The read is cache-first, so it paints from the snapshot and asks
+  // again - it never blocks the screen. The next tick is half a minute away,
+  // so a slow database cannot stack two of them.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      for (const id of expandedConns) void ensureSchema(id, { force: true })
+      for (const key of expandedDbs) {
+        const cut = key.indexOf(":")
+        if (cut <= 0) continue
+        void ensureDbSchema(key.slice(0, cut), key.slice(cut + 1))
+      }
+    }, KEEP_FRESH_MS)
+    return () => clearInterval(timer)
+  }, [expandedConns, expandedDbs, ensureSchema, ensureDbSchema])
 
   const toggleConn = (id: string) => {
     const wasExpanded = expandedConns.has(id)
@@ -2063,8 +2085,8 @@ export function Databases() {
             <CardTitle className="flex items-center gap-2">
               Schema · {conns.find((c) => c.id === schemaConnId)?.name}
               {schemaInfo?.fromCache ? (
-                <Badge variant="outline" className={schemaInfo.source === "offline" || isStaleCache(schemaInfo.cachedAt) ? "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-400" : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"}>
-                  {schemaInfo.source === "offline" ? "offline" : schemaInfo.source === "refreshing" ? "refreshing" : isStaleCache(schemaInfo.cachedAt) ? "stale" : "cached"} · {formatCacheAge(schemaInfo.cachedAt)}
+                <Badge variant="outline" className={isStaleCache(schemaInfo.cachedAt) ? "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-400" : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"}>
+                  {isStaleCache(schemaInfo.cachedAt) ? "stale" : "cached"} · {formatCacheAge(schemaInfo.cachedAt)}
                 </Badge>
               ) : null}
             </CardTitle>
