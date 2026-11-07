@@ -17,7 +17,8 @@ public interface IDatabaseReadService
     Task<DatabaseSchemaInfo> GetSchemaAsync(
         DatabaseConnection connection,
         string? database,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool preferCache = true);
 
     Task<IReadOnlyList<string>> ListDatabasesAsync(
         DatabaseConnection connection,

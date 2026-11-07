@@ -12,6 +12,54 @@ public static class LogReader
     private static readonly Regex DateRegex = new(@"^\d{4}-\d{2}-\d{2}$", RegexOptions.Compiled);
     private static readonly HashSet<string> AllowedStreams = new(StringComparer.OrdinalIgnoreCase) { "backend", "desktop" };
 
+    /// <summary>
+    /// The longest line a reader will hand back. A line longer than this is
+    /// not a log line: it is a hole in the file, left by a process that
+    /// truncated it while another was writing to it, and it can run to
+    /// megabytes of NUL bytes. The real log line sits at the end of it.
+    /// </summary>
+    public const int MaxLineLength = 64 * 1024;
+
+    /// <summary>
+    /// The most bytes a single read may return. The MCP transport refuses a
+    /// response past 16 MiB, so a read that ignores the size of its lines can
+    /// take the whole tool down - and the lines here can be megabytes each.
+    ///
+    /// <para>
+    /// The budget is deliberately well under that limit: JSON escapes a
+    /// control character as six characters, so the serialized answer can be
+    /// several times the text it carries.
+    /// </para>
+    /// </summary>
+    public const int MaxResponseBytes = 1024 * 1024;
+
+    /// <summary>
+    /// A line that carries no readable text: the NUL padding of a hole in the
+    /// file, or whitespace left where a process died mid-write.
+    /// </summary>
+    public static bool IsNoise(string line)
+    {
+        if (line.Length == 0) return true;
+        foreach (var c in line)
+        {
+            if (c != '\0' && !char.IsWhiteSpace(c)) return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Trim a line to something a reader can use: drop the NUL padding of a
+    /// hole in the file, and cut a line that is absurdly long.
+    /// </summary>
+    public static string Sanitize(string line)
+    {
+        var start = 0;
+        while (start < line.Length && (line[start] == '\0' || char.IsWhiteSpace(line[start]))) start++;
+        if (start > 0) line = line[start..];
+        if (line.Length > MaxLineLength) line = line[..MaxLineLength];
+        return line;
+    }
+
     public static bool IsValidStream(string? stream) => !string.IsNullOrWhiteSpace(stream) && AllowedStreams.Contains(stream.Trim());
 
     public static bool IsValidDate(string? date) => string.IsNullOrWhiteSpace(date) || DateRegex.IsMatch(date.Trim());
@@ -151,6 +199,13 @@ public static class LogReader
         {
             var line = lines[i];
             if (line.EndsWith("\r")) line = line.Substring(0, line.Length - 1);
+
+            // A hole in the file, left by a process that truncated it while
+            // another was writing: megabytes of NUL padding, then the real
+            // line at the end of it. Only the real line is worth emitting.
+            if (IsNoise(line)) continue;
+            line = Sanitize(line);
+
             if (Matches(line, level, contains)) result.Add(line);
         }
 
@@ -208,7 +263,8 @@ public static class LogReader
         foreach (var raw in lines)
         {
             var line = raw.EndsWith("\r") ? raw.Substring(0, raw.Length - 1) : raw;
-            if (string.IsNullOrEmpty(line)) continue;
+            if (IsNoise(line)) continue;
+            line = Sanitize(line);
             if (!Matches(line, level, contains)) continue;
             tailBuffer.Enqueue(line);
             if (tailBuffer.Count > tail) tailBuffer.Dequeue();
@@ -221,6 +277,7 @@ public static class LogReader
         var tailBuffer = new Queue<string>(tail + 1);
         int total = 0;
         int filteredCount = 0;
+        int bytes = 0;
 
         using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
         using (var reader = new StreamReader(stream, System.Text.Encoding.UTF8))
@@ -229,8 +286,20 @@ public static class LogReader
             while ((line = reader.ReadLine()) != null)
             {
                 total++;
+
+                // A line of nothing but NUL bytes is a hole in the file, not a
+                // log line. Counting it would inflate the totals and, worse,
+                // hand the reader megabytes of padding.
+                if (IsNoise(line)) continue;
+
+                line = Sanitize(line);
                 if (!Matches(line, level, contains)) continue;
                 filteredCount++;
+
+                // Stop before the answer outgrows what a transport can carry.
+                if (bytes + line.Length > MaxResponseBytes) break;
+
+                bytes += line.Length;
                 tailBuffer.Enqueue(line);
                 if (tailBuffer.Count > tail) tailBuffer.Dequeue();
             }

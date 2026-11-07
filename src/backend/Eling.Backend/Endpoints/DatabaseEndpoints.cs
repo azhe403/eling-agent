@@ -304,6 +304,7 @@ public static class DatabaseEndpoints
             string id,
             string? tableName,
             string? database,
+            bool? refresh,
             IDatabaseConnectionStore store,
             IDatabaseReadService readService,
             IAuditLogger auditLogger,
@@ -325,7 +326,7 @@ public static class DatabaseEndpoints
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                var schema = await readService.GetSchemaAsync(row, database, ct);
+                var schema = await readService.GetSchemaAsync(row, database, ct, preferCache: refresh != true);
 
                 if (!string.IsNullOrWhiteSpace(tableName))
                 {

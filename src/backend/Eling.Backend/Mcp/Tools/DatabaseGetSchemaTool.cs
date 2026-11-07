@@ -48,7 +48,7 @@ public sealed class DatabaseGetSchemaTool
         var sw = Stopwatch.StartNew();
         try
         {
-            var schema = await _readService.GetSchemaAsync(row, database, cancellationToken);
+            var schema = await _readService.GetSchemaAsync(row, database, cancellationToken, preferCache: false);
 
             if (!string.IsNullOrWhiteSpace(tableName))
             {

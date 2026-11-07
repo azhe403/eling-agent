@@ -81,6 +81,65 @@ public sealed class JsonDatabaseReadCacheTests : IDisposable
     }
 
     [Fact]
+    public void AnUnchangedEntry_StillGetsAFreshTimestamp()
+    {
+        // The dashboard polls, so the same schema is written again and again.
+        // Skipping the write entirely would freeze the timestamp, and the
+        // frozen timestamp is what a reader uses to decide the snapshot is
+        // still current - the entry would read as stale forever, and the
+        // dashboard would retry against a database that answered fine.
+        var cache = NewCache();
+        cache.SetSchema("c1", "db", Schema());
+
+        var before = ReadSchemaCachedAt();
+        AgeSchemaEntry(TimeSpan.FromMinutes(5));
+        cache.SetSchema("c1", "db", Schema());
+
+        Assert.True(ReadSchemaCachedAt() > before);
+    }
+
+    [Fact]
+    public void AnUnchangedEntry_KeepsItsTimestampWhileItIsStillFresh()
+    {
+        // While the entry is inside the freshness window, the file already
+        // says what a write would say, so the write is skipped - and the
+        // timestamp must not move, or the file would be rewritten on every
+        // read of every connection.
+        var cache = NewCache();
+        cache.SetSchema("c1", "db", Schema());
+
+        var first = ReadSchemaCachedAt();
+        Thread.Sleep(50);
+        cache.SetSchema("c1", "db", Schema());
+
+        Assert.Equal(first, ReadSchemaCachedAt());
+    }
+
+    private DateTimeOffset ReadSchemaCachedAt()
+    {
+        var path = Path.Combine(_dir, "database-schema-cache.json");
+        var file = JsonSerializer.Deserialize<DatabaseSchemaCacheFile>(
+            File.ReadAllText(path), JsonDefaults.Shared)!;
+        return file.Schemas[0].CachedAt;
+    }
+
+    /// <summary>
+    /// Rewrite the cache file's timestamp, so the age rule is what is under
+    /// test rather than the writer.
+    /// </summary>
+    private void AgeSchemaEntry(TimeSpan age)
+    {
+        var path = Path.Combine(_dir, "database-schema-cache.json");
+        var file = JsonSerializer.Deserialize<DatabaseSchemaCacheFile>(
+            File.ReadAllText(path), JsonDefaults.Shared)!;
+        var aged = file with
+        {
+            Schemas = [.. file.Schemas.Select(s => s with { CachedAt = DateTimeOffset.UtcNow - age })]
+        };
+        File.WriteAllText(path, JsonSerializer.Serialize(aged, JsonDefaults.Shared));
+    }
+
+    [Fact]
     public void EntriesOlderThanTheMaxAge_AreNotServed()
     {
         var cache = NewCache();

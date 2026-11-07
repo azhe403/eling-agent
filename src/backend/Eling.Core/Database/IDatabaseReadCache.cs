@@ -12,6 +12,21 @@ public interface IDatabaseReadCache
     /// <summary>Maximum age of a cached entry. Older entries are not served.</summary>
     static readonly TimeSpan DefaultMaxAge = TimeSpan.FromDays(7);
 
+    /// <summary>
+    /// How long a snapshot counts as current, without a re-read.
+    ///
+    /// <para>
+    /// The read service uses this to decide whether a snapshot can be served
+    /// as live, and the cache uses it to decide whether a write can be
+    /// skipped: an unchanged snapshot whose timestamp is still this fresh does
+    /// not need to be written back, because its timestamp already says what
+    /// it would say after the write. The two must be the same value - if the
+    /// cache kept an older timestamp than the service considered fresh, the
+    /// entry would be rewritten on every read and never settle.
+    /// </para>
+    /// </summary>
+    static readonly TimeSpan FreshWindow = TimeSpan.FromSeconds(30);
+
     /// <summary>Try to read a cached schema entry.</summary>
     bool TryGetSchema(
         string connectionId,

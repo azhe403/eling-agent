@@ -66,7 +66,6 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
 
                 v = entry.Schema with
                 {
-                    FromCache = true,
                     CachedAt = entry.CachedAt
                 };
                 ca = entry.CachedAt;
@@ -108,8 +107,29 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
 
                 if (idx >= 0)
                 {
-                    if (EntriesEqual(file.Schemas[idx], entry)) return;
-                    file.Schemas[idx] = entry;
+                    // An unchanged snapshot still has to have its timestamp
+                    // refreshed: the timestamp is how a reader knows the
+                    // database was reached at that moment, and a frozen one
+                    // makes the entry look stale forever - so the read service
+                    // keeps reporting "refreshing" and the dashboard keeps
+                    // retrying against a database that answered fine.
+                    //
+                    // The write is skipped only while the timestamp is still
+                    // inside the freshness window, because then the file
+                    // already says what the write would say.
+                    if (EntriesEqual(file.Schemas[idx], entry))
+                    {
+                        if (DateTimeOffset.UtcNow - file.Schemas[idx].CachedAt < IDatabaseReadCache.FreshWindow)
+                        {
+                            return;
+                        }
+
+                        file.Schemas[idx] = entry;
+                    }
+                    else
+                    {
+                        file.Schemas[idx] = entry;
+                    }
                 }
                 else
                 {
@@ -222,8 +242,23 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
 
                 if (idx >= 0)
                 {
-                    if (EntriesEqual(file.Queries[idx], entry)) return;
-                    file.Queries[idx] = entry;
+                    // The same rule as the schema cache: an unchanged result
+                    // still needs a fresh timestamp, or it reads as stale
+                    // forever. The write is skipped only while the timestamp
+                    // is still inside the freshness window.
+                    if (EntriesEqual(file.Queries[idx], entry))
+                    {
+                        if (DateTimeOffset.UtcNow - file.Queries[idx].CachedAt < IDatabaseReadCache.FreshWindow)
+                        {
+                            return;
+                        }
+
+                        file.Queries[idx] = entry;
+                    }
+                    else
+                    {
+                        file.Queries[idx] = entry;
+                    }
                 }
                 else
                 {
@@ -301,8 +336,22 @@ public sealed class JsonDatabaseReadCache : IDatabaseReadCache, IDisposable
 
                 if (idx >= 0)
                 {
-                    if (EntriesEqual(file.DatabaseLists[idx], entry)) return;
-                    file.DatabaseLists[idx] = entry;
+                    // The same rule as the schema cache: an unchanged list
+                    // still needs a fresh timestamp, or it reads as stale
+                    // forever.
+                    if (EntriesEqual(file.DatabaseLists[idx], entry))
+                    {
+                        if (DateTimeOffset.UtcNow - file.DatabaseLists[idx].CachedAt < IDatabaseReadCache.FreshWindow)
+                        {
+                            return;
+                        }
+
+                        file.DatabaseLists[idx] = entry;
+                    }
+                    else
+                    {
+                        file.DatabaseLists[idx] = entry;
+                    }
                 }
                 else
                 {

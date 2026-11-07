@@ -112,4 +112,56 @@ public sealed class LogReaderTests : IDisposable
         Assert.False(LogReader.Matches("2026 [INFO] hello", null, "boom"));
         Assert.True(LogReader.Matches("2026 [INFO] hello", null, null));
     }
+
+    [Fact]
+    public void AHoleInTheFile_IsNotALogLine()
+    {
+        // Several processes write to one log file, and a process that
+        // truncates it while another is writing leaves a hole: megabytes of
+        // NUL bytes, with the real line at the end of it. Handing that to a
+        // reader would answer a question with megabytes of padding, and the
+        // MCP transport would close the connection over it.
+        var hole = new string('\0', 6_000_000) + "2026-11-07 [INF] real line";
+        File.WriteAllText(Path.Combine(_dir, "backend.log"), hole + "\n2026-11-07 [ERR] after\n");
+
+        var r = LogReader.Read(_dir, "backend", null, null, null, 10);
+
+        Assert.Equal(2, r.Returned);
+        Assert.DoesNotContain(r.Lines, l => l.Contains('\0'));
+        Assert.All(r.Lines, l => Assert.True(l.Length < 100_000));
+        Assert.Contains("real line", r.Lines[0]);
+    }
+
+    [Fact]
+    public void ARead_IsBoundedByBytes_NotJustByLineCount()
+    {
+        // A tail count alone does not bound the answer: a few very long lines
+        // can carry more than a transport will take.
+        var line = new string('x', 200_000);
+        var lines = string.Join("\n", Enumerable.Range(0, 200).Select(i => $"{line}-{i}"));
+        File.WriteAllText(Path.Combine(_dir, "backend.log"), lines);
+
+        var r = LogReader.Read(_dir, "backend", null, null, null, 5000);
+
+        Assert.True(r.Returned > 0);
+        var bytes = r.Lines.Sum(l => l.Length);
+        Assert.True(bytes <= LogReader.MaxResponseBytes, $"answer carried {bytes} bytes");
+    }
+
+    [Fact]
+    public void IsNoise_RecognizesPaddingAndEmpty()
+    {
+        Assert.True(LogReader.IsNoise(""));
+        Assert.True(LogReader.IsNoise(new string('\0', 100)));
+        Assert.True(LogReader.IsNoise("   "));
+        Assert.False(LogReader.IsNoise("2026 [INF] hello"));
+    }
+
+    [Fact]
+    public void Sanitize_StripsPaddingAndCutsAnOverlongLine()
+    {
+        Assert.Equal("hello", LogReader.Sanitize("\0\0  hello"));
+        var long_ = new string('y', LogReader.MaxLineLength + 100);
+        Assert.Equal(LogReader.MaxLineLength, LogReader.Sanitize(long_).Length);
+    }
 }

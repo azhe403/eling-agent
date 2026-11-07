@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Eling.Core.Logging;
@@ -83,8 +84,30 @@ public sealed class LogTools
                     JsonOptions);
             }
 
-            return JsonSerializer.Serialize(
+            var json = JsonSerializer.Serialize(
                 new { file = result.File, directory = result.Directory, totalLines = result.TotalLines, filteredTotal = result.FilteredTotal, returned = result.Returned, lines = result.Lines },
+                JsonOptions);
+
+            // The transport refuses a response past 16 MiB, and it closes the
+            // connection rather than answering when a tool exceeds it - the
+            // caller loses the tool, not just the answer. The reader already
+            // bounds the text; this bounds the serialized form, which can be
+            // several times larger because JSON escapes control characters.
+            if (Encoding.UTF8.GetByteCount(json) <= MaxResponseBytes)
+            {
+                return json;
+            }
+
+            return JsonSerializer.Serialize(
+                new
+                {
+                    ok = false,
+                    error = "The answer is too large to send. Narrow it with a level or contains filter, or a smaller tail.",
+                    code = "too_large",
+                    file = result.File,
+                    totalLines = result.TotalLines,
+                    filteredTotal = result.FilteredTotal
+                },
                 JsonOptions);
         }
         catch (Exception ex)
@@ -93,6 +116,12 @@ public sealed class LogTools
             return ErrorJson(ex);
         }
     }
+
+    /// <summary>
+    /// The most bytes a tool response may carry. The transport's own limit is
+    /// 16 MiB; this leaves room for the JSON envelope around the answer.
+    /// </summary>
+    private const int MaxResponseBytes = 8 * 1024 * 1024;
 
     private static string ErrorJson(Exception ex)
     {
