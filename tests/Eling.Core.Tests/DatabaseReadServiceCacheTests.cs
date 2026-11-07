@@ -9,12 +9,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Eling.Core.Tests;
 
 /// <summary>
-/// The read path answers from the cache without touching the database while a
-/// snapshot is fresh, goes to the database for an older one, and falls back to
-/// the snapshot when the database is down. These tests pin that order with a
-/// database that cannot be opened: a fresh snapshot must still answer as
-/// <c>live</c>, and an old one must answer as <c>refreshing</c> or
-/// <c>offline</c> — never by throwing.
+/// The read path is cache-first: a snapshot on file answers at once, whatever
+/// its age, and says so. The real answer is a separate, cache-bypassing read,
+/// so a reachable database is never described as anything but live and a
+/// snapshot never passes itself off as current.
 /// </summary>
 public sealed class DatabaseReadServiceCacheTests : IDisposable
 {
@@ -55,11 +53,46 @@ public sealed class DatabaseReadServiceCacheTests : IDisposable
         File.WriteAllText(path, JsonSerializer.Serialize(aged, JsonDefaults.Shared));
     }
 
-    [Fact]
-    public async Task FreshSnapshot_IsServedAsLive_WithoutTouchingTheDatabase()
+    /// <summary>A real SQLite database with one table, and a connection to it.</summary>
+    private async Task<DatabaseConnection> HealthyConnectionAsync(string table = "users")
     {
+        var db = Path.Combine(_dir, $"healthy-{Guid.NewGuid():N}.db");
+        Directory.CreateDirectory(_dir);
+        await using (var conn = new SqliteConnection($"Data Source={db}"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"CREATE TABLE {table} (id INTEGER PRIMARY KEY, name TEXT);";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        return DatabaseConnection.Create(
+            "healthy@local",
+            DatabaseProvider.Sqlite,
+            $"Data Source={db}",
+            DatabaseEnvironment.ReadOnly);
+    }
+
+    [Fact]
+    public async Task ASnapshot_AnswersAsCached_WithoutTouchingTheDatabase()
+    {
+        // The snapshot answers, whatever its age. The database is not read, so
+        // the tables are on screen the moment the cache is - and the answer
+        // says it came from the cache, so the caller knows to ask again.
         var connection = BrokenConnection();
-        SeedSchema(connection, DateTimeOffset.UtcNow, Schema("users"));
+        SeedSchema(connection, DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5), Schema("users"));
+
+        var result = await NewService().GetSchemaAsync(connection, null);
+
+        Assert.Equal(CacheSources.Cached, result.Source);
+        Assert.True(result.FromCache);
+        Assert.Equal("users", Assert.Single(result.Tables).Name);
+    }
+
+    [Fact]
+    public async Task AnEmptyCache_OnAHealthyDatabase_AnswersAsLive()
+    {
+        var connection = await HealthyConnectionAsync();
 
         var result = await NewService().GetSchemaAsync(connection, null);
 
@@ -69,58 +102,66 @@ public sealed class DatabaseReadServiceCacheTests : IDisposable
     }
 
     [Fact]
-    public async Task OldSnapshot_IsServedAsRefreshing_WhileTheRefreshRuns()
+    public async Task AnEmptyCache_OnAnUnreachableDatabase_Throws()
     {
+        // There is nothing to answer with: the snapshot is what the cache is
+        // for, and there is no snapshot.
         var connection = BrokenConnection();
-        SeedSchema(connection, DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5), Schema("users"));
 
-        var result = await NewService().GetSchemaAsync(connection, null);
+        var thrown = await Record.ExceptionAsync(() => NewService().GetSchemaAsync(connection, null));
 
-        Assert.Equal(CacheSources.Refreshing, result.Source);
+        Assert.IsType<DatabaseUnavailableException>(thrown);
+    }
+
+    [Fact]
+    public async Task PreferCacheFalse_ReadsTheDatabase_EvenWhenASnapshotExists()
+    {
+        // The cache-bypassing read is the revalidate: it reaches the database,
+        // so a stale snapshot is replaced by the real answer.
+        var connection = await HealthyConnectionAsync();
+        SeedSchema(connection, DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5), Schema("stale_table"));
+
+        var result = await NewService().GetSchemaAsync(connection, null, preferCache: false);
+
+        Assert.Equal(CacheSources.Live, result.Source);
+        Assert.False(result.FromCache);
+        // The database was read, so the snapshot's stale table is gone.
         Assert.Equal("users", Assert.Single(result.Tables).Name);
     }
 
     [Fact]
-    public async Task OldSnapshot_BecomesOffline_OnceTheRefreshHasFailed()
+    public async Task PreferCacheFalse_OnAnUnreachableDatabase_FallsBackToTheSnapshot()
     {
-        var connection = BrokenConnection();
-        SeedSchema(connection, DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5), Schema("users"));
-
-        var service = NewService();
-        Assert.Equal(CacheSources.Refreshing, (await service.GetSchemaAsync(connection, null)).Source);
-
-        // The background refresh fails on the broken connection; the next read
-        // reports the snapshot as offline rather than probing again.
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(10);
-        DatabaseSchemaInfo? last = null;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            last = await service.GetSchemaAsync(connection, null);
-            if (last.Source == CacheSources.Offline) break;
-            await Task.Delay(100);
-        }
-
-        Assert.Equal(CacheSources.Offline, last!.Source);
-        Assert.Equal("users", Assert.Single(last.Tables).Name);
-    }
-
-    [Fact]
-    public async Task PreferCacheFalse_GoesToTheDatabase_EvenWhenTheSnapshotIsFresh()
-    {
+        // A revalidate asks for the database. It cannot be reached, so the
+        // snapshot answers - but it says so, and it is not passed off as live.
         var connection = BrokenConnection();
         SeedSchema(connection, DateTimeOffset.UtcNow, Schema("users"));
 
         var result = await NewService().GetSchemaAsync(connection, null, preferCache: false);
 
-        // The snapshot was fresh, but the caller asked for the database. It was
-        // unreachable, so the answer is the snapshot marked offline — not the
-        // fresh snapshot served as live.
         Assert.Equal(CacheSources.Offline, result.Source);
+        Assert.True(result.FromCache);
         Assert.Equal("users", Assert.Single(result.Tables).Name);
     }
 
     [Fact]
-    public async Task CachedAnswer_CarriesAConsistentTtl()
+    public async Task AnUnreachableDatabase_WithASnapshot_AnswersOffline()
+    {
+        // The shape the dashboard actually sees: the tree is open, the
+        // database goes away, and the snapshot answers marked offline.
+        var connection = await HealthyConnectionAsync();
+        await NewService().GetSchemaAsync(connection, null, preferCache: false);
+
+        var broken = connection with { ConnectionString = BrokenConnection().ConnectionString };
+        var result = await NewService().GetSchemaAsync(broken, null, preferCache: false);
+
+        Assert.Equal(CacheSources.Offline, result.Source);
+        Assert.True(result.FromCache);
+        Assert.NotNull(result.CacheTtlSeconds);
+    }
+
+    [Fact]
+    public async Task ACachedAnswer_CarriesAConsistentTtl()
     {
         var connection = BrokenConnection();
         var cachedAt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5);
@@ -134,56 +175,6 @@ public sealed class DatabaseReadServiceCacheTests : IDisposable
         var expected = (long)Math.Max(0, (result.CacheExpiresAt!.Value - DateTimeOffset.UtcNow).TotalSeconds);
         Assert.InRange(result.CacheTtlSeconds!.Value, expected - 5, expected + 5);
     }
-
-    [Fact]
-    public async Task ASnapshotInsideTheWindow_IsServedAsLive_AndStillRefreshedInTheBackground()
-    {
-        // A snapshot that is still current is answered without waiting for the
-        // database. But nothing else would refresh it, so its timestamp would
-        // sit at the edge of the window and read as stale soon. A snapshot
-        // that has been sitting a while is therefore refreshed on the way out:
-        // the answer is immediate, and it stays honestly current.
-        var db = Path.Combine(_dir, "real.db");
-        Directory.CreateDirectory(_dir);
-        await using (var conn = new SqliteConnection($"Data Source={db}"))
-        {
-            await conn.OpenAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);";
-            await cmd.ExecuteNonQueryAsync();
-        }
-
-        var connection = DatabaseConnection.Create(
-            "real@local",
-            DatabaseProvider.Sqlite,
-            $"Data Source={db}",
-            DatabaseEnvironment.ReadOnly);
-
-        // Age the entry past the refresh-due point but keep it inside the
-        // freshness window.
-        var seededAt = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(15);
-        SeedSchema(connection, seededAt, Schema("users"));
-
-        var result = await NewService().GetSchemaAsync(connection, null);
-
-        Assert.Equal(CacheSources.Live, result.Source);
-        Assert.False(result.FromCache);
-
-        // The background refresh moves the timestamp on.
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(10);
-        DateTimeOffset cachedAt = seededAt;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            Assert.True(NewCache().TryGetSchema(connection.Id, null, out _, out var at));
-            cachedAt = at!.Value;
-            if (cachedAt > seededAt) break;
-            await Task.Delay(100);
-        }
-
-        Assert.True(cachedAt > seededAt);
-    }
-
-    private JsonDatabaseReadCache NewCache() => new(_dir);
 
     public void Dispose()
     {

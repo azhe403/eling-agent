@@ -4,10 +4,10 @@ namespace Eling.Core.Tests;
 
 /// <summary>
 /// A fresh schema answer says nothing about caching, so it must look exactly
-/// like a live read: source <c>live</c>, no expiry, no TTL. The cached
-/// answers carry the same three facts, so the dashboard can tell "the database
-/// answered" from "a snapshot answered and the database is down" without
-/// guessing from the age alone.
+/// like a live read: source <c>live</c>, no expiry, no TTL. A snapshot that
+/// answered for an unreachable database carries its remaining lifetime, so the
+/// dashboard can tell "the database answered" from "a snapshot answered and the
+/// database is down".
 /// </summary>
 public sealed class DatabaseSchemaInfoTests
 {
@@ -23,13 +23,13 @@ public sealed class DatabaseSchemaInfoTests
     }
 
     [Fact]
-    public void Refreshing_MarksFromCache_AndCarriesExpiry()
+    public void Offline_MarksFromCache_AndCarriesExpiry()
     {
         var expires = DateTimeOffset.UtcNow.AddHours(6);
 
         var info = new DatabaseSchemaInfo([])
         {
-            Source = CacheSources.Refreshing,
+            Source = CacheSources.Offline,
             CacheExpiresAt = expires,
             CacheTtlSeconds = 3600
         };
@@ -37,13 +37,5 @@ public sealed class DatabaseSchemaInfoTests
         Assert.True(info.FromCache);
         Assert.Equal(expires, info.CacheExpiresAt);
         Assert.Equal(3600, info.CacheTtlSeconds);
-    }
-
-    [Fact]
-    public void Offline_MarksFromCache()
-    {
-        var info = new DatabaseSchemaInfo([]) { Source = CacheSources.Offline };
-
-        Assert.True(info.FromCache);
     }
 }

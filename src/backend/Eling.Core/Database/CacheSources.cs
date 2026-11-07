@@ -11,9 +11,10 @@ public static class CacheSources
     public const string Live = "live";
 
     /// <summary>
-    /// A cached snapshot was served and a refresh is running in the background.
+    /// The snapshot answered, and the database has not been read yet. The
+    /// caller shows it at once and asks again for the real answer.
     /// </summary>
-    public const string Refreshing = "refreshing";
+    public const string Cached = "cached";
 
     /// <summary>
     /// The database could not be reached and the cached snapshot answered

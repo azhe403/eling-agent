@@ -36,10 +36,10 @@ public sealed record DatabaseSchemaInfo(IReadOnlyList<TableSchema> Tables)
     public DateTimeOffset? CachedAt { get; init; }
 
     /// <summary>
-    /// How this answer was obtained: <c>"live"</c> when the database was read,
-    /// <c>"refreshing"</c> when a cached snapshot was served while a refresh runs
-    /// in the background, <c>"offline"</c> when the database could not be reached
-    /// and the cached snapshot answered instead.
+    /// How this answer was obtained: <c>"live"</c> when the database answered,
+    /// <c>"cached"</c> when a snapshot answered before the database was read,
+    /// <c>"offline"</c> when the database could not be reached and the snapshot
+    /// answered instead.
     /// </summary>
     public string Source { get; init; } = CacheSources.Live;
 
