@@ -21,6 +21,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { copyText } from "@/lib/clipboard"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
+import { useExponentialRetry } from "./useExponentialRetry"
 import {
   CONN_SORT_KEYS,
   CONN_SORT_COPY,
@@ -94,7 +95,14 @@ type QueryResult = {
 
 type ColumnSchema = { name: string; dataType: string; isNullable: boolean; isPrimaryKey: boolean }
 type TableSchema = { name: string; kind: string; columns?: ColumnSchema[]; foreignKeys?: { column: string; referencesTable: string; referencesColumn: string }[] }
-type SchemaInfo = { tables?: TableSchema[]; databases?: string[]; fromCache?: boolean; cachedAt?: string | null }
+type SchemaInfo = {
+  tables?: TableSchema[]
+  databases?: string[]
+  fromCache?: boolean
+  cachedAt?: string | null
+  /** How the answer was obtained: live, refreshing, or offline. */
+  source?: "live" | "refreshing" | "offline"
+}
 
 type Detected = {
   settingsKey: string
@@ -359,21 +367,10 @@ export function Databases() {
   const connSchemasRef = useRef<Record<string, SchemaInfo>>({})
   const dbSchemasRef = useRef<Record<string, SchemaInfo>>({})
   const schemaConnIdRef = useRef<string | null>(null)
-  const schemaRetryRef = useRef<Record<string, number>>({})
   const autoScrollPendingRef = useRef(false)
   /** Guards the inspector against an answer for a key that is no longer shown. */
   const redisInspectRequestRef = useRef(0)
   const browsePollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  /**
-   * Every retry timer the schema refetchers start, so unmounting can clear
-   * them: otherwise a 5-second poll started just before the panel closed
-   * would still fire and write into state of a gone component.
-   */
-  const pendingSchemaTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
-  useEffect(() => () => {
-    for (const t of pendingSchemaTimers.current) clearTimeout(t)
-    pendingSchemaTimers.current.clear()
-  }, [])
   const dataScrollRef = useRef<HTMLDivElement | null>(null)
   const activeTableRef = useRef<DbTab | null>(null)
   const browseInFlightRef = useRef(0)
@@ -1143,7 +1140,9 @@ export function Databases() {
     }
   }
 
-  const loadSchema = async (id: string) => {
+  // An explicit refresh from the tree. It bypasses the cache: the person asked
+  // for the database, not for what we last knew.
+  const loadSchema = async (id: string, database?: string | null) => {
     setSchemaConnId(id)
     setSchemaLoading(true)
     setSchemaInfo(null)
@@ -1151,9 +1150,10 @@ export function Databases() {
     setBrowseResult(null)
     setBrowseTotal(null)
     try {
-      const data = await fetchSchema(id)
+      const data = await fetchSchema(id, database, true)
       setSchemaInfo(data)
       setConnSchemas((prev) => ({ ...prev, [id]: data }))
+      if (database) setDbSchemas((prev) => ({ ...prev, [`${id}:${database}`]: data }))
     } catch (e: unknown) {
       notifyDb("error", e instanceof Error ? e.message : "schema failed")
     } finally {
@@ -1161,55 +1161,75 @@ export function Databases() {
     }
   }
 
-  const fetchSchema = async (id: string, database?: string | null) => {
-    const qs = database ? "?database=" + encodeURIComponent(database) : ""
+  const fetchSchema = async (id: string, database?: string | null, refresh?: boolean) => {
+    const params = new URLSearchParams()
+    if (database) params.set("database", database)
+    if (refresh) params.set("refresh", "true")
+    const qs = params.toString() ? "?" + params.toString() : ""
     const res = await fetch(API + "/" + id + "/schema" + qs)
     if (!res.ok) throw new Error(parseApiError(await res.text()))
     return await res.json()
   }
 
-  const ensureSchema = useCallback(async (id: string, opts?: { force?: boolean }) => {
+  // The retry ladder, its countdown and its timers live in the hook. The
+  // callers below are useCallback closures, so keeping the bookkeeping in local
+  // state would have them read the first render's values forever.
+  const {
+    schedule: scheduleRetry,
+    cancel: cancelRetry,
+    attemptOf: retryAttemptOf,
+    label: retryLabel
+  } = useExponentialRetry()
+
+  const ensureSchema = useCallback(async (id: string, opts?: { force?: boolean; bypass?: boolean }) => {
     const force = opts?.force ?? false
-    if (!force && connSchemasRef.current[id]?.fromCache === false) return
+    // A manual refresh asks the database; a retry asks for the best answer the
+    // backend can give, which is the cache plus the backend's own background
+    // probe. Only the first one skips the cache.
+    const bypass = opts?.bypass ?? false
+    if (!force && connSchemasRef.current[id]?.source === "live") return
 
     try {
-      const fresh = await fetchSchema(id)
+      const fresh = await fetchSchema(id, null, bypass)
       setConnSchemas((prev) => ({ ...prev, [id]: fresh }))
       if (schemaConnIdRef.current === id) setSchemaInfo(fresh)
-      schemaRetryRef.current[id] = 0
-      if (fresh.fromCache) {
-        const delay = (schemaRetryRef.current[id] ?? 0) < 12 ? 5000 : 15000
-        schemaRetryRef.current[id] = (schemaRetryRef.current[id] ?? 0) + 1
-        const timer = setTimeout(() => { void ensureSchema(id, { force: true }) }, delay)
-        pendingSchemaTimers.current.add(timer)
+      if (fresh.source && fresh.source !== "live") {
+        scheduleRetry(id, fresh.source === "offline" ? "offline" : "refreshing", () => { void ensureSchema(id, { force: true }) })
+      } else {
+        cancelRetry(id)
       }
-    } catch {
-      const retries = schemaRetryRef.current[id] ?? 0
-      if (retries < 3) {
-        schemaRetryRef.current[id] = retries + 1
-        const timer = setTimeout(() => { void ensureSchema(id) }, 2000 * (retries + 1))
-        pendingSchemaTimers.current.add(timer)
-      }
+    } catch (e: unknown) {
+      // The database could not be reached at all: there is no cached answer
+      // either, so the retry ladder runs on the same schedule. The error is
+      // reported once - ten toasts for one dead database is noise.
+      const first = retryAttemptOf(id) === 0
+      scheduleRetry(id, "offline", () => { void ensureSchema(id, { force: true }) })
+      if (first) notifyDb("error", e instanceof Error ? e.message : "schema failed")
     }
-  }, [])
+  }, [notifyDb, scheduleRetry, cancelRetry, retryAttemptOf])
 
   // The tables of one database on a server-level connection. The database
   // name is part of the cache key, so two databases never share a schema.
   const ensureDbSchema = useCallback(async (connId: string, database: string) => {
     const key = `${connId}:${database}`
-    if (dbSchemasRef.current[key] && !dbSchemasRef.current[key]?.fromCache) return
+    if (dbSchemasRef.current[key]?.source === "live") return
 
     try {
       const fresh = await fetchSchema(connId, database)
       setDbSchemas((prev) => ({ ...prev, [key]: fresh }))
-      if (fresh.fromCache) {
-        const timer = setTimeout(() => { void ensureDbSchema(connId, database) }, 5000)
-        pendingSchemaTimers.current.add(timer)
+      if (fresh.source && fresh.source !== "live") {
+        scheduleRetry(key, fresh.source === "offline" ? "offline" : "refreshing", () => { void ensureDbSchema(connId, database) })
+      } else {
+        cancelRetry(key)
       }
     } catch (e: unknown) {
-      notifyDb("error", e instanceof Error ? e.message : "schema failed")
+      // Unreachable: the retry ladder runs on the same schedule, and the tree
+      // shows the same countdown under this database.
+      const first = retryAttemptOf(key) === 0
+      scheduleRetry(key, "offline", () => { void ensureDbSchema(connId, database) })
+      if (first) notifyDb("error", e instanceof Error ? e.message : "schema failed")
     }
-  }, [notifyDb])
+  }, [notifyDb, scheduleRetry, cancelRetry, retryAttemptOf])
 
   const toggleConn = (id: string) => {
     const wasExpanded = expandedConns.has(id)
@@ -1831,7 +1851,7 @@ export function Databases() {
            <Button
              variant="outline"
              size="sm"
-             onClick={() => { void load(); for (const id of expandedConns) { void ensureSchema(id, { force: true }); const conn = conns.find((c) => c.id === id); if (conn?.provider === "Redis") void loadRedisDatabases(id) } }}
+             onClick={() => { void load(); for (const id of expandedConns) { void ensureSchema(id, { force: true, bypass: true }); const conn = conns.find((c) => c.id === id); if (conn?.provider === "Redis") void loadRedisDatabases(id) } }}
            >
              <RefreshCw className="mr-2 size-4" />
              <span className="hidden sm:inline-block">Refresh</span>
@@ -1948,7 +1968,12 @@ export function Databases() {
                         )
                       })
                     ) : <p className="ml-2 text-xs text-muted-foreground">Loading.</p>
-                  ) : !connSchemas[c.id] ? <p className="ml-2 text-xs text-muted-foreground">Loading.</p> : null}
+                  ) : (!connSchemas[c.id] || retryLabel(c.id)) ? (
+                    <p className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Loader2 className="size-3 animate-spin" />
+                      {retryLabel(c.id) ?? "Loading…"}
+                    </p>
+                  ) : null}
                   {c.provider !== "Redis" && c.isServerLevel ? (
                     // A server-level connection reaches every database on the
                     // server, so the tree lists them before the tables.
@@ -1975,6 +2000,12 @@ export function Databases() {
                                 <span className="truncate">{t.name}</span>
                               </button>
                             ))}
+                            {!dbSchemas[`${c.id}:${db}`] || retryLabel(`${c.id}:${db}`) ? (
+                              <p className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Loader2 className="size-3 animate-spin" />
+                                {retryLabel(`${c.id}:${db}`) ?? "Loading…"}
+                              </p>
+                            ) : null}
                           </div>
                         ) : null}
                       </div>
@@ -2032,14 +2063,19 @@ export function Databases() {
             <CardTitle className="flex items-center gap-2">
               Schema · {conns.find((c) => c.id === schemaConnId)?.name}
               {schemaInfo?.fromCache ? (
-                <Badge variant="outline" className={isStaleCache(schemaInfo.cachedAt) ? "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-400" : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"}>
-                  {isStaleCache(schemaInfo.cachedAt) ? "stale" : "cached"} · {formatCacheAge(schemaInfo.cachedAt)}
+                <Badge variant="outline" className={schemaInfo.source === "offline" || isStaleCache(schemaInfo.cachedAt) ? "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-400" : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"}>
+                  {schemaInfo.source === "offline" ? "offline" : schemaInfo.source === "refreshing" ? "refreshing" : isStaleCache(schemaInfo.cachedAt) ? "stale" : "cached"} · {formatCacheAge(schemaInfo.cachedAt)}
                 </Badge>
               ) : null}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {schemaLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
+            {retryLabel(schemaConnId ?? "") ? (
+              <div className="flex items-center gap-2">
+                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">{retryLabel(schemaConnId ?? "")}</p>
+              </div>
+            ) : schemaLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
             {(() => {
               const t = activeTable ? schemaInfo?.tables?.find((x) => x.name === activeTable.table) : null
               if (t) {
