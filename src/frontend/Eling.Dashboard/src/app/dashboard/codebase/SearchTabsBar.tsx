@@ -31,7 +31,10 @@ export function SearchTabsBar({
   onAddTab,
 }: SearchTabsBarProps) {
   return (
-    <div className="flex w-full items-center gap-1.5 text-xs select-none">
+    <div className="flex w-full items-center text-xs select-none">
+      {/* One scroll container for the tabs and the new-tab button, so the
+          button sits right next to the last tab while there is room and
+          scrolls away with them once the strip overflows. */}
       <div
         role="tablist"
         aria-label="Codebase search tabs"
@@ -89,7 +92,7 @@ export function SearchTabsBar({
                       tab.lastStats.totalHits && tab.lastStats.totalHits > tab.lastStats.hits
                         ? `${tab.lastStats.hits} of ${tab.lastStats.totalHits}`
                         : tab.lastStats.hits
-                    } match(es) in ${tab.lastStats.files} file(s)`}
+                    } match(es)`}
                   >
                     {tab.lastStats.totalHits && tab.lastStats.totalHits > tab.lastStats.hits
                       ? `${tab.lastStats.hits}/${tab.lastStats.totalHits}`
@@ -125,19 +128,22 @@ export function SearchTabsBar({
             </div>
           )
         })}
-      </div>
 
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        onClick={onAddTab}
-        aria-label="New search tab"
-        title="Open new search tab"
-        className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
-      >
-        <Plus className="size-3.5" />
-      </Button>
+        {/* The new-tab button lives inside the scroll container, next to the
+            last tab, so it does not float away at the far right while there
+            is room for it. */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          onClick={onAddTab}
+          aria-label="New search tab"
+          title="Open new search tab"
+          className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+        >
+          <Plus className="size-3.5" />
+        </Button>
+      </div>
     </div>
   )
 }

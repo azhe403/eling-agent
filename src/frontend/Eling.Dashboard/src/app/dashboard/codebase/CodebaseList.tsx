@@ -20,10 +20,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import type { SseTopic } from "@/hooks/use-memories-sse"
 import {
-  useCodebaseRebuildSse,
-  type RebuildProgress,
-} from "@/hooks/use-codebase-rebuild-sse"
+  rebuildModeLabel,
+  useCodebaseRebuild,
+  type RebuildMode,
+} from "./use-codebase-rebuild"
 import { useMediaQuery } from "@/hooks/use-media-query"
+import { useCodebaseSearch } from "./use-codebase-search"
+import { useCodebaseUrlState } from "./use-codebase-url-state"
 import { utcToLocal } from "@/lib/date-utils"
 import { XL_BREAKPOINT } from "@/lib/constants"
 import { cn } from "@/lib/utils"
@@ -50,17 +53,12 @@ import {
   type SearchStats,
 } from "./searchTabs"
 import {
-  rebuildUrl,
   queryFromParams,
-  queryParam,
   searchScopeFromParams,
-  searchScopeQuery,
   searchUrl,
   selectionFromParams,
-  selectionQuery,
   statusUrl,
   tabFromParams,
-  tabParam,
   SEARCH_SCOPE_COPY,
   type SearchScope,
 } from "./scope"
@@ -95,39 +93,8 @@ type CodebaseHit = {
   score: number
 }
 
-type RebuildMode = "incremental" | "full"
-
-function rebuildModeLabel(mode: RebuildMode) {
-  return mode === "full" ? "Full re-index" : "Incremental"
-}
-
 // URL builders and this page's URL binding of the selection live in ./scope.ts;
 // the selection model itself is shared in @/components/workspaces/selection.
-
-// The open file's URL identity. Two params rather than one encoded pair: both
-// values are paths, and unmerged they stay readable in the address bar and in
-// a shared link. `line` jumps the viewer straight to a search hit's line.
-function fileQuery(file: SelectedFile) {
-  const parts = [
-    `file=${encodeURIComponent(file.path)}`,
-    `fileRoot=${encodeURIComponent(file.projectRoot)}`,
-  ]
-  if (file.startLine) parts.push(`line=${file.startLine}`)
-  return parts.join("&")
-}
-
-function fileFromParams(params: URLSearchParams): SelectedFile | null {
-  const path = params.get("file")?.trim()
-  const root = params.get("fileRoot")?.trim()
-  const line = params.get("line")?.trim()
-  return path && root
-    ? {
-        projectRoot: root,
-        path,
-        ...(line ? { startLine: Number(line) } : {}),
-      }
-    : null
-}
 
 // Idle time after the last keystroke before a search is issued.
 const SEARCH_DEBOUNCE_MS = 500
@@ -140,129 +107,70 @@ const HEALTH_PROBE_INTERVAL_MS = 5_000
 
 export function CodebaseList() {
   const [statusLoading, setStatusLoading] = useState(true)
-  const [searching, setSearching] = useState(false)
   const [status, setStatus] = useState<CodebaseStatus | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
-  const [results, setResults] = useState<CodebaseHit[]>([])
-  const [fileResults, setFileResults] = useState<FileResult[]>([])
-  const [searchError, setSearchError] = useState<string | null>(null)
   const searchParams = useSearchParams()
-  const router = useRouter()
-  const pathname = usePathname()
 
-  const urlTabId = useMemo(() => tabFromParams(searchParams), [searchParams])
-  const [tabsState, setTabsState] = useState(() => {
-    const urlSelection = selectionFromParams(searchParams)
-    const urlScope = searchScopeFromParams(searchParams)
-    const urlQuery = queryFromParams(searchParams)
-    const loaded = loadTabs(urlQuery, urlScope, urlSelection)
-    if (urlTabId && loaded.tabs.some((t) => t.id === urlTabId)) {
-      return { tabs: loaded.tabs, activeId: urlTabId }
-    }
-    if (urlTabId) {
-      const newTab = createTab({
-        id: urlTabId,
-        query: urlQuery,
-        scope: urlScope,
-        selection: urlSelection,
-      })
-      return { tabs: [...loaded.tabs, newTab], activeId: newTab.id }
-    }
-    return loaded
+  // Everything the reader can change lives in the address bar, so a reload,
+  // a back button and a shared link all land on the same view.
+  const { selectedFile, writeUrl } = useCodebaseUrlState()
+
+  // The tabs, the query and the rows they show.
+  const {
+    tabs,
+    updateTabs,
+    activeTabId,
+    activeTab,
+    selection,
+    searchScope,
+    query,
+    setQuery,
+    issuedQuery,
+    setIssuedQuery,
+    results,
+    fileResults,
+    setResults,
+    setFileResults,
+    searchError,
+    setSearchError,
+    searching,
+    setSearching,
+    searchLimit,
+    setSearchLimit,
+    searchSeq,
+    debounceTimer,
+    pendingNavTabId,
+    shownScope,
+    doSearch,
+    activateTab,
+    selectTab,
+    addSearchTab,
+    closeSearchTab,
+    handleLimitChange,
+    applySearchScope,
+    handleQueryChange,
+    applySelection,
+    openFile,
+    closeFile,
+  } = useCodebaseSearch({
+    setStatusLoading,
+    defaultScope: searchScopeFromParams(searchParams),
+    writeUrl,
+    selectedFile,
   })
-  const { tabs, activeId: activeTabId } = tabsState
-  const activeTab = useMemo(
-    () => tabs.find((t) => t.id === activeTabId) ?? tabs[0],
-    [tabs, activeTabId]
-  )
-  const selection = activeTab.selection
-  const searchScope = activeTab.scope
 
-  // The query comes from the active tab.
-  const [query, setQuery] = useState(() => activeTab.query)
-
-  // Persist tab state whenever tabs or active tab changes, kept out of state updaters.
+  // Persist tab state whenever tabs or active tab changes, kept out of
+  // state updaters.
   useEffect(() => {
-    saveTabs(tabsState.tabs, tabsState.activeId)
-  }, [tabsState])
+    saveTabs(tabs, activeTabId)
+  }, [tabs, activeTabId])
 
-  // Tracks in-flight tab navigation initiated by user interaction to prevent
-  // the URL back/forward sync effect from reverting back to the old URL tab id
-  // before router.replace finishes updating searchParams.
-  const pendingNavTabId = useRef<string | null>(null)
-
-  // The query as it was when the last search went out.
-  const [issuedQuery, setIssuedQuery] = useState("")
   const { rows, error: runtimesError, reload } = useWorkspaceRows()
   const allRoots = useMemo(() => rows.map((r) => r.root), [rows])
-  // The open file is URL state, same as the scope: reload, back/forward and
-  // shared links all land on the same viewer state. `file` carries the path
-  // and `fileRoot` the owning project — the same relative path can exist in
-  // two indexed workspaces, and the viewer must know which one to read.
-  const selectedFile = useMemo(
-    () => fileFromParams(searchParams),
-    [searchParams]
-  )
-  // One writer for all of this page's URL state, so changing one piece never
-  // drops another: a scope change keeps the query and the open file, closing
-  // the file keeps the scope, and a new query keeps the scope.
-  const writeUrl = useCallback(
-    (next: {
-      tab?: string
-      selection: WorkspaceSelection
-      scope: SearchScope
-      query: string
-      file: SelectedFile | null
-    }) => {
-      const tabId = next.tab ?? activeTab.id
-      const parts = [
-        tabParam(tabId),
-        selectionQuery(next.selection),
-        searchScopeQuery(next.scope),
-        queryParam(next.query),
-        next.file ? fileQuery(next.file) : "",
-      ].filter(Boolean)
-      const qs = parts.join("&")
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-    },
-    [pathname, router, activeTab.id]
-  )
-  // Selection changes flip the skeleton on right in the event handler — before
-  // the router round-trip — so tiles react to the click, not to the next commit.
-  const applySelection = useCallback(
-    (next: WorkspaceSelection) => {
-      setStatusLoading(true)
-      setTabsState((prev) => {
-        const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
-        return {
-          ...prev,
-          tabs: updateTab(prev.tabs, { ...current, selection: next }),
-        }
-      })
-      writeUrl({
-        tab: activeTab.id,
-        selection: next,
-        scope: searchScope,
-        query,
-        file: selectedFile,
-      })
-    },
-    [writeUrl, searchScope, query, selectedFile, activeTab.id]
-  )
-  const openFile = useCallback(
-    (file: SelectedFile) =>
-      writeUrl({ tab: activeTab.id, selection, scope: searchScope, query, file }),
-    [writeUrl, activeTab.id, selection, searchScope, query]
-  )
-  const closeFile = useCallback(
-    () => writeUrl({ tab: activeTab.id, selection, scope: searchScope, query, file: null }),
-    [writeUrl, activeTab.id, selection, searchScope, query]
-  )
   // Wide screens get the docked file panel; narrow ones keep the centered
   // dialog. Mirrors Tailwind's xl breakpoint, which FileDetailPanel's own
   // `xl:flex` class also encodes, so the JS gate and CSS agree by construction.
   const wide = useMediaQuery(`(min-width: ${XL_BREAKPOINT}px)`)
-  const [searchLimit, setSearchLimit] = useState(20)
   const [topFiles, setTopFiles] = useState<FileResult[]>([])
   const [topStats, setTopStats] = useState<SearchStats | null>(null)
   const [topLoading, setTopLoading] = useState(true)
@@ -270,32 +178,22 @@ export function CodebaseList() {
   // panel takes the rest — the list keeps its width whether the panel is open
   // or not, and the code viewer gets every remaining pixel.
   const panelOpen = selectedFile !== null && wide
-  // Rebuild is an async job: the POST returns 202 with the first snapshot and
-  // the rest arrives over SSE. `rebuildStarting` covers only the POST itself,
-  // before any snapshot exists.
-  const [rebuildMode, setRebuildMode] = useState<RebuildMode>("incremental")
-  const [rebuildProgress, setRebuildProgress] = useState<RebuildProgress | null>(null)
-  const [rebuildStarting, setRebuildStarting] = useState(false)
-  // Persist the running job id so a page refresh can re-attach to an in-flight
-  // rebuild instead of silently dropping the progress indicator.
-  const REBUILD_JOB_KEY = "codebase:rebuildJobId"
-  // The rebuild-mode dropdown is a base-ui Menu whose radio items do not
-  // close the popup on selection (radio items are toggles, not actions).
-  // Without this the popup stays open after picking a mode, which reads as
-  // a checkbox. Controlling `open` and closing on `onValueChange` makes a
-  // selection act like a normal menu item: pick, close, done.
-  const [rebuildModeMenuOpen, setRebuildModeMenuOpen] = useState(false)
-  const rebuilding =
-    rebuildStarting || (rebuildProgress?.isRunning ?? false)
+  // The index rebuild is a backend job, watched over SSE: it has its own
+  // progress, its own localStorage pointer and its own fallback poll.
+  const {
+    rebuildMode,
+    setRebuildMode,
+    rebuildProgress,
+    rebuildModeMenuOpen,
+    setRebuildModeMenuOpen,
+    rebuilding,
+    rebuild,
+  } = useCodebaseRebuild({
+    selection,
+    onFinished: () => { void loadStatus() },
+    onError: setStatusError,
+  })
 
-  // Monotonic id: only the latest issued search may write results,
-  // so a slow earlier response can never overwrite a newer one.
-  const searchSeq = useRef(0)
-  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // The scope the results on screen belong to. A scope change is an explicit
-  // action rather than a keystroke, so it searches at once instead of
-  // waiting out the debounce a typed character gets.
-  const shownScope = useRef(searchScope)
   // Last seen index timestamp — a change means someone rebuilt the index.
   const lastIndexedAtRef = useRef<string | null>(null)
 
@@ -347,336 +245,6 @@ export function CodebaseList() {
     }
   }, [selection, searchScope, searchLimit])
 
-  // Starts a rebuild over the selected scope/mode. The 202 body is already a
-  // progress snapshot, so the UI has something to render before the first SSE
-  // frame lands. Tiles refresh on each "codebase" notification from the
-  // backend, and once more when the job reports it finished.
-  const rebuild = useCallback(
-    async (mode: RebuildMode) => {
-      // Always take the mode explicitly so a stale closure can never
-      // silently flip incremental into a full reindex.
-      setRebuildMode(mode)
-      setRebuildStarting(true)
-      setStatusError(null)
-      try {
-        const res = await fetch(
-          rebuildUrl(selection, mode === "full", Date.now()),
-          {
-            method: "POST",
-            cache: "no-store",
-          }
-        )
-        if (!res.ok) throw new Error(`API returned ${res.status}`)
-        const snap = (await res.json()) as RebuildProgress
-        setRebuildProgress(snap)
-        if (snap.jobId) {
-          try { localStorage.setItem(REBUILD_JOB_KEY, snap.jobId) } catch { /* ignore */ }
-        }
-      } catch (e) {
-        setStatusError(e instanceof Error ? e.message : "Rebuild failed")
-      } finally {
-        setRebuildStarting(false)
-      }
-    },
-    [selection]
-  )
-
-  // A final snapshot also refetches the tiles, so the numbers stay correct
-  // even if the SSE channel is down and the per-root notifications were lost.
-  // When the job finishes cleanly, the finished-report banner auto-dismisses
-  // after a few seconds; a report with failed projects stays visible so the
-  // failures can actually be read.
-  const handleRebuildProgress = useCallback(
-    (progress: RebuildProgress) => {
-      setRebuildProgress(progress)
-      if (progress.jobId) {
-        try {
-          if (progress.isRunning) {
-            localStorage.setItem(REBUILD_JOB_KEY, progress.jobId)
-          } else {
-            localStorage.removeItem(REBUILD_JOB_KEY)
-          }
-        } catch {
-          // ignore storage errors
-        }
-      }
-      if (!progress.isRunning) void loadStatus()
-    },
-    [loadStatus]
-  )
-
-  // Keep SSE subscription for real-time updates (primary channel).
-  useCodebaseRebuildSse(handleRebuildProgress)
-
-  // Poll the job status as a fallback for the SSE stream: the stream can drop
-  // or miss the terminal frame (proxy buffering, late subscriber), leaving
-  // `rebuilding` stuck true forever. Polling guarantees the terminal state
-  // lands even when SSE does not.
-  useEffect(() => {
-    if (!rebuildProgress?.isRunning || !rebuildProgress.jobId) return
-    const jobId = rebuildProgress.jobId
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/codebase/rebuild-index/${jobId}`, { cache: "no-store" })
-        if (!res.ok) return
-        const snap = (await res.json()) as RebuildProgress
-        setRebuildProgress(snap)
-        if (!snap.isRunning) {
-          clearInterval(interval)
-          void loadStatus()
-        }
-      } catch {
-        // ignore transient errors; next tick retries
-      }
-    }, 2000)
-    return () => clearInterval(interval)
-  }, [rebuildProgress?.isRunning, rebuildProgress?.jobId, loadStatus])
-
-  // Re-attach to an in-flight rebuild after a page refresh: the POST response
-  // (and the SSE stream) are lost on reload, but the backend job keeps running
-  // and its snapshot is still fetchable by jobId.
-  useEffect(() => {
-    let cancelled = false
-    const restore = async () => {
-      let jobId: string | null = null
-      try { jobId = localStorage.getItem(REBUILD_JOB_KEY) } catch { return }
-      if (!jobId) return
-      try {
-        const res = await fetch(`/api/codebase/rebuild-index/${jobId}`, { cache: "no-store" })
-        if (!res.ok) throw new Error("not found")
-        const snap = (await res.json()) as RebuildProgress
-        if (cancelled) return
-        setRebuildProgress(snap)
-        // The pointer only exists to re-attach to an in-flight rebuild, so drop
-        // it once the job is done. Auto-hiding a clean report is the shared
-        // effect below; a timer here would duplicate that rule and outlive the
-        // component.
-        if (!snap.isRunning) {
-          try { localStorage.removeItem(REBUILD_JOB_KEY) } catch { /* ignore */ }
-        }
-      } catch {
-        // Job gone (backend restarted, or unknown id): drop the stale pointer.
-        try { localStorage.removeItem(REBUILD_JOB_KEY) } catch { /* ignore */ }
-      }
-    }
-    void restore()
-    return () => { cancelled = true }
-  }, [])
-
-  // A clean finished report is transient: it confirms the rebuild ran, then
-  // gets out of the way. Errors are not transient — a failing project's
-  // message must stay on screen until the user dismisses it, so only a
-  // report with no failed projects is auto-hidden.
-  useEffect(() => {
-    if (!rebuildProgress || rebuildProgress.isRunning) return
-    if (rebuildProgress.results.some((r) => !r.ok)) return
-    const timer = setTimeout(() => setRebuildProgress(null), 5000)
-    return () => clearTimeout(timer)
-  }, [rebuildProgress])
-
-  // The scope travels with the query rather than being read from the
-  // callback's closure: every request states which scope it is for, so a
-  // response can never be filed under the wrong one.
-  const doSearch = useCallback(async (
-    q: string,
-    scope: SearchScope,
-    opts?: { silent?: boolean; selection?: WorkspaceSelection; limit?: number }
-  ) => {
-    const trimmed = q.trim()
-    const seq = ++searchSeq.current
-    if (!trimmed) {
-      setResults([])
-      setFileResults([])
-      setSearchError(null)
-      setSearching(false)
-      setTabsState((prev) => {
-        const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
-        return {
-          ...prev,
-          tabs: updateTab(prev.tabs, { ...current, lastStats: undefined }),
-        }
-      })
-      return
-    }
-    const targetSelection = opts?.selection ?? selection
-    const silent = opts?.silent ?? false
-    const effectiveLimit = opts?.limit ?? searchLimit
-    if (!silent) setSearching(true)
-    setSearchError(null)
-    try {
-      const res = await fetch(searchUrl(trimmed, targetSelection, scope, effectiveLimit), {
-        cache: "no-store",
-      })
-      if (!res.ok) throw new Error(`API returned ${res.status}`)
-      const data = await res.json()
-      if (searchSeq.current !== seq) return
-
-      const stats: SearchStats | undefined = data.stats
-        ? {
-            tookMs: Number(data.stats.tookMs) || 0,
-            hits: Number(data.stats.hits) || 0,
-            totalHits: Number(data.stats.totalHits) || Number(data.stats.hits) || 0,
-            files: Number(data.stats.files) || 0,
-            chunks: Number(data.stats.chunks) || 0,
-            workspaces: Number(data.stats.workspaces) || 1,
-            workspacesWithHits: Number(data.stats.workspacesWithHits) || 0,
-            mode: data.mode === "files" ? "files" : "search",
-          }
-        : undefined
-
-      setTabsState((prev) => {
-        const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
-        return {
-          ...prev,
-          tabs: updateTab(prev.tabs, { ...current, lastStats: stats }),
-        }
-      })
-
-      // Each scope has its own row shape and only one of them is ever on
-      // screen, so they live in separate lists instead of one list the
-      // renderer has to inspect.
-      if (scope === "content") {
-        setResults(data.results || [])
-      } else {
-        setFileResults(data.results || [])
-      }
-    } catch (e) {
-      if (searchSeq.current !== seq) return
-      if (!silent) {
-        setResults([])
-        setFileResults([])
-        setSearchError(e instanceof Error ? e.message : "Search failed")
-        setTabsState((prev) => {
-          const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
-          return {
-            ...prev,
-            tabs: updateTab(prev.tabs, { ...current, lastStats: undefined }),
-          }
-        })
-      }
-    } finally {
-      // Always clear on the latest sequence, even for silent refreshes:
-      // a silent poll landing after a manual search started would otherwise
-      // leave `searching` stuck true (skeletons + disabled button) forever,
-      // because the superseded manual search skips its own reset above.
-      if (searchSeq.current === seq) setSearching(false)
-    }
-  }, [selection, searchLimit])
-
-  const handleLimitChange = useCallback(
-    (newLimit: number) => {
-      setSearchLimit(newLimit)
-      if (query.trim()) {
-        void doSearch(query, searchScope, { limit: newLimit })
-      } else {
-        void loadTop(false, newLimit)
-      }
-    },
-    [query, searchScope, doSearch, loadTop]
-  )
-
-  // Switching the scope drops the rows on screen and puts the new scope in
-  // the URL; the search that follows belongs to the debounce effect, which
-  // sees the changed scope.
-  const applySearchScope = useCallback(
-    (next: SearchScope) => {
-      if (next === searchScope) return
-      setResults([])
-      setFileResults([])
-      setTabsState((prev) => {
-        const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
-        return {
-          ...prev,
-          tabs: updateTab(prev.tabs, { ...current, scope: next, lastStats: undefined }),
-        }
-      })
-      writeUrl({ tab: activeTab.id, selection, scope: next, query, file: selectedFile })
-    },
-    [searchScope, activeTab.id, selection, query, selectedFile, writeUrl]
-  )
-
-  // Clearing the box resets the list immediately (in the event handler,
-  // not in an effect, to avoid cascading renders).
-  const handleQueryChange = useCallback(
-    (value: string) => {
-      setQuery(value)
-      rememberQuery(value)
-      setTabsState((prev) => {
-        const current = prev.tabs.find((t) => t.id === prev.activeId) ?? prev.tabs[0]
-        return {
-          ...prev,
-          tabs: updateTab(prev.tabs, {
-            ...current,
-            query: value,
-            ...(!value.trim() ? { lastStats: undefined } : {}),
-          }),
-        }
-      })
-      if (!value.trim()) {
-        if (debounceTimer.current) clearTimeout(debounceTimer.current)
-        searchSeq.current++
-        setIssuedQuery("")
-        setResults([])
-        setFileResults([])
-        setSearchError(null)
-        setSearching(false)
-      }
-    },
-    []
-  )
-
-  const activateTab = useCallback(
-    (target: SearchTab, opts?: { file?: SelectedFile | null; newTabs?: SearchTab[] }) => {
-      pendingNavTabId.current = target.id
-      if (debounceTimer.current) clearTimeout(debounceTimer.current)
-      searchSeq.current++
-      setTabsState((prev) => ({
-        tabs: opts?.newTabs ?? prev.tabs,
-        activeId: target.id,
-      }))
-      setQuery(target.query)
-      setIssuedQuery(target.query)
-      rememberQuery(target.query)
-      writeUrl({
-        tab: target.id,
-        selection: target.selection,
-        scope: target.scope,
-        query: target.query,
-        file: opts?.file ?? null,
-      })
-      if (target.query.trim()) {
-        void doSearch(target.query, target.scope, { selection: target.selection })
-      } else {
-        setResults([])
-        setFileResults([])
-      }
-    },
-    [doSearch, writeUrl]
-  )
-
-  const selectTab = useCallback(
-    (targetId: string) => {
-      if (targetId === activeTabId) return
-      const target = tabs.find((t) => t.id === targetId)
-      if (target) activateTab(target, { file: selectedFile })
-    },
-    [activeTabId, tabs, selectedFile, activateTab]
-  )
-
-  const addSearchTab = useCallback(() => {
-    const newTab = createTab({ selection: activeTab.selection })
-    activateTab(newTab, { file: null, newTabs: [...tabs, newTab] })
-  }, [tabs, activeTab.selection, activateTab])
-
-  const closeSearchTab = useCallback(
-    (closeId: string) => {
-      const res = closeTab(tabs, closeId, activeTabId)
-      const nextActive = res.tabs.find((t) => t.id === res.activeId) ?? res.tabs[0]
-      activateTab(nextActive, { file: null, newTabs: res.tabs })
-    },
-    [tabs, activeTabId, activateTab]
-  )
-
   // Sync active tab on browser back/forward navigation (popstate).
   useEffect(() => {
     const handlePopState = () => {
@@ -727,22 +295,6 @@ export function CodebaseList() {
     }
     void fetchTop()
   }, [query, loadTop])
-  // Search-as-you-type: debounce keystrokes so a request goes out only
-  // after the user pauses. A scope change skips the wait — the user asked
-  // for something different, not for the same thing again.
-  useEffect(() => {
-    const scopeChanged = shownScope.current !== searchScope
-    shownScope.current = searchScope
-    if (!query.trim()) return
-    debounceTimer.current = setTimeout(() => {
-      setIssuedQuery(query)
-      void doSearch(query, searchScope)
-    }, scopeChanged ? 0 : SEARCH_DEBOUNCE_MS)
-    return () => {
-      if (debounceTimer.current) clearTimeout(debounceTimer.current)
-    }
-  }, [query, searchScope, doSearch])
-
   // The URL carries the text the last search used, so a reload or a shared
   // link brings the same query back. Skipped on the first run, so a `q` that
   // arrived in the URL is not clobbered before the reader types.

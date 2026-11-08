@@ -81,26 +81,31 @@ describe("SearchTabsBar", () => {
     expect(label.className).toContain("whitespace-nowrap")
   })
 
-  it("keeps the new-tab button outside the scrolling tab list so it stays visible", () => {
+  it("keeps the new-tab button next to the last tab, inside the scrolling strip", () => {
     renderBar([makeTab("tab-1", "one"), makeTab("tab-2", "two")])
 
     const tabList = screen.getByRole("tablist")
     const addButton = screen.getByRole("button", { name: "New search tab" })
 
-    // The list scrolls; the button does not scroll with it.
+    // The button sits in the scroll container right after the last tab, so it
+    // does not float away at the far right while there is room for it. The
+    // strip scrolls once the tabs outgrow it.
     expect(tabList.className).toContain("overflow-x-auto")
-    expect(tabList.contains(addButton)).toBe(false)
+    expect(tabList.contains(addButton)).toBe(true)
+    const children = Array.from(tabList.children)
+    expect(children[children.length - 1]).toBe(addButton)
   })
 
   it("owns its tabs directly, so the tab list has no invalid children", () => {
     renderBar([makeTab("tab-1", "one"), makeTab("tab-2", "two")])
 
     // role="tab" belongs directly under role="tablist"; the close buttons
-    // live inside the tabs, and the new-tab button lives outside.
+    // live inside the tabs. The new-tab button is the only other child, and
+    // it follows the tabs.
     const tabList = screen.getByRole("tablist")
     const children = Array.from(tabList.children)
-    expect(children).toHaveLength(2)
-    for (const child of children) {
+    expect(children).toHaveLength(3)
+    for (const child of children.slice(0, 2)) {
       expect(child.getAttribute("role")).toBe("tab")
     }
   })
