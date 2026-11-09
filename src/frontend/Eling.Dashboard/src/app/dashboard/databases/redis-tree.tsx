@@ -43,7 +43,7 @@ export function RedisKeyRow({
   onDelete: (key: string) => void
 }) {
   return (
-    <div className="flex w-full items-center" title={item.key}>
+    <div className="flex w-full items-center gap-1 pr-1" title={item.key}>
       <Button
         variant="ghost"
         size="sm"
@@ -89,7 +89,7 @@ export function RedisNodeRow({
   onDelete: (prefix: string) => void
 }) {
   return (
-    <div className="flex w-full items-center" title={item.prefix}>
+    <div className="flex w-full items-center gap-1 pr-1" title={item.prefix}>
       <Button
         variant="ghost"
         size="sm"
