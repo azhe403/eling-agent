@@ -439,21 +439,32 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
             throw new ArgumentException("key must not be blank");
         }
 
-        var mux = await _pool.GetAsync(connection, ct);
-        var server = GetServer(mux);
-        EnsureStandalone(server);
-        var db = mux.GetDatabase(database.Value);
-
-        var deleted = await db.KeyDeleteAsync(key, CommandFlags.None);
-        // A cached inspection of a gone key is a lie either way: evict on the
-        // way out so an offline read cannot resurrect it.
-        _cache.RemoveKey(connection.Id, database, key);
-        if (!deleted)
+        try
         {
-            throw new KeyNotFoundException("key not found");
-        }
+            var mux = await _pool.GetAsync(connection, ct);
+            var server = GetServer(mux);
+            EnsureStandalone(server);
+            var db = mux.GetDatabase(database.Value);
 
-        return new RedisKeyDeleteResult(true);
+            var deleted = await db.KeyDeleteAsync(key, CommandFlags.None);
+            // A cached inspection of a gone key is a lie either way: evict on the
+            // way out so an offline read cannot resurrect it.
+            _cache.RemoveKey(connection.Id, database, key);
+            if (!deleted)
+            {
+                throw new KeyNotFoundException("key not found");
+            }
+
+            return new RedisKeyDeleteResult(true);
+        }
+        catch (Exception ex) when (IsUnreachable(ex))
+        {
+            // Deletes have no cached answer to fall back to, so the failure is
+            // classified and surfaced like the reads': unreachable and
+            // credential failures both reach the route ladder as themselves.
+            _logger?.LogWarning(ex, "Redis unavailable during key delete for {Key}", key);
+            throw;
+        }
     }
 
     public async Task<RedisPrefixPreviewResult> PreviewPrefixAsync(
@@ -464,45 +475,56 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
             throw new ArgumentException("prefix must not be blank");
         }
 
-        var mux = await _pool.GetAsync(connection, ct);
-        var server = GetServer(mux);
-        EnsureStandalone(server);
-
-        var pattern = prefix + "*";
-        var keys = new List<string>();
-        long total = 0;
-        var truncated = false;
-        var sw = Stopwatch.StartNew();
-
-        var enumerable = server.KeysAsync(database.Value, pattern, DefaultPageSize, 0, 0);
-        await using var enumerator = enumerable.GetAsyncEnumerator(ct);
-        while (await enumerator.MoveNextAsync())
+        try
         {
-            total++;
-            var key = enumerator.Current.ToString();
-            if (keys.Count < 100)
+            var mux = await _pool.GetAsync(connection, ct);
+            var server = GetServer(mux);
+            EnsureStandalone(server);
+
+            var pattern = prefix + "*";
+            var keys = new List<string>();
+            long total = 0;
+            var truncated = false;
+            var sw = Stopwatch.StartNew();
+
+            var enumerable = server.KeysAsync(database.Value, pattern, DefaultPageSize, 0, 0);
+            await using var enumerator = enumerable.GetAsyncEnumerator(ct);
+            while (await enumerator.MoveNextAsync())
             {
-                keys.Add(key);
-            }
-            else
-            {
-                truncated = true;
+                total++;
+                var key = enumerator.Current.ToString();
+                if (keys.Count < 100)
+                {
+                    keys.Add(key);
+                }
+                else
+                {
+                    truncated = true;
+                }
+
+                if (total >= 2000)
+                {
+                    truncated = true;
+                    break;
+                }
+
+                if (sw.ElapsedMilliseconds >= 3000)
+                {
+                    truncated = true;
+                    break;
+                }
             }
 
-            if (total >= 2000)
-            {
-                truncated = true;
-                break;
-            }
-
-            if (sw.ElapsedMilliseconds >= 3000)
-            {
-                truncated = true;
-                break;
-            }
+            return new RedisPrefixPreviewResult(prefix, keys, total, truncated);
         }
-
-        return new RedisPrefixPreviewResult(prefix, keys, total, truncated);
+        catch (Exception ex) when (IsUnreachable(ex))
+        {
+            // A preview is a read, but the deletes' budget scan has no cache
+            // fallback either: the unreachable failure surfaces as itself so
+            // the route ladder answers it.
+            _logger?.LogWarning(ex, "Redis unavailable during prefix preview for {Prefix}", prefix);
+            throw;
+        }
     }
 
     public async Task<RedisPrefixDeleteResult> DeletePrefixAsync(
@@ -513,43 +535,54 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
             throw new ArgumentException("prefix must not be blank");
         }
 
-        var mux = await _pool.GetAsync(connection, ct);
-        var server = GetServer(mux);
-        EnsureStandalone(server);
-        var db = mux.GetDatabase(database.Value);
-
-        var pattern = prefix + "*";
-        long scanned = 0;
-        long deleted = 0;
-        var truncated = false;
-        var sw = Stopwatch.StartNew();
-
-        var enumerable = server.KeysAsync(database.Value, pattern, DefaultPageSize, 0, 0);
-        await using var enumerator = enumerable.GetAsyncEnumerator(ct);
-        while (await enumerator.MoveNextAsync())
+        try
         {
-            scanned++;
-            var key = enumerator.Current.ToString();
-            if (await db.KeyDeleteAsync(key, CommandFlags.None))
+            var mux = await _pool.GetAsync(connection, ct);
+            var server = GetServer(mux);
+            EnsureStandalone(server);
+            var db = mux.GetDatabase(database.Value);
+
+            var pattern = prefix + "*";
+            long scanned = 0;
+            long deleted = 0;
+            var truncated = false;
+            var sw = Stopwatch.StartNew();
+
+            var enumerable = server.KeysAsync(database.Value, pattern, DefaultPageSize, 0, 0);
+            await using var enumerator = enumerable.GetAsyncEnumerator(ct);
+            while (await enumerator.MoveNextAsync())
             {
-                deleted++;
-                _cache.RemoveKey(connection.Id, database, key);
+                scanned++;
+                var key = enumerator.Current.ToString();
+                if (await db.KeyDeleteAsync(key, CommandFlags.None))
+                {
+                    deleted++;
+                    _cache.RemoveKey(connection.Id, database, key);
+                }
+
+                if (scanned >= 2000)
+                {
+                    truncated = true;
+                    break;
+                }
+
+                if (sw.ElapsedMilliseconds >= 3000)
+                {
+                    truncated = true;
+                    break;
+                }
             }
 
-            if (scanned >= 2000)
-            {
-                truncated = true;
-                break;
-            }
-
-            if (sw.ElapsedMilliseconds >= 3000)
-            {
-                truncated = true;
-                break;
-            }
+            return new RedisPrefixDeleteResult(deleted, truncated);
         }
-
-        return new RedisPrefixDeleteResult(deleted, truncated);
+        catch (Exception ex) when (IsUnreachable(ex))
+        {
+            // A subtree delete cannot be finished from a cache, so the
+            // unreachable failure surfaces as itself; work already done stays
+            // deleted and its cache entries stay evicted.
+            _logger?.LogWarning(ex, "Redis unavailable during prefix delete for {Prefix}", prefix);
+            throw;
+        }
     }
 
     /// <summary>

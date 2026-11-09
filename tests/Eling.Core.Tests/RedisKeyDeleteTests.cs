@@ -139,6 +139,71 @@ public sealed class RedisKeyDeleteTests
         Assert.True(result.Truncated);
     }
 
+    [Fact]
+    public async Task DeleteKey_Unreachable_PropagatesWithoutEvicting()
+    {
+        RedisDatabaseIndex.TryCreate(0, out var db);
+        var cache = new CountingCache();
+        var service = new RedisKeyReadService(new FakePool(new TimeoutException("no connection")), cache);
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => service.DeleteKeyAsync(Connection(), db, "user:1:email"));
+
+        Assert.Empty(cache.RemovedKeys);
+    }
+
+    [Fact]
+    public async Task DeleteKey_CredentialFailure_PropagatesAsItself()
+    {
+        RedisDatabaseIndex.TryCreate(0, out var db);
+        var cache = new CountingCache();
+#pragma warning disable CS0618
+        var failure = new RedisConnectionException(
+            ConnectionFailureType.AuthenticationFailure, "WRONGPASS invalid username-password pair");
+#pragma warning restore CS0618
+        var service = new RedisKeyReadService(new FakePool(failure), cache);
+
+        await Assert.ThrowsAsync<RedisConnectionException>(
+            () => service.DeleteKeyAsync(Connection(), db, "user:1:email"));
+
+        Assert.Empty(cache.RemovedKeys);
+    }
+
+    [Fact]
+    public async Task PreviewPrefix_Unreachable_Propagates()
+    {
+        RedisDatabaseIndex.TryCreate(0, out var db);
+        var harness = NewHarness([]);
+        harness.ServerProxy.ScanError = new TimeoutException("no connection");
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => harness.Service.PreviewPrefixAsync(Connection(), db, "user:"));
+    }
+
+    [Fact]
+    public async Task DeletePrefix_ScanUnreachable_Propagates()
+    {
+        RedisDatabaseIndex.TryCreate(0, out var db);
+        var harness = NewHarness([]);
+        harness.ServerProxy.ScanError = new TimeoutException("no connection");
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => harness.Service.DeletePrefixAsync(Connection(), db, "user:"));
+    }
+
+    [Fact]
+    public async Task DeletePrefix_DeleteUnreachable_PropagatesWithoutEvicting()
+    {
+        RedisDatabaseIndex.TryCreate(0, out var db);
+        var harness = NewHarness(["user:1:email"]);
+        harness.DatabaseProxy.DeleteError = new TimeoutException("no connection");
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => harness.Service.DeletePrefixAsync(Connection(), db, "user:"));
+
+        Assert.Empty(harness.Cache.RemovedKeys);
+    }
+
     // --- fakes -----------------------------------------------------------------
 
     /// <summary>One test's wired-up service and its doubles, bundled so each test reads as arranged.</summary>
@@ -146,7 +211,8 @@ public sealed class RedisKeyDeleteTests
         RedisKeyReadService Service,
         FakePool Pool,
         CountingCache Cache,
-        DatabaseProxy DatabaseProxy);
+        DatabaseProxy DatabaseProxy,
+        ServerProxy ServerProxy);
 
     private static Harness NewHarness(IReadOnlyList<string> scanKeys)
     {
@@ -165,22 +231,27 @@ public sealed class RedisKeyDeleteTests
         var pool = new FakePool(mux);
         var cache = new CountingCache();
         var service = new RedisKeyReadService(pool, cache);
-        return new Harness(service, pool, cache, databaseCast);
+        return new Harness(service, pool, cache, databaseCast, serverProxyCast);
     }
 
     /// <summary>Counts <see cref="IRedisConnectionPool.GetAsync"/> so refusals can prove the pool was never touched.</summary>
     private sealed class FakePool : IRedisConnectionPool
     {
-        private readonly IConnectionMultiplexer _mux;
+        private readonly IConnectionMultiplexer? _mux;
+        private readonly Exception? _error;
 
         public FakePool(IConnectionMultiplexer mux) => _mux = mux;
+
+        public FakePool(Exception error) => _error = error;
 
         public int GetAsyncCalls { get; private set; }
 
         public Task<IConnectionMultiplexer> GetAsync(DatabaseConnection connection, CancellationToken ct = default)
         {
             GetAsyncCalls++;
-            return Task.FromResult(_mux);
+            return _error is not null
+                ? Task.FromException<IConnectionMultiplexer>(_error)
+                : Task.FromResult(_mux!);
         }
 
         public void Invalidate(string connectionId)
@@ -267,12 +338,19 @@ public sealed class RedisKeyDeleteTests
     {
         public bool DeleteResult { get; set; }
 
+        public Exception? DeleteError { get; set; }
+
         public List<string> DeletedKeys { get; set; } = [];
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             if (targetMethod?.Name == nameof(IDatabaseAsync.KeyDeleteAsync) && args?.Length == 2)
             {
+                if (DeleteError is not null)
+                {
+                    return Task.FromException<bool>(DeleteError);
+                }
+
                 DeletedKeys.Add(((RedisKey)args[0]!).ToString());
                 return Task.FromResult(DeleteResult);
             }
@@ -289,6 +367,8 @@ public sealed class RedisKeyDeleteTests
     {
         public List<RedisKey> Keys { get; set; } = [];
 
+        public Exception? ScanError { get; set; }
+
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             if (targetMethod?.Name == "get_ServerType")
@@ -298,7 +378,9 @@ public sealed class RedisKeyDeleteTests
 
             if (targetMethod?.Name == nameof(IServer.KeysAsync))
             {
-                return new KeyEnumerable(Keys);
+                return ScanError is not null
+                    ? new ThrowingEnumerable(ScanError)
+                    : new KeyEnumerable(Keys);
             }
 
             throw new NotImplementedException(targetMethod?.Name);
@@ -344,5 +426,29 @@ public sealed class RedisKeyDeleteTests
 
             await Task.CompletedTask;
         }
+    }
+
+    /// <summary>A fake scan whose first page never arrives: the server stops answering mid-scan.</summary>
+    private sealed class ThrowingEnumerable : IAsyncEnumerable<RedisKey>
+    {
+        private readonly Exception _error;
+
+        public ThrowingEnumerable(Exception error) => _error = error;
+
+        public IAsyncEnumerator<RedisKey> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
+            new ThrowingEnumerator(_error);
+    }
+
+    private sealed class ThrowingEnumerator : IAsyncEnumerator<RedisKey>
+    {
+        private readonly Exception _error;
+
+        public ThrowingEnumerator(Exception error) => _error = error;
+
+        public RedisKey Current => throw _error;
+
+        public ValueTask<bool> MoveNextAsync() => ValueTask.FromException<bool>(_error);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }
