@@ -96,6 +96,93 @@ public static class DatabaseKeyEndpoints
                 });
         });
 
+        group.MapDelete("/{id}/keys/delete", async (
+            string id,
+            IDatabaseConnectionStore store,
+            IRedisKeyReadService readService,
+            IAuditLogger auditLogger,
+            string key,
+            int database = 0,
+            CancellationToken ct = default) =>
+        {
+            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            if (gate.Http is not null) return gate.Http;
+            if (string.IsNullOrEmpty(key)) return Results.BadRequest("key must not be blank");
+            if (RedisKeyRoute.RefuseIndex(database, out var dbIndex) is { } refusal) return refusal;
+
+            return await RedisKeyRoute.RunAsync(
+                gate.Row!,
+                DatabaseAuditActions.RedisDelete,
+                key,
+                auditLogger,
+                ct,
+                async () =>
+                {
+                    var result = await readService.DeleteKeyAsync(gate.Row!, dbIndex, key, ct);
+                    return (object?)new RedisKeyDeleteDto(result.Deleted);
+                });
+        });
+
+        group.MapGet("/{id}/keys/preview", async (
+            string id,
+            IDatabaseConnectionStore store,
+            IRedisKeyReadService readService,
+            IAuditLogger auditLogger,
+            string prefix,
+            int database = 0,
+            CancellationToken ct = default) =>
+        {
+            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            if (gate.Http is not null) return gate.Http;
+            if (string.IsNullOrEmpty(prefix)) return Results.BadRequest("prefix must not be blank");
+            if (RedisKeyRoute.RefuseIndex(database, out var dbIndex) is { } refusal) return refusal;
+
+            return await RedisKeyRoute.RunAsync(
+                gate.Row!,
+                DatabaseAuditActions.RedisPrefixPreview,
+                prefix,
+                auditLogger,
+                ct,
+                async () =>
+                {
+                    var result = await readService.PreviewPrefixAsync(gate.Row!, dbIndex, prefix, ct);
+                    return (object?)new RedisPrefixPreviewDto(
+                        result.Prefix,
+                        result.Keys.ToArray(),
+                        result.Total,
+                        result.Truncated);
+                },
+                resultCountOf: answer => answer is RedisPrefixPreviewDto dto ? (int)dto.Total : null);
+        });
+
+        group.MapDelete("/{id}/keys/prefix", async (
+            string id,
+            IDatabaseConnectionStore store,
+            IRedisKeyReadService readService,
+            IAuditLogger auditLogger,
+            string prefix,
+            int database = 0,
+            CancellationToken ct = default) =>
+        {
+            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            if (gate.Http is not null) return gate.Http;
+            if (string.IsNullOrEmpty(prefix)) return Results.BadRequest("prefix must not be blank");
+            if (RedisKeyRoute.RefuseIndex(database, out var dbIndex) is { } refusal) return refusal;
+
+            return await RedisKeyRoute.RunAsync(
+                gate.Row!,
+                DatabaseAuditActions.RedisPrefixDelete,
+                prefix,
+                auditLogger,
+                ct,
+                async () =>
+                {
+                    var result = await readService.DeletePrefixAsync(gate.Row!, dbIndex, prefix, ct);
+                    return (object?)new RedisPrefixDeleteDto(result.Deleted, result.Truncated);
+                },
+                resultCountOf: answer => answer is RedisPrefixDeleteDto dto ? (int)dto.Deleted : null);
+        });
+
         group.MapPost("/{id}/keys/command", async (
             string id,
             RedisCommandRequest req,

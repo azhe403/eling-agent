@@ -55,7 +55,8 @@ public static class RedisKeyRoute
         string query,
         IAuditLogger auditLogger,
         CancellationToken ct,
-        Func<Task<object?>> work)
+        Func<Task<object?>> work,
+        Func<object?, int?>? resultCountOf = null)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
@@ -71,6 +72,7 @@ public static class RedisKeyRoute
                 Target = row.Id,
                 Outcome = AuditOutcome.Success,
                 Query = query,
+                ResultCount = resultCountOf?.Invoke(answer),
                 DurationMs = (int)sw.ElapsedMilliseconds
             }, ct);
             return Results.Ok(answer);

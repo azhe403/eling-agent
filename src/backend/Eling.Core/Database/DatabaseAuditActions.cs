@@ -29,5 +29,7 @@ public static class DatabaseAuditActions
 
     public const string RedisDelete = "redis_delete";
 
+    public const string RedisPrefixPreview = "redis_prefix_preview";
+
     public const string RedisPrefixDelete = "redis_prefix_delete";
 }

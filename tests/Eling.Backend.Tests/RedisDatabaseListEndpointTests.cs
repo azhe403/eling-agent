@@ -148,5 +148,26 @@ public sealed class RedisDatabaseListEndpointTests : IAsyncLifetime
             IReadOnlyList<string> args,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException("command is not part of this test.");
+
+        public Task<RedisKeyDeleteResult> DeleteKeyAsync(
+            DatabaseConnection connection,
+            RedisDatabaseIndex database,
+            string key,
+            CancellationToken ct = default)
+            => throw new NotSupportedException("delete is not part of this test.");
+
+        public Task<RedisPrefixPreviewResult> PreviewPrefixAsync(
+            DatabaseConnection connection,
+            RedisDatabaseIndex database,
+            string prefix,
+            CancellationToken ct = default)
+            => throw new NotSupportedException("preview is not part of this test.");
+
+        public Task<RedisPrefixDeleteResult> DeletePrefixAsync(
+            DatabaseConnection connection,
+            RedisDatabaseIndex database,
+            string prefix,
+            CancellationToken ct = default)
+            => throw new NotSupportedException("prefix delete is not part of this test.");
     }
 }
