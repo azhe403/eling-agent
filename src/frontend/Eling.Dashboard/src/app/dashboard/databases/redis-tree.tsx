@@ -1,5 +1,7 @@
 "use client"
 
+import { Trash2 } from "lucide-react"
+
 import { Button } from "@/components/ui/button"
 
 import { RedisPage, redisPageKey } from "./redis-browser"
@@ -33,25 +35,40 @@ export function RedisKeyRow({
   item,
   active,
   onSelect,
+  onDelete,
 }: {
   item: { key: string; type: string; ttlSeconds: number }
   active: boolean
   onSelect: (key: string) => void
+  onDelete: (key: string) => void
 }) {
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      title={item.key}
-      className={`flex w-full items-center justify-start gap-1.5 rounded px-1.5 py-1 text-left hover:bg-accent ${active ? "border border-primary" : ""}`}
-      onClick={() => onSelect(item.key)}
-    >
-      <span className="shrink-0 text-xs">🔑</span>
-      <span className="min-w-0 flex-1 truncate font-mono text-xs">{item.key}</span>
-      <span className="shrink-0 pl-2 text-xs tabular-nums text-muted-foreground">
-        {item.type} · {formatTtl(item.ttlSeconds)}
-      </span>
-    </Button>
+    <div className="flex w-full items-center" title={item.key}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className={`min-w-0 flex-1 items-center justify-start gap-1.5 rounded px-1.5 py-1 text-left hover:bg-accent ${active ? "border border-primary" : ""}`}
+        onClick={() => onSelect(item.key)}
+      >
+        <span className="shrink-0 text-xs">🔑</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs">{item.key}</span>
+        <span className="shrink-0 pl-2 text-xs tabular-nums text-muted-foreground">
+          {item.type} · {formatTtl(item.ttlSeconds)}
+        </span>
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="size-6 shrink-0 p-0"
+        aria-label={`Delete key ${item.key}`}
+        onClick={(e) => {
+          e.stopPropagation()
+          onDelete(item.key)
+        }}
+      >
+        <Trash2 className="size-3.5" />
+      </Button>
+    </div>
   )
 }
 
@@ -64,22 +81,39 @@ export function RedisNodeRow({
   item,
   expanded,
   onToggle,
+  onDelete,
 }: {
   item: { segment: string; prefix: string }
   expanded: boolean
   onToggle: () => void
+  onDelete: (prefix: string) => void
 }) {
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      title={item.prefix}
-      className="flex w-full items-center justify-start gap-1.5 rounded px-1.5 py-1 text-left hover:bg-accent"
-      onClick={onToggle}
-    >
-      <span className="shrink-0 text-xs">{expanded ? "▾" : "▸"}</span>
-      <span className="min-w-0 flex-1 truncate text-xs font-medium">📁 {item.segment}</span>
-    </Button>
+    <div className="flex w-full items-center" title={item.prefix}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="min-w-0 flex-1 items-center justify-start gap-1.5 rounded px-1.5 py-1 text-left hover:bg-accent"
+        onClick={onToggle}
+      >
+        <span className="shrink-0 text-xs">{expanded ? "▾" : "▸"}</span>
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">📁 {item.segment}</span>
+      </Button>
+      {item.prefix === "" ? null : (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="size-6 shrink-0 p-0"
+          aria-label={`Delete prefix ${item.prefix}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete(item.prefix)
+          }}
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      )}
+    </div>
   )
 }
 
@@ -100,6 +134,8 @@ export function RedisPrefixTree({
   inspectKey,
   onToggle,
   onSelectKey,
+  onDeleteKey = () => {},
+  onDeletePrefix = () => {},
 }: {
   connId: string
   db: number
@@ -109,6 +145,13 @@ export function RedisPrefixTree({
   inspectKey: string
   onToggle: (prefix: string) => void
   onSelectKey: (key: string) => void
+  /**
+   * Delete asks from the rows, wired by the page (Task 5). Optional until then
+   * so the only caller (RedisBrowser) needs no change in this task: a trash
+   * click before wiring is a silent no-op.
+   */
+  onDeleteKey?: (key: string) => void
+  onDeletePrefix?: (prefix: string) => void
 }) {
   const page = pages[redisPageKey(connId, db, prefix)]
   if (!page) return <p className="px-2 text-xs text-muted-foreground">Loading…</p>
@@ -118,7 +161,12 @@ export function RedisPrefixTree({
         const isExpanded = expanded.has(redisPageKey(connId, db, n.prefix))
         return (
           <div key={n.prefix} className="space-y-0.5">
-            <RedisNodeRow item={n} expanded={isExpanded} onToggle={() => onToggle(n.prefix)} />
+            <RedisNodeRow
+              item={n}
+              expanded={isExpanded}
+              onToggle={() => onToggle(n.prefix)}
+              onDelete={onDeletePrefix}
+            />
             {isExpanded ? (
               <div className="ml-2 space-y-0.5 border-l pl-1.5">
                 <RedisPrefixTree
@@ -130,6 +178,8 @@ export function RedisPrefixTree({
                   inspectKey={inspectKey}
                   onToggle={onToggle}
                   onSelectKey={onSelectKey}
+                  onDeleteKey={onDeleteKey}
+                  onDeletePrefix={onDeletePrefix}
                 />
               </div>
             ) : null}
@@ -142,6 +192,7 @@ export function RedisPrefixTree({
           item={k}
           active={inspectKey === k.key}
           onSelect={onSelectKey}
+          onDelete={onDeleteKey}
         />
       ))}
     </div>
