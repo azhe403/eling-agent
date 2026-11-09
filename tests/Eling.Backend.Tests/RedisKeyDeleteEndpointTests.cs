@@ -258,8 +258,7 @@ public sealed class RedisKeyDeleteEndpointTests : IAsyncLifetime
 
         public Task<IReadOnlyList<RedisDatabaseInfo>> ListDatabasesAsync(
             DatabaseConnection connection,
-            CancellationToken cancellationToken = default,
-            bool preferCache = true)
+            CancellationToken cancellationToken = default)
             => throw new NotSupportedException("databases are not part of this test.");
 
         public Task<KeyPage> ScanAsync(
@@ -269,8 +268,7 @@ public sealed class RedisKeyDeleteEndpointTests : IAsyncLifetime
             long cursor,
             int pageOffset,
             int pageSize,
-            CancellationToken cancellationToken = default,
-            bool preferCache = true)
+            CancellationToken cancellationToken = default)
             => throw new NotSupportedException("scan is not part of this test.");
 
         public Task<KeyInspectResult> InspectAsync(
