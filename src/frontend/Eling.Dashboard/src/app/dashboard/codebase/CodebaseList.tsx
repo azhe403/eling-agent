@@ -124,23 +124,12 @@ export function CodebaseList() {
     selection,
     searchScope,
     query,
-    setQuery,
     issuedQuery,
-    setIssuedQuery,
     results,
     fileResults,
-    setResults,
-    setFileResults,
     searchError,
-    setSearchError,
     searching,
-    setSearching,
     searchLimit,
-    setSearchLimit,
-    searchSeq,
-    debounceTimer,
-    pendingNavTabId,
-    shownScope,
     doSearch,
     activateTab,
     selectTab,
@@ -148,6 +137,7 @@ export function CodebaseList() {
     closeSearchTab,
     handleLimitChange,
     applySearchScope,
+    searchNow,
     handleQueryChange,
     applySelection,
     openFile,
@@ -295,26 +285,6 @@ export function CodebaseList() {
     }
     void fetchTop()
   }, [query, loadTop])
-  // The URL carries the text the last search used, so a reload or a shared
-  // link brings the same query back. Skipped on the first run, so a `q` that
-  // arrived in the URL is not clobbered before the reader types.
-  const urlSyncReady = useRef(false)
-  useEffect(() => {
-    if (!urlSyncReady.current) {
-      urlSyncReady.current = true
-      return
-    }
-    if (pendingNavTabId.current) return
-    if (queryFromParams(searchParams) === issuedQuery) return
-    writeUrl({
-      tab: activeTab.id,
-      selection,
-      scope: searchScope,
-      query: issuedQuery,
-      file: selectedFile,
-    })
-  }, [issuedQuery, searchParams, selection, searchScope, selectedFile, writeUrl, activeTab.id])
-
   // Live refresh via SSE: the backend broadcasts "codebase" on every index
   // rebuild (button, MCP call, or background watcher, any process) and
   // "runtimes" on membership changes. No polling — refresh only on events.
@@ -681,8 +651,7 @@ export function CodebaseList() {
             onSubmit={(e) => {
               e.preventDefault()
               // Enter searches immediately instead of waiting for the debounce.
-              if (debounceTimer.current) clearTimeout(debounceTimer.current)
-              void doSearch(query, searchScope)
+              searchNow()
             }}
           >
             <SearchScopeToggle

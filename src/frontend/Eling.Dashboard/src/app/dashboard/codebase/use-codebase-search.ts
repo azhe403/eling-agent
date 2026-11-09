@@ -334,6 +334,34 @@ export function useCodebaseSearch({
       if (debounceTimer.current) clearTimeout(debounceTimer.current)
     }
   }, [query, searchScope, doSearch])
+  // The URL carries the text the last search used, so a reload or a shared
+  // link brings the same query back. Skipped on the first run, so a `q` that
+  // arrived in the URL is not clobbered before the reader types.
+  const urlSyncReady = useRef(false)
+  useEffect(() => {
+    if (!urlSyncReady.current) {
+      urlSyncReady.current = true
+      return
+    }
+    if (pendingNavTabId.current) return
+    if (queryFromParams(searchParams) === issuedQuery) return
+    writeUrl({
+      tab: activeTabId,
+      selection,
+      scope: searchScope,
+      query: issuedQuery,
+      file: selectedFile,
+    })
+  }, [issuedQuery, searchParams, selection, searchScope, selectedFile, writeUrl, activeTabId])
+  /**
+   * Searches right away, without waiting out the debounce. The pending
+   * timer is dropped so it cannot fire a second, older search afterwards.
+   */
+  const searchNow = useCallback(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current)
+    setIssuedQuery(query)
+    void doSearch(query, searchScope)
+  }, [query, searchScope, doSearch])
   /** The result limit changed; the search runs again under the new limit. */
   const handleLimitChange = useCallback(
     (newLimit: number) => {
@@ -424,23 +452,12 @@ export function useCodebaseSearch({
     selection,
     searchScope,
     query,
-    setQuery,
     issuedQuery,
-    setIssuedQuery,
     results,
     fileResults,
-    setResults,
-    setFileResults,
     searchError,
-    setSearchError,
     searching,
-    setSearching,
     searchLimit,
-    setSearchLimit,
-    searchSeq,
-    debounceTimer,
-    pendingNavTabId,
-    shownScope,
     doSearch,
     activateTab,
     selectTab,
@@ -448,6 +465,7 @@ export function useCodebaseSearch({
     closeSearchTab,
     handleLimitChange,
     applySearchScope,
+    searchNow,
     handleQueryChange,
     applySelection,
     openFile,
