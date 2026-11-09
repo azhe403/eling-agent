@@ -381,8 +381,7 @@ export function useRedisBrowser({
         })
         void fetchRedisPrefix(connId, db, redisRootPrefix)
         void loadRedisDatabases(connId)
-        const total = redisPreview?.prefix === prefix ? redisPreview.total : result.deleted
-        notifyDb("success", "Redis keys deleted", `${total} keys under ${prefix}`)
+        notifyDb("success", "Redis keys deleted", `${result.deleted} keys under ${prefix}`)
         setRedisPrefixPreviewOpen(false)
       } catch (e: unknown) {
         notifyDb("error", "Redis delete failed", e instanceof Error ? e.message : String(e))
@@ -390,7 +389,7 @@ export function useRedisBrowser({
         setRedisMutating(false)
       }
     },
-    [redisInspectKey, redisPreview, redisRootPrefix, fetchRedisPrefix, loadRedisDatabases, notifyDb]
+    [redisInspectKey, redisRootPrefix, fetchRedisPrefix, loadRedisDatabases, notifyDb]
   )
 
   /** Opens or closes a Redis connection in the tree. */

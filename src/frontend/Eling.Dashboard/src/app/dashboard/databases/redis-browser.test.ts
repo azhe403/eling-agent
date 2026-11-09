@@ -345,7 +345,7 @@ describe("useRedisBrowser delete", () => {
         )
       }
       if (url.includes("/keys/prefix") && method === "DELETE") {
-        return new Response(JSON.stringify({ deleted: 3, truncated: false }), { status: 200 })
+        return new Response(JSON.stringify({ deleted: 2, truncated: false }), { status: 200 })
       }
       if (url.includes("/keys/databases")) {
         return new Response(JSON.stringify([{ index: 0, keys: 2 }]), { status: 200 })
@@ -513,5 +513,24 @@ describe("useRedisBrowser delete", () => {
 
     expect(result.current.redisInspectKey).toBe("")
     expect(result.current.redisPrefixPreviewOpen).toBe(false)
+  })
+
+  it("toasts the count the server actually deleted, not the preview total", async () => {
+    stubRedisFetch()
+    const { result, notifyDb } = renderBrowser()
+
+    // The preview said total 3; the server deleted only 2 (e.g. the subtree
+    // shrank after the preview, or the run was truncated).
+    await act(async () => {
+      await result.current.previewRedisPrefix("c1", 0, "users:")
+    })
+    expect(result.current.redisPreview?.total).toBe(3)
+
+    await act(async () => {
+      await result.current.deleteRedisPrefix("c1", 0, "users:")
+    })
+
+    expect(notifyDb).toHaveBeenCalledWith("success", "Redis keys deleted", "2 keys under users:")
+    expect(notifyDb).not.toHaveBeenCalledWith("success", "Redis keys deleted", "3 keys under users:")
   })
 })
