@@ -151,6 +151,16 @@ export function Databases() {
     redisPrefix,
     setRedisPrefix,
     redisRootPrefix,
+    redisDeleteTarget,
+    setRedisDeleteTarget,
+    redisDeleteOpen,
+    setRedisDeleteOpen,
+    redisPrefixPreviewTarget,
+    redisPrefixPreviewOpen,
+    setRedisPrefixPreviewOpen,
+    redisPreview,
+    redisPreviewLoading,
+    redisMutating,
     loadRedisDatabases,
     fetchRedisPrefix,
     loadMoreRedis,
@@ -161,6 +171,9 @@ export function Databases() {
     selectRedisKey,
     toggleRedisConn,
     openRedisDb,
+    deleteRedisKey,
+    previewRedisPrefix,
+    deleteRedisPrefix,
   } = useRedisBrowser({
     notifyDb,
     activeTable,
@@ -982,6 +995,13 @@ export function Databases() {
           redisLoading={redisLoading}
           redisInspect={redisInspect}
           redisInspectOpen={redisInspectOpen}
+          redisDeleteTarget={redisDeleteTarget}
+          redisDeleteOpen={redisDeleteOpen}
+          redisPreview={redisPreview}
+          redisPreviewLoading={redisPreviewLoading}
+          redisMutating={redisMutating}
+          redisPrefixPreviewOpen={redisPrefixPreviewOpen}
+          redisPrefixPreviewTarget={redisPrefixPreviewTarget}
           isWide={isWide}
           retryLabel={retryLabel}
           onSortChange={setConnSort}
@@ -1037,6 +1057,12 @@ export function Databases() {
             setRedisInspectOpen(false)
           }}
           onInspectOpenChange={setRedisInspectOpen}
+          onDeleteTargetChange={setRedisDeleteTarget}
+          onDeleteOpenChange={setRedisDeleteOpen}
+          onPrefixPreviewOpenChange={setRedisPrefixPreviewOpen}
+          onPreviewPrefix={previewRedisPrefix}
+          onConfirmDeleteKey={deleteRedisKey}
+          onConfirmDeletePrefix={deleteRedisPrefix}
         />
 
         {treeCtxMenu ? (

@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button"
 import { DbTab, DbConn, QueryResult, SchemaInfo, RedisInspect } from "@/app/dashboard/databases/types"
 import { isRedisTab } from "@/app/dashboard/databases/db-tabs"
-import type { RedisPage } from "@/app/dashboard/databases/redis-browser"
+import type { RedisPage, RedisPrefixPreview } from "@/app/dashboard/databases/redis-browser"
 import { ConnectionTree } from "./connection-tree/ConnectionTree"
 import { SchemaView } from "./schema-view/SchemaView"
 import { DataGrid } from "./data-grid/DataGrid"
@@ -53,6 +53,13 @@ export interface ExplorerPanelsProps {
   redisLoading: boolean
   redisInspect: RedisInspect | null
   redisInspectOpen: boolean
+  redisDeleteTarget: string | null
+  redisDeleteOpen: boolean
+  redisPreview: RedisPrefixPreview | null
+  redisPreviewLoading: boolean
+  redisMutating: boolean
+  redisPrefixPreviewOpen: boolean
+  redisPrefixPreviewTarget: string | null
   isWide: boolean
   /** The countdown a schema read shows while it retries, or null. */
   retryLabel: (key: string) => string | null
@@ -89,6 +96,12 @@ export interface ExplorerPanelsProps {
   onCollapseAll: (connId: string, db: number) => void
   onCloseInspect: () => void
   onInspectOpenChange: (open: boolean) => void
+  onDeleteTargetChange: (key: string | null) => void
+  onDeleteOpenChange: (open: boolean) => void
+  onPrefixPreviewOpenChange: (open: boolean) => void
+  onPreviewPrefix: (connId: string, db: number, prefix: string) => void
+  onConfirmDeleteKey: (connId: string, db: number, key: string) => void
+  onConfirmDeletePrefix: (connId: string, db: number, prefix: string) => void
 }
 
 /**
@@ -102,7 +115,9 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
     selectedId, selectedIsReadOnly, selectedIsRedis, browseResult, browseTotal, browseLoading,
     mutating, editingCell, editValue, savingCell, newRow, pkNames, sql, qResult, qLoading,
     activeRedisDb, redisPrefix, redisRootPrefix, redisPages, redisExpanded, redisInspectKey,
-    redisLoading, redisInspect, redisInspectOpen, isWide, retryLabel,
+    redisLoading, redisInspect, redisInspectOpen,
+    redisDeleteTarget, redisDeleteOpen, redisPreview, redisPreviewLoading, redisMutating,
+    redisPrefixPreviewOpen, redisPrefixPreviewTarget, isWide, retryLabel,
   } = props
 
   const activeIsRedis = isRedisTab(activeTable)
@@ -185,6 +200,13 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
             redisLoading={redisLoading}
             redisInspect={redisInspect}
             redisInspectOpen={redisInspectOpen}
+            redisDeleteTarget={redisDeleteTarget}
+            redisDeleteOpen={redisDeleteOpen}
+            redisPreview={redisPreview}
+            redisPreviewLoading={redisPreviewLoading}
+            redisMutating={redisMutating}
+            redisPrefixPreviewOpen={redisPrefixPreviewOpen}
+            redisPrefixPreviewTarget={redisPrefixPreviewTarget}
             conns={conns}
             isWide={isWide}
             onPrefixChange={props.onPrefixChange}
@@ -196,6 +218,12 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
             onCollapseAll={props.onCollapseAll}
             onCloseInspect={props.onCloseInspect}
             onInspectOpenChange={props.onInspectOpenChange}
+            onDeleteTargetChange={props.onDeleteTargetChange}
+            onDeleteOpenChange={props.onDeleteOpenChange}
+            onPrefixPreviewOpenChange={props.onPrefixPreviewOpenChange}
+            onPreviewPrefix={props.onPreviewPrefix}
+            onConfirmDeleteKey={props.onConfirmDeleteKey}
+            onConfirmDeletePrefix={props.onConfirmDeletePrefix}
           />
         ) : null}
 

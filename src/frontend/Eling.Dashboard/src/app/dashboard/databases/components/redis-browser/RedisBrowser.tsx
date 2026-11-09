@@ -6,6 +6,9 @@ import { X } from "lucide-react"
 import { useMemo } from "react"
 import { DbConn, DbTab, RedisPage } from "@/app/dashboard/databases/types"
 import { RedisPrefixTree, formatTtl } from "@/app/dashboard/databases/redis-tree"
+import type { RedisPrefixPreview } from "@/app/dashboard/databases/redis-browser"
+import { RedisDeleteConfirmDialog } from "../dialogs/RedisDeleteConfirmDialog"
+import { RedisPrefixDeleteConfirmDialog } from "../dialogs/RedisPrefixDeleteConfirmDialog"
 import { redisPageKey, redisPageScope } from "@/app/dashboard/databases/redis-browser"
 
 /** The value a key holds, as the inspector reads it. */
@@ -45,6 +48,19 @@ export interface RedisBrowserProps {
   onCollapseAll: (connId: string, db: number) => void
   onCloseInspect: () => void
   onInspectOpenChange: (open: boolean) => void
+  redisDeleteTarget: string | null
+  redisDeleteOpen: boolean
+  redisPreview: RedisPrefixPreview | null
+  redisPreviewLoading: boolean
+  redisMutating: boolean
+  redisPrefixPreviewOpen: boolean
+  redisPrefixPreviewTarget: string | null
+  onDeleteTargetChange: (key: string | null) => void
+  onDeleteOpenChange: (open: boolean) => void
+  onPrefixPreviewOpenChange: (open: boolean) => void
+  onPreviewPrefix: (connId: string, db: number, prefix: string) => void
+  onConfirmDeleteKey: (connId: string, db: number, key: string) => void
+  onConfirmDeletePrefix: (connId: string, db: number, prefix: string) => void
 }
 
 export const RedisBrowser = ({
@@ -69,6 +85,19 @@ export const RedisBrowser = ({
   onCollapseAll,
   onCloseInspect,
   onInspectOpenChange,
+  redisDeleteTarget,
+  redisDeleteOpen,
+  redisPreview,
+  redisPreviewLoading,
+  redisMutating,
+  redisPrefixPreviewOpen,
+  redisPrefixPreviewTarget,
+  onDeleteTargetChange,
+  onDeleteOpenChange,
+  onPrefixPreviewOpenChange,
+  onPreviewPrefix,
+  onConfirmDeleteKey,
+  onConfirmDeletePrefix,
 }: RedisBrowserProps) => {
   const connId = activeTable?.connId ?? ""
   const rootKey = redisPageKey(connId, activeRedisDb, redisRootPrefix)
@@ -207,6 +236,8 @@ export const RedisBrowser = ({
                   inspectKey={redisInspectKey}
                   onToggle={(prefix) => connId && onTogglePrefix(connId, prefix)}
                   onSelectKey={(key) => onSelectKey(key)}
+                  onDeleteKey={(key) => { onDeleteTargetChange(key); onDeleteOpenChange(true) }}
+                  onDeletePrefix={(prefix) => { if (connId) void onPreviewPrefix(connId, activeRedisDb, prefix) }}
                 />
               ) : (
                 <p className="text-sm text-muted-foreground">
@@ -246,6 +277,30 @@ export const RedisBrowser = ({
               {inspectBody}
             </DialogContent>
           </Dialog>
+        ) : null}
+
+        {connId && redisDeleteTarget ? (
+          <RedisDeleteConfirmDialog
+            open={redisDeleteOpen}
+            keyName={redisDeleteTarget}
+            mutating={redisMutating}
+            onConfirm={() => void onConfirmDeleteKey(connId, activeRedisDb, redisDeleteTarget)}
+            onCancel={() => { onDeleteTargetChange(null); onDeleteOpenChange(false) }}
+          />
+        ) : null}
+
+        {connId && redisPrefixPreviewTarget ? (
+          <RedisPrefixDeleteConfirmDialog
+            open={redisPrefixPreviewOpen}
+            prefix={redisPreview?.prefix ?? redisPrefixPreviewTarget}
+            total={redisPreview?.total ?? 0}
+            keys={redisPreview?.keys ?? []}
+            truncated={redisPreview?.truncated ?? false}
+            loading={redisPreviewLoading}
+            mutating={redisMutating}
+            onConfirm={() => void onConfirmDeletePrefix(connId, activeRedisDb, redisPrefixPreviewTarget)}
+            onCancel={() => onPrefixPreviewOpenChange(false)}
+          />
         ) : null}
       </CardContent>
     </Card>

@@ -134,8 +134,8 @@ export function RedisPrefixTree({
   inspectKey,
   onToggle,
   onSelectKey,
-  onDeleteKey = () => {},
-  onDeletePrefix = () => {},
+  onDeleteKey,
+  onDeletePrefix,
 }: {
   connId: string
   db: number
@@ -145,13 +145,9 @@ export function RedisPrefixTree({
   inspectKey: string
   onToggle: (prefix: string) => void
   onSelectKey: (key: string) => void
-  /**
-   * Delete asks from the rows, wired by the page (Task 5). Optional until then
-   * so the only caller (RedisBrowser) needs no change in this task: a trash
-   * click before wiring is a silent no-op.
-   */
-  onDeleteKey?: (key: string) => void
-  onDeletePrefix?: (prefix: string) => void
+  /** Delete asks from the rows, wired by the caller to the delete dialogs. */
+  onDeleteKey: (key: string) => void
+  onDeletePrefix: (prefix: string) => void
 }) {
   const page = pages[redisPageKey(connId, db, prefix)]
   if (!page) return <p className="px-2 text-xs text-muted-foreground">Loading…</p>

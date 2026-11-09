@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { DbConn, DbTab, RedisInspect } from "../types"
-import type { RedisDbInfo, RedisPage } from "../redis-browser"
+import type { RedisDbInfo, RedisPage, RedisPrefixPreview } from "../redis-browser"
 import {
   fetchRedisDatabases,
+  fetchRedisKeyDelete,
+  fetchRedisPrefixPreview,
+  fetchRedisPrefixDelete,
   parseRedisDb,
   pickRedisDb,
   redisPageKey,
@@ -61,6 +64,20 @@ export function useRedisBrowser({
    * tree until the reader asks for it.
    */
   const [redisRootPrefix, setRedisRootPrefix] = useState("")
+  /**
+   * The delete confirmation the dialog names: the key or the prefix the trash
+   * button asked for, and whether that dialog is open. The open flags are
+   * separate from the targets so a cancel can close without losing where the
+   * dialog would reopen.
+   */
+  const [redisDeleteTarget, setRedisDeleteTarget] = useState<string | null>(null)
+  const [redisDeleteOpen, setRedisDeleteOpen] = useState(false)
+  const [redisPrefixPreviewTarget, setRedisPrefixPreviewTarget] = useState<string | null>(null)
+  const [redisPrefixPreviewOpen, setRedisPrefixPreviewOpen] = useState(false)
+  /** The preview a subtree delete confirms against; null until one loads. */
+  const [redisPreview, setRedisPreview] = useState<RedisPrefixPreview | null>(null)
+  const [redisPreviewLoading, setRedisPreviewLoading] = useState(false)
+  const [redisMutating, setRedisMutating] = useState(false)
   const redisInFlightRef = useRef(0)
   /** Guards the inspector against an answer for a key that is no longer shown. */
   const redisInspectRequestRef = useRef(0)
@@ -249,6 +266,133 @@ export function useRedisBrowser({
     [activeTable, activeRedisDb, notifyDb]
   )
 
+  /**
+   * Delete one key from the dashboard. No optimistic removal: the tree keeps
+   * showing the key until the server confirms, and a failure keeps the
+   * dialog open so the reader can cancel or retry.
+   *
+   * On success the inspector is cleared when it names the deleted key, the
+   * cached pages of this database drop the key, and the root page plus the
+   * database list are reloaded so the count matches.
+   */
+  const deleteRedisKey = useCallback(
+    async (connId: string, db: number, key: string) => {
+      setRedisMutating(true)
+      try {
+        await fetchRedisKeyDelete(connId, db, key)
+        if (redisInspectKey === key) {
+          setRedisInspect(null)
+          setRedisInspectKey("")
+          setRedisInspectOpen(false)
+        }
+        const scope = redisPageScope(connId, db)
+        setRedisPages((prev) => {
+          const next = { ...prev }
+          for (const pageKey of Object.keys(next)) {
+            if (!pageKey.startsWith(scope)) continue
+            const page = next[pageKey]
+            next[pageKey] = { ...page, keys: page.keys.filter((item) => item.key !== key) }
+          }
+          return next
+        })
+        void fetchRedisPrefix(connId, db, redisRootPrefix)
+        void loadRedisDatabases(connId)
+        notifyDb("success", "Redis key deleted", key)
+        setRedisDeleteOpen(false)
+      } catch (e: unknown) {
+        notifyDb("error", "Redis delete failed", e instanceof Error ? e.message : String(e))
+      } finally {
+        setRedisMutating(false)
+      }
+    },
+    [redisInspectKey, redisRootPrefix, fetchRedisPrefix, loadRedisDatabases, notifyDb]
+  )
+
+  /**
+   * Read the affected keys of one subtree before the delete dialog confirms,
+   * so the reader sees what will go away. The dialog opens as the preview
+   * loads; a failed preview closes it again rather than showing an empty list.
+   */
+  const previewRedisPrefix = useCallback(
+    async (connId: string, db: number, prefix: string) => {
+      setRedisPrefixPreviewTarget(prefix)
+      setRedisPreview(null)
+      setRedisPreviewLoading(true)
+      setRedisPrefixPreviewOpen(true)
+      try {
+        const preview = await fetchRedisPrefixPreview(connId, db, prefix)
+        setRedisPreview(preview)
+      } catch (e: unknown) {
+        notifyDb("error", "Redis preview failed", e instanceof Error ? e.message : String(e))
+        setRedisPrefixPreviewOpen(false)
+      } finally {
+        setRedisPreviewLoading(false)
+      }
+    },
+    [notifyDb]
+  )
+
+  /**
+   * Delete every key under one subtree, after the preview named them. Same
+   * pattern as the single key: the inspector is cleared when it names a key
+   * inside the subtree, pages of this database inside the subtree are
+   * dropped, and the root plus the database list reload. A failure keeps the
+   * dialog open.
+   */
+  const deleteRedisPrefix = useCallback(
+    async (connId: string, db: number, prefix: string) => {
+      setRedisMutating(true)
+      try {
+        const result = await fetchRedisPrefixDelete(connId, db, prefix)
+        if (redisInspectKey !== "" && redisInspectKey.startsWith(prefix)) {
+          setRedisInspect(null)
+          setRedisInspectKey("")
+          setRedisInspectOpen(false)
+        }
+        const scope = redisPageScope(connId, db)
+        setRedisPages((prev) => {
+          const next: Record<string, RedisPage> = {}
+          for (const [pageKey, page] of Object.entries(prev)) {
+            if (!pageKey.startsWith(scope)) {
+              next[pageKey] = page
+              continue
+            }
+            if (page.prefix === prefix || page.prefix.startsWith(prefix)) continue
+            next[pageKey] = {
+              ...page,
+              nodes: page.nodes.filter((n) => !(n.prefix === prefix || n.prefix.startsWith(prefix))),
+              keys: page.keys.filter((k) => !k.key.startsWith(prefix)),
+            }
+          }
+          return next
+        })
+        setRedisExpanded((prev) => {
+          const next = new Set<string>()
+          for (const entry of prev) {
+            if (!entry.startsWith(scope)) {
+              next.add(entry)
+              continue
+            }
+            const suffix = entry.slice(scope.length)
+            if (suffix === prefix || suffix.startsWith(prefix)) continue
+            next.add(entry)
+          }
+          return next
+        })
+        void fetchRedisPrefix(connId, db, redisRootPrefix)
+        void loadRedisDatabases(connId)
+        const total = redisPreview?.prefix === prefix ? redisPreview.total : result.deleted
+        notifyDb("success", "Redis keys deleted", `${total} keys under ${prefix}`)
+        setRedisPrefixPreviewOpen(false)
+      } catch (e: unknown) {
+        notifyDb("error", "Redis delete failed", e instanceof Error ? e.message : String(e))
+      } finally {
+        setRedisMutating(false)
+      }
+    },
+    [redisInspectKey, redisPreview, redisRootPrefix, fetchRedisPrefix, loadRedisDatabases, notifyDb]
+  )
+
   /** Opens or closes a Redis connection in the tree. */
   const toggleRedisConn = useCallback(
     (id: string) => {
@@ -314,6 +458,17 @@ export function useRedisBrowser({
     setRedisPrefix,
     redisRootPrefix,
     setRedisRootPrefix,
+    redisDeleteTarget,
+    setRedisDeleteTarget,
+    redisDeleteOpen,
+    setRedisDeleteOpen,
+    redisPrefixPreviewTarget,
+    redisPrefixPreviewOpen,
+    setRedisPrefixPreviewOpen,
+    redisPreview,
+    setRedisPreview,
+    redisPreviewLoading,
+    redisMutating,
     activeRedisDb,
     redisSetLoading,
     loadRedisDatabases,
@@ -326,6 +481,9 @@ export function useRedisBrowser({
     selectRedisKey,
     toggleRedisConn,
     openRedisDb,
+    deleteRedisKey,
+    previewRedisPrefix,
+    deleteRedisPrefix,
   }
 }
 

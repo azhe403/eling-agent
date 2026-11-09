@@ -7,6 +7,8 @@
  * and without a Redis server.
  */
 
+import { API, parseApiError } from "./utils/connection-helpers"
+
 /** One logical Redis database, as the server reports it. */
 export type RedisDbInfo = {
   index: number
@@ -30,6 +32,24 @@ export type RedisPage = {
   complete: boolean
   scanned: number
 }
+
+/** The answer to deleting one Redis key from the dashboard: the key is gone. */
+export type RedisKeyDeleteResult = { deleted: boolean }
+
+/**
+ * The flat list of keys under one prefix, for the subtree delete dialog: the
+ * capped list the operator confirms against, the full count, and whether the
+ * scan budget cut it short.
+ */
+export type RedisPrefixPreview = {
+  prefix: string
+  keys: string[]
+  total: number
+  truncated: boolean
+}
+
+/** The answer to deleting one prefix subtree: how many keys actually went. */
+export type RedisPrefixDeleteResult = { deleted: number; truncated: boolean }
 
 /** The name of a database in the tree. */
 export const dbRowLabel = (db: RedisDbInfo): string => `db${db.index}`
@@ -149,4 +169,73 @@ export const dbRowAsOf = (db: RedisDbInfo): string | null => {
   const when = new Date(db.cachedAt)
   if (Number.isNaN(when.getTime())) return "cached"
   return `as of ${when.toLocaleString()}`
+}
+
+/**
+ * Delete one Redis key.
+ *
+ * The key travels in the query string, never as a path segment: keys may
+ * contain `/`, `:` or `%` and would split the route.
+ */
+export const fetchRedisKeyDelete = async (
+  connId: string,
+  database: number,
+  key: string,
+): Promise<RedisKeyDeleteResult> => {
+  const qs = new URLSearchParams()
+  qs.set("database", String(database))
+  qs.set("key", key)
+  const response = await fetch(`${API}/${connId}/keys/delete?${qs.toString()}`, { method: "DELETE" })
+  if (!response.ok) throw new Error(parseApiError(await response.text()))
+  const body = (await response.json()) as { deleted?: unknown }
+  return { deleted: body?.deleted === true }
+}
+
+/**
+ * The flat list of keys under one prefix, for the subtree delete dialog.
+ */
+export const fetchRedisPrefixPreview = async (
+  connId: string,
+  database: number,
+  prefix: string,
+): Promise<RedisPrefixPreview> => {
+  const qs = new URLSearchParams()
+  qs.set("database", String(database))
+  qs.set("prefix", prefix)
+  const response = await fetch(`${API}/${connId}/keys/preview?${qs.toString()}`)
+  if (!response.ok) throw new Error(parseApiError(await response.text()))
+  const body = (await response.json()) as {
+    prefix?: unknown
+    keys?: unknown
+    total?: unknown
+    truncated?: unknown
+  }
+  return {
+    prefix: typeof body?.prefix === "string" ? body.prefix : prefix,
+    keys: Array.isArray(body?.keys)
+      ? body.keys.filter((k): k is string => typeof k === "string")
+      : [],
+    total: typeof body?.total === "number" ? body.total : 0,
+    truncated: body?.truncated === true,
+  }
+}
+
+/**
+ * Delete every key under one prefix subtree.
+ */
+export const fetchRedisPrefixDelete = async (
+  connId: string,
+  database: number,
+  prefix: string,
+): Promise<RedisPrefixDeleteResult> => {
+  const qs = new URLSearchParams()
+  qs.set("database", String(database))
+  qs.set("prefix", prefix)
+  const response = await fetch(`${API}/${connId}/keys/prefix?${qs.toString()}`, { method: "DELETE" })
+  if (!response.ok) throw new Error(parseApiError(await response.text()))
+  const body = (await response.json()) as { deleted?: unknown; truncated?: unknown }
+  return {
+    deleted: typeof body?.deleted === "number" ? body.deleted : 0,
+    truncated: body?.truncated === true,
+  }
 }
