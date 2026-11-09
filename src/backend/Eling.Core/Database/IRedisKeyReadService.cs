@@ -1,8 +1,10 @@
 namespace Eling.Core.Database;
 
 /// <summary>
-/// The read-only Redis surface: browse a connection as a lazy key tree, inspect
-/// one key, and run a whitelisted command. Nothing here writes.
+/// The Redis surface: browse a connection as a lazy key tree, inspect one key,
+/// run a whitelisted command, and — for the dashboard only — delete one key or a
+/// whole prefix subtree. The deletes are human-initiated writes from the
+/// Databases page; the command console and the agent surface stay read-only.
 /// </summary>
 public interface IRedisKeyReadService
 {
@@ -31,4 +33,22 @@ public interface IRedisKeyReadService
     Task<IReadOnlyList<RedisDatabaseInfo>> ListDatabasesAsync(
         DatabaseConnection connection,
         CancellationToken cancellationToken = default);
+
+    Task<RedisKeyDeleteResult> DeleteKeyAsync(
+        DatabaseConnection connection,
+        RedisDatabaseIndex database,
+        string key,
+        CancellationToken ct = default);
+
+    Task<RedisPrefixPreviewResult> PreviewPrefixAsync(
+        DatabaseConnection connection,
+        RedisDatabaseIndex database,
+        string prefix,
+        CancellationToken ct = default);
+
+    Task<RedisPrefixDeleteResult> DeletePrefixAsync(
+        DatabaseConnection connection,
+        RedisDatabaseIndex database,
+        string prefix,
+        CancellationToken ct = default);
 }

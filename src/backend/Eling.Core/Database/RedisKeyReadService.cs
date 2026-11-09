@@ -431,6 +431,127 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
         return new KeyInspectPreview(type.ToString().ToLowerInvariant(), entries, truncated);
     }
 
+    public async Task<RedisKeyDeleteResult> DeleteKeyAsync(
+        DatabaseConnection connection, RedisDatabaseIndex database, string key, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            throw new ArgumentException("key must not be blank");
+        }
+
+        var mux = await _pool.GetAsync(connection, ct);
+        var server = GetServer(mux);
+        EnsureStandalone(server);
+        var db = mux.GetDatabase(database.Value);
+
+        var deleted = await db.KeyDeleteAsync(key, CommandFlags.None);
+        // A cached inspection of a gone key is a lie either way: evict on the
+        // way out so an offline read cannot resurrect it.
+        _cache.RemoveKey(connection.Id, database, key);
+        if (!deleted)
+        {
+            throw new KeyNotFoundException("key not found");
+        }
+
+        return new RedisKeyDeleteResult(true);
+    }
+
+    public async Task<RedisPrefixPreviewResult> PreviewPrefixAsync(
+        DatabaseConnection connection, RedisDatabaseIndex database, string prefix, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(prefix))
+        {
+            throw new ArgumentException("prefix must not be blank");
+        }
+
+        var mux = await _pool.GetAsync(connection, ct);
+        var server = GetServer(mux);
+        EnsureStandalone(server);
+
+        var pattern = prefix + "*";
+        var keys = new List<string>();
+        long total = 0;
+        var truncated = false;
+        var sw = Stopwatch.StartNew();
+
+        var enumerable = server.KeysAsync(database.Value, pattern, DefaultPageSize, 0, 0);
+        await using var enumerator = enumerable.GetAsyncEnumerator(ct);
+        while (await enumerator.MoveNextAsync())
+        {
+            total++;
+            var key = enumerator.Current.ToString();
+            if (keys.Count < 100)
+            {
+                keys.Add(key);
+            }
+            else
+            {
+                truncated = true;
+            }
+
+            if (total >= 2000)
+            {
+                truncated = true;
+                break;
+            }
+
+            if (sw.ElapsedMilliseconds >= 3000)
+            {
+                truncated = true;
+                break;
+            }
+        }
+
+        return new RedisPrefixPreviewResult(prefix, keys, total, truncated);
+    }
+
+    public async Task<RedisPrefixDeleteResult> DeletePrefixAsync(
+        DatabaseConnection connection, RedisDatabaseIndex database, string prefix, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(prefix))
+        {
+            throw new ArgumentException("prefix must not be blank");
+        }
+
+        var mux = await _pool.GetAsync(connection, ct);
+        var server = GetServer(mux);
+        EnsureStandalone(server);
+        var db = mux.GetDatabase(database.Value);
+
+        var pattern = prefix + "*";
+        long scanned = 0;
+        long deleted = 0;
+        var truncated = false;
+        var sw = Stopwatch.StartNew();
+
+        var enumerable = server.KeysAsync(database.Value, pattern, DefaultPageSize, 0, 0);
+        await using var enumerator = enumerable.GetAsyncEnumerator(ct);
+        while (await enumerator.MoveNextAsync())
+        {
+            scanned++;
+            var key = enumerator.Current.ToString();
+            if (await db.KeyDeleteAsync(key, CommandFlags.None))
+            {
+                deleted++;
+                _cache.RemoveKey(connection.Id, database, key);
+            }
+
+            if (scanned >= 2000)
+            {
+                truncated = true;
+                break;
+            }
+
+            if (sw.ElapsedMilliseconds >= 3000)
+            {
+                truncated = true;
+                break;
+            }
+        }
+
+        return new RedisPrefixDeleteResult(deleted, truncated);
+    }
+
     /// <summary>
     /// Answers a console <c>SCAN</c> from the service's own bounded paging path
     /// (spec 6 rule 6) instead of executing it. The console may name a

@@ -26,4 +26,8 @@ public static class DatabaseAuditActions
     public const string RedisCommand = "redis_command";
 
     public const string RedisDatabases = "redis_databases";
+
+    public const string RedisDelete = "redis_delete";
+
+    public const string RedisPrefixDelete = "redis_prefix_delete";
 }
