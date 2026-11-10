@@ -3,11 +3,12 @@ using Eling.Core.Database;
 namespace Eling.Core.Tests;
 
 /// <summary>
-/// The Redis read cache is the offline fallback: the keyspace is never cached,
-/// only the database list and single-key inspections, and neither for longer
-/// than a day. These tests pin the rules that make that safe — an entry is
-/// scoped to its connection, to its database, and to its key, and a removed
-/// key stops being served.
+/// The Redis read cache is the offline fallback: only the database list,
+/// scan pages, and single-key inspections survive a dead server, marked
+/// FromCache and no longer than a day. These tests pin the rules that make
+/// that safe — an entry is scoped to its connection, to its database, and
+/// when it is a page, to its prefix and cursor. A removed key stops being
+/// served.
 /// </summary>
 public sealed class JsonRedisReadCacheTests : IDisposable
 {
@@ -135,6 +136,112 @@ public sealed class JsonRedisReadCacheTests : IDisposable
 
         Assert.False(TryDb(cache, " ", out _, out _));
         Assert.False(cache.TryGetKey("c1", db, string.Empty, out _, out _));
+    }
+
+    [Fact]
+    public void Pages_KeepAKeyThatLeftTheKeyspace_FlaggedExpired()
+    {
+        var cache = NewCache();
+        Assert.True(RedisDatabaseIndex.TryCreate(0, out var db));
+
+        // The page as it was: two keys.
+        cache.SetPage("c1", db, "", 0, 0, 200, PageWithKeys("keep:1", "gone:1"));
+
+        // The next scan no longer sees gone:1 - it expired.
+        cache.SetPage("c1", db, "", 0, 0, 200, PageWithKeys("keep:1"));
+
+        Assert.True(cache.TryGetPage("c1", db, "", 0, 0, 200, out var value, out _));
+        var keys = value!.Keys;
+        // The row stays in the tree instead of disappearing on its own.
+        Assert.Equal(["keep:1", "gone:1"], keys.Select(k => k.Key));
+        var expired = keys.Single(k => k.Key == "gone:1");
+        Assert.True(expired.Expired);
+        // Nothing is left to count down from, so the flag carries the meaning.
+        Assert.Equal(-1, expired.TtlSeconds);
+        Assert.Null(expired.ExpiresAt);
+        // The key that is still there is not flagged.
+        Assert.False(keys.Single(k => k.Key == "keep:1").Expired);
+    }
+
+    [Fact]
+    public void Pages_DropTheFlagWhenTheKeyComesBack()
+    {
+        var cache = NewCache();
+        Assert.True(RedisDatabaseIndex.TryCreate(0, out var db));
+
+        cache.SetPage("c1", db, "", 0, 0, 200, PageWithKeys("keep:1"));
+        cache.SetPage("c1", db, "", 0, 0, 200, PageWithKeys("keep:1", "back:1"));
+        // back:1 vanishes, so it is carried as expired...
+        cache.SetPage("c1", db, "", 0, 0, 200, PageWithKeys("keep:1"));
+        Assert.True(cache.TryGetPage("c1", db, "", 0, 0, 200, out var expiredPage, out _));
+        Assert.True(expiredPage!.Keys.Single(k => k.Key == "back:1").Expired);
+
+        // ...and when the writer recreates it, the server's own row wins: no flag.
+        cache.SetPage("c1", db, "", 0, 0, 200, PageWithKeys("keep:1", "back:1"));
+
+        Assert.True(cache.TryGetPage("c1", db, "", 0, 0, 200, out var revived, out _));
+        Assert.False(revived!.Keys.Single(k => k.Key == "back:1").Expired);
+    }
+
+    [Fact]
+    public void Pages_DoNotInventKeysTheCacheNeverSaw()
+    {
+        var cache = NewCache();
+        Assert.True(RedisDatabaseIndex.TryCreate(0, out var db));
+
+        // Nothing cached yet, so the first page is simply the server's answer.
+        cache.SetPage("c1", db, "", 0, 0, 200, PageWithKeys("only:1"));
+
+        Assert.True(cache.TryGetPage("c1", db, "", 0, 0, 200, out var value, out _));
+        Assert.Equal(["only:1"], value!.Keys.Select(k => k.Key));
+    }
+
+    private static KeyPage PageWithKeys(params string[] keys) => new(
+        "",
+        [new KeyNode("session", "session:")],
+        keys.Select(k => new KeyLeaf(k, "string", -1)).ToList(),
+        Cursor: 0,
+        PageOffset: 0,
+        Complete: true,
+        Scanned: keys.Length);
+
+    private static KeyPage Page(string prefix) => new(
+        prefix,
+        [new KeyNode("session", "session:")],
+        [new KeyLeaf("session:abc", "string", -1)],
+        Cursor: 0,
+        PageOffset: 0,
+        Complete: true,
+        Scanned: 1);
+
+    [Fact]
+    public void Pages_RoundTrip()
+    {
+        var cache = NewCache();
+        Assert.True(RedisDatabaseIndex.TryCreate(3, out var db));
+
+        cache.SetPage("c1", db, "session:", 0, 0, 200, Page("session:"));
+
+        Assert.True(cache.TryGetPage("c1", db, "session:", 0, 0, 200, out var value, out var at));
+        Assert.Equal(["session:abc"], value!.Keys.Select(k => k.Key));
+        Assert.NotNull(at);
+    }
+
+    [Fact]
+    public void Pages_AreScopedToTheirCoordinates()
+    {
+        var cache = NewCache();
+        Assert.True(RedisDatabaseIndex.TryCreate(0, out var db0));
+        Assert.True(RedisDatabaseIndex.TryCreate(1, out var db1));
+
+        cache.SetPage("c1", db0, "p:", 42, 0, 200, Page("p:"));
+
+        Assert.False(cache.TryGetPage("c1", db1, "p:", 42, 0, 200, out _, out _));
+        Assert.False(cache.TryGetPage("c2", db0, "p:", 42, 0, 200, out _, out _));
+        Assert.False(cache.TryGetPage("c1", db0, "other:", 42, 0, 200, out _, out _));
+        Assert.False(cache.TryGetPage("c1", db0, "p:", 43, 0, 200, out _, out _));
+        Assert.False(cache.TryGetPage("c1", db0, "p:", 42, 0, 500, out _, out _));
+        Assert.True(cache.TryGetPage("c1", db0, "p:", 42, 0, 200, out _, out _));
     }
 
     [Fact]

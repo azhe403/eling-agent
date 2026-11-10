@@ -26,8 +26,17 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
     }
 
     public async Task<IReadOnlyList<RedisDatabaseInfo>> ListDatabasesAsync(
-        DatabaseConnection connection, CancellationToken ct = default)
+        DatabaseConnection connection, CancellationToken ct = default, bool preferCache = true)
     {
+        if (preferCache
+            && _cache.TryGetDatabases(connection.Id, out var snapshot, out var snapshotAt)
+            && snapshot is not null)
+        {
+            return snapshot
+                .Select(db => db with { FromCache = true, CachedAt = snapshotAt })
+                .ToList();
+        }
+
         try
         {
             var live = await ListDatabasesLiveAsync(connection, ct);
@@ -131,12 +140,45 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
     }
 
     public async Task<KeyPage> ScanAsync(
-        DatabaseConnection connection, RedisDatabaseIndex database, string prefix, long cursor, int pageOffset, int pageSize, CancellationToken ct = default)
+        DatabaseConnection connection, RedisDatabaseIndex database, string prefix, long cursor, int pageOffset, int pageSize, CancellationToken ct = default, bool preferCache = true)
     {
         prefix ??= string.Empty;
         if (prefix.Length > 1024) throw new ArgumentException("prefix too long");
 
         pageSize = Math.Clamp(pageSize, 1, 500);
+
+        if (preferCache
+            && _cache.TryGetPage(connection.Id, database, prefix, cursor, pageOffset, pageSize, out var snapshot, out var snapshotAt)
+            && snapshot is not null)
+        {
+            return PageWithCurrentTtl(snapshot) with { FromCache = true, CachedAt = snapshotAt };
+        }
+
+        try
+        {
+            var live = await ScanLiveAsync(connection, database, prefix, cursor, pageOffset, pageSize, ct);
+            // The live scan is what the reader gets, but it is not what the tree
+            // may take blindly: a key that left the keyspace comes back flagged,
+            // not erased, because the page is what the reader is watching.
+            var merged = _cache.SetPage(connection.Id, database, prefix, cursor, pageOffset, pageSize, live);
+            return merged;
+        }
+        catch (Exception ex) when (IsUnreachable(ex))
+        {
+            if (_cache.TryGetPage(connection.Id, database, prefix, cursor, pageOffset, pageSize, out var cached, out var cachedAt)
+                && cached is not null)
+            {
+                _logger?.LogWarning(ex, "Redis unavailable; serving cached scan page for {Id}", connection.Id);
+                return PageWithCurrentTtl(cached) with { FromCache = true, CachedAt = cachedAt };
+            }
+
+            throw;
+        }
+    }
+
+    private async Task<KeyPage> ScanLiveAsync(
+        DatabaseConnection connection, RedisDatabaseIndex database, string prefix, long cursor, int pageOffset, int pageSize, CancellationToken ct = default)
+    {
 
         var mux = await _pool.GetAsync(connection, ct);
         var server = GetServer(mux);
@@ -210,6 +252,26 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
         return new KeyPage(prefix, nodeMap.Values.ToList(), leafList, newCursor, newPageOffset, complete, scanned);
     }
 
+    private static KeyPage PageWithCurrentTtl(KeyPage page)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var keys = page.Keys
+            .Select(key =>
+            {
+                var expires = key.ExpiresAt;
+                if (expires is null)
+                {
+                    return key with { TtlSeconds = key.TtlSeconds < 0 ? -1L : 0 };
+                }
+
+                var left = expires.Value - now;
+                return key with { TtlSeconds = left <= TimeSpan.Zero ? 0 : (long)left.TotalSeconds };
+            })
+            .ToList();
+
+        return page with { Keys = keys };
+    }
+
     /// <summary>
     /// TYPE and TTL for each leaf, pipelined in one batch. A key that vanished
     /// between SCAN and TYPE (type None) is dropped rather than shown.
@@ -228,13 +290,16 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
             ttlTasks[k] = batch.KeyTimeToLiveAsync(k);
         }
         batch.Execute();
+        var now = DateTimeOffset.UtcNow;
         foreach (var k in leafKeys)
         {
             var rt = await typeTasks[k];
             if (rt == RedisType.None) continue;
             var ttl = await ttlTasks[k];
             var ttlSec = ttl.HasValue ? (long)ttl.Value.TotalSeconds : -1L;
-            leafList.Add(new KeyLeaf(k, rt.ToString().ToLowerInvariant(), ttlSec));
+            var hasPositiveTtl = ttl.HasValue && ttl.Value > TimeSpan.Zero;
+            DateTimeOffset? expiresAt = hasPositiveTtl ? now.Add(ttl.Value) : null;
+            leafList.Add(new KeyLeaf(k, rt.ToString().ToLowerInvariant(), ttlSec, expiresAt));
         }
         return leafList;
     }
@@ -273,6 +338,92 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
 
             throw;
         }
+    }
+
+    /// <summary>
+    /// Whether a key is still there, and its TTL.
+    ///
+    /// One EXISTS and one TTL, live only: this answers "is the row on screen
+    /// still true", so a cached answer would defeat its only purpose. A key
+    /// that is gone also drops its cached inspection - the stored preview now
+    /// describes a key nobody can open.
+    /// </summary>
+    public async Task<RedisKeyProbeResult> ProbeKeyAsync(
+        DatabaseConnection connection, RedisDatabaseIndex database, string key, CancellationToken ct = default)
+    {
+        var mux = await _pool.GetAsync(connection, ct);
+        EnsureStandalone(GetServer(mux));
+        var db = mux.GetDatabase(database.Value);
+
+        var exists = await db.KeyExistsAsync(key);
+        if (!exists)
+        {
+            _cache.RemoveKey(connection.Id, database, key);
+            return new RedisKeyProbeResult(key, false, -1L, null);
+        }
+
+        var ttl = await db.KeyTimeToLiveAsync(key);
+        var ttlSec = ttl.HasValue ? (long)ttl.Value.TotalSeconds : -1L;
+        DateTimeOffset? expires = ttl.HasValue && ttl.Value > TimeSpan.Zero
+            ? DateTimeOffset.UtcNow.Add(ttl.Value)
+            : null;
+
+        return new RedisKeyProbeResult(key, true, ttlSec, expires);
+    }
+
+    /// <summary>
+    /// The same question for many keys, in one pipelined round trip.
+    ///
+    /// Short-lived keys expire in bunches - a job finishing, a queue draining -
+    /// and asking one at a time would turn that single moment into a burst of
+    /// round trips that all say the same thing. EXISTS and TTL are both sent
+    /// together in a batch, so the cost is one round trip regardless of how
+    /// many keys came due.
+    /// </summary>
+    public async Task<IReadOnlyList<RedisKeyProbeResult>> ProbeKeysAsync(
+        DatabaseConnection connection, RedisDatabaseIndex database, IReadOnlyList<string> keys, CancellationToken ct = default)
+    {
+        if (keys.Count == 0) return [];
+
+        var mux = await _pool.GetAsync(connection, ct);
+        EnsureStandalone(GetServer(mux));
+        var db = mux.GetDatabase(database.Value);
+
+        // A key named twice is one key: the dictionaries below are keyed by it.
+        var wanted = keys.Distinct(StringComparer.Ordinal).ToList();
+
+        var batch = db.CreateBatch();
+        var existsTasks = new Dictionary<string, Task<bool>>(wanted.Count, StringComparer.Ordinal);
+        var ttlTasks = new Dictionary<string, Task<TimeSpan?>>(wanted.Count, StringComparer.Ordinal);
+        foreach (var key in wanted)
+        {
+            existsTasks[key] = batch.KeyExistsAsync(key);
+            ttlTasks[key] = batch.KeyTimeToLiveAsync(key);
+        }
+        batch.Execute();
+
+        var now = DateTimeOffset.UtcNow;
+        var results = new List<RedisKeyProbeResult>(wanted.Count);
+        foreach (var key in wanted)
+        {
+            if (!await existsTasks[key])
+            {
+                // The row on screen describes a key nobody can open any more.
+                _cache.RemoveKey(connection.Id, database, key);
+                results.Add(new RedisKeyProbeResult(key, false, -1L, null));
+                continue;
+            }
+
+            var ttl = await ttlTasks[key];
+            var ttlSec = ttl.HasValue ? (long)ttl.Value.TotalSeconds : -1L;
+            DateTimeOffset? expires = ttl.HasValue && ttl.Value > TimeSpan.Zero
+                ? now.Add(ttl.Value)
+                : null;
+
+            results.Add(new RedisKeyProbeResult(key, true, ttlSec, expires));
+        }
+
+        return results;
     }
 
     private async Task<KeyInspectResult> InspectLiveAsync(
@@ -631,7 +782,7 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
         if (prefix.Contains('?') || prefix.Contains('[') || (pattern.Contains('*') && !pattern.EndsWith('*')))
             throw new ArgumentException("SCAN via the console supports a prefix pattern only; use the key tree for globs");
 
-        var page = await ScanAsync(connection, database, prefix, cursor, 0, DefaultPageSize, ct);
+        var page = await ScanAsync(connection, database, prefix, cursor, 0, DefaultPageSize, ct, preferCache: false);
 
         // Spec 5.2: these nodes are not a complete level, only the ones this
         // one page's scan happened to cross - the rest arrive on a later page.

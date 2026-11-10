@@ -121,7 +121,7 @@ public sealed class RedisDatabaseListEndpointTests : IAsyncLifetime
     private sealed class StubRedisKeyReadService(IReadOnlyList<RedisDatabaseInfo> databases) : IRedisKeyReadService
     {
         public Task<IReadOnlyList<RedisDatabaseInfo>> ListDatabasesAsync(
-            DatabaseConnection connection, CancellationToken cancellationToken = default)
+            DatabaseConnection connection, CancellationToken cancellationToken = default, bool preferCache = true)
             => Task.FromResult(databases);
 
         public Task<KeyPage> ScanAsync(
@@ -131,7 +131,8 @@ public sealed class RedisDatabaseListEndpointTests : IAsyncLifetime
             long cursor,
             int pageOffset,
             int pageSize,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            bool preferCache = true)
             => throw new NotSupportedException("scan is not part of this test.");
 
         public Task<KeyInspectResult> InspectAsync(
@@ -140,6 +141,20 @@ public sealed class RedisDatabaseListEndpointTests : IAsyncLifetime
             string key,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException("inspect is not part of this test.");
+
+        public Task<RedisKeyProbeResult> ProbeKeyAsync(
+            DatabaseConnection connection,
+            RedisDatabaseIndex database,
+            string key,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("probe is not part of this test.");
+
+        public Task<IReadOnlyList<RedisKeyProbeResult>> ProbeKeysAsync(
+            DatabaseConnection connection,
+            RedisDatabaseIndex database,
+            IReadOnlyList<string> keys,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("probe is not part of this test.");
 
         public Task<RedisCommandResult> ExecuteCommandAsync(
             DatabaseConnection connection,

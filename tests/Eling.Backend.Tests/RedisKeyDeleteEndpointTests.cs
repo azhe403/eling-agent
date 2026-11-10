@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Eling.Backend.Endpoints;
 using Eling.Core.Audit;
@@ -110,6 +111,165 @@ public sealed class RedisKeyDeleteEndpointTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.True(document.RootElement.GetProperty("deleted").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ProbeKey_UnknownId_NotFound()
+    {
+        var response = await _client.GetAsync("/api/databases/nope/keys/probe?key=user:1:email");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ProbeKey_NonRedis_BadRequestContainsKeyBrowsingRequiresRedis()
+    {
+        var id = await RegisterConnection("local.sqlite", DatabaseProvider.Sqlite, "Data Source=local.db");
+
+        var response = await _client.GetAsync($"/api/databases/{id}/keys/probe?key=user:1:email");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("key browsing requires Redis", body);
+    }
+
+    [Fact]
+    public async Task ProbeKey_BlankKey_BadRequest()
+    {
+        var id = await RegisterConnection("dev-ibl-redis", DatabaseProvider.Redis, "dev-ibl-redis.internal:6379");
+
+        var response = await _client.GetAsync($"/api/databases/{id}/keys/probe?key=");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ProbeKey_OutOfRangeDatabase_BadRequestRefusesIndex()
+    {
+        var id = await RegisterConnection("dev-ibl-redis", DatabaseProvider.Redis, "dev-ibl-redis.internal:6379");
+
+        var response = await _client.GetAsync($"/api/databases/{id}/keys/probe?database=16&key=user:1:email");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("database must be an integer between 0 and 15", body);
+    }
+
+    [Fact]
+    public async Task ProbeKey_ExistingKey_AnswersLiveExpiry()
+    {
+        _stub.ProbeBehavior = key => Task.FromResult(new RedisKeyProbeResult(
+            key, true, 120, DateTimeOffset.UtcNow.AddSeconds(120)));
+        var id = await RegisterConnection("dev-ibl-redis", DatabaseProvider.Redis, "dev-ibl-redis.internal:6379");
+
+        var response = await _client.GetAsync($"/api/databases/{id}/keys/probe?key=user:1:email");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        Assert.Equal("user:1:email", root.GetProperty("key").GetString());
+        Assert.True(root.GetProperty("exists").GetBoolean());
+        Assert.Equal(120, root.GetProperty("ttlSeconds").GetInt64());
+        Assert.False(string.IsNullOrEmpty(root.GetProperty("expiresAt").GetString()));
+    }
+
+    [Fact]
+    public async Task ProbeKey_GoneKey_AnswersExistsFalseRatherThan404()
+    {
+        // A recheck is a question about a row already on screen; "it is gone" is
+        // an answer, not a failure, so it is a 200 with exists:false.
+        _stub.ProbeBehavior = key => Task.FromResult(new RedisKeyProbeResult(key, false, -1, null));
+        var id = await RegisterConnection("dev-ibl-redis", DatabaseProvider.Redis, "dev-ibl-redis.internal:6379");
+
+        var response = await _client.GetAsync($"/api/databases/{id}/keys/probe?key=user:1:email");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(document.RootElement.GetProperty("exists").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ProbeKeys_EmptyList_BadRequest()
+    {
+        var id = await RegisterConnection("dev-ibl-redis", DatabaseProvider.Redis, "dev-ibl-redis.internal:6379");
+
+        var response = await _client.PostAsJsonAsync($"/api/databases/{id}/keys/probe", new { database = 0, keys = Array.Empty<string>() });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ProbeKeys_BlankKeysOnly_BadRequest()
+    {
+        var id = await RegisterConnection("dev-ibl-redis", DatabaseProvider.Redis, "dev-ibl-redis.internal:6379");
+
+        var response = await _client.PostAsJsonAsync($"/api/databases/{id}/keys/probe", new { database = 0, keys = new[] { "", "" } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ProbeKeys_NonRedis_BadRequest()
+    {
+        var id = await RegisterConnection("local.sqlite", DatabaseProvider.Sqlite, "Data Source=local.db");
+
+        var response = await _client.PostAsJsonAsync($"/api/databases/{id}/keys/probe", new { database = 0, keys = new[] { "a" } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ProbeKeys_OutOfRangeDatabase_BadRequestRefusesIndex()
+    {
+        var id = await RegisterConnection("dev-ibl-redis", DatabaseProvider.Redis, "dev-ibl-redis.internal:6379");
+
+        var response = await _client.PostAsJsonAsync($"/api/databases/{id}/keys/probe", new { database = 16, keys = new[] { "a" } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("database must be an integer between 0 and 15", body);
+    }
+
+    [Fact]
+    public async Task ProbeKeys_AnswersEachKeyOnce()
+    {
+        _stub.ProbeManyBehavior = keys => Task.FromResult<IReadOnlyList<RedisKeyProbeResult>>(
+            keys.Distinct(StringComparer.Ordinal)
+                .Select(k => new RedisKeyProbeResult(k, k != "gone:1", k == "gone:1" ? -1L : 60, null))
+                .ToList());
+        var id = await RegisterConnection("dev-ibl-redis", DatabaseProvider.Redis, "dev-ibl-redis.internal:6379");
+
+        // The same key named twice is one key: it must not come back twice.
+        var response = await _client.PostAsJsonAsync($"/api/databases/{id}/keys/probe", new
+        {
+            database = 3,
+            keys = new[] { "alive:1", "gone:1", "alive:1" },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var rows = document.RootElement.EnumerateArray().ToList();
+        Assert.Equal(2, rows.Count);
+        var alive = rows.Single(r => r.GetProperty("key").GetString() == "alive:1");
+        Assert.True(alive.GetProperty("exists").GetBoolean());
+        var gone = rows.Single(r => r.GetProperty("key").GetString() == "gone:1");
+        Assert.False(gone.GetProperty("exists").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ProbeKeys_TooManyKeys_BadRequest()
+    {
+        var id = await RegisterConnection("dev-ibl-redis", DatabaseProvider.Redis, "dev-ibl-redis.internal:6379");
+
+        var response = await _client.PostAsJsonAsync($"/api/databases/{id}/keys/probe", new
+        {
+            database = 0,
+            keys = Enumerable.Range(0, 501).Select(i => $"k{i}").ToArray(),
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("at most 500 keys per probe", body);
     }
 
     [Fact]
@@ -235,6 +395,13 @@ public sealed class RedisKeyDeleteEndpointTests : IAsyncLifetime
         public Func<string, Task<RedisPrefixDeleteResult>> PrefixDeleteBehavior { get; set; } =
             _ => Task.FromResult(new RedisPrefixDeleteResult(2, false));
 
+        public Func<string, Task<RedisKeyProbeResult>> ProbeBehavior { get; set; } =
+            key => Task.FromResult(new RedisKeyProbeResult(key, false, -1L, null));
+
+        public Func<IReadOnlyList<string>, Task<IReadOnlyList<RedisKeyProbeResult>>> ProbeManyBehavior { get; set; } =
+            keys => Task.FromResult<IReadOnlyList<RedisKeyProbeResult>>(
+                keys.Select(k => new RedisKeyProbeResult(k, false, -1L, null)).ToList());
+
         public Task<RedisKeyDeleteResult> DeleteKeyAsync(
             DatabaseConnection connection,
             RedisDatabaseIndex database,
@@ -258,7 +425,8 @@ public sealed class RedisKeyDeleteEndpointTests : IAsyncLifetime
 
         public Task<IReadOnlyList<RedisDatabaseInfo>> ListDatabasesAsync(
             DatabaseConnection connection,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            bool preferCache = true)
             => throw new NotSupportedException("databases are not part of this test.");
 
         public Task<KeyPage> ScanAsync(
@@ -268,8 +436,23 @@ public sealed class RedisKeyDeleteEndpointTests : IAsyncLifetime
             long cursor,
             int pageOffset,
             int pageSize,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            bool preferCache = true)
             => throw new NotSupportedException("scan is not part of this test.");
+
+        public Task<RedisKeyProbeResult> ProbeKeyAsync(
+            DatabaseConnection connection,
+            RedisDatabaseIndex database,
+            string key,
+            CancellationToken cancellationToken = default)
+            => ProbeBehavior(key);
+
+        public Task<IReadOnlyList<RedisKeyProbeResult>> ProbeKeysAsync(
+            DatabaseConnection connection,
+            RedisDatabaseIndex database,
+            IReadOnlyList<string> keys,
+            CancellationToken cancellationToken = default)
+            => ProbeManyBehavior(keys);
 
         public Task<KeyInspectResult> InspectAsync(
             DatabaseConnection connection,

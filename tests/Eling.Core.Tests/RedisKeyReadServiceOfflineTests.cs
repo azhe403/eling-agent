@@ -7,10 +7,8 @@ namespace Eling.Core.Tests;
 /// The point of the Redis read cache is a server that cannot be reached. These
 /// tests stand a pool in front of the service that fails the way a dead server
 /// fails, and pin what the reader gets back: the cached answer, marked cached,
-/// or the original failure when nothing was cached.
-///
-/// The keyspace is deliberately absent from this: a stale tree is a lie, so
-/// only the database list and single-key inspections have an offline answer.
+/// or the original failure when nothing was cached. ListDatabases, Scan and
+/// Inspect all follow the same offline-fallback standard.
 /// </summary>
 public sealed class RedisKeyReadServiceOfflineTests : IDisposable
 {
@@ -81,6 +79,39 @@ public sealed class RedisKeyReadServiceOfflineTests : IDisposable
 
         await Assert.ThrowsAsync<TimeoutException>(() =>
             Service(cache).ListDatabasesAsync(Connection()));
+    }
+
+    private static KeyPage ScanPage(string prefix) => new(
+        prefix,
+        [new KeyNode("session", "session:")],
+        [new KeyLeaf("session:abc", "string", -1)],
+        Cursor: 0,
+        PageOffset: 0,
+        Complete: true,
+        Scanned: 1);
+
+    [Fact]
+    public async Task Scan_WhenTheServerIsDownAndThePageWasCached_AnswersFromCache()
+    {
+        var cache = NewCache();
+        Assert.True(RedisDatabaseIndex.TryCreate(0, out var db));
+        cache.SetPage("c1", db, "session:", 0, 0, 200, ScanPage("session:"));
+
+        var result = await Service(cache).ScanAsync(Connection(), db, "session:", 0, 0, 200);
+
+        Assert.True(result.FromCache);
+        Assert.NotNull(result.CachedAt);
+        Assert.Equal(["session:abc"], result.Keys.Select(k => k.Key));
+    }
+
+    [Fact]
+    public async Task Scan_WhenTheServerIsDownAndNothingWasCached_Throws()
+    {
+        var cache = NewCache();
+        Assert.True(RedisDatabaseIndex.TryCreate(0, out var db));
+
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            Service(cache).ScanAsync(Connection(), db, "", 0, 0, 200));
     }
 
     [Fact]

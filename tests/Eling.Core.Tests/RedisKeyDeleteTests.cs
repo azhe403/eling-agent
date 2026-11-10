@@ -314,7 +314,7 @@ public sealed class RedisKeyDeleteTests
             return false;
         }
 
-        public void SetPage(
+        public KeyPage SetPage(
             string connectionId,
             RedisDatabaseIndex database,
             string prefix,
@@ -322,8 +322,7 @@ public sealed class RedisKeyDeleteTests
             int pageOffset,
             int pageSize,
             KeyPage value)
-        {
-        }
+            => value;
 
         public void InvalidateConnection(string connectionId)
         {

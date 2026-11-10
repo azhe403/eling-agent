@@ -7,4 +7,6 @@ public sealed record KeyPage(
     long Cursor,
     int PageOffset,
     bool Complete,
-    int Scanned);
+    int Scanned,
+    bool FromCache = false,
+    DateTimeOffset? CachedAt = null);

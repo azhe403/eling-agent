@@ -53,7 +53,7 @@ public sealed class RedisScanTool
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            var page = await _readService.ScanAsync(row, dbIndex, prefix, cursor, pageOffset, pageSize, cancellationToken);
+            var page = await _readService.ScanAsync(row, dbIndex, prefix, cursor, pageOffset, pageSize, cancellationToken, preferCache: false);
             sw.Stop();
             await _audit.RecordAsync(new AuditEvent
             {

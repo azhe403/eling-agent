@@ -15,12 +15,13 @@ namespace Eling.Core.Database;
 public sealed class JsonRedisReadCache : IRedisReadCache
 {
     private const int MaxKeysPerConnection = 500;
+    private const int MaxPagesPerConnection = 1000;
 
     private readonly CacheFileGate _gate;
     private readonly ILogger<JsonRedisReadCache>? _logger;
 
     /// <summary>What an empty cache file looks like.</summary>
-    private static RedisCacheFile Empty() => new([], []);
+    private static RedisCacheFile Empty() => new([], [], []);
 
     public JsonRedisReadCache(string dataDirectory, ILogger<JsonRedisReadCache>? logger = null)
     {
@@ -126,7 +127,7 @@ public sealed class JsonRedisReadCache : IRedisReadCache
         {
             _gate.WithGate(() =>
             {
-                var file = _gate.Load(Empty);
+                var file = Normalize(_gate.Load(Empty));
                 var removed = file.Keys.RemoveAll(e =>
                     string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal) &&
                     e.Database == database.Value &&
@@ -141,6 +142,121 @@ public sealed class JsonRedisReadCache : IRedisReadCache
         }
     }
 
+    public bool TryGetPage(
+        string connectionId,
+        RedisDatabaseIndex database,
+        string prefix,
+        long cursor,
+        int pageOffset,
+        int pageSize,
+        out KeyPage? value,
+        out DateTimeOffset? cachedAt)
+    {
+        value = null;
+        cachedAt = null;
+        if (string.IsNullOrWhiteSpace(connectionId)) return false;
+
+        prefix ??= string.Empty;
+        return Read(connectionId, out value, out cachedAt, file =>
+        {
+            var pages = file.Pages;
+            if (pages is null) return null;
+            var entry = pages.FirstOrDefault(e =>
+                string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal) &&
+                e.Database == database.Value &&
+                string.Equals(e.Prefix, prefix, StringComparison.Ordinal) &&
+                e.Cursor == cursor &&
+                e.PageOffset == pageOffset &&
+                e.PageSize == pageSize);
+
+            return entry is null || IsExpired(entry.CachedAt) || entry.Page is null
+                ? null
+                : new CachedEntry<KeyPage>(entry.Page, entry.CachedAt);
+        });
+    }
+
+    public KeyPage SetPage(
+        string connectionId,
+        RedisDatabaseIndex database,
+        string prefix,
+        long cursor,
+        int pageOffset,
+        int pageSize,
+        KeyPage value)
+    {
+        if (string.IsNullOrWhiteSpace(connectionId) || value is null) return value;
+
+        prefix ??= string.Empty;
+        KeyPage merged = value;
+        Write(connectionId, file =>
+        {
+            var pages = file.Pages;
+            var idx = pages.FindIndex(e =>
+                string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal) &&
+                e.Database == database.Value &&
+                string.Equals(e.Prefix, prefix, StringComparison.Ordinal) &&
+                e.Cursor == cursor &&
+                e.PageOffset == pageOffset &&
+                e.PageSize == pageSize);
+
+            // The previous page is the only record of what the reader was
+            // looking at a moment ago, so the merge happens before it is
+            // overwritten.
+            var previous = idx >= 0 ? pages[idx]?.Page : null;
+            merged = MergeExpiredKeys(previous, value);
+
+            var entry = new CachedRedisPageEntry(
+                connectionId, database.Value, prefix, cursor, pageOffset, pageSize, DateTimeOffset.UtcNow, merged);
+
+            if (idx >= 0) pages[idx] = entry;
+            else pages.Add(entry);
+
+            CapPages(file, connectionId);
+        });
+        return merged;
+    }
+
+    /// <summary>
+    /// The new page, with the keys it no longer has put back and flagged.
+    ///
+    /// A key that expired must not disappear from the tree: a row vanishing by
+    /// itself is indistinguishable from a bug, and the reader loses what they
+    /// were watching. So a key that was in the previous page and is missing
+    /// from the fresh one is carried over with <see cref="KeyLeaf.Expired"/>
+    /// set, keeping its position at the end of the page.
+    ///
+    /// Only keys the cache already knew about are re-added - nothing is
+    /// invented - and a key that comes back from the server is simply the
+    /// server's own row again, unflagged.
+    /// </summary>
+    private static KeyPage MergeExpiredKeys(KeyPage? previous, KeyPage fresh)
+    {
+        if (previous?.Keys is not { Count: > 0 } oldKeys) return fresh;
+
+        var present = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var key in fresh.Keys) present.Add(key.Key);
+
+        List<KeyLeaf>? retained = null;
+        foreach (var old in oldKeys)
+        {
+            if (present.Contains(old.Key)) continue;
+            (retained ??= []).Add(old with
+            {
+                Expired = true,
+                // No expiry is left to count down from; the flag says what
+                // happened, and a stale TTL would count down from nothing.
+                TtlSeconds = -1L,
+                ExpiresAt = null
+            });
+        }
+
+        if (retained is null) return fresh;
+        var keys = new List<KeyLeaf>(fresh.Keys.Count + retained.Count);
+        keys.AddRange(fresh.Keys);
+        keys.AddRange(retained);
+        return fresh with { Keys = keys };
+    }
+
     public void InvalidateConnection(string connectionId)
     {
         if (string.IsNullOrWhiteSpace(connectionId)) return;
@@ -149,11 +265,16 @@ public sealed class JsonRedisReadCache : IRedisReadCache
         {
             _gate.WithGate(() =>
             {
-                var file = _gate.Load(Empty);
+                var file = Normalize(_gate.Load(Empty));
                 var removed = file.Databases.RemoveAll(e =>
                     string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal));
                 removed += file.Keys.RemoveAll(e =>
                     string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal));
+                if (file.Pages is not null)
+                {
+                    removed += file.Pages.RemoveAll(e =>
+                        string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal));
+                }
 
                 if (removed > 0) _gate.Save(file);
             });
@@ -185,7 +306,7 @@ public sealed class JsonRedisReadCache : IRedisReadCache
 
             _gate.WithGate(() =>
             {
-                var picked = pick(_gate.Load(Empty));
+                var picked = pick(Normalize(_gate.Load(Empty)));
                 if (picked is null) return;
                 found = picked.Value;
                 at = picked.CachedAt;
@@ -212,7 +333,7 @@ public sealed class JsonRedisReadCache : IRedisReadCache
         {
             _gate.WithGate(() =>
             {
-                var file = _gate.Load(Empty);
+                var file = Normalize(_gate.Load(Empty));
                 mutate(file);
                 _gate.Save(file);
             });
@@ -222,6 +343,14 @@ public sealed class JsonRedisReadCache : IRedisReadCache
             _logger?.LogWarning(ex, "Failed to write cached Redis entry for {Id} to {Path}.", connectionId, _gate.Path);
         }
     }
+
+    private static RedisCacheFile Normalize(RedisCacheFile file) =>
+        file with
+        {
+            Databases = file.Databases ?? [],
+            Keys = file.Keys ?? [],
+            Pages = file.Pages ?? []
+        };
 
     /// <summary>
     /// One connection can be inspected across hundreds of keys; keep the newest
@@ -243,6 +372,29 @@ public sealed class JsonRedisReadCache : IRedisReadCache
         file.Keys.RemoveAll(e => toDrop.Contains(e));
     }
 
+    /// <summary>
+    /// Scan pages accumulate across prefixes; keep the newest so the file
+    /// cannot grow without bound.
+    /// </summary>
+    private static void CapPages(RedisCacheFile file, string connectionId)
+    {
+        var pages = file.Pages;
+        if (pages is null) return;
+
+        var mine = pages
+            .Where(e => string.Equals(e.ConnectionId, connectionId, StringComparison.Ordinal))
+            .ToList();
+
+        if (mine.Count <= MaxPagesPerConnection) return;
+
+        var toDrop = mine
+            .OrderBy(e => e.CachedAt)
+            .Take(mine.Count - MaxPagesPerConnection)
+            .ToHashSet();
+
+        pages.RemoveAll(e => toDrop.Contains(e));
+    }
+
     private static bool IsExpired(DateTimeOffset cachedAt) =>
         DateTimeOffset.UtcNow - cachedAt > IRedisReadCache.MaxAge;
 
@@ -262,7 +414,8 @@ public sealed class JsonRedisReadCache : IRedisReadCache
 
     private sealed record RedisCacheFile(
         List<CachedRedisDatabasesEntry> Databases,
-        List<CachedRedisKeyEntry> Keys);
+        List<CachedRedisKeyEntry> Keys,
+        List<CachedRedisPageEntry> Pages);
 
     private sealed record CachedRedisDatabasesEntry(
         string ConnectionId,
@@ -279,4 +432,14 @@ public sealed class JsonRedisReadCache : IRedisReadCache
         string KeyHash,
         DateTimeOffset CachedAt,
         KeyInspectResult Result);
+
+    private sealed record CachedRedisPageEntry(
+        string ConnectionId,
+        int Database,
+        string Prefix,
+        long Cursor,
+        int PageOffset,
+        int PageSize,
+        DateTimeOffset CachedAt,
+        KeyPage Page);
 }

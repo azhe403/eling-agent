@@ -7,6 +7,13 @@ namespace Eling.Backend.Endpoints;
 
 public static class DatabaseKeyEndpoints
 {
+    /// <summary>
+    /// How many keys one batch probe may name. The route exists to make a
+    /// burst cheap; a caller asking about more than this is driving the key
+    /// tree through the wrong door.
+    /// </summary>
+    private const int MaxProbeKeys = 500;
+
     public static WebApplication MapDatabaseKeyEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/databases");
@@ -21,6 +28,7 @@ public static class DatabaseKeyEndpoints
             long cursor = 0,
             int pageOffset = 0,
             int pageSize = 200,
+            bool? refresh = null,
             CancellationToken ct = default) =>
         {
             var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
@@ -38,7 +46,7 @@ public static class DatabaseKeyEndpoints
                 ct,
                 async () =>
                 {
-                    var page = await readService.ScanAsync(gate.Row!, dbIndex, prefix, cursor, pageOffset, pageSize, ct);
+                    var page = await readService.ScanAsync(gate.Row!, dbIndex, prefix, cursor, pageOffset, pageSize, ct, preferCache: refresh != true);
                     return (object?)page;
                 });
         });
@@ -48,6 +56,7 @@ public static class DatabaseKeyEndpoints
             IDatabaseConnectionStore store,
             IRedisKeyReadService readService,
             IAuditLogger auditLogger,
+            bool? refresh,
             CancellationToken ct = default) =>
         {
             var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
@@ -61,7 +70,7 @@ public static class DatabaseKeyEndpoints
                 ct,
                 async () =>
                 {
-                    var databases = await readService.ListDatabasesAsync(gate.Row!, ct);
+                    var databases = await readService.ListDatabasesAsync(gate.Row!, ct, preferCache: refresh != true);
                     return databases
                         .Select(db => new RedisDatabaseInfoDto(db.Index, db.Keys, db.FromCache, db.CachedAt))
                         .ToList();
@@ -120,6 +129,71 @@ public static class DatabaseKeyEndpoints
                 {
                     var result = await readService.DeleteKeyAsync(gate.Row!, dbIndex, key, ct);
                     return (object?)new RedisKeyDeleteDto(result.Deleted);
+                });
+        });
+
+        group.MapGet("/{id}/keys/probe", async (
+            string id,
+            IDatabaseConnectionStore store,
+            IRedisKeyReadService readService,
+            IAuditLogger auditLogger,
+            string key,
+            int database = 0,
+            CancellationToken ct = default) =>
+        {
+            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            if (gate.Http is not null) return gate.Http;
+            if (string.IsNullOrEmpty(key)) return Results.BadRequest("key must not be blank");
+            if (RedisKeyRoute.RefuseIndex(database, out var dbIndex) is { } refusal) return refusal;
+
+            return await RedisKeyRoute.RunAsync(
+                gate.Row!,
+                DatabaseAuditActions.InspectKey,
+                key,
+                auditLogger,
+                ct,
+                async () =>
+                {
+                    var result = await readService.ProbeKeyAsync(gate.Row!, dbIndex, key, ct);
+                    return (object?)new RedisKeyProbeDto(
+                        result.Key, result.Exists, result.TtlSeconds, result.ExpiresAt);
+                });
+        });
+
+        group.MapPost("/{id}/keys/probe", async (
+            string id,
+            RedisKeyProbeBatchRequest req,
+            IDatabaseConnectionStore store,
+            IRedisKeyReadService readService,
+            IAuditLogger auditLogger,
+            CancellationToken ct = default) =>
+        {
+            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            if (gate.Http is not null) return gate.Http;
+
+            // A key named twice is one key, and a blank one names nothing.
+            var keys = (req?.Keys ?? [])
+                .Where(k => !string.IsNullOrEmpty(k))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            if (keys.Count == 0) return Results.BadRequest("keys must not be blank");
+            // The batch exists to make a burst cheap, not to become one: a
+            // caller asking about thousands of keys is using the wrong route.
+            if (keys.Count > MaxProbeKeys) return Results.BadRequest($"at most {MaxProbeKeys} keys per probe");
+            if (RedisKeyRoute.RefuseIndex(req?.Database ?? 0, out var dbIndex) is { } refusal) return refusal;
+
+            return await RedisKeyRoute.RunAsync(
+                gate.Row!,
+                DatabaseAuditActions.InspectKey,
+                $"probe {keys.Count} keys",
+                auditLogger,
+                ct,
+                async () =>
+                {
+                    var results = await readService.ProbeKeysAsync(gate.Row!, dbIndex, keys, ct);
+                    return (object?)results
+                        .Select(r => new RedisKeyProbeDto(r.Key, r.Exists, r.TtlSeconds, r.ExpiresAt))
+                        .ToList();
                 });
         });
 
