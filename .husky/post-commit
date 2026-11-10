@@ -33,9 +33,11 @@ if [ -z "$VETTED_TREE" ] || [ "$VETTED_TREE" = "none" ]; then
 fi
 
 if [ "$VETTED_TREE" != "$COMMIT_TREE" ]; then
-  echo "✗ post-commit: the committed tree was never vetted by the pre-commit hook." >&2
+  echo "" >&2
+  echo "✗ post-commit: this commit went in WITHOUT the pre-commit checks." >&2
   echo "  `git commit --no-verify` is not supported; the hooks are mandatory." >&2
-  echo "  Please rebase this commit on top of a vetted one, or ask the" >&2
-  echo "  maintainer to land the blocking work first." >&2
+  echo "  The commit exists, but nothing verified it. Fix the failing checks" >&2
+  echo "  and amend it (git commit --amend), or ask the maintainer to land the" >&2
+  echo "  blocking work first." >&2
   exit 0
 fi
