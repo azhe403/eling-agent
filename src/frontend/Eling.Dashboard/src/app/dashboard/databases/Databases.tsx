@@ -117,6 +117,19 @@ export function Databases() {
   const [cellCtxMenu, setCellCtxMenu] = useState<CellContextMenuState | null>(null)
 
   // Schemas
+  //
+  // A Redis connection is not a table store: /schema refuses it, so the schema
+  // hook is told which connections it may ask about. A connection that is not
+  // in the list yet is still allowed through - `conns` loads asynchronously,
+  // and refusing an unknown id would skip the one read that matters when the
+  // list is empty on first paint.
+  const connsRef = useRef<DbConn[]>([])
+  useEffect(() => { connsRef.current = conns }, [conns])
+  const isSqlConnection = useCallback((connId: string) => {
+    const conn = connsRef.current.find((c) => c.id === connId)
+    return conn ? conn.provider !== "Redis" : true
+  }, [])
+
   const {
     schemaInfo,
     setSchemaInfo,
@@ -133,7 +146,7 @@ export function Databases() {
     loadSchema,
     retryLabel,
     KEEP_FRESH_MS,
-  } = useSchema(notifyDb)
+  } = useSchema(notifyDb, isSqlConnection)
 
   // Redis
   const {
@@ -161,6 +174,10 @@ export function Databases() {
     redisPreview,
     redisPreviewLoading,
     redisMutating,
+    redisAutoRefresh,
+    setRedisAutoRefresh,
+    redisAutoRefreshMs,
+    setRedisAutoRefreshMs,
     loadRedisDatabases,
     fetchRedisPrefix,
     loadMoreRedis,
@@ -1063,6 +1080,10 @@ export function Databases() {
           onPreviewPrefix={previewRedisPrefix}
           onConfirmDeleteKey={deleteRedisKey}
           onConfirmDeletePrefix={deleteRedisPrefix}
+          redisAutoRefresh={redisAutoRefresh}
+          redisAutoRefreshMs={redisAutoRefreshMs}
+          onAutoRefreshChange={setRedisAutoRefresh}
+          onAutoRefreshMsChange={setRedisAutoRefreshMs}
         />
 
         {treeCtxMenu ? (

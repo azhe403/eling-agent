@@ -2,14 +2,22 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Switch } from "@/components/ui/switch"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { X } from "lucide-react"
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { DbConn, DbTab, RedisPage } from "@/app/dashboard/databases/types"
-import { RedisPrefixTree, formatTtl } from "@/app/dashboard/databases/redis-tree"
-import type { RedisPrefixPreview } from "@/app/dashboard/databases/redis-browser"
+import { RedisPrefixTree } from "@/app/dashboard/databases/redis-tree"
+import type { RedisPrefixPreview, RedisTtlMode } from "@/app/dashboard/databases/redis-browser"
 import { RedisDeleteConfirmDialog } from "../dialogs/RedisDeleteConfirmDialog"
 import { RedisPrefixDeleteConfirmDialog } from "../dialogs/RedisPrefixDeleteConfirmDialog"
-import { redisPageKey, redisPageScope } from "@/app/dashboard/databases/redis-browser"
+import { pageAsOf, redisPageKey, redisPageScope, redisTtlLabel } from "@/app/dashboard/databases/redis-browser"
 
 /** The value a key holds, as the inspector reads it. */
 export type RedisInspect = {
@@ -37,6 +45,8 @@ export interface RedisBrowserProps {
   redisLoading: boolean
   redisInspect: RedisInspect | null
   redisInspectOpen: boolean
+  redisAutoRefresh: boolean
+  redisAutoRefreshMs: number
   conns: DbConn[]
   isWide: boolean
   onPrefixChange: (prefix: string) => void
@@ -61,6 +71,8 @@ export interface RedisBrowserProps {
   onPreviewPrefix: (connId: string, db: number, prefix: string) => void
   onConfirmDeleteKey: (connId: string, db: number, key: string) => void
   onConfirmDeletePrefix: (connId: string, db: number, prefix: string) => void
+  onAutoRefreshChange: (enabled: boolean) => void
+  onAutoRefreshMsChange: (ms: number) => void
 }
 
 export const RedisBrowser = ({
@@ -98,10 +110,48 @@ export const RedisBrowser = ({
   onPreviewPrefix,
   onConfirmDeleteKey,
   onConfirmDeletePrefix,
+  redisAutoRefresh,
+  redisAutoRefreshMs,
+  onAutoRefreshChange,
+  onAutoRefreshMsChange,
 }: RedisBrowserProps) => {
+  const [redisTtlMode, setRedisTtlMode] = useState<RedisTtlMode>(() => {
+    if (typeof window === "undefined") return "countdown"
+    const saved = window.localStorage.getItem("redis.ttlMode")
+    return saved === "datetime" ? "datetime" : "countdown"
+  })
+  const [redisTtlNow, setRedisTtlNow] = useState<number>(() => Date.now())
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("redis.ttlMode", redisTtlMode)
+    } catch {
+      // storage unavailable: the mode still applies for this session
+    }
+  }, [redisTtlMode])
+
+  useEffect(() => {
+    const timer = setInterval(() => setRedisTtlNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
   const connId = activeTable?.connId ?? ""
   const rootKey = redisPageKey(connId, activeRedisDb, redisRootPrefix)
   const activePage = redisPages[rootKey]
+  const ttlNow = redisTtlNow
+
+  /**
+   * Whether anything on screen can count down. A tree of keys without an
+   * expiry has nothing to tick, so the clock stays off and the rows do not
+   * re-render once a second for nothing.
+   */
+  const anyKeyHasExpiry = useMemo(
+    () =>
+      Object.values(redisPages).some((page) =>
+        page.keys.some((key) => Boolean(key.expiresAt) || key.ttlSeconds > 0)
+      ),
+    [redisPages]
+  )
 
   /**
    * The counts of the pages in view. A root prefix hides the rest of the
@@ -119,13 +169,32 @@ export const RedisBrowser = ({
     const keys = dbPages.reduce((sum, p) => sum + p.keys.length, 0)
     const scanned = activePage ? ` · scanned ${activePage.scanned} so far` : ""
     const continued = activePage && !activePage.complete ? " (more)" : ""
+    const cached = pageAsOf(activePage)
     const label =
       redisRootPrefix === "" ? `${prefixes} prefixes · ${keys} keys (this level)` : `${prefixes} prefixes · ${keys} keys under ${redisRootPrefix}`
-    return `${label}${continued}${scanned}`
+    return `${label}${continued}${scanned}${cached ? ` · ${cached}` : ""}`
   }, [redisPages, connId, activeRedisDb, redisRootPrefix, activePage])
 
   /**
-   * The preview of the inspected key. Shared between the docked column and
+   * The freshest TTL for the inspected key lives in the page, not in the
+   * click-time inspect payload: the payload is a snapshot of the moment the
+   * reader opened it, and it has no way to know the key was rewritten with a
+   * fresh expiry. If the key is on screen, the counts line below is what the
+   * countdown reads; the payload keeps the type, length and preview.
+   *
+   * The fallback is the payload itself, so a key that is currently scrolled
+   * out of every page still shows a stale-but-honest TTL instead of nothing.
+   */
+  const inspectedLeaf = useMemo(() => {
+    if (!redisInspect) return null
+    for (const page of Object.values(redisPages)) {
+      const found = page.keys.find((key) => key.key === redisInspect.key)
+      if (found) return found
+    }
+    return null
+  }, [redisPages, redisInspect])
+
+  /** The preview of the inspected key. Shared between the docked column and
    * the popup used on narrower screens, so both show exactly the same preview.
    *
    * Stacked field/value rows instead of a table: the docked column is 360px
@@ -152,7 +221,13 @@ export const RedisBrowser = ({
     </>
   ) : null
 
-  const inspectMeta = redisInspect ? `${redisInspect.type} · len ${redisInspect.length} · ${formatTtl(redisInspect.ttlSeconds)}` : ""
+  // The TTL shown in the inspector's title is read from the page (which the
+  // server keeps current) when the key is on screen, and from the click-time
+  // payload otherwise — so an open detail re-counts down as soon as the key is
+  // written back with a fresh expiry.
+  const inspectMeta = redisInspect
+    ? `${redisInspect.type} · len ${redisInspect.length} · ${redisTtlLabel(inspectedLeaf ?? redisInspect, ttlNow, redisTtlMode)}`
+    : ""
 
   return (
     <Card className="flex-1 min-h-0">
@@ -198,6 +273,39 @@ export const RedisBrowser = ({
           >
             {redisLoading ? "Browsing…" : "Root"}
           </Button>
+          <div className="flex w-[200px] shrink-0 items-center gap-2 rounded-md border px-2 py-1 dark:border-input" title="AutoRefresh: background revalidate of the root page">
+            <Switch
+              size="sm"
+              checked={redisAutoRefresh}
+              onCheckedChange={(checked) => onAutoRefreshChange(Boolean(checked))}
+              aria-label="AutoRefresh reload keys"
+              disabled={!connId}
+            />
+            <span className="text-xs font-medium">AutoRefresh</span>
+            <Select value={`${redisAutoRefreshMs / 1000}s`} onValueChange={(v) => { if (v) onAutoRefreshMsChange(Number(v.replace("s", "")) * 1000) }} disabled={!redisAutoRefresh || !connId}>
+              <SelectTrigger size="sm" className="ml-auto w-[96px]" aria-label="AutoRefresh interval">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10s">10s</SelectItem>
+                <SelectItem value="15s">15s</SelectItem>
+                <SelectItem value="30s">30s</SelectItem>
+                <SelectItem value="60s">60s</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 rounded-md border px-2 py-1 dark:border-input" title="How a key's TTL is written: a live countdown, or the moment it expires">
+            <span className="text-xs font-medium">TTL</span>
+            <Select value={redisTtlMode} onValueChange={(v) => { if (v === "countdown" || v === "datetime") setRedisTtlMode(v) }} disabled={!connId}>
+              <SelectTrigger size="sm" className="w-[104px]" aria-label="TTL display mode">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="countdown">H:M:S</SelectItem>
+                <SelectItem value="datetime">Date</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <div className={`grid min-h-0 flex-1 grid-rows-[1fr] gap-2 ${isWide && redisInspect ? "xl:grid-cols-[360px_minmax(0,1fr)]" : ""}`}>
@@ -238,6 +346,8 @@ export const RedisBrowser = ({
                   onSelectKey={(key) => onSelectKey(key)}
                   onDeleteKey={(key) => { onDeleteTargetChange(key); onDeleteOpenChange(true) }}
                   onDeletePrefix={(prefix) => { if (connId) void onPreviewPrefix(connId, activeRedisDb, prefix) }}
+                  ttlMode={redisTtlMode}
+                  now={ttlNow}
                 />
               ) : (
                 <p className="text-sm text-muted-foreground">

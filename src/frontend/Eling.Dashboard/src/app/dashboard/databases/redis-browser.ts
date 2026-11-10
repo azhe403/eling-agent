@@ -26,15 +26,158 @@ export type RedisDbInfo = {
 export type RedisPage = {
   prefix: string
   nodes: Array<{ segment: string; prefix: string }>
-  keys: Array<{ key: string; type: string; ttlSeconds: number }>
+  keys: Array<{
+    key: string
+    type: string
+    ttlSeconds: number
+    /** When the key dies, as an absolute moment. Absent when it has no expiry. */
+    expiresAt?: string | null
+    /** True when a recheck found the key gone; the row stays, marked. */
+    gone?: boolean
+    /**
+     * True when the backend's page cache carried this row over because the key
+     * is no longer in the keyspace. The row stays in the tree instead of
+     * disappearing on its own.
+     */
+    expired?: boolean
+  }>
   cursor: number
   pageOffset: number
   complete: boolean
   scanned: number
+  /** True when the server was unreachable and the page came from the read cache. */
+  fromCache?: boolean
+  /** When the cached page was recorded; shown as "cached as of" next to the counts. */
+  cachedAt?: string | null
+}
+
+export type RedisTtlMode = "countdown" | "datetime"
+
+/**
+ * The TTL of one key, as the row shows it.
+ *
+ * Two shapes, because two questions get asked of a TTL: "how long is left"
+ * (the countdown) and "when does it die" (the moment). The countdown ticks
+ * down every second from the absolute expiry, so it never sits still on the
+ * value the server happened to answer with; the moment is that expiry
+ * written out, which does not move and does not need to.
+ *
+ * A key without an expiry keeps Redis's own -1, and says "no ttl". A key
+ * whose expiry has passed says "expired" - the recheck decides whether it is
+ * really gone.
+ */
+export const redisTtlLabel = (
+  key: { ttlSeconds: number; expiresAt?: string | null },
+  now: number,
+  mode: RedisTtlMode,
+): string => {
+  const expiresMs = key.expiresAt ? new Date(key.expiresAt).getTime() : Number.NaN
+  const hasExpiry = Number.isFinite(expiresMs)
+
+  if (!hasExpiry) {
+    // Redis answers -1 for a key without an expiry and 0 for one that is
+    // already gone; neither counts down.
+    if (key.ttlSeconds <= 0) return key.ttlSeconds === 0 ? "expired" : "no ttl"
+    const secondsLeft = Math.floor(key.ttlSeconds)
+    if (mode === "datetime") return new Date(now + secondsLeft * 1000).toLocaleString()
+    return formatClock(secondsLeft)
+  }
+
+  if (mode === "datetime") {
+    return new Date(expiresMs).toLocaleString("en-US", {
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    })
+  }
+
+  const secondsLeft = Math.max(0, Math.floor((expiresMs - now) / 1000))
+  if (secondsLeft <= 0) return "expired"
+  return formatClock(secondsLeft)
+}
+
+/** A countdown as hours, minutes and seconds: `2h 14m 03s`. */
+const formatClock = (seconds: number): string => {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = seconds % 60
+  return `${h}h ${m}m ${String(s).padStart(2, "0")}s`
 }
 
 /** The answer to deleting one Redis key from the dashboard: the key is gone. */
 export type RedisKeyDeleteResult = { deleted: boolean }
+
+/**
+ * What a recheck found for one key: whether it is still there, and its TTL.
+ *
+ * A key whose countdown reached zero either died or was rewritten with a new
+ * expiry, and only the server knows which.
+ */
+export type RedisKeyProbe = {
+  key: string
+  exists: boolean
+  ttlSeconds: number
+  expiresAt: string | null
+}
+
+/**
+ * Asks the server whether a key is still there.
+ *
+ * One request per key whose countdown just ran out, never a poll.
+ */
+export const fetchRedisKeyProbe = async (
+  connId: string,
+  database: number,
+  key: string,
+): Promise<RedisKeyProbe> => {
+  const qs = new URLSearchParams()
+  qs.set("database", String(database))
+  qs.set("key", key)
+  const response = await fetch(`${API}/${connId}/keys/probe?${qs.toString()}`)
+  if (!response.ok) throw new Error(parseApiError(await response.text()))
+  return parseProbe(await response.json(), key)
+}
+
+/**
+ * The same question for many keys, in one request.
+ *
+ * Keys that expire together - a batch job finishing, a queue draining - would
+ * otherwise be one round trip each, all at the same instant. A key the answer
+ * leaves out is a key that is gone.
+ */
+export const fetchRedisKeyProbeBatch = async (
+  connId: string,
+  database: number,
+  keys: string[],
+): Promise<RedisKeyProbe[]> => {
+  if (keys.length === 0) return []
+  const response = await fetch(`${API}/${connId}/keys/probe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ database, keys }),
+  })
+  if (!response.ok) throw new Error(parseApiError(await response.text()))
+  const body = await response.json()
+  if (!Array.isArray(body)) return []
+  return body.map((entry) => parseProbe(entry, typeof entry?.key === "string" ? entry.key : ""))
+}
+
+const parseProbe = (raw: unknown, fallbackKey: string): RedisKeyProbe => {
+  const body = (raw ?? {}) as {
+    key?: unknown
+    exists?: unknown
+    ttlSeconds?: unknown
+    expiresAt?: unknown
+  }
+  return {
+    key: typeof body.key === "string" ? body.key : fallbackKey,
+    exists: body.exists === true,
+    ttlSeconds: typeof body.ttlSeconds === "number" ? body.ttlSeconds : -1,
+    expiresAt: typeof body.expiresAt === "string" ? body.expiresAt : null,
+  }
+}
 
 /**
  * The flat list of keys under one prefix, for the subtree delete dialog: the
@@ -139,9 +282,14 @@ export const redisPageScope = (connId: string, db: number): string => `${connId}
 
 /**
  * The logical databases of a Redis connection.
+ *
+ * Cache-first like the schema read: the first call paints the snapshot at
+ * once and the caller revalidates with `refresh: true` to ask the server for
+ * the real answer. An explicit refresh skips the cache.
  */
-export const fetchRedisDatabases = async (connId: string): Promise<RedisDbInfo[]> => {
-  const response = await fetch(`/api/databases/${connId}/keys/databases`)
+export const fetchRedisDatabases = async (connId: string, refresh?: boolean): Promise<RedisDbInfo[]> => {
+  const qs = refresh ? "?refresh=true" : ""
+  const response = await fetch(`/api/databases/${connId}/keys/databases${qs}`)
   if (!response.ok) {
     const text = await response.text()
     throw new Error(text.trim() || `could not read the databases of ${connId}`)
@@ -238,4 +386,20 @@ export const fetchRedisPrefixDelete = async (
     deleted: typeof body?.deleted === "number" ? body.deleted : 0,
     truncated: body?.truncated === true,
   }
+}
+
+/**
+ * How the counts line says a cached page is not live.
+ *
+ * The scan cache is an offline fallback, like the database list: a page
+ * served while the server is unreachable carries the moment it was taken so
+ * the reader knows the tree is a snapshot, not the current keyspace. Null
+ * when the page is live, which keeps the counts quiet in the normal case.
+ */
+export const pageAsOf = (page: RedisPage | null | undefined): string | null => {
+  if (!page?.fromCache) return null
+  if (!page.cachedAt) return "cached"
+  const when = new Date(page.cachedAt)
+  if (Number.isNaN(when.getTime())) return "cached"
+  return `cached as of ${when.toLocaleString()}`
 }

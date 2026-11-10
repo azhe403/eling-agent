@@ -30,8 +30,18 @@ const fetchSchema = async (
  * A read is cache-first: the snapshot paints at once and the real answer is
  * asked for behind it. A database that cannot be reached is asked again on a
  * doubling ladder, with the countdown shown next to the tree.
+ *
+ * `isSqlConnection` says whether a connection is one this read has anything to
+ * say about. A Redis connection has no tables and no columns, so /schema
+ * refuses it — and every caller here would otherwise ask anyway, once per
+ * interval, per expanded connection, and get a 400 back each time. The guard
+ * lives in this hook rather than at the call sites: there are six of them and
+ * a seventh would forget.
  */
-export function useSchema(notifyDb: NotifyDb) {
+export function useSchema(
+  notifyDb: NotifyDb,
+  isSqlConnection: (connId: string) => boolean = () => true,
+) {
   const [schemaInfo, setSchemaInfo] = useState<SchemaInfo | null>(null)
   const [connSchemas, setConnSchemas] = useState<Record<string, SchemaInfo>>({})
   const [dbSchemas, setDbSchemas] = useState<Record<string, SchemaInfo>>({})
@@ -40,9 +50,12 @@ export function useSchema(notifyDb: NotifyDb) {
   const connSchemasRef = useRef<Record<string, SchemaInfo>>({})
   const dbSchemasRef = useRef<Record<string, SchemaInfo>>({})
   const schemaConnIdRef = useRef<string | null>(null)
+  /** The newest predicate, so a closure from an earlier render cannot go stale. */
+  const isSqlConnectionRef = useRef(isSqlConnection)
 
   useEffect(() => { connSchemasRef.current = connSchemas }, [connSchemas])
   useEffect(() => { dbSchemasRef.current = dbSchemas }, [dbSchemas])
+  useEffect(() => { isSqlConnectionRef.current = isSqlConnection }, [isSqlConnection])
 
   const {
     schedule: scheduleRetry,
@@ -69,6 +82,8 @@ export function useSchema(notifyDb: NotifyDb) {
    */
   const ensureSchema = useCallback(
     async (id: string, opts?: { force?: boolean; bypass?: boolean }) => {
+      // Not a SQL connection: /schema would refuse it, so do not ask.
+      if (!isSqlConnectionRef.current(id)) return
       const force = opts?.force ?? false
       // A manual refresh asks the database; a retry asks for the best answer the
       // backend can give, which is the snapshot when it is still current. Only
@@ -108,6 +123,8 @@ export function useSchema(notifyDb: NotifyDb) {
    */
   const ensureDbSchema = useCallback(
     async (connId: string, database: string) => {
+      // Same refusal as above, one level down.
+      if (!isSqlConnectionRef.current(connId)) return
       const key = `${connId}:${database}`
       if (dbSchemasRef.current[key]?.source === "live") return
 
@@ -141,6 +158,8 @@ export function useSchema(notifyDb: NotifyDb) {
    */
   const loadSchema = useCallback(
     async (id: string, database?: string | null) => {
+      // A manual "Refresh schema" on a Redis connection is a no-op, not a 400.
+      if (!isSqlConnectionRef.current(id)) return
       schemaConnIdRef.current = id
       setSchemaLoading(true)
       setSchemaInfo(null)

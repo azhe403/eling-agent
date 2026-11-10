@@ -14,6 +14,7 @@ describe("RedisKeyRow delete", () => {
         active={false}
         onSelect={onSelect}
         onDelete={onDelete}
+        now={0}
       />,
     )
     fireEvent.click(screen.getByRole("button", { name: "Delete key my:key" }))
@@ -30,6 +31,7 @@ describe("RedisKeyRow delete", () => {
         active={false}
         onSelect={onSelect}
         onDelete={() => {}}
+        now={0}
       />,
     )
     const selectButton = screen
@@ -42,8 +44,37 @@ describe("RedisKeyRow delete", () => {
   })
 })
 
-describe("RedisNodeRow delete", () => {
-  it("calls onDelete with the prefix and never toggles", () => {
+describe("RedisKeyRow gone", () => {
+  it("marks a key the recheck found gone, instead of dropping the row", () => {
+    render(
+      <RedisKeyRow
+        item={{ key: "my:key", type: "string", ttlSeconds: -1, gone: true }}
+        active={false}
+        onSelect={() => {}}
+        onDelete={() => {}}
+        now={0}
+      />,
+    )
+    expect(screen.getByText(/gone/)).toBeTruthy()
+    expect(screen.getByText("my:key")).toBeTruthy()
+  })
+
+  it("shows the live countdown when the key still has a ttl", () => {
+    const now = Date.parse("2026-11-10T12:00:00Z")
+    render(
+      <RedisKeyRow
+        item={{ key: "my:key", type: "string", ttlSeconds: 90, expiresAt: new Date(now + 90_000).toISOString() }}
+        active={false}
+        onSelect={() => {}}
+        onDelete={() => {}}
+        now={now}
+      />,
+    )
+    expect(screen.getByText(/0h 1m 30s/)).toBeTruthy()
+  })
+})
+
+describe("RedisNodeRow delete", () => {  it("calls onDelete with the prefix and never toggles", () => {
     const onToggle = vi.fn()
     const onDelete = vi.fn()
     render(
@@ -99,6 +130,7 @@ describe("RedisPrefixTree threading", () => {
         onSelectKey={() => {}}
         onDeleteKey={onDeleteKey}
         onDeletePrefix={onDeletePrefix}
+        now={0}
       />,
     )
     fireEvent.click(screen.getByRole("button", { name: "Delete key my:key" }))

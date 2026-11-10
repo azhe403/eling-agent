@@ -12,6 +12,8 @@ import {
   fetchRedisPrefixPreview,
   fetchRedisPrefixDelete,
   redisPageKey,
+  redisTtlLabel,
+  fetchRedisKeyProbeBatch,
   type RedisDbInfo,
   type RedisPage,
 } from "./redis-browser"
@@ -27,7 +29,6 @@ describe("dbRowCount", () => {
   it("reads 3 keys", () => {
     expect(dbRowCount({ index: 3, keys: 3 })).toBe("3 keys")
   })
-
   it("reads 0 keys", () => {
     expect(dbRowCount({ index: 0, keys: 0 })).toBe("0 keys")
   })
@@ -532,5 +533,329 @@ describe("useRedisBrowser delete", () => {
 
     expect(notifyDb).toHaveBeenCalledWith("success", "Redis keys deleted", "2 keys under users:")
     expect(notifyDb).not.toHaveBeenCalledWith("success", "Redis keys deleted", "3 keys under users:")
+  })
+})
+
+describe("redisTtlLabel", () => {
+  const now = Date.parse("2026-11-10T12:00:00Z")
+  const inSeconds = (seconds: number) => new Date(now + seconds * 1000).toISOString()
+
+  it("counts down from the absolute expiry, not from a frozen ttl", () => {
+    const key = { ttlSeconds: 120, expiresAt: inSeconds(120) }
+    expect(redisTtlLabel(key, now, "countdown")).toBe("0h 2m 00s")
+    // One second later the same key says one second less: the label is live.
+    expect(redisTtlLabel(key, now + 1000, "countdown")).toBe("0h 1m 59s")
+  })
+
+  it("says expired once the expiry has passed", () => {
+    expect(redisTtlLabel({ ttlSeconds: 0, expiresAt: inSeconds(-1) }, now, "countdown")).toBe("expired")
+  })
+
+  it("writes the moment in date mode, and it does not tick", () => {
+    const key = { ttlSeconds: 3600, expiresAt: inSeconds(3600) }
+    expect(redisTtlLabel(key, now, "datetime")).toBe(redisTtlLabel(key, now + 5000, "datetime"))
+  })
+
+  it("says no ttl for a key Redis reports without an expiry", () => {
+    expect(redisTtlLabel({ ttlSeconds: -1 }, now, "countdown")).toBe("no ttl")
+    expect(redisTtlLabel({ ttlSeconds: -1 }, now, "datetime")).toBe("no ttl")
+  })
+})
+
+describe("fetchRedisKeyProbeBatch", () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it("asks about many keys in one request", async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify([
+        { key: "a", exists: true, ttlSeconds: 60, expiresAt: null },
+        { key: "b", exists: false, ttlSeconds: -1, expiresAt: null },
+      ]),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const answers = await fetchRedisKeyProbeBatch("c1", 3, ["a", "b"])
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toContain("/c1/keys/probe")
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(String(init.body))).toEqual({ database: 3, keys: ["a", "b"] })
+    expect(answers.map((a) => [a.key, a.exists])).toEqual([["a", true], ["b", false]])
+  })
+
+  it("asks nothing at all for an empty list", async () => {
+    const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    expect(await fetchRedisKeyProbeBatch("c1", 0, [])).toEqual([])
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("surfaces the server refusal as an error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("at most 500 keys per probe", { status: 400 })))
+
+    await expect(fetchRedisKeyProbeBatch("c1", 0, ["a"])).rejects.toThrow("at most 500 keys per probe")
+  })
+})
+
+describe("useRedisBrowser expiry recheck", () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  function renderWithRedisTab() {
+    const activeTable = { connId: "c1", table: "Redis keys", database: null, kind: "redis" as const, redisDb: 0 }
+    return renderHook(() =>
+      useRedisBrowser({
+        notifyDb: vi.fn(),
+        activeTable,
+        setActiveTable: vi.fn(),
+        activeTableRef: { current: activeTable },
+        setSelectedId: vi.fn(),
+        setSchemaConnId: vi.fn(),
+        setOpenTabs: vi.fn(),
+        setRightTab: vi.fn(),
+        expandedConns: new Set(),
+        setExpandedConns: vi.fn(),
+        conns: [],
+      }),
+    )
+  }
+
+  it("asks about keys that expired together in one request, not one each", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/keys/probe") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { keys: string[] }
+        return new Response(
+          JSON.stringify(body.keys.map((key) => ({
+            key, exists: true, ttlSeconds: 120, expiresAt: new Date(Date.now() + 120_000).toISOString(),
+          }))),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      }
+      return new Response(JSON.stringify({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { result } = renderWithRedisTab()
+    const past = new Date(Date.now() - 1_000).toISOString()
+    act(() => {
+      result.current.setRedisPages({
+        [redisPageKey("c1", 0, "")]: {
+          prefix: "", nodes: [], cursor: 0, pageOffset: 0, complete: true, scanned: 2,
+          keys: [
+            { key: "a", type: "string", ttlSeconds: 0, expiresAt: past },
+            { key: "b", type: "string", ttlSeconds: 0, expiresAt: past },
+          ],
+        },
+      })
+    })
+
+    // Let the coalescing window close.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 500)) })
+
+    const probes = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).includes("/keys/probe") && (init as RequestInit | undefined)?.method === "POST",
+    )
+    expect(probes).toHaveLength(1)
+    const body = JSON.parse(String((probes[0][1] as RequestInit).body)) as { keys: string[] }
+    expect([...body.keys].sort()).toEqual(["a", "b"])
+  })
+
+  it("marks a key gone when the recheck says it no longer exists", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/keys/probe") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { keys: string[] }
+        return new Response(
+          JSON.stringify(body.keys.map((key) => ({ key, exists: false, ttlSeconds: -1, expiresAt: null }))),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      }
+      return new Response(JSON.stringify({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { result } = renderWithRedisTab()
+    const pageKey = redisPageKey("c1", 0, "")
+    act(() => {
+      result.current.setRedisPages({
+        [pageKey]: {
+          prefix: "", nodes: [], cursor: 0, pageOffset: 0, complete: true, scanned: 1,
+          keys: [{ key: "dead", type: "string", ttlSeconds: 0, expiresAt: new Date(Date.now() - 1_000).toISOString() }],
+        },
+      })
+    })
+
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 500)) })
+
+    // The probe said gone, and that triggered a refetch which came back without
+    // the key: the row is not struck through, it is simply not there any more.
+    expect(result.current.redisPages[pageKey].keys).toHaveLength(0)
+  })
+})
+
+describe("useRedisBrowser expiry recheck on a clock", () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it("rechecks a key that expires while nothing else changes", async () => {
+    // The bug this guards: the countdown is drawn from `expiresAt`, so a key
+    // reaching zero changes no state. An effect keyed on the pages never ran,
+    // and the row sat on "expired" until the reader clicked something.
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/keys/probe") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { keys: string[] }
+        return new Response(
+          JSON.stringify(body.keys.map((key) => ({ key, exists: false, ttlSeconds: -1, expiresAt: null }))),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      }
+      return new Response(JSON.stringify({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const activeTable = { connId: "c1", table: "Redis keys", database: null, kind: "redis" as const, redisDb: 0 }
+    const { result } = renderHook(() =>
+      useRedisBrowser({
+        notifyDb: vi.fn(),
+        activeTable,
+        setActiveTable: vi.fn(),
+        activeTableRef: { current: activeTable },
+        setSelectedId: vi.fn(),
+        setSchemaConnId: vi.fn(),
+        setOpenTabs: vi.fn(),
+        setRightTab: vi.fn(),
+        expandedConns: new Set(),
+        setExpandedConns: vi.fn(),
+        conns: [],
+      }),
+    )
+
+    const pageKey = redisPageKey("c1", 0, "")
+    // Expires 300ms from now: still in the future when the page lands, so the
+    // scan that follows the page arriving must NOT probe it.
+    act(() => {
+      result.current.setRedisPages({
+        [pageKey]: {
+          prefix: "", nodes: [], cursor: 0, pageOffset: 0, complete: true, scanned: 1,
+          keys: [{ key: "short", type: "string", ttlSeconds: 1, expiresAt: new Date(Date.now() + 300).toISOString() }],
+        },
+      })
+    })
+
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)) })
+    const early = fetchMock.mock.calls.filter(([u, i]) => String(u).includes("/keys/probe") && (i as RequestInit | undefined)?.method === "POST")
+    expect(early).toHaveLength(0)
+
+    // Now let it cross zero with no further state change of any kind.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1800)) })
+
+    const late = fetchMock.mock.calls.filter(([u, i]) => String(u).includes("/keys/probe") && (i as RequestInit | undefined)?.method === "POST")
+    expect(late).toHaveLength(1)
+    // The probe answered "gone", which refetched the page; the stub returns an
+    // empty page, so the row is gone from the list rather than struck through.
+    expect(result.current.redisPages[pageKey].keys).toHaveLength(0)
+  }, 10000)
+})
+
+describe("useRedisBrowser gone rows", () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  const redisTab = { connId: "c1", table: "Redis keys", database: null, kind: "redis" as const, redisDb: 0 }
+
+  function renderRedis() {
+    return renderHook(() =>
+      useRedisBrowser({
+        notifyDb: vi.fn(),
+        activeTable: redisTab,
+        setActiveTable: vi.fn(),
+        activeTableRef: { current: redisTab },
+        setSelectedId: vi.fn(),
+        setSchemaConnId: vi.fn(),
+        setOpenTabs: vi.fn(),
+        setRightTab: vi.fn(),
+        expandedConns: new Set(),
+        setExpandedConns: vi.fn(),
+        conns: [],
+      }),
+    )
+  }
+
+  it("refetches the page as soon as a probe says the key is gone", async () => {
+    // The point: a gone key means the page is stale, and waiting for the next
+    // AutoRefresh tick (10-60s) would leave a struck-through row on screen.
+    const calls: string[] = []
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url)
+      if (u.includes("/keys/probe") && init?.method === "POST") {
+        calls.push("probe")
+        const body = JSON.parse(String(init.body)) as { keys: string[] }
+        return new Response(
+          JSON.stringify(body.keys.map((key) => ({ key, exists: false, ttlSeconds: -1, expiresAt: null }))),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      }
+      if (u.includes("/keys?")) {
+        calls.push("refetch")
+        // The page comes back without the dead key: it really is gone.
+        return new Response(
+          JSON.stringify({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      }
+      return new Response(JSON.stringify({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { result } = renderRedis()
+    const pageKey = redisPageKey("c1", 0, "")
+    act(() => {
+      result.current.setRedisPages({
+        [pageKey]: {
+          prefix: "", nodes: [], cursor: 0, pageOffset: 0, complete: true, scanned: 1,
+          keys: [{ key: "dead", type: "string", ttlSeconds: 0, expiresAt: new Date(Date.now() - 1000).toISOString() }],
+        },
+      })
+    })
+
+    await act(async () => { await new Promise((r) => setTimeout(r, 900)) })
+
+    expect(calls).toContain("probe")
+    expect(calls).toContain("refetch")
+    // The refetch is what recovers the row, so it must not still be listed.
+    expect(result.current.redisPages[pageKey].keys.find((k) => k.key === "dead")).toBeUndefined()
+  }, 15000)
+
+  it("clears a gone row when the inspector finds the key alive", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/keys/inspect")) {
+        return new Response(
+          JSON.stringify({
+            key: "revived", type: "string", ttlSeconds: 400,
+            expiresAt: new Date(Date.now() + 400_000).toISOString(),
+            length: 1, encoding: null, preview: { kind: "string", entries: [], truncated: false },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      }
+      return new Response(JSON.stringify({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { result } = renderRedis()
+    const pageKey = redisPageKey("c1", 0, "")
+    act(() => {
+      result.current.setRedisPages({
+        [pageKey]: {
+          prefix: "", nodes: [], cursor: 0, pageOffset: 0, complete: true, scanned: 1,
+          keys: [{ key: "revived", type: "string", ttlSeconds: -1, expiresAt: null, gone: true }],
+        },
+      })
+    })
+
+    await act(async () => { await result.current.selectRedisKey("revived") })
+
+    const row = result.current.redisPages[pageKey].keys[0]
+    expect(row.gone).toBe(false)
+    expect(row.ttlSeconds).toBe(400)
   })
 })

@@ -53,6 +53,8 @@ export interface ExplorerPanelsProps {
   redisLoading: boolean
   redisInspect: RedisInspect | null
   redisInspectOpen: boolean
+  redisAutoRefresh: boolean
+  redisAutoRefreshMs: number
   redisDeleteTarget: string | null
   redisDeleteOpen: boolean
   redisPreview: RedisPrefixPreview | null
@@ -102,6 +104,8 @@ export interface ExplorerPanelsProps {
   onPreviewPrefix: (connId: string, db: number, prefix: string) => void
   onConfirmDeleteKey: (connId: string, db: number, key: string) => void
   onConfirmDeletePrefix: (connId: string, db: number, prefix: string) => void
+  onAutoRefreshChange: (enabled: boolean) => void
+  onAutoRefreshMsChange: (ms: number) => void
 }
 
 /**
@@ -117,7 +121,7 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
     activeRedisDb, redisPrefix, redisRootPrefix, redisPages, redisExpanded, redisInspectKey,
     redisLoading, redisInspect, redisInspectOpen,
     redisDeleteTarget, redisDeleteOpen, redisPreview, redisPreviewLoading, redisMutating,
-    redisPrefixPreviewOpen, redisPrefixPreviewTarget, isWide, retryLabel,
+    redisPrefixPreviewOpen, redisPrefixPreviewTarget, redisAutoRefresh, redisAutoRefreshMs, isWide, retryLabel,
   } = props
 
   const activeIsRedis = isRedisTab(activeTable)
@@ -207,6 +211,10 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
             redisMutating={redisMutating}
             redisPrefixPreviewOpen={redisPrefixPreviewOpen}
             redisPrefixPreviewTarget={redisPrefixPreviewTarget}
+            redisAutoRefresh={redisAutoRefresh}
+            redisAutoRefreshMs={redisAutoRefreshMs}
+            onAutoRefreshChange={props.onAutoRefreshChange}
+            onAutoRefreshMsChange={props.onAutoRefreshMsChange}
             conns={conns}
             isWide={isWide}
             onPrefixChange={props.onPrefixChange}

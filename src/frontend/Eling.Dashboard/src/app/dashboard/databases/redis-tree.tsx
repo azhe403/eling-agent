@@ -1,10 +1,11 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 
-import { RedisPage, redisPageKey } from "./redis-browser"
+import { RedisPage, redisPageKey, redisTtlLabel, type RedisTtlMode } from "./redis-browser"
 
 /**
  * The Redis key tree, as it is drawn.
@@ -26,6 +27,33 @@ export const formatTtl = (seconds: number): string => {
   return `${Math.round(seconds / 86400)}d`
 }
 
+export type RedisKeyItem = {
+  key: string
+  type: string
+  ttlSeconds: number
+  expiresAt?: string | null
+  /** True when the recheck found the key gone; the row stays, marked. */
+  gone?: boolean
+  /**
+   * True when the backend's page cache carried this row over because the key
+   * is no longer in the keyspace. The row stays in the tree, marked, instead of
+   * disappearing on its own.
+   */
+  expired?: boolean
+}
+
+export function useRedisTtlClock(enabled: boolean): number {
+  const [now, setNow] = useState<number>(() => Date.now())
+
+  useEffect(() => {
+    if (!enabled) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [enabled])
+
+  return now
+}
+
 /**
  * One key row, shared by the root list and every prefix level. They used to be
  * three copies that drifted apart: the root list kept the old layout long
@@ -36,14 +64,22 @@ export function RedisKeyRow({
   active,
   onSelect,
   onDelete,
+  ttlMode = "countdown",
+  now,
 }: {
-  item: { key: string; type: string; ttlSeconds: number }
+  item: RedisKeyItem
   active: boolean
   onSelect: (key: string) => void
   onDelete: (key: string) => void
+  ttlMode?: RedisTtlMode
+  now: number
 }) {
+  const ttlLabel = redisTtlLabel(item, now, ttlMode)
+  // "expired" is the backend's judgement (the key is gone from the keyspace);
+  // "gone" is the same finding made by a live recheck. Both keep the row.
+  const gone = Boolean(item.gone || item.expired)
   return (
-    <div className="flex w-full items-center gap-1 pr-1" title={item.key}>
+    <div className={`flex w-full items-center gap-1 pr-1 ${gone ? "opacity-60" : ""}`} title={item.key}>
       <Button
         variant="ghost"
         size="sm"
@@ -51,9 +87,9 @@ export function RedisKeyRow({
         onClick={() => onSelect(item.key)}
       >
         <span className="shrink-0 text-xs">🔑</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">{item.key}</span>
+        <span className={`min-w-0 flex-1 truncate font-mono text-xs ${gone ? "line-through" : ""}`}>{item.key}</span>
         <span className="shrink-0 pl-2 text-xs tabular-nums text-muted-foreground">
-          {item.type} · {formatTtl(item.ttlSeconds)}
+          {item.type} · {item.expired ? "expired" : gone ? "gone" : ttlLabel}
         </span>
       </Button>
       <Button
@@ -136,6 +172,8 @@ export function RedisPrefixTree({
   onSelectKey,
   onDeleteKey,
   onDeletePrefix,
+  ttlMode = "countdown",
+  now,
 }: {
   connId: string
   db: number
@@ -148,6 +186,8 @@ export function RedisPrefixTree({
   /** Delete asks from the rows, wired by the caller to the delete dialogs. */
   onDeleteKey: (key: string) => void
   onDeletePrefix: (prefix: string) => void
+  ttlMode?: RedisTtlMode
+  now: number
 }) {
   const page = pages[redisPageKey(connId, db, prefix)]
   if (!page) return <p className="px-2 text-xs text-muted-foreground">Loading…</p>
@@ -176,6 +216,8 @@ export function RedisPrefixTree({
                   onSelectKey={onSelectKey}
                   onDeleteKey={onDeleteKey}
                   onDeletePrefix={onDeletePrefix}
+                  ttlMode={ttlMode}
+                  now={now}
                 />
               </div>
             ) : null}
@@ -189,6 +231,8 @@ export function RedisPrefixTree({
           active={inspectKey === k.key}
           onSelect={onSelectKey}
           onDelete={onDeleteKey}
+          ttlMode={ttlMode}
+          now={now}
         />
       ))}
     </div>
