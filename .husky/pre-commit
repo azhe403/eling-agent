@@ -7,11 +7,15 @@
 # - dashboard change -> frontend lint + typecheck only (no C# impact)
 # - build/config     -> core + api + desktop (package.json also frontend)
 # - docs only        -> nothing, instant
-# Bypass: SKIP_HOOK=1 git commit --no-verify  or  FULL_CHECK=1 git commit
+# No bypass. SKIP_HOOK=1 / --no-verify are refused on purpose: a skipped
+# hook hides the very failure it was meant to catch. FULL_CHECK=1 runs
+# everything instead of skipping anything.
 
 if [ "$SKIP_HOOK" = "1" ]; then
-  echo "→ SKIP_HOOK=1: skipping pre-commit"
-  exit 0
+  echo "✗ SKIP_HOOK=1 is not supported: the pre-commit hook is mandatory." >&2
+  echo "  Fix the failing checks instead, or ask the maintainer to land the" >&2
+  echo "  blocking work first." >&2
+  exit 1
 fi
 
 # Anti-lock: every dotnet invocation below builds/tests under a disposable
@@ -23,6 +27,19 @@ fi
 # Already gitignored (.bin*) and auto-cleaned by scripts/clean-bin.ps1.
 HOOK_ROOT=".bin-hook-$$"
 trap 'rm -rf "$HOOK_ROOT"' EXIT INT TERM
+
+# Record that this commit's tree passed the checks, so post-commit can tell
+# a vetted commit from one that bypassed the hook with --no-verify.
+mark_vetted() {
+  # Two separate assignments, not one interpolated string: on a repository
+  # without a HEAD yet (the very first commit) `git rev-parse HEAD` prints
+  # "HEAD" to stdout and fails, and an inline `|| echo none` would then be
+  # swallowed, leaving the tree field misaligned.
+  head_sha=$(git rev-parse --verify HEAD 2>/dev/null || echo none)
+  tree_sha=$(git write-tree 2>/dev/null || echo none)
+  printf '%s|%s\n' "$head_sha" "$tree_sha" \
+    > "$(git rev-parse --git-dir)/eling-hook-vetted" 2>/dev/null || true
+}
 
 # Core tests are fast (~2s) and their observed failure mode is intermittent
 # (parallel-class races, or a mid-edit compile window while another session
@@ -143,6 +160,7 @@ fi
 
 if [ "$NEED_FRONTEND" = "0" ] && [ "$NEED_CORE" = "0" ] && [ "$NEED_API" = "0" ] && [ "$NEED_DESKTOP" = "0" ]; then
   echo "→ pre-commit: docs/config only, nothing to test"
+  mark_vetted
   exit 0
 fi
 
@@ -169,3 +187,5 @@ if [ "$NEED_DESKTOP" = "1" ]; then
   echo "→ desktop layer: test:backend:desktop (isolated output $HOOK_ROOT)"
   ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Desktop.Tests/Eling.Desktop.Tests.csproj || exit 1
 fi
+
+mark_vetted

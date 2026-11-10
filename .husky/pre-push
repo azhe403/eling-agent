@@ -6,12 +6,16 @@
 #   per-run root) avoids .bin lock collisions with the dev server,
 #   manual runs, MCP hosts, and concurrent hooks
 # - after the checks pass, publish a Release build into ~/.local/bin
-# Bypass: SKIP_HOOK=1 git push --no-verify  or  FULL_CHECK=1 git push
+# No bypass. SKIP_HOOK=1 / --no-verify are refused on purpose: a skipped
+# hook hides the very failure it was meant to catch. FULL_CHECK=1 runs
+# everything instead of skipping anything.
 # Tests skipped by default (already covered by pre-commit). Re-enable: SKIP_TESTS=0 git push or RUN_TESTS=1 git push
 
 if [ "$SKIP_HOOK" = "1" ]; then
-  echo "→ SKIP_HOOK=1: skipping pre-push checks"
-  exit 0
+  echo "✗ SKIP_HOOK=1 is not supported: the pre-push hook is mandatory." >&2
+  echo "  Fix the failing checks instead, or ask the maintainer to land the" >&2
+  echo "  blocking work first." >&2
+  exit 1
 fi
 
 # Tests in pre-push are skipped by DEFAULT (already covered by the pre-commit

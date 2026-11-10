@@ -1,0 +1,41 @@
+#!/bin/sh
+# Catches commits that bypassed the checks with `git commit --no-verify`.
+#
+# `--no-verify` makes git skip the pre-commit and commit-msg hooks, but it
+# always runs post-commit. The pre-commit hook stamps the tree it vetted;
+# here that stamp is compared against the commit that was actually created.
+# A commit whose tree was never vetted went in unchecked, which is exactly
+# the failure the hooks exist to prevent.
+#
+# The commit is NOT undone here: post-commit runs after the commit object
+# exists, and rewriting history from a hook is a worse surprise than a loud
+# report. The report is the point - a bypassed commit must not look like a
+# normal one.
+
+VETTED_FILE="$(git rev-parse --git-dir)/eling-hook-vetted"
+
+if [ ! -f "$VETTED_FILE" ]; then
+  echo "✗ post-commit: no hook stamp found - this commit skipped the pre-commit hook." >&2
+  echo "  `git commit --no-verify` is not supported; the hooks are mandatory." >&2
+  exit 0
+fi
+
+VETTED_TREE="$(cut -d'|' -f2 < "$VETTED_FILE" 2>/dev/null)"
+# The tree of the commit that was just created. `git write-tree` would read
+# the index, which is already back in sync with HEAD after a commit, so it
+# would always differ from the tree the hook vetted.
+COMMIT_TREE="$(git rev-parse "HEAD^{tree}" 2>/dev/null)"
+
+if [ -z "$VETTED_TREE" ] || [ "$VETTED_TREE" = "none" ]; then
+  echo "✗ post-commit: the pre-commit hook did not record a vetted tree." >&2
+  echo "  `git commit --no-verify` is not supported; the hooks are mandatory." >&2
+  exit 0
+fi
+
+if [ "$VETTED_TREE" != "$COMMIT_TREE" ]; then
+  echo "✗ post-commit: the committed tree was never vetted by the pre-commit hook." >&2
+  echo "  `git commit --no-verify` is not supported; the hooks are mandatory." >&2
+  echo "  Please rebase this commit on top of a vetted one, or ask the" >&2
+  echo "  maintainer to land the blocking work first." >&2
+  exit 0
+fi
