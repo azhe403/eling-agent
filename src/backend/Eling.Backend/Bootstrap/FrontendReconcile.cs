@@ -45,15 +45,35 @@ internal static class FrontendReconcile
     /// is on.
     /// </para>
     /// </param>
-    public static FrontendAction Decide(bool portListening, bool responding, bool starting) =>
+    /// <param name="consecutiveSilentProbes">
+    /// How many probe rounds in a row have found the port listening but silent.
+    /// One slow compile must not be treated as a hang: Next.js compiles routes
+    /// on demand, so a single silent probe is not proof of a hang. See
+    /// <see cref="SilentProbeThreshold"/>.
+    /// </param>
+    public static FrontendAction Decide(
+        bool portListening,
+        bool responding,
+        bool starting,
+        int consecutiveSilentProbes) =>
         (portListening, responding) switch
         {
             (true, true) => FrontendAction.None,
             (true, false) when starting => FrontendAction.None,
+            (true, false) when consecutiveSilentProbes < SilentProbeThreshold => FrontendAction.None,
             (true, false) => FrontendAction.Restart,
             _ when starting => FrontendAction.None,
             _ => FrontendAction.Start,
         };
+
+    /// <summary>
+    /// Consecutive silent probes required before a hung frontend is killed.
+    /// One slow compile (&gt;10s first hit) must not be treated as a hang:
+    /// Next.js compiles routes on demand, so a single silent probe is not
+    /// proof of a hang. Two silent probes (each with the 10s probe timeout)
+    /// in a row is.
+    /// </summary>
+    internal const int SilentProbeThreshold = 2;
 
     /// <summary>
     /// Wait before the next attempt. Doubles per consecutive failure and stops
