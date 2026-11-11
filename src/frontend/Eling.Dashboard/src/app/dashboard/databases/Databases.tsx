@@ -37,7 +37,7 @@ import { DeleteConnectionDialog } from "./components/dialogs/DeleteConnectionDia
 import { ImportConfirmDialog } from "./components/dialogs/ImportConfirmDialog"
 import { DeleteRowConfirmDialog } from "./components/dialogs/DeleteRowConfirmDialog"
 import { ReadOnlyDeleteDialog } from "./components/dialogs/ReadOnlyDeleteDialog"
-import { SqliteFilePicker } from "./components/dialogs/SqliteFilePicker"
+import { HostPathPicker } from "@/components/host-path-picker"
 import { NotificationStack } from "./components/notifications/NotificationToast"
 import { TreeContextMenu, type TreeContextMenuState } from "./components/context-menus/TreeContextMenu"
 import { TabContextMenu, type TabContextMenuState } from "./components/context-menus/TabContextMenu"
@@ -238,12 +238,8 @@ export function Databases() {
   const [editTestResult, setEditTestResult] = useState<{ ok: boolean; message: string; latencyMs: number } | null>(null)
   const [editTesting, setEditTesting] = useState(false)
 
-  // The SQLite file picker
+  // The path picker dialog (SQLite file selection)
   const [showPicker, setShowPicker] = useState(false)
-  const [pickerPath, setPickerPath] = useState<string | null>(null)
-  const [pickerParent, setPickerParent] = useState<string | null>(null)
-  const [pickerEntries, setPickerEntries] = useState<{ path: string; isDirectory: boolean }[]>([])
-  const [pickerLoading, setPickerLoading] = useState(false)
   const [pickerTarget, setPickerTarget] = useState<"create" | "edit">("create")
 
   // Import
@@ -877,49 +873,12 @@ export function Databases() {
     setShowImportConfirm(true)
   }, [selectedKeys])
 
-  /* --------------------------------------------------------------- picker */
+  /* ----------------------------------------------------------------- picker */
 
-  const browse = useCallback(async (path: string | null) => {
-    setPickerLoading(true)
-    try {
-      if (!path) {
-        const res = await fetch("/api/agent/host/drives")
-        const drives: string[] = await res.json()
-        setPickerPath(null)
-        setPickerParent(null)
-        setPickerEntries(drives.map((d) => ({ path: d, isDirectory: true })))
-      } else {
-        const res = await fetch("/api/agent/host/browse?path=" + encodeURIComponent(path))
-        const data = await res.json()
-        setPickerPath(data.path)
-        setPickerParent(data.parent)
-        setPickerEntries(data.entries ?? [])
-      }
-    } catch {
-      setPickerEntries([])
-    } finally {
-      setPickerLoading(false)
-    }
+  const openPicker = useCallback((target: "create" | "edit") => {
+    setPickerTarget(target)
+    setShowPicker(true)
   }, [])
-
-  const openPicker = useCallback(
-    async (target: "create" | "edit" = "create") => {
-      setPickerTarget(target)
-      setShowPicker(true)
-      try {
-        const res = await fetch("/api/agent/host/drives")
-        const drives: string[] = await res.json()
-        if (drives && drives.length > 0) {
-          void browse(drives[0])
-        } else {
-          void browse(null)
-        }
-      } catch {
-        void browse(null)
-      }
-    },
-    [browse]
-  )
 
   /* ----------------------------------------------------------------- render */
 
@@ -1260,13 +1219,10 @@ export function Databases() {
           </div>
         ) : null}
 
-        <SqliteFilePicker
+        <HostPathPicker
           open={showPicker}
-          path={pickerPath}
-          parent={pickerParent}
-          entries={pickerEntries}
-          loading={pickerLoading}
-          onBrowse={(path) => { void browse(path) }}
+          mode="file"
+          title="Select SQLite database file"
           onSelect={(path) => {
             // The manual form takes the path, the raw form takes a connection string.
             if (pickerTarget === "edit") {

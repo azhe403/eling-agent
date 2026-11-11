@@ -25,6 +25,15 @@ export function utcToLocal(dateStr?: string | null): string {
 }
 
 /**
+ * The same instant rendered date-only, `yyyy-mm-dd`, for compact columns. The
+ * rules of `utcToLocal` all hold: local timezone, empty string on absent or
+ * invalid input.
+ */
+export function utcToLocalDate(dateStr?: string | null): string {
+  return utcToLocal(dateStr).slice(0, 10)
+}
+
+/**
  * How long ago an instant was, in the reader's own clock: "just now", "4m
  * ago", "3h ago", "2d ago", and the local date once it is older than a week.
  *
@@ -53,5 +62,5 @@ export function relativeTime(dateStr?: string | null): string {
   const days = Math.floor(hours / 24)
   if (days < 7) return `${days}d ago`
 
-  return utcToLocal(dateStr).slice(0, 10)
+  return utcToLocalDate(dateStr)
 }

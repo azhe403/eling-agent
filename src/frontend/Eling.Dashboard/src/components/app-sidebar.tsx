@@ -14,6 +14,7 @@ import {
   Wrench,
   FileText,
   Settings,
+  SquareTerminal,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -76,6 +77,11 @@ const navMain = [
     title: "Tools",
     url: "/dashboard/tools",
     icon: <Wrench className="size-4" />,
+  },
+  {
+    title: "Shell",
+    url: "/dashboard/shell",
+    icon: <SquareTerminal className="size-4" />,
   },
   {
     title: "Settings",
