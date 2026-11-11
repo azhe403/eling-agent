@@ -28,7 +28,8 @@ public sealed class DatabaseReadService : IDatabaseReadService
         string? database,
         string sql,
         int maxRows,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool preferCache = true)
     {
         ArgumentNullException.ThrowIfNull(connection);
         if (string.IsNullOrWhiteSpace(sql))
@@ -39,14 +40,31 @@ public sealed class DatabaseReadService : IDatabaseReadService
         if (maxRows < 1) maxRows = 1;
         if (maxRows > 1000) maxRows = 1000;
 
-        var target = Target(connection, database);
+        // SQLite is local: a live read is as fast as the cache lookup
+        // plus the cache file read, and a snapshot is staler than either.
+        // It stays live-first.
+        var useCache = preferCache && connection.Provider != DatabaseProvider.Sqlite;
+        if (useCache
+            && _cache.TryGetQuery(connection.Id, database, maxRows, sql, out var snapshot, out var snapshotAt)
+            && snapshot is not null)
+        {
+            return snapshot with
+            {
+                FromCache = true,
+                CachedAt = snapshotAt
+            };
+        }
 
-        var adapter = DatabaseAdapterFactory.CreateAdapter(target);
+        var target = Target(connection, database);
         var sw = Stopwatch.StartNew();
         try
         {
+            var adapter = DatabaseAdapterFactory.CreateAdapter(target);
             var result = await adapter.QueryAsync(sql, maxRows, cancellationToken);
-            _cache.SetQuery(connection.Id, database, maxRows, sql, result);
+            if (connection.Provider != DatabaseProvider.Sqlite)
+            {
+                _cache.SetQuery(connection.Id, database, maxRows, sql, result);
+            }
             return result with { FromCache = false };
         }
         catch (DatabaseUnavailableException ex)
@@ -116,24 +134,36 @@ public sealed class DatabaseReadService : IDatabaseReadService
 
     public async Task<IReadOnlyList<string>> ListDatabasesAsync(
         DatabaseConnection connection,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool preferCache = true)
     {
         ArgumentNullException.ThrowIfNull(connection);
+
+        var useCache = preferCache && connection.Provider != DatabaseProvider.Sqlite;
+        if (useCache
+            && _cache.TryGetDatabaseList(connection.Id, out var cached, out var cachedAt)
+            && cached is not null)
+        {
+            return cached;
+        }
 
         var adapter = DatabaseAdapterFactory.CreateAdapter(connection);
         try
         {
             var databases = await adapter.ListDatabasesAsync(cancellationToken);
-            _cache.SetDatabaseList(connection.Id, databases);
+            if (connection.Provider != DatabaseProvider.Sqlite)
+            {
+                _cache.SetDatabaseList(connection.Id, databases);
+            }
             return databases;
         }
         catch (DatabaseUnavailableException ex)
         {
-            if (_cache.TryGetDatabaseList(connection.Id, out var cached, out var cachedAt)
-                && cached is not null)
+            if (_cache.TryGetDatabaseList(connection.Id, out var cachedList, out var cachedListAt)
+                && cachedList is not null)
             {
                 _logger?.LogWarning(ex, "Database unavailable; serving cached database list for {Id}", connection.Id);
-                return cached;
+                return cachedList;
             }
 
             throw;

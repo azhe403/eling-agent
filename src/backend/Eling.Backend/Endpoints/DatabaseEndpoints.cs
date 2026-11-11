@@ -376,7 +376,9 @@ public static class DatabaseEndpoints
             string id,
             HttpContext httpContext,
             TestDatabaseConnectionRequest? req,
+            bool? refresh,
             IDatabaseConnectionStore store,
+            IDatabaseReadService readService,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
@@ -386,19 +388,31 @@ public static class DatabaseEndpoints
 
             // The stored password is not in the form, so the entered fields
             // are layered over the stored connection - a blank password keeps
-            // the stored one.
-            var connectionString = row.ConnectionString;
-            if (req is not null)
+            // the stored one. With no override fields at all, this is the same
+            // read the tree makes on every paint, so it goes through the cache.
+            if (req is null || (req.ConnectionString is null && req.Manual is null))
             {
                 try
                 {
-                    connectionString = ResolveConnectionString(row.Provider, req.ConnectionString, req.Manual, row.ConnectionString);
+                    var databases = await readService.ListDatabasesAsync(row, ct, preferCache: refresh != true);
+                    return Results.Ok(databases);
                 }
-                catch (ArgumentException ex)
+                catch (Exception ex)
                 {
-                    logger.LogWarning(ex, "List databases validation failed for {Id}", id);
-                    return Results.BadRequest(ex.Message);
+                    logger.LogWarning(ex, "Listing databases failed for {Id}", id);
+                    return Results.Problem(statusCode: 502, title: "databases failed", detail: "could not read the databases on this server");
                 }
+            }
+
+            var connectionString = row.ConnectionString;
+            try
+            {
+                connectionString = ResolveConnectionString(row.Provider, req.ConnectionString, req.Manual, row.ConnectionString);
+            }
+            catch (ArgumentException ex)
+            {
+                logger.LogWarning(ex, "List databases validation failed for {Id}", id);
+                return Results.BadRequest(ex.Message);
             }
 
             var adapterResult = TryCreateAdapter(row with { ConnectionString = connectionString }, logger);
@@ -459,7 +473,7 @@ public static class DatabaseEndpoints
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                var result = await readService.QueryAsync(row, req.Database, req.Sql, maxRows, ct);
+                var result = await readService.QueryAsync(row, req.Database, req.Sql, maxRows, ct, preferCache: !req.Refresh);
                 sw.Stop();
                 await auditLogger.RecordAsync(new AuditEvent
                 {

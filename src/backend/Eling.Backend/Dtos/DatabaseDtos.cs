@@ -59,7 +59,8 @@ public sealed record DatabaseTestResponse(
 public sealed record DatabaseQueryRequest(
     string Sql,
     int MaxRows = 100,
-    string? Database = null);
+    string? Database = null,
+    bool Refresh = false);
 
 public sealed record DatabaseMutateRequest(
     string Sql,

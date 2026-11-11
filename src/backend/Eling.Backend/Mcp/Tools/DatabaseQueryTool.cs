@@ -83,7 +83,7 @@ public sealed class DatabaseQueryTool
             // failure escaping to the agent.
             if (maxRows < 1) maxRows = 1;
             if (maxRows > 1000) maxRows = 1000;
-            var result = await _readService.QueryAsync(row, database, sql, maxRows, cancellationToken);
+            var result = await _readService.QueryAsync(row, database, sql, maxRows, cancellationToken, preferCache: false);
             sw.Stop();
             await (_audit?.RecordAsync(new AuditEvent
             {
