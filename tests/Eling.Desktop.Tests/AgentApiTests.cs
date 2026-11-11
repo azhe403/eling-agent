@@ -27,7 +27,7 @@ public class AgentApiTests
         var handler = new StubHandler(request =>
             new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("""{"baseUrl":"http://127.0.0.1:11434/v1","model":"m1","hasKey":true,"modelsCached":["m1"]}""")
+                Content = new StringContent("""{"code":"ok","message":"The resource was read successfully from the server.","data":{"baseUrl":"http://127.0.0.1:11434/v1","model":"m1","hasKey":true,"modelsCached":["m1"]}}""")
             });
         var client = CreateClient(handler);
 
@@ -43,7 +43,7 @@ public class AgentApiTests
         var handler = new StubHandler(request =>
             new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("""{"baseUrl":"http://x/v1","model":"m2","hasKey":true,"modelsCached":[]}""")
+                Content = new StringContent("""{"code":"ok","message":"The request was processed successfully by the server.","data":{"baseUrl":"http://x/v1","model":"m2","hasKey":true,"modelsCached":[]}}""")
             });
         var client = CreateClient(handler);
 
@@ -127,7 +127,7 @@ public class AgentApiTests
             {
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = new StringContent("""{"baseUrl":"http://x/v1","model":"m1","hasKey":true,"modelsCached":["m1","m2"]}""")
+                    Content = new StringContent("""{"code":"ok","message":"x","data":{"baseUrl":"http://x/v1","model":"m1","hasKey":true,"modelsCached":["m1","m2"]}}""")
                 };
             }
 
@@ -136,7 +136,7 @@ public class AgentApiTests
                 putHit = true;
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = new StringContent("""{"baseUrl":"http://x/v1","model":"m2","hasKey":true,"modelsCached":["m1","m2"]}""")
+                    Content = new StringContent("""{"code":"ok","message":"x","data":{"baseUrl":"http://x/v1","model":"m2","hasKey":true,"modelsCached":["m1","m2"]}}""")
                 };
             }
 
@@ -169,7 +169,7 @@ public class AgentApiTests
             {
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = new StringContent("""{"baseUrl":"http://x/v1","model":null,"hasKey":true,"modelsCached":[]}""")
+                    Content = new StringContent("""{"code":"ok","message":"x","data":{"baseUrl":"http://x/v1","model":null,"hasKey":true,"modelsCached":[]}}""")
                 };
             }
 

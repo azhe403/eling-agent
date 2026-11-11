@@ -39,6 +39,36 @@ public sealed class ElingApiClient
         _logger = logger;
     }
 
+    /// <summary>
+    /// Reads a response that speaks the standard envelope (code/message/data).
+    /// Falls back to the raw body when the backend predates the envelope so the
+    /// desktop keeps working against an older backend. Returns default on any
+    /// decode failure - the call sites already keep a "default + log" failure
+    /// policy, so an unreadable payload behaves exactly like a missing one.
+    /// </summary>
+    private async Task<T?> ReadEnvelopeAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+        try
+        {
+            using var document = JsonDocument.Parse(raw);
+            var root = document.RootElement;
+            if (root.ValueKind == JsonValueKind.Object
+                && root.TryGetProperty("code", out _)
+                && root.TryGetProperty("message", out _)
+                && root.TryGetProperty("data", out var data))
+            {
+                return JsonSerializer.Deserialize<T>(data.GetRawText(), JsonOptions);
+            }
+            return JsonSerializer.Deserialize<T>(raw, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not decode the envelope from {Path}", response.RequestMessage?.RequestUri?.PathAndQuery);
+            return default;
+        }
+    }
+
     private HttpClient GetClient()
     {
         if (HttpClientFactory is not null)
@@ -107,7 +137,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync(url, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<MemoryListDto>(JsonOptions, cancellationToken);
+                return await ReadEnvelopeAsync<MemoryListDto>(response, cancellationToken);
             }
             _logger.LogWarning("GetMemories failed with status {StatusCode}", response.StatusCode);
         }
@@ -132,10 +162,10 @@ public sealed class ElingApiClient
         try
         {
             using var client = GetClient();
-            var response = await client.PostAsJsonAsync(url, payload, JsonOptions, cancellationToken);
+            var response = await client.PostAsJsonAsync(url, payload, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<MemoryDto>(JsonOptions, cancellationToken);
+                return await ReadEnvelopeAsync<MemoryDto>(response, cancellationToken);
             }
             _logger.LogWarning("CreateMemory failed with status {StatusCode}", response.StatusCode);
         }
@@ -168,10 +198,10 @@ public sealed class ElingApiClient
         try
         {
             using var client = GetClient();
-            var response = await client.PatchAsJsonAsync(url, payload, JsonOptions, cancellationToken);
+            var response = await client.PatchAsJsonAsync(url, payload, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<MemoryDto>(JsonOptions, cancellationToken);
+                return await ReadEnvelopeAsync<MemoryDto>(response, cancellationToken);
             }
             _logger.LogWarning("UpdateMemory failed with status {StatusCode}", response.StatusCode);
         }
@@ -204,7 +234,7 @@ public sealed class ElingApiClient
         try
         {
             using var client = GetClient();
-            var response = await client.PostAsJsonAsync(endpoint, payload, JsonOptions, cancellationToken);
+            var response = await client.PostAsJsonAsync(endpoint, payload, cancellationToken);
             if (response.IsSuccessStatusCode) return true;
             _logger.LogWarning("MoveMemoryTier failed with status {StatusCode}", response.StatusCode);
         }
@@ -250,7 +280,7 @@ public sealed class ElingApiClient
         try
         {
             using var client = GetClient();
-            var response = await client.PostAsJsonAsync("api/scoped/promote-to-global", payload, JsonOptions, cancellationToken);
+            var response = await client.PostAsJsonAsync("api/scoped/promote-to-global", payload, cancellationToken);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -266,7 +296,7 @@ public sealed class ElingApiClient
         try
         {
             using var client = GetClient();
-            var response = await client.PostAsJsonAsync("api/scoped/copy-to-project", payload, JsonOptions, cancellationToken);
+            var response = await client.PostAsJsonAsync("api/scoped/copy-to-project", payload, cancellationToken);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -284,7 +314,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync("api/coordinator/runtimes", cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var dtos = await response.Content.ReadFromJsonAsync<List<RuntimeDto>>(JsonOptions, cancellationToken);
+                var dtos = await ReadEnvelopeAsync<List<RuntimeDto>>(response, cancellationToken);
                 return dtos ?? [];
             }
         }
@@ -304,7 +334,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync("api/coordinator/runtimes?includeRegistered=true&allProcesses=true", cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var dtos = await response.Content.ReadFromJsonAsync<List<CoordinatorRuntimeDto>>(JsonOptions, cancellationToken);
+                var dtos = await ReadEnvelopeAsync<List<CoordinatorRuntimeDto>>(response, cancellationToken);
                 return dtos ?? [];
             }
         }
@@ -333,7 +363,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync(url, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<WorkspaceTreesDto>(JsonOptions, cancellationToken);
+                return await ReadEnvelopeAsync<WorkspaceTreesDto>(response, cancellationToken);
             }
         }
         catch (Exception ex)
@@ -358,7 +388,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync("api/coordinator/workspaces/expanded", cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<WorkspaceExpansionDto>(JsonOptions, cancellationToken);
+                return await ReadEnvelopeAsync<WorkspaceExpansionDto>(response, cancellationToken);
             }
         }
         catch (Exception ex)
@@ -400,7 +430,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync("api/coordinator/projects/codebase-statuses", cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var dtos = await response.Content.ReadFromJsonAsync<List<ProjectCodebaseStatusDto>>(JsonOptions, cancellationToken);
+                var dtos = await ReadEnvelopeAsync<List<ProjectCodebaseStatusDto>>(response, cancellationToken);
                 return dtos ?? [];
             }
         }
@@ -451,13 +481,13 @@ public sealed class ElingApiClient
                 deleteCodebaseIndex,
                 deleteDotEling
             };
-            var response = await client.PostAsJsonAsync("api/coordinator/project/delete", payload, JsonOptions, cancellationToken);
+            var response = await client.PostAsJsonAsync("api/coordinator/project/delete", payload, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 return new DeleteProjectResult(false, [$"Delete failed (HTTP {(int)response.StatusCode})."]);
             }
 
-            var body = await response.Content.ReadFromJsonAsync<DeleteProjectResponse>(JsonOptions, cancellationToken);
+            var body = await ReadEnvelopeAsync<DeleteProjectResponse>(response, cancellationToken);
             var warnings = body?.Warnings ?? [];
             return new DeleteProjectResult(warnings.Count == 0, warnings);
         }
@@ -505,7 +535,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync("api/agent/provider/", cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<ProviderViewDto>(JsonOptions, cancellationToken);
+                return await ReadEnvelopeAsync<ProviderViewDto>(response, cancellationToken);
             }
             _logger.LogWarning("GetProvider failed with status {StatusCode}", response.StatusCode);
         }
@@ -522,10 +552,10 @@ public sealed class ElingApiClient
         {
             using var client = GetClient();
             var payload = new { baseUrl, model, apiKey };
-            var response = await client.PutAsJsonAsync("api/agent/provider/", payload, JsonOptions, cancellationToken);
+            var response = await client.PutAsJsonAsync("api/agent/provider/", payload, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<ProviderViewDto>(JsonOptions, cancellationToken);
+                return await ReadEnvelopeAsync<ProviderViewDto>(response, cancellationToken);
             }
             _logger.LogWarning("UpdateProvider failed with status {StatusCode}", response.StatusCode);
         }
@@ -541,10 +571,10 @@ public sealed class ElingApiClient
         try
         {
             using var client = GetClient();
-            var response = await client.PostAsJsonAsync("api/agent/provider/models", new { }, JsonOptions, cancellationToken);
+            var response = await client.PostAsJsonAsync("api/agent/provider/models", new { }, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var result = await response.Content.ReadFromJsonAsync<ModelListDto>(JsonOptions, cancellationToken);
+                var result = await ReadEnvelopeAsync<ModelListDto>(response, cancellationToken);
                 return result?.Models ?? [];
             }
             _logger.LogWarning("FetchModels failed with status {StatusCode}", response.StatusCode);
@@ -561,10 +591,10 @@ public sealed class ElingApiClient
         try
         {
             using var client = GetClient();
-            var response = await client.PostAsJsonAsync("api/agent/provider/test", new { }, JsonOptions, cancellationToken);
+            var response = await client.PostAsJsonAsync("api/agent/provider/test", new { }, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<ProviderTestResultDto>(JsonOptions, cancellationToken);
+                return await ReadEnvelopeAsync<ProviderTestResultDto>(response, cancellationToken);
             }
         }
         catch (Exception ex)
@@ -582,7 +612,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync("api/agent/workspaces/", cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var result = await response.Content.ReadFromJsonAsync<WorkspaceListDto>(JsonOptions, cancellationToken);
+                var result = await ReadEnvelopeAsync<WorkspaceListDto>(response, cancellationToken);
                 return result?.Roots ?? [];
             }
             _logger.LogWarning("GetWorkspaces failed with status {StatusCode}", response.StatusCode);
@@ -599,7 +629,7 @@ public sealed class ElingApiClient
         try
         {
             using var client = GetClient();
-            var response = await client.PostAsJsonAsync("api/agent/workspaces/", new { path }, JsonOptions, cancellationToken);
+            var response = await client.PostAsJsonAsync("api/agent/workspaces/", new { path }, cancellationToken);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -634,7 +664,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync(url, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var result = await response.Content.ReadFromJsonAsync<FileListDto>(JsonOptions, cancellationToken);
+                var result = await ReadEnvelopeAsync<FileListDto>(response, cancellationToken);
                 return result?.Entries ?? [];
             }
         }
@@ -654,7 +684,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync(url, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<FileReadDto>(JsonOptions, cancellationToken);
+                return await ReadEnvelopeAsync<FileReadDto>(response, cancellationToken);
             }
         }
         catch (Exception ex)
@@ -670,7 +700,7 @@ public sealed class ElingApiClient
         {
             using var client = GetClient();
             var payload = new { root, path, content };
-            var response = await client.PostAsJsonAsync("api/agent/files/write", payload, JsonOptions, cancellationToken);
+            var response = await client.PostAsJsonAsync("api/agent/files/write", payload, cancellationToken);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -688,7 +718,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync("api/agent/host/drives", cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var result = await response.Content.ReadFromJsonAsync<List<string>>(JsonOptions, cancellationToken);
+                var result = await ReadEnvelopeAsync<List<string>>(response, cancellationToken);
                 return result ?? [];
             }
         }
@@ -708,7 +738,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync(url, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<HostBrowseDto>(JsonOptions, cancellationToken);
+                return await ReadEnvelopeAsync<HostBrowseDto>(response, cancellationToken);
             }
         }
         catch (Exception ex)
@@ -727,7 +757,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync(url, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var result = await response.Content.ReadFromJsonAsync<List<ChatSummaryDto>>(JsonOptions, cancellationToken);
+                var result = await ReadEnvelopeAsync<List<ChatSummaryDto>>(response, cancellationToken);
                 return result ?? [];
             }
         }
@@ -746,7 +776,7 @@ public sealed class ElingApiClient
             var response = await client.GetAsync($"api/agent/chats/{id}", cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var result = await response.Content.ReadFromJsonAsync<List<ChatMessageDto>>(JsonOptions, cancellationToken);
+                var result = await ReadEnvelopeAsync<List<ChatMessageDto>>(response, cancellationToken);
                 return result ?? [];
             }
         }
@@ -763,10 +793,10 @@ public sealed class ElingApiClient
         {
             using var client = GetClient();
             var payload = new { workspace, message, chatId };
-            var response = await client.PostAsJsonAsync("api/agent/chats", payload, JsonOptions, cancellationToken);
+            var response = await client.PostAsJsonAsync("api/agent/chats", payload, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<TurnDto>(JsonOptions, cancellationToken);
+                return await ReadEnvelopeAsync<TurnDto>(response, cancellationToken);
             }
         }
         catch (Exception ex)
