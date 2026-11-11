@@ -133,6 +133,27 @@ public sealed class RedisKeyReadServiceOfflineTests : IDisposable
     }
 
     [Fact]
+    public async Task Inspect_WhenRecentlyMarkedUnreachable_ServesTheCachedAnswerWithoutHittingThePool()
+    {
+        var cache = NewCache();
+        Assert.True(RedisDatabaseIndex.TryCreate(0, out var db));
+        var pool = new CountingDeadPool();
+        var service = new RedisKeyReadService(pool, cache);
+
+        // First call: nothing cached, the server is down - it fails, and the
+        // connection is marked unreachable.
+        await Assert.ThrowsAsync<TimeoutException>(() => service.InspectAsync(Connection(), db, "session:abc"));
+        Assert.Equal(1, pool.GetAsyncCount);
+
+        // Cache lands. The second call must not touch the pool at all while
+        // the unreachable window is still open - it costs exactly nothing.
+        cache.SetKey("c1", db, Result("session:abc"));
+        var result = await service.InspectAsync(Connection(), db, "session:abc");
+        Assert.True(result.FromCache);
+        Assert.Equal(1, pool.GetAsyncCount);
+    }
+
+    [Fact]
     public async Task Inspect_WhenTheKeyWasRejectedByTheServer_DoesNotServeTheCache()
     {
         var cache = NewCache();
@@ -193,6 +214,24 @@ public sealed class RedisKeyReadServiceOfflineTests : IDisposable
     // their internal-ish constructors, which StackExchange.Redis marks obsolete
     // for callers that can supply the extra metadata. A test cannot.
 #pragma warning disable CS0618
+    /// <summary>A pool whose server is always down, counting how often it is asked.</summary>
+    private sealed class CountingDeadPool : IRedisConnectionPool
+    {
+        public int GetAsyncCount { get; private set; }
+
+        public Task<IConnectionMultiplexer> GetAsync(DatabaseConnection connection, CancellationToken ct = default)
+        {
+            GetAsyncCount++;
+            return Task.FromException<IConnectionMultiplexer>(new TimeoutException("no connection is available"));
+        }
+
+        public void Invalidate(string connectionId)
+        {
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     /// <summary>A server that is up and refuses the command itself.</summary>
     private sealed class RejectingPool : IRedisConnectionPool
     {

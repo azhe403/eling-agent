@@ -22,7 +22,8 @@ public interface IRedisKeyReadService
         DatabaseConnection connection,
         RedisDatabaseIndex database,
         string key,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool preferCache = true);
 
     /// <summary>
     /// Whether a key is still there, and its TTL, without reading its value.

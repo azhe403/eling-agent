@@ -48,7 +48,7 @@ public sealed class RedisKeyDeleteEndpointTests : IAsyncLifetime
         _app = builder.Build();
         _app.MapDatabaseKeyEndpoints();
         await _app.StartAsync();
-        _client = _app.GetTestClient();
+        _client = _app.CreateEnvelopeClient();
     }
 
     public async Task DisposeAsync()
@@ -458,7 +458,7 @@ public sealed class RedisKeyDeleteEndpointTests : IAsyncLifetime
             DatabaseConnection connection,
             RedisDatabaseIndex database,
             string key,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default, bool preferCache = true)
             => throw new NotSupportedException("inspect is not part of this test.");
 
         public Task<RedisCommandResult> ExecuteCommandAsync(

@@ -14,6 +14,9 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
     private readonly IRedisConnectionPool _pool;
     private readonly IRedisReadCache _cache;
     private readonly ILogger<RedisKeyReadService>? _logger;
+    /// <summary>How long a connection counts as unreachable after an unreachable-type failure.</summary>
+    private static readonly TimeSpan UnreachableWindow = TimeSpan.FromSeconds(60);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _unreachableSince = new();
 
     public RedisKeyReadService(
         IRedisConnectionPool pool,
@@ -79,6 +82,34 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
 
         var left = expires - DateTimeOffset.UtcNow;
         return left <= TimeSpan.Zero ? 0 : (long)left.TotalSeconds;
+    }
+
+    private bool IsRecentlyUnreachable(string connectionId) =>
+        _unreachableSince.TryGetValue(connectionId, out var since)
+        && DateTimeOffset.UtcNow - since < UnreachableWindow;
+
+    private void MarkUnreachable(string connectionId) =>
+        _unreachableSince[connectionId] = DateTimeOffset.UtcNow;
+
+    private void MarkReachable(string connectionId) =>
+        _unreachableSince.TryRemove(connectionId, out _);
+
+    private bool TryServeCachedInspection(string connectionId, RedisDatabaseIndex database, string key, out KeyInspectResult cached)
+    {
+        if (_cache.TryGetKey(connectionId, database, key, out var snapshot, out var snapshotAt)
+            && snapshot is not null)
+        {
+            cached = snapshot with
+            {
+                FromCache = true,
+                CachedAt = snapshotAt,
+                TtlSeconds = RemainingTtl(snapshot)
+            };
+            return true;
+        }
+
+        cached = default!;
+        return false;
     }
 
     /// <summary>
@@ -305,11 +336,23 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
     }
 
     public async Task<KeyInspectResult> InspectAsync(
-        DatabaseConnection connection, RedisDatabaseIndex database, string key, CancellationToken ct = default)
+        DatabaseConnection connection, RedisDatabaseIndex database, string key, CancellationToken ct = default, bool preferCache = true)
     {
+        // A connection that just failed as unreachable cannot re-teach us that
+        // the host is alive until we try it again - so during the window no
+        // InspectLiveAsync happens and the cached answer is served now.
+        if (preferCache && IsRecentlyUnreachable(connection.Id))
+        {
+            if (TryServeCachedInspection(connection.Id, database, key, out var cached))
+            {
+                return cached;
+            }
+        }
+
         try
         {
             var live = await InspectLiveAsync(connection, database, key, ct);
+            MarkReachable(connection.Id);
             _cache.SetKey(connection.Id, database, live);
             return live;
         }
@@ -321,21 +364,19 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
         }
         catch (Exception ex) when (IsUnreachable(ex))
         {
-            if (_cache.TryGetKey(connection.Id, database, key, out var cached, out var cachedAt)
-                && cached is not null)
+            MarkUnreachable(connection.Id);
+            if (TryServeCachedInspection(connection.Id, database, key, out var cached))
             {
                 _logger?.LogWarning(ex, "Redis unavailable; serving cached inspection for {Key}", key);
-                return cached with
-                {
-                    FromCache = true,
-                    CachedAt = cachedAt,
-                    // The stored TTL is a snapshot of "seconds left" at write
-                    // time; served an hour later it would overstate the key's
-                    // life. The absolute expiry it was derived from still holds.
-                    TtlSeconds = RemainingTtl(cached)
-                };
+                return cached;
             }
 
+            throw;
+        }
+        catch
+        {
+            // The server answered (even by rejecting) - it is not unreachable.
+            MarkReachable(connection.Id);
             throw;
         }
     }

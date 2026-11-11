@@ -88,6 +88,7 @@ public static class DatabaseKeyEndpoints
             IAuditLogger auditLogger,
             string key,
             int database = 0,
+            bool? refresh = null,
             CancellationToken ct = default) =>
         {
             var gate = await RedisKeyRoute.OpenAsync(id, store, httpContext, ct);
@@ -103,7 +104,7 @@ public static class DatabaseKeyEndpoints
                 ct,
                 async () =>
                 {
-                    var result = await readService.InspectAsync(gate.Row!, dbIndex, key, ct);
+                    var result = await readService.InspectAsync(gate.Row!, dbIndex, key, ct, preferCache: refresh != true);
                     return (object?)result;
                 });
         });
