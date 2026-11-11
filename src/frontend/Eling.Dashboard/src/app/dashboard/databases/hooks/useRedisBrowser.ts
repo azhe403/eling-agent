@@ -15,7 +15,8 @@ import {
   redisPageScope,
 } from "../redis-browser"
 import { REDIS_TAB_TABLE, isRedisTab, tabKey } from "../db-tabs"
-import { API, parseApiError } from "../utils/connection-helpers"
+import { API } from "../utils/connection-helpers"
+import { apiFetch } from "@/lib/api"
 import type { NotifyDb } from "./useNotifications"
 
 /**
@@ -226,9 +227,7 @@ export function useRedisBrowser({
         qs.set("pageOffset", "0")
         qs.set("pageSize", "200")
         if (refresh) qs.set("refresh", "true")
-        const res = await fetch(`${API}/${id}/keys?${qs.toString()}`)
-        if (!res.ok) throw new Error(parseApiError(await res.text()))
-        const page = (await res.json()) as RedisPage
+        const page = await apiFetch<RedisPage>(`${API}/${id}/keys?${qs.toString()}`)
         setRedisPages((prev) => ({ ...prev, [redisPageKey(id, database, prefix)]: page }))
         if (!refresh && page.fromCache) {
           void (async () => {
@@ -240,9 +239,8 @@ export function useRedisBrowser({
               qs2.set("pageOffset", "0")
               qs2.set("pageSize", "200")
               qs2.set("refresh", "true")
-              const res2 = await fetch(`${API}/${id}/keys?${qs2.toString()}`)
-              if (!res2.ok) return
-              const live = (await res2.json()) as RedisPage
+              const live = await apiFetch<RedisPage>(`${API}/${id}/keys?${qs2.toString()}`).catch(() => null)
+              if (!live) return
               setRedisPages((prev) => ({ ...prev, [redisPageKey(id, database, prefix)]: live }))
             } catch {
               // Offline revalidate keeps the cached paint; the next keep-fresh
@@ -277,9 +275,7 @@ export function useRedisBrowser({
         qs.set("cursor", String(page.cursor))
         qs.set("pageOffset", String(page.pageOffset))
         qs.set("pageSize", "200")
-        const res = await fetch(`${API}/${id}/keys?${qs.toString()}`)
-        if (!res.ok) throw new Error(parseApiError(await res.text()))
-        const next = (await res.json()) as RedisPage
+        const next = await apiFetch<RedisPage>(`${API}/${id}/keys?${qs.toString()}`)
         // The continuation appends to what the page already has: a node or key
         // the two answers both carry is one thing, not two.
         setRedisPages((prev) => {
@@ -382,9 +378,7 @@ export function useRedisBrowser({
         const qs = new URLSearchParams()
         qs.set("key", key)
         qs.set("database", String(activeRedisDb))
-        const res = await fetch(`${API}/${connId}/keys/inspect?${qs.toString()}`)
-        if (!res.ok) throw new Error(parseApiError(await res.text()))
-        const payload = (await res.json()) as RedisInspect
+        const payload = await apiFetch<RedisInspect>(`${API}/${connId}/keys/inspect?${qs.toString()}`)
         // A slower answer must not land on a tab that has moved on.
         if (request !== redisInspectRequestRef.current) return
         setRedisInspect(payload)

@@ -3,29 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { SchemaInfo } from "../types"
 import { useExponentialRetry } from "../useExponentialRetry"
-import { API, parseApiError } from "../utils/connection-helpers"
+import { API } from "../utils/connection-helpers"
+import { apiFetch, ApiError } from "@/lib/api"
 import { NotifyDb } from "./useNotifications"
 
 /** How often a tree that is on screen is read again. */
 const KEEP_FRESH_MS = 30000
 
-/**
- * An HTTP failure that keeps its status code, so a caller can tell "the
- * connection is gone from the registry" (404) apart from "the database
- * could not be reached" (502/503/network).
- */
-export class SchemaFetchError extends Error {
-  readonly status: number
-
-  constructor(status: number, message: string) {
-    super(message)
-    this.name = "SchemaFetchError"
-    this.status = status
-  }
-}
-
 /** Reads the schema of a connection, or of one database on a server-level one. */
-const fetchSchema = async (
+const fetchSchema = (
   id: string,
   database?: string | null,
   refresh?: boolean
@@ -34,9 +20,7 @@ const fetchSchema = async (
   if (database) params.set("database", database)
   if (refresh) params.set("refresh", "true")
   const qs = params.toString() ? "?" + params.toString() : ""
-  const res = await fetch(API + "/" + id + "/schema" + qs)
-  if (!res.ok) throw new SchemaFetchError(res.status, parseApiError(await res.text()))
-  return await res.json()
+  return apiFetch<SchemaInfo>(API + "/" + id + "/schema" + qs)
 }
 
 /**
@@ -79,7 +63,7 @@ export function useSchema(
 
   /** A 404 means the connection is not in the registry anymore; tell the page. */
   const reportConnectionMissing = (e: unknown) => {
-    if (e instanceof SchemaFetchError && e.status === 404) onConnectionMissingRef.current?.()
+    if (e instanceof ApiError && e.status === 404) onConnectionMissingRef.current?.()
   }
 
   const {

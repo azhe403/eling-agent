@@ -19,6 +19,9 @@ import {
 } from "./redis-browser"
 import { useRedisBrowser } from "./hooks/useRedisBrowser"
 
+/** Wraps a payload in the standard envelope so stubs match the live wire format. */
+const env = (data: unknown) => JSON.stringify({ code: "ok", message: "ok", data })
+
 describe("dbRowLabel", () => {
   it("reads db3", () => {
     expect(dbRowLabel({ index: 3, keys: 3 })).toBe("db3")
@@ -123,7 +126,7 @@ describe("fetchRedisDatabases", () => {
   it("resolves with the parsed list on 200", async () => {
     globalThis.fetch = vi.fn(
       async () =>
-        new Response(JSON.stringify([{ index: 3, keys: 3 }]), {
+        new Response(env([{ index: 3, keys: 3 }]), {
           status: 200,
           headers: { "content-type": "application/json" },
         }),
@@ -137,7 +140,7 @@ describe("fetchRedisDatabases", () => {
     globalThis.fetch = vi.fn(
       async () =>
         new Response(
-          JSON.stringify([{ index: 3, keys: 3, fromCache: true, cachedAt }]),
+          env([{ index: 3, keys: 3, fromCache: true, cachedAt }]),
           { status: 200, headers: { "content-type": "application/json" } },
         ),
     )
@@ -165,7 +168,7 @@ describe("fetchRedisKeyDelete", () => {
 
   it("deletes one key by query string and resolves deleted on 200", async () => {
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
-      new Response(JSON.stringify({ deleted: true }), {
+      new Response(env({ deleted: true }), {
         status: 200,
         headers: { "content-type": "application/json" },
       }),
@@ -185,7 +188,7 @@ describe("fetchRedisKeyDelete", () => {
 
   it("keeps a key with slashes and percent signs out of the path", async () => {
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
-      new Response(JSON.stringify({ deleted: true }), { status: 200 }),
+      new Response(env({ deleted: true }), { status: 200 }),
     )
     vi.stubGlobal("fetch", fetchMock)
 
@@ -197,7 +200,7 @@ describe("fetchRedisKeyDelete", () => {
 
   it("rejects with the parsed error message on a non-OK response", async () => {
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
-      new Response(JSON.stringify({ detail: "key not found" }), { status: 404 }),
+      new Response(JSON.stringify({ code: "not_found", message: "key not found", data: null }), { status: 404 }),
     )
     vi.stubGlobal("fetch", fetchMock)
 
@@ -217,7 +220,7 @@ describe("fetchRedisPrefixPreview", () => {
   it("previews one prefix by query string and resolves the parsed body on 200", async () => {
     const body = { prefix: "users:", keys: ["users:1", "users:2"], total: 150, truncated: true }
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
-      new Response(JSON.stringify(body), {
+      new Response(env(body), {
         status: 200,
         headers: { "content-type": "application/json" },
       }),
@@ -256,7 +259,7 @@ describe("fetchRedisPrefixDelete", () => {
   it("deletes one prefix by query string and resolves the parsed body on 200", async () => {
     const body = { deleted: 3, truncated: false }
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
-      new Response(JSON.stringify(body), {
+      new Response(env(body), {
         status: 200,
         headers: { "content-type": "application/json" },
       }),
@@ -335,23 +338,23 @@ describe("useRedisBrowser delete", () => {
       const method = init?.method ?? "GET"
       if (url.includes("/keys/delete") && method === "DELETE") {
         if (deleteStatus !== 200) {
-          return new Response(JSON.stringify({ detail: "key not found" }), { status: deleteStatus })
+          return new Response(JSON.stringify({ code: "not_found", message: "key not found", data: null }), { status: deleteStatus })
         }
-        return new Response(JSON.stringify({ deleted: true }), { status: 200 })
+        return new Response(env({ deleted: true }), { status: 200 })
       }
       if (url.includes("/keys/preview")) {
         return new Response(
-          JSON.stringify({ prefix: "users:", keys: ["users:1"], total: 3, truncated: false }),
+          env({ prefix: "users:", keys: ["users:1"], total: 3, truncated: false }),
           { status: 200 },
         )
       }
       if (url.includes("/keys/prefix") && method === "DELETE") {
-        return new Response(JSON.stringify({ deleted: 2, truncated: false }), { status: 200 })
+        return new Response(env({ deleted: 2, truncated: false }), { status: 200 })
       }
       if (url.includes("/keys/databases")) {
-        return new Response(JSON.stringify([{ index: 0, keys: 2 }]), { status: 200 })
+        return new Response(env([{ index: 0, keys: 2 }]), { status: 200 })
       }
-      return new Response(JSON.stringify(liveRootPage), { status: 200 })
+      return new Response(env(liveRootPage), { status: 200 })
     })
     vi.stubGlobal("fetch", fetchMock)
     return fetchMock
@@ -567,7 +570,7 @@ describe("fetchRedisKeyProbeBatch", () => {
 
   it("asks about many keys in one request", async () => {
     const fetchMock = vi.fn(async () => new Response(
-      JSON.stringify([
+      env([
         { key: "a", exists: true, ttlSeconds: 60, expiresAt: null },
         { key: "b", exists: false, ttlSeconds: -1, expiresAt: null },
       ]),
@@ -627,13 +630,13 @@ describe("useRedisBrowser expiry recheck", () => {
       if (String(url).includes("/keys/probe") && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as { keys: string[] }
         return new Response(
-          JSON.stringify(body.keys.map((key) => ({
+          env(body.keys.map((key) => ({
             key, exists: true, ttlSeconds: 120, expiresAt: new Date(Date.now() + 120_000).toISOString(),
           }))),
           { status: 200, headers: { "Content-Type": "application/json" } },
         )
       }
-      return new Response(JSON.stringify({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
+      return new Response(env({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
     })
     vi.stubGlobal("fetch", fetchMock)
 
@@ -667,11 +670,11 @@ describe("useRedisBrowser expiry recheck", () => {
       if (String(url).includes("/keys/probe") && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as { keys: string[] }
         return new Response(
-          JSON.stringify(body.keys.map((key) => ({ key, exists: false, ttlSeconds: -1, expiresAt: null }))),
+          env(body.keys.map((key) => ({ key, exists: false, ttlSeconds: -1, expiresAt: null }))),
           { status: 200, headers: { "Content-Type": "application/json" } },
         )
       }
-      return new Response(JSON.stringify({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
+      return new Response(env({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
     })
     vi.stubGlobal("fetch", fetchMock)
 
@@ -705,11 +708,11 @@ describe("useRedisBrowser expiry recheck on a clock", () => {
       if (String(url).includes("/keys/probe") && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as { keys: string[] }
         return new Response(
-          JSON.stringify(body.keys.map((key) => ({ key, exists: false, ttlSeconds: -1, expiresAt: null }))),
+          env(body.keys.map((key) => ({ key, exists: false, ttlSeconds: -1, expiresAt: null }))),
           { status: 200, headers: { "Content-Type": "application/json" } },
         )
       }
-      return new Response(JSON.stringify({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
+      return new Response(env({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
     })
     vi.stubGlobal("fetch", fetchMock)
 
@@ -790,7 +793,7 @@ describe("useRedisBrowser gone rows", () => {
         calls.push("probe")
         const body = JSON.parse(String(init.body)) as { keys: string[] }
         return new Response(
-          JSON.stringify(body.keys.map((key) => ({ key, exists: false, ttlSeconds: -1, expiresAt: null }))),
+          env(body.keys.map((key) => ({ key, exists: false, ttlSeconds: -1, expiresAt: null }))),
           { status: 200, headers: { "Content-Type": "application/json" } },
         )
       }
@@ -798,11 +801,11 @@ describe("useRedisBrowser gone rows", () => {
         calls.push("refetch")
         // The page comes back without the dead key: it really is gone.
         return new Response(
-          JSON.stringify({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }),
+          env({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         )
       }
-      return new Response(JSON.stringify({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
+      return new Response(env({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
     })
     vi.stubGlobal("fetch", fetchMock)
 
@@ -829,7 +832,7 @@ describe("useRedisBrowser gone rows", () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (String(url).includes("/keys/inspect")) {
         return new Response(
-          JSON.stringify({
+          env({
             key: "revived", type: "string", ttlSeconds: 400,
             expiresAt: new Date(Date.now() + 400_000).toISOString(),
             length: 1, encoding: null, preview: { kind: "string", entries: [], truncated: false },
@@ -837,7 +840,7 @@ describe("useRedisBrowser gone rows", () => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         )
       }
-      return new Response(JSON.stringify({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
+      return new Response(env({ prefix: "", nodes: [], keys: [], cursor: 0, pageOffset: 0, complete: true, scanned: 0 }), { status: 200, headers: { "Content-Type": "application/json" } })
     })
     vi.stubGlobal("fetch", fetchMock)
 

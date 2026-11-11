@@ -7,7 +7,8 @@
  * and without a Redis server.
  */
 
-import { API, parseApiError } from "./utils/connection-helpers"
+import { API } from "./utils/connection-helpers"
+import { apiFetch } from "@/lib/api"
 
 /** One logical Redis database, as the server reports it. */
 export type RedisDbInfo = {
@@ -135,9 +136,9 @@ export const fetchRedisKeyProbe = async (
   const qs = new URLSearchParams()
   qs.set("database", String(database))
   qs.set("key", key)
-  const response = await fetch(`${API}/${connId}/keys/probe?${qs.toString()}`)
-  if (!response.ok) throw new Error(parseApiError(await response.text()))
-  return parseProbe(await response.json(), key)
+  const response = await apiFetch<unknown>(`${API}/${connId}/keys/probe?${qs.toString()}`)
+  if (!response) throw new Error(`could not confirm key ${key}`)
+  return parseProbe(response, key)
 }
 
 /**
@@ -153,13 +154,11 @@ export const fetchRedisKeyProbeBatch = async (
   keys: string[],
 ): Promise<RedisKeyProbe[]> => {
   if (keys.length === 0) return []
-  const response = await fetch(`${API}/${connId}/keys/probe`, {
+  const body = await apiFetch<Array<Record<string, unknown>>>(`${API}/${connId}/keys/probe`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ database, keys }),
   })
-  if (!response.ok) throw new Error(parseApiError(await response.text()))
-  const body = await response.json()
   if (!Array.isArray(body)) return []
   return body.map((entry) => parseProbe(entry, typeof entry?.key === "string" ? entry.key : ""))
 }
@@ -289,12 +288,7 @@ export const redisPageScope = (connId: string, db: number): string => `${connId}
  */
 export const fetchRedisDatabases = async (connId: string, refresh?: boolean): Promise<RedisDbInfo[]> => {
   const qs = refresh ? "?refresh=true" : ""
-  const response = await fetch(`/api/databases/${connId}/keys/databases${qs}`)
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(text.trim() || `could not read the databases of ${connId}`)
-  }
-  const body = await response.json()
+  const body = await apiFetch<Array<Record<string, unknown>>>(`/api/databases/${connId}/keys/databases${qs}`)
   if (!Array.isArray(body)) return []
   return body.map((entry) => ({
     index: Number(entry?.index ?? 0),
@@ -333,10 +327,8 @@ export const fetchRedisKeyDelete = async (
   const qs = new URLSearchParams()
   qs.set("database", String(database))
   qs.set("key", key)
-  const response = await fetch(`${API}/${connId}/keys/delete?${qs.toString()}`, { method: "DELETE" })
-  if (!response.ok) throw new Error(parseApiError(await response.text()))
-  const body = (await response.json()) as { deleted?: unknown }
-  return { deleted: body?.deleted === true }
+  const response = await apiFetch<{ deleted?: unknown }>(`${API}/${connId}/keys/delete?${qs.toString()}`, { method: "DELETE" })
+  return { deleted: response?.deleted === true }
 }
 
 /**
@@ -350,14 +342,12 @@ export const fetchRedisPrefixPreview = async (
   const qs = new URLSearchParams()
   qs.set("database", String(database))
   qs.set("prefix", prefix)
-  const response = await fetch(`${API}/${connId}/keys/preview?${qs.toString()}`)
-  if (!response.ok) throw new Error(parseApiError(await response.text()))
-  const body = (await response.json()) as {
+  const body = await apiFetch<{
     prefix?: unknown
     keys?: unknown
     total?: unknown
     truncated?: unknown
-  }
+  }>(`${API}/${connId}/keys/preview?${qs.toString()}`)
   return {
     prefix: typeof body?.prefix === "string" ? body.prefix : prefix,
     keys: Array.isArray(body?.keys)
@@ -379,9 +369,7 @@ export const fetchRedisPrefixDelete = async (
   const qs = new URLSearchParams()
   qs.set("database", String(database))
   qs.set("prefix", prefix)
-  const response = await fetch(`${API}/${connId}/keys/prefix?${qs.toString()}`, { method: "DELETE" })
-  if (!response.ok) throw new Error(parseApiError(await response.text()))
-  const body = (await response.json()) as { deleted?: unknown; truncated?: unknown }
+  const body = await apiFetch<{ deleted?: unknown; truncated?: unknown }>(`${API}/${connId}/keys/prefix?${qs.toString()}`, { method: "DELETE" })
   return {
     deleted: typeof body?.deleted === "number" ? body.deleted : 0,
     truncated: body?.truncated === true,

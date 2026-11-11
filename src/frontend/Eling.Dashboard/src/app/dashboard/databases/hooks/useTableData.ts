@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { DbConn, DbTab, QueryResult, SchemaInfo } from "../types"
-import { API, parseApiError, quoteIdent, sqlQuote, buildWherePk } from "../utils/connection-helpers"
+import { API, quoteIdent, sqlQuote, buildWherePk } from "../utils/connection-helpers"
+import { apiFetch } from "@/lib/api"
 import { pkColumnNames } from "../utils/schema-helpers"
 import type { NotifyDb } from "./useNotifications"
 
@@ -69,13 +70,13 @@ export function useTableData({
         const quote = conn?.provider === "MySql" ? "`" : '"'
         const escaped = table.replace(new RegExp(quote, "g"), quote + quote)
         const selectSql = "SELECT * FROM " + quote + escaped + quote + " LIMIT 100"
-        const [dataRes, countRes] = await Promise.all([
-          fetch(API + "/" + id + "/query", {
+        const [data, countData] = await Promise.all([
+          apiFetch<QueryResult>(API + "/" + id + "/query", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sql: selectSql, maxRows: 100, database: database ?? null }),
           }),
-          fetch(API + "/" + id + "/query", {
+          apiFetch<QueryResult>(API + "/" + id + "/query", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -83,17 +84,11 @@ export function useTableData({
               maxRows: 1,
               database: database ?? null,
             }),
-          }),
+          }).catch(() => null),
         ])
-        if (!dataRes.ok) throw new Error(parseApiError(await dataRes.text()))
-        const data = (await dataRes.json()) as QueryResult
-        // The poll and the click may have crossed in flight; a late answer for
-        // a tab the reader has left must not overwrite a fresher one - but the
-        // spinner it raised stays its own to clear.
         if (request === browseInFlightRef.current) setBrowseResult(data)
-        if (countRes.ok) {
-          const cd = (await countRes.json()) as QueryResult
-          const v = cd?.rows?.[0]?.[0]
+        if (countData) {
+          const v = countData?.rows?.[0]?.[0]
           if (v !== null && v !== undefined) {
             const n = typeof v === "number" ? v : Number(v)
             if (Number.isFinite(n)) setBrowseTotal(n)
@@ -199,12 +194,11 @@ export function useTableMutations({
   const sendMutate = useCallback(
     async (sql: string) => {
       if (!selectedId) throw new Error("no connection")
-      const res = await fetch(API + "/" + selectedId + "/mutate", {
+      await apiFetch<{ affectedRows: number }>(API + "/" + selectedId + "/mutate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql, maxAffectedRows: 1000, database: activeTable?.database ?? null }),
       })
-      if (!res.ok) throw new Error(parseApiError(await res.text()))
     },
     [selectedId, activeTable]
   )
@@ -363,13 +357,12 @@ export function useTableMutations({
     setMutating(true)
     try {
       const sqlStmt = `DELETE FROM ${quoteIdent(activeTable.table, selectedConn)} WHERE ${where}`
-      const res = await fetch(API + "/" + selectedId + "/mutate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000, database: activeTable?.database ?? null }),
-      })
-      if (!res.ok) throw new Error(parseApiError(await res.text()))
-      const data = await res.json().catch(() => ({ affectedRows: 0, truncated: false }))
+      const data =
+        (await apiFetch<{ affectedRows?: number; truncated?: boolean } | undefined>(API + "/" + selectedId + "/mutate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sql: sqlStmt, maxAffectedRows: 1000, database: activeTable?.database ?? null }),
+        })) ?? { affectedRows: 0, truncated: false }
       await refreshData()
       if ((data?.affectedRows ?? 0) === 0) {
         notifyDb("error", "Nothing was deleted.", "No row matched.")
