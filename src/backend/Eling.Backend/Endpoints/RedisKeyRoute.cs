@@ -1,5 +1,7 @@
+using Eling.Backend.Bootstrap;
 using Eling.Core.Audit;
 using Eling.Core.Database;
+using Microsoft.AspNetCore.Http;
 
 namespace Eling.Backend.Endpoints;
 
@@ -25,10 +27,14 @@ public static class RedisKeyRoute
     /// Fetch the connection row and answer the two pre-conditions every key
     /// route asks: does the id exist, and is it a Redis connection?
     /// </summary>
-    public static async Task<Result> OpenAsync(string id, IDatabaseConnectionStore store, CancellationToken ct)
+    public static async Task<Result> OpenAsync(string id, IDatabaseConnectionStore store, HttpContext httpContext, CancellationToken ct)
     {
         var row = await store.FindAsync(id, ct);
-        if (row is null) return Result.NotFound(id);
+        if (row is null)
+        {
+            httpContext.Items[ApiEnvelopeMiddleware.ErrorCodeItem] = "connection_not_found";
+            return Result.NotFound(id);
+        }
         if (row.Provider != DatabaseProvider.Redis)
         {
             return Result.BadRequest(RedisRequirement.NotRedis(row, "key browsing"));
@@ -107,7 +113,7 @@ public static class RedisKeyRoute
         public IResult? Http { get; private init; }
         public DatabaseConnection? Row { get; private init; }
         public static Result Ok(DatabaseConnection row) => new() { Row = row };
-        public static Result NotFound(string id) => new() { Http = Results.NotFound(new { error = $"connection '{id}' not found" }) };
+        public static Result NotFound(string id) => new() { Http = Results.NotFound(new { error = $"Connection '{id}' is gone - it may have been deleted in another tab or by another eling app; the connection list is being refreshed." }) };
         public static Result BadRequest(string detail) => new() { Http = Results.BadRequest(detail) };
     }
 }

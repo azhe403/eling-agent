@@ -20,6 +20,7 @@ public static class DatabaseKeyEndpoints
 
         group.MapGet("/{id}/keys", async (
             string id,
+            HttpContext httpContext,
             IDatabaseConnectionStore store,
             IRedisKeyReadService readService,
             IAuditLogger auditLogger,
@@ -31,7 +32,7 @@ public static class DatabaseKeyEndpoints
             bool? refresh = null,
             CancellationToken ct = default) =>
         {
-            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            var gate = await RedisKeyRoute.OpenAsync(id, store, httpContext, ct);
             if (gate.Http is not null) return gate.Http;
             if (RedisKeyRoute.RefuseIndex(database, out var dbIndex) is { } refusal) return refusal;
             prefix ??= string.Empty;
@@ -53,13 +54,14 @@ public static class DatabaseKeyEndpoints
 
         group.MapGet("/{id}/keys/databases", async (
             string id,
+            HttpContext httpContext,
             IDatabaseConnectionStore store,
             IRedisKeyReadService readService,
             IAuditLogger auditLogger,
             bool? refresh,
             CancellationToken ct = default) =>
         {
-            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            var gate = await RedisKeyRoute.OpenAsync(id, store, httpContext, ct);
             if (gate.Http is not null) return gate.Http;
 
             var view = await RedisKeyRoute.RunAsync(
@@ -80,6 +82,7 @@ public static class DatabaseKeyEndpoints
 
         group.MapGet("/{id}/keys/inspect", async (
             string id,
+            HttpContext httpContext,
             IDatabaseConnectionStore store,
             IRedisKeyReadService readService,
             IAuditLogger auditLogger,
@@ -87,7 +90,7 @@ public static class DatabaseKeyEndpoints
             int database = 0,
             CancellationToken ct = default) =>
         {
-            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            var gate = await RedisKeyRoute.OpenAsync(id, store, httpContext, ct);
             if (gate.Http is not null) return gate.Http;
             if (string.IsNullOrEmpty(key)) return Results.BadRequest("key must not be blank");
             if (RedisKeyRoute.RefuseIndex(database, out var dbIndex) is { } refusal) return refusal;
@@ -107,6 +110,7 @@ public static class DatabaseKeyEndpoints
 
         group.MapDelete("/{id}/keys/delete", async (
             string id,
+            HttpContext httpContext,
             IDatabaseConnectionStore store,
             IRedisKeyReadService readService,
             IAuditLogger auditLogger,
@@ -114,7 +118,7 @@ public static class DatabaseKeyEndpoints
             int database = 0,
             CancellationToken ct = default) =>
         {
-            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            var gate = await RedisKeyRoute.OpenAsync(id, store, httpContext, ct);
             if (gate.Http is not null) return gate.Http;
             if (string.IsNullOrEmpty(key)) return Results.BadRequest("key must not be blank");
             if (RedisKeyRoute.RefuseIndex(database, out var dbIndex) is { } refusal) return refusal;
@@ -134,6 +138,7 @@ public static class DatabaseKeyEndpoints
 
         group.MapGet("/{id}/keys/probe", async (
             string id,
+            HttpContext httpContext,
             IDatabaseConnectionStore store,
             IRedisKeyReadService readService,
             IAuditLogger auditLogger,
@@ -141,7 +146,7 @@ public static class DatabaseKeyEndpoints
             int database = 0,
             CancellationToken ct = default) =>
         {
-            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            var gate = await RedisKeyRoute.OpenAsync(id, store, httpContext, ct);
             if (gate.Http is not null) return gate.Http;
             if (string.IsNullOrEmpty(key)) return Results.BadRequest("key must not be blank");
             if (RedisKeyRoute.RefuseIndex(database, out var dbIndex) is { } refusal) return refusal;
@@ -162,13 +167,14 @@ public static class DatabaseKeyEndpoints
 
         group.MapPost("/{id}/keys/probe", async (
             string id,
+            HttpContext httpContext,
             RedisKeyProbeBatchRequest req,
             IDatabaseConnectionStore store,
             IRedisKeyReadService readService,
             IAuditLogger auditLogger,
             CancellationToken ct = default) =>
         {
-            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            var gate = await RedisKeyRoute.OpenAsync(id, store, httpContext, ct);
             if (gate.Http is not null) return gate.Http;
 
             // A key named twice is one key, and a blank one names nothing.
@@ -199,6 +205,7 @@ public static class DatabaseKeyEndpoints
 
         group.MapGet("/{id}/keys/preview", async (
             string id,
+            HttpContext httpContext,
             IDatabaseConnectionStore store,
             IRedisKeyReadService readService,
             IAuditLogger auditLogger,
@@ -206,7 +213,7 @@ public static class DatabaseKeyEndpoints
             int database = 0,
             CancellationToken ct = default) =>
         {
-            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            var gate = await RedisKeyRoute.OpenAsync(id, store, httpContext, ct);
             if (gate.Http is not null) return gate.Http;
             if (string.IsNullOrEmpty(prefix)) return Results.BadRequest("prefix must not be blank");
             if (RedisKeyRoute.RefuseIndex(database, out var dbIndex) is { } refusal) return refusal;
@@ -231,6 +238,7 @@ public static class DatabaseKeyEndpoints
 
         group.MapDelete("/{id}/keys/prefix", async (
             string id,
+            HttpContext httpContext,
             IDatabaseConnectionStore store,
             IRedisKeyReadService readService,
             IAuditLogger auditLogger,
@@ -238,7 +246,7 @@ public static class DatabaseKeyEndpoints
             int database = 0,
             CancellationToken ct = default) =>
         {
-            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            var gate = await RedisKeyRoute.OpenAsync(id, store, httpContext, ct);
             if (gate.Http is not null) return gate.Http;
             if (string.IsNullOrEmpty(prefix)) return Results.BadRequest("prefix must not be blank");
             if (RedisKeyRoute.RefuseIndex(database, out var dbIndex) is { } refusal) return refusal;
@@ -259,6 +267,7 @@ public static class DatabaseKeyEndpoints
 
         group.MapPost("/{id}/keys/command", async (
             string id,
+            HttpContext httpContext,
             RedisCommandRequest req,
             IDatabaseConnectionStore store,
             IRedisKeyReadService readService,
@@ -266,7 +275,7 @@ public static class DatabaseKeyEndpoints
             IAuditLogger auditLogger,
             CancellationToken ct = default) =>
         {
-            var gate = await RedisKeyRoute.OpenAsync(id, store, ct);
+            var gate = await RedisKeyRoute.OpenAsync(id, store, httpContext, ct);
             if (gate.Http is not null) return gate.Http;
 
             var command = req?.Command ?? string.Empty;

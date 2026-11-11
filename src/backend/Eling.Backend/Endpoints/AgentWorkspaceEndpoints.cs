@@ -1,6 +1,8 @@
 using Eling.Backend.Agent.Services;
+using Eling.Backend.Bootstrap;
 using Eling.Backend.Dtos;
 using Eling.Core.Projects;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
 namespace Eling.Backend.Endpoints;
@@ -67,7 +69,7 @@ public static class AgentWorkspaceEndpoints
         });
 
         var files = app.MapGroup("/api/agent/files");
-        files.MapGet("/list", (BackendFileTools tools, string root, string? path) =>
+        files.MapGet("/list", (HttpContext httpContext, BackendFileTools tools, string root, string? path) =>
         {
             try
             {
@@ -77,7 +79,8 @@ public static class AgentWorkspaceEndpoints
             catch (UnauthorizedAccessException ex)
             {
                 logger.LogWarning(ex, "Workspace escape attempt root={Root} path={Path}", root, path);
-                return Results.StatusCode(403);
+                httpContext.Items[ApiEnvelopeMiddleware.ErrorCodeItem] = "path_outside_root";
+                return Results.Json(new { error = "That path is outside the workspace root - open a file inside one of the registered workspaces." }, statusCode: StatusCodes.Status403Forbidden);
             }
             catch (ArgumentException ex)
             {
@@ -88,7 +91,7 @@ public static class AgentWorkspaceEndpoints
                 return Results.NotFound(ex.Message);
             }
         });
-        files.MapGet("/read", (BackendFileTools tools, string root, string? path) =>
+        files.MapGet("/read", (HttpContext httpContext, BackendFileTools tools, string root, string? path) =>
         {
             try
             {
@@ -99,7 +102,8 @@ public static class AgentWorkspaceEndpoints
             catch (UnauthorizedAccessException ex)
             {
                 logger.LogWarning(ex, "Workspace escape attempt root={Root} path={Path}", root, path);
-                return Results.StatusCode(403);
+                httpContext.Items[ApiEnvelopeMiddleware.ErrorCodeItem] = "path_outside_root";
+                return Results.Json(new { error = "That path is outside the workspace root - open a file inside one of the registered workspaces." }, statusCode: StatusCodes.Status403Forbidden);
             }
             catch (ArgumentException ex)
             {
@@ -111,10 +115,11 @@ public static class AgentWorkspaceEndpoints
             }
             catch (InvalidOperationException ex) when (ex.Message == "binary")
             {
-                return Results.StatusCode(415);
+                httpContext.Items[ApiEnvelopeMiddleware.ErrorCodeItem] = "binary_file";
+                return Results.Json(new { error = "That file looks like a binary - this read tool only returns text, open it in a hex viewer." }, statusCode: StatusCodes.Status415UnsupportedMediaType);
             }
         });
-        files.MapPost("/write", (IWorkspacesRegistry registry, BackendFileTools tools, WriteFileRequest req) =>
+        files.MapPost("/write", (HttpContext httpContext, IWorkspacesRegistry registry, BackendFileTools tools, WriteFileRequest req) =>
         {
             try
             {
@@ -125,7 +130,8 @@ public static class AgentWorkspaceEndpoints
             catch (UnauthorizedAccessException ex)
             {
                 logger.LogWarning(ex, "Workspace escape attempt root={Root} path={Path}", req.Root, req.Path);
-                return Results.StatusCode(403);
+                httpContext.Items[ApiEnvelopeMiddleware.ErrorCodeItem] = "path_outside_root";
+                return Results.Json(new { error = "That path is outside the workspace root - write inside one of the registered workspaces only." }, statusCode: StatusCodes.Status403Forbidden);
             }
             catch (ArgumentException ex)
             {
