@@ -18,6 +18,11 @@ public static class DashboardRoutes
 {
     public static void Map(WebApplication app)
     {
+        // The envelope middleware runs first: every endpoint below it — static
+        // files, the SPA fallback, the correlation middleware, routing — is
+        // guaranteed a non-empty JSON body on errors and a uniform success shape.
+        app.UseMiddleware<ApiEnvelopeMiddleware>();
+
         // Order matters: defaults/static BEFORE routing, MapFallbackToFile LAST
         // so deep links reach the SPA fallback instead of being captured earlier.
         app.UseDefaultFiles();

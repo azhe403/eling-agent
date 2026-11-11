@@ -46,7 +46,7 @@ public static class DatabaseEndpoints
         group.MapGet("/{id}", async (string id, IDatabaseConnectionStore store, IAuditLogger auditLogger, CancellationToken ct) =>
         {
             var row = await store.FindAsync(id, ct);
-            if (row is null) return Results.NotFound();
+            if (row is null) return ConnectionNotFound(id);
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var view = ToView(row);
             sw.Stop();
@@ -102,7 +102,7 @@ public static class DatabaseEndpoints
         {
             var logger = loggerFactory.CreateLogger("Database");
             var existing = await store.FindAsync(id, ct);
-            if (existing is null) return Results.NotFound();
+            if (existing is null) return ConnectionNotFound(id);
 
             var name = req.Name ?? existing.Name;
             var env = req.Environment ?? existing.Environment;
@@ -139,7 +139,7 @@ public static class DatabaseEndpoints
         group.MapDelete("/{id}", async (string id, IDatabaseConnectionStore store, IDatabaseReadCache readCache, IRedisReadCache redisReadCache, IRedisConnectionPool redisPool, CancellationToken ct) =>
         {
             var ok = await store.RemoveAsync(id, ct);
-            if (!ok) return Results.NotFound();
+            if (!ok) return ConnectionNotFound(id);
             readCache.InvalidateConnection(id);
             redisReadCache.InvalidateConnection(id);
             // The row is gone; any pooled multiplexer it left behind would
@@ -249,7 +249,7 @@ public static class DatabaseEndpoints
         {
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
-            if (row is null) return Results.NotFound();
+            if (row is null) return ConnectionNotFound(id);
 
             // No body: the stored connection is tested as it is. With a body the
             // caller is trying out an edit, so the entered fields are layered
@@ -313,7 +313,7 @@ public static class DatabaseEndpoints
         {
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
-            if (row is null) return Results.NotFound();
+            if (row is null) return ConnectionNotFound(id);
             if (row.Provider == DatabaseProvider.Redis)
             {
                 return Results.BadRequest(RedisRequirement.NotSql(row, "use /keys"));
@@ -377,7 +377,7 @@ public static class DatabaseEndpoints
         {
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
-            if (row is null) return Results.NotFound();
+            if (row is null) return ConnectionNotFound(id);
 
             // The stored password is not in the form, so the entered fields
             // are layered over the stored connection - a blank password keeps
@@ -423,7 +423,7 @@ public static class DatabaseEndpoints
         {
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
-            if (row is null) return Results.NotFound();
+            if (row is null) return ConnectionNotFound(id);
             if (row.Provider == DatabaseProvider.Redis)
             {
                 return Results.BadRequest(RedisRequirement.NotSql(row, "use /keys"));
@@ -500,7 +500,7 @@ public static class DatabaseEndpoints
         {
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
-            if (row is null) return Results.NotFound();
+            if (row is null) return ConnectionNotFound(id);
             if (row.Provider == DatabaseProvider.Redis)
             {
                 return Results.BadRequest(RedisRequirement.NotSql(row, "mutations are not supported"));
@@ -644,6 +644,14 @@ public static class DatabaseEndpoints
 
         return app;
     }
+
+    /// <summary>
+    /// A 404 the client can act on: the id is not in the registry. The body
+    /// is what the dashboard shows, so it names the connection rather than
+    /// answering with a bare empty response.
+    /// </summary>
+    private static IResult ConnectionNotFound(string id) =>
+        Results.NotFound(new { error = $"connection '{id}' not found" });
 
     private static DatabaseConnectionView ToView(DatabaseConnection c) => new(
         c.Id,

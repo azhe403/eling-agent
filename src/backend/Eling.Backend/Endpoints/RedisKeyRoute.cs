@@ -28,7 +28,7 @@ public static class RedisKeyRoute
     public static async Task<Result> OpenAsync(string id, IDatabaseConnectionStore store, CancellationToken ct)
     {
         var row = await store.FindAsync(id, ct);
-        if (row is null) return Result.NotFound();
+        if (row is null) return Result.NotFound(id);
         if (row.Provider != DatabaseProvider.Redis)
         {
             return Result.BadRequest(RedisRequirement.NotRedis(row, "key browsing"));
@@ -107,7 +107,7 @@ public static class RedisKeyRoute
         public IResult? Http { get; private init; }
         public DatabaseConnection? Row { get; private init; }
         public static Result Ok(DatabaseConnection row) => new() { Row = row };
-        public static Result NotFound() => new() { Http = Results.NotFound() };
+        public static Result NotFound(string id) => new() { Http = Results.NotFound(new { error = $"connection '{id}' not found" }) };
         public static Result BadRequest(string detail) => new() { Http = Results.BadRequest(detail) };
     }
 }
