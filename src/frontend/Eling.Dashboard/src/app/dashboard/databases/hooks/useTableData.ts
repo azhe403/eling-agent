@@ -43,7 +43,7 @@ export function useTableData({
   useEffect(() => () => { if (browsePollRef.current) clearTimeout(browsePollRef.current) }, [])
 
   const browseData = useCallback(
-    async (id: string, table: string, database?: string | null, background = false) => {
+    async (id: string, table: string, database?: string | null, background = false, refresh = false) => {
       const request = ++browseInFlightRef.current
       // Guard against stale polls from a previous table selection - including
       // the database: a poll for db2 must not answer into a db3 tab.
@@ -74,7 +74,7 @@ export function useTableData({
           apiFetch<QueryResult>(API + "/" + id + "/query", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sql: selectSql, maxRows: 100, database: database ?? null }),
+            body: JSON.stringify({ sql: selectSql, maxRows: 100, database: database ?? null, refresh }),
           }),
           apiFetch<QueryResult>(API + "/" + id + "/query", {
             method: "POST",
@@ -83,6 +83,7 @@ export function useTableData({
               sql: "SELECT COUNT(*) FROM " + quote + escaped + quote,
               maxRows: 1,
               database: database ?? null,
+              refresh,
             }),
           }).catch(() => null),
         ])
@@ -99,7 +100,7 @@ export function useTableData({
           // Cached rows are read again later; live ones are fresh.
           browsePollRef.current = data.fromCache
             // eslint-disable-next-line react-hooks/immutability -- browseData polls itself; the callback body runs long after the binding is initialized.
-            ? setTimeout(() => { void browseData(id, table, database, true) }, POLL_MS)
+            ? setTimeout(() => { void browseData(id, table, database, true, true) }, POLL_MS)
             : null
         }
       } catch (e: unknown) {

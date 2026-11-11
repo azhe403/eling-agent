@@ -373,7 +373,7 @@ export function Databases() {
     if (!activeTable) return
     // The active tab owns its database; the selection does not. Polling from
     // the selection wrote another database's rows under this table's name.
-    await browseData(activeTable.connId, activeTable.table, activeTable.database)
+    await browseData(activeTable.connId, activeTable.table, activeTable.database, false, true)
   }, [activeTable, browseData])
 
   const {
