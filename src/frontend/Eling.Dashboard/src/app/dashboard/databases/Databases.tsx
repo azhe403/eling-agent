@@ -130,6 +130,19 @@ export function Databases() {
     return conn ? conn.provider !== "Redis" : true
   }, [])
 
+  // A 404 from /schema can only mean the connection is gone from the registry
+  // (deleted in another tab or by the agent, or this page is pointed at another
+  // backend). The list re-reads itself, throttled: one dead row in a tree full
+  // of them must not fan out into a reload per row.
+  const reloadListRef = useRef<() => void>(() => {})
+  const lastMissingReloadAt = useRef(0)
+  const handleConnectionMissing = useCallback(() => {
+    const now = Date.now()
+    if (now - lastMissingReloadAt.current < 2000) return
+    lastMissingReloadAt.current = now
+    reloadListRef.current()
+  }, [])
+
   const {
     schemaInfo,
     setSchemaInfo,
@@ -146,7 +159,7 @@ export function Databases() {
     loadSchema,
     retryLabel,
     KEEP_FRESH_MS,
-  } = useSchema(notifyDb, isSqlConnection)
+  } = useSchema(notifyDb, isSqlConnection, handleConnectionMissing)
 
   // Redis
   const {
@@ -264,8 +277,20 @@ export function Databases() {
 
       const res = await fetch(API + connSortQuery(connSort, connOrder), { cache: "no-store" })
       if (!res.ok) throw new Error(parseApiError(await res.text()))
-      const data = await res.json()
+      const data = (await res.json()) as DbConn[]
       setConns(data)
+      // The list is ground truth: an expanded id that is not in it anymore
+      // (connection deleted elsewhere) is pruned here, or the 30-second
+      // freshness loop keeps firing requests at a corpse forever.
+      const valid = new Set(data.map((c) => c.id))
+      setExpandedConns((prev) => {
+        const next = new Set([...prev].filter((id) => valid.has(id)))
+        return next.size === prev.size ? prev : next
+      })
+      setExpandedDbs((prev) => {
+        const next = new Set([...prev].filter((key) => valid.has(key.slice(0, key.indexOf(":")))))
+        return next.size === prev.size ? prev : next
+      })
     } catch (e: unknown) {
       notifyDb("error", e instanceof Error ? e.message : "failed")
     } finally {
@@ -285,6 +310,9 @@ export function Databases() {
   // connection appears without anybody pressing Refresh.
   const reloadOnRegistryChange = useCallback(() => { void load() }, [load])
   useMemoriesSse(reloadOnRegistryChange, undefined, ["databases"])
+  // The schema hook 404s through the same door: gone from the registry means
+  // the list is stale, so it asks for a fresh one.
+  useEffect(() => { reloadListRef.current = reloadOnRegistryChange }, [reloadOnRegistryChange])
 
   /* ------------------------------------------------------------ the schemas */
 

@@ -9,6 +9,21 @@ import { NotifyDb } from "./useNotifications"
 /** How often a tree that is on screen is read again. */
 const KEEP_FRESH_MS = 30000
 
+/**
+ * An HTTP failure that keeps its status code, so a caller can tell "the
+ * connection is gone from the registry" (404) apart from "the database
+ * could not be reached" (502/503/network).
+ */
+export class SchemaFetchError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = "SchemaFetchError"
+    this.status = status
+  }
+}
+
 /** Reads the schema of a connection, or of one database on a server-level one. */
 const fetchSchema = async (
   id: string,
@@ -20,7 +35,7 @@ const fetchSchema = async (
   if (refresh) params.set("refresh", "true")
   const qs = params.toString() ? "?" + params.toString() : ""
   const res = await fetch(API + "/" + id + "/schema" + qs)
-  if (!res.ok) throw new Error(parseApiError(await res.text()))
+  if (!res.ok) throw new SchemaFetchError(res.status, parseApiError(await res.text()))
   return await res.json()
 }
 
@@ -41,6 +56,8 @@ const fetchSchema = async (
 export function useSchema(
   notifyDb: NotifyDb,
   isSqlConnection: (connId: string) => boolean = () => true,
+  /** Called when /schema answers 404: the connection is gone from the registry. */
+  onConnectionMissing?: () => void,
 ) {
   const [schemaInfo, setSchemaInfo] = useState<SchemaInfo | null>(null)
   const [connSchemas, setConnSchemas] = useState<Record<string, SchemaInfo>>({})
@@ -52,10 +69,18 @@ export function useSchema(
   const schemaConnIdRef = useRef<string | null>(null)
   /** The newest predicate, so a closure from an earlier render cannot go stale. */
   const isSqlConnectionRef = useRef(isSqlConnection)
+  /** Same for the missing-connection callback. */
+  const onConnectionMissingRef = useRef(onConnectionMissing)
 
   useEffect(() => { connSchemasRef.current = connSchemas }, [connSchemas])
   useEffect(() => { dbSchemasRef.current = dbSchemas }, [dbSchemas])
   useEffect(() => { isSqlConnectionRef.current = isSqlConnection }, [isSqlConnection])
+  useEffect(() => { onConnectionMissingRef.current = onConnectionMissing }, [onConnectionMissing])
+
+  /** A 404 means the connection is not in the registry anymore; tell the page. */
+  const reportConnectionMissing = (e: unknown) => {
+    if (e instanceof SchemaFetchError && e.status === 404) onConnectionMissingRef.current?.()
+  }
 
   const {
     schedule: scheduleRetry,
@@ -111,6 +136,7 @@ export function useSchema(
         // reported once - ten toasts for one dead database is noise.
         const first = retryAttemptOf(id) === 0
         scheduleRetry(id, "offline", () => { void ensureSchemaRef.current(id, { force: true, bypass: true }) })
+        reportConnectionMissing(e)
         if (first) notifyDb("error", e instanceof Error ? e.message : "schema failed")
       }
     },
@@ -143,6 +169,7 @@ export function useSchema(
         // shows the same countdown under this database.
         const first = retryAttemptOf(key) === 0
         scheduleRetry(key, "offline", () => { void ensureDbSchemaRef.current(connId, database) })
+        reportConnectionMissing(e)
         if (first) notifyDb("error", e instanceof Error ? e.message : "schema failed")
       }
     },
@@ -169,6 +196,7 @@ export function useSchema(
         setConnSchemas((prev) => ({ ...prev, [id]: data }))
         if (database) setDbSchemas((prev) => ({ ...prev, [`${id}:${database}`]: data }))
       } catch (e: unknown) {
+        reportConnectionMissing(e)
         notifyDb("error", e instanceof Error ? e.message : "schema failed")
       } finally {
         setSchemaLoading(false)
