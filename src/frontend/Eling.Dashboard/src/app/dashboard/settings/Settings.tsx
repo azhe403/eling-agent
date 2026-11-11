@@ -13,6 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { apiFetch } from "@/lib/api"
 
 type LogFormat = "text" | "jsonl"
 
@@ -57,10 +58,8 @@ export function Settings() {
     setLoading(true)
     setMessage(null)
     try {
-      const res = await fetch("/api/logs/config")
-      if (!res.ok) throw new Error(`Failed to load settings (HTTP ${res.status})`)
-      const data = (await res.json()) as LogConfigView
-      setFormat(asFormat(data.format))
+      const data = await apiFetch<LogConfigView | undefined>("/api/logs/config")
+      setFormat(asFormat(data?.format))
     } catch (err) {
       setMessage({
         type: "error",
@@ -90,14 +89,12 @@ export function Settings() {
       setSaving(next)
       setMessage(null)
       try {
-        const res = await fetch("/api/logs/config", {
+        const updated = await apiFetch<LogConfigView | undefined>("/api/logs/config", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ format: next }),
         })
-        if (!res.ok) throw new Error(`Failed to save (HTTP ${res.status})`)
-        const updated = (await res.json()) as LogConfigView
-        const applied = asFormat(updated.format)
+        const applied = asFormat(updated?.format)
         setFormat(applied)
         setMessage({
           type: "success",

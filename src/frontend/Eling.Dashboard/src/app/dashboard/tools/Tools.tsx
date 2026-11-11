@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { apiFetch } from "@/lib/api"
 
 interface ToolItem {
   name: string
@@ -113,11 +114,7 @@ export function Tools() {
   const reload = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch("/api/tools", { cache: "no-store" })
-      if (!res.ok) {
-        throw new Error(`Failed to fetch tools: HTTP ${res.status}`)
-      }
-      const data: ToolItem[] = await res.json()
+      const data = await apiFetch<ToolItem[]>("/api/tools", { cache: "no-store" })
       setTools(data)
     } catch (err) {
       notify("error", "Failed to load tools", err instanceof Error ? err.message : "Unknown error.")
@@ -128,13 +125,7 @@ export function Tools() {
 
   useEffect(() => {
     let isMounted = true
-    fetch("/api/tools", { cache: "no-store" })
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`Failed to fetch tools: HTTP ${res.status}`)
-        }
-        return res.json() as Promise<ToolItem[]>
-      })
+    apiFetch<ToolItem[]>("/api/tools", { cache: "no-store" })
       .then((data) => {
         if (!isMounted) return
         setTools(data)
@@ -170,16 +161,11 @@ export function Tools() {
 
   async function applyUpdate(payload: { toolName?: string; group?: string; enabled: boolean }) {
     try {
-      const res = await fetch("/api/tools", {
+      const data = await apiFetch<ToolItem[]>("/api/tools", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `Update failed: HTTP ${res.status}`)
-      }
-      const data: ToolItem[] = await res.json()
       setTools(data)
     } catch (err) {
       notify("error", "Update failed", err instanceof Error ? err.message : "Unknown error.")

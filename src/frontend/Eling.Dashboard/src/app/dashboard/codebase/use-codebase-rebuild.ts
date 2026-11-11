@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { rebuildUrl } from "./scope"
 import { useCodebaseRebuildSse, type RebuildProgress } from "@/hooks/use-codebase-rebuild-sse"
+import { apiFetch } from "@/lib/api"
 import type { WorkspaceSelection } from "@/components/workspaces/selection"
 
 /** The two ways the index can be rebuilt: in place, or from scratch. */
@@ -70,12 +71,10 @@ export function useCodebaseRebuild({ selection, onFinished, onError }: UseCodeba
       setRebuildStarting(true)
       onError("")
       try {
-        const res = await fetch(rebuildUrl(selection, mode === "full", Date.now()), {
-          method: "POST",
-          cache: "no-store",
-        })
-        if (!res.ok) throw new Error(`API returned ${res.status}`)
-        const snap = (await res.json()) as RebuildProgress
+        const snap = await apiFetch<RebuildProgress>(
+          rebuildUrl(selection, mode === "full", Date.now()),
+          { method: "POST", cache: "no-store" }
+        )
         setRebuildProgress(snap)
         if (snap.jobId) {
           try { localStorage.setItem(REBUILD_JOB_KEY, snap.jobId) } catch { /* ignore */ }
@@ -121,9 +120,7 @@ export function useCodebaseRebuild({ selection, onFinished, onError }: UseCodeba
     const jobId = rebuildProgress.jobId
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/codebase/rebuild-index/${jobId}`, { cache: "no-store" })
-        if (!res.ok) return
-        const snap = (await res.json()) as RebuildProgress
+        const snap = await apiFetch<RebuildProgress>(`/api/codebase/rebuild-index/${jobId}`, { cache: "no-store" })
         setRebuildProgress(snap)
         if (!snap.isRunning) {
           clearInterval(interval)
@@ -146,9 +143,7 @@ export function useCodebaseRebuild({ selection, onFinished, onError }: UseCodeba
       try { jobId = localStorage.getItem(REBUILD_JOB_KEY) } catch { return }
       if (!jobId) return
       try {
-        const res = await fetch(`/api/codebase/rebuild-index/${jobId}`, { cache: "no-store" })
-        if (!res.ok) throw new Error("not found")
-        const snap = (await res.json()) as RebuildProgress
+        const snap = await apiFetch<RebuildProgress>(`/api/codebase/rebuild-index/${jobId}`, { cache: "no-store" })
         if (cancelled) return
         setRebuildProgress(snap)
         // The pointer only exists to re-attach to an in-flight rebuild, so drop

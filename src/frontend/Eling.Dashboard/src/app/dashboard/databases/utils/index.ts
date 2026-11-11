@@ -4,7 +4,6 @@ export {
   manualPayload,
   isValidPort,
   shortValue,
-  parseApiError,
   providerLabel,
   isRedis,
   isMySql,

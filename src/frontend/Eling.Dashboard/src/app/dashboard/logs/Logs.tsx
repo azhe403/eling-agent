@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useLogTail } from "@/hooks/use-log-tail"
+import { apiFetch, ApiError } from "@/lib/api"
 
 interface LogFile {
   name: string
@@ -95,15 +96,16 @@ export function Logs() {
 
   const fetchFiles = useCallback(async () => {
     try {
-      const res = await fetch(`/api/logs?stream=${stream}`)
-      if (res.ok) {
-        const data = await res.json()
-        setFiles(data.files ?? [])
-      } else {
-        setError(`Failed to list logs (${res.status})`)
-      }
+      const data = await apiFetch<{ files?: LogFile[] } | undefined>(`/api/logs?stream=${stream}`)
+      setFiles(data?.files ?? [])
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(
+        e instanceof ApiError
+          ? `Failed to list logs (${e.status})`
+          : e instanceof Error
+            ? e.message
+            : String(e)
+      )
     }
   }, [stream])
 
@@ -111,13 +113,14 @@ export function Logs() {
   // which active file name to leave out of the date picker.
   const fetchFormat = useCallback(async () => {
     try {
-      const res = await fetch("/api/logs/config")
-      if (res.ok) {
-        const data = (await res.json()) as { format?: string }
-        setFormat(data.format === "jsonl" ? "jsonl" : "text")
-      }
+      const data = await apiFetch<{ format?: string } | undefined>("/api/logs/config")
+      setFormat(data?.format === "jsonl" ? "jsonl" : "text")
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      // A non-2xx answer used to be ignored silently; only unexpected
+      // failures surface.
+      if (!(e instanceof ApiError)) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
     }
   }, [])
 
@@ -131,18 +134,18 @@ export function Logs() {
       if (level !== "all") qs.set("level", level)
       if (debouncedContains) qs.set("contains", debouncedContains)
       qs.set("tail", String(tailCount))
-      const res = await fetch(`/api/logs/read?${qs.toString()}`)
-      if (res.ok) {
-        setHistory((await res.json()) as ReadResponse)
-        if (!autoLiveRef.current) {
-          autoLiveRef.current = true
-          setLive(true)
-        }
-      } else {
-        setError(`Failed to read logs (${res.status})`)
+      const data = await apiFetch<ReadResponse | undefined>(`/api/logs/read?${qs.toString()}`)
+      setHistory(data ?? null)
+      if (!autoLiveRef.current) {
+        autoLiveRef.current = true
+        setLive(true)
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      if (e instanceof ApiError) {
+        setError(`Failed to read logs (${e.status})`)
+      } else {
+        setError(e instanceof Error ? e.message : String(e))
+      }
     } finally {
       setLoading(false)
     }

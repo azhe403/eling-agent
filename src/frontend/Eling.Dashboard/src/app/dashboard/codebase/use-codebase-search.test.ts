@@ -65,10 +65,12 @@ describe("useCodebaseSearch", () => {
   })
 
   it("searches immediately when the reader presses Enter", () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ results: [], stats: null, mode: "search" }),
-    })
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: "ok", message: "ok", data: { results: [], stats: null, mode: "search" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )
     vi.stubGlobal("fetch", fetchMock)
 
     const { result } = setup()
@@ -102,23 +104,27 @@ describe("useCodebaseSearch", () => {
 
     await waitFor(() => expect(resolvers.length).toBe(2))
 
+    const envelope = (data: unknown) =>
+      new Response(JSON.stringify({ code: "ok", message: "ok", data }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+
     await act(async () => {
-      resolvers[1]({
-        ok: true,
-        json: async () => ({
+      resolvers[1](
+        envelope({
           results: [{ projectRoot: "r", path: "second.ts", startLine: 1, endLine: 2, content: "x", score: 1 }],
           stats: null,
           mode: "search",
         }),
-      })
-      resolvers[0]({
-        ok: true,
-        json: async () => ({
+      )
+      resolvers[0](
+        envelope({
           results: [{ projectRoot: "r", path: "first.ts", startLine: 1, endLine: 2, content: "x", score: 1 }],
           stats: null,
           mode: "search",
         }),
-      })
+      )
     })
 
     // The newer search owns the rows; the slow older answer is dropped.

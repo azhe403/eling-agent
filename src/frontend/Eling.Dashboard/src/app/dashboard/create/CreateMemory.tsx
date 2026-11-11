@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { useAutoHeight } from "@/hooks/use-auto-height"
+import { apiFetch } from "@/lib/api"
 
 const TYPES = ["Fact", "Preference", "Decision", "Lesson", "Note"] as const
 type MemoryType = (typeof TYPES)[number]
@@ -68,14 +69,14 @@ export function CreateMemory() {
   useEffect(() => {
     async function loadRuntimes() {
       try {
-        const res = await fetch("/api/coordinator/runtimes", { cache: "no-store" })
-        if (res.ok) {
-          const data: Runtime[] = await res.json()
+        const data = await apiFetch<Runtime[] | undefined>("/api/coordinator/runtimes", { cache: "no-store" })
+        if (Array.isArray(data)) {
           setRuntimes(data)
           // Default to the first available project runtime if no explicit choice yet.
-          if (data.length > 0) {
+          const first = data[0]
+          if (first) {
             setScope((prev) =>
-              prev.kind === "project" ? { kind: "scoped", projectRoot: data[0].projectRoot } : prev,
+              prev.kind === "project" ? { kind: "scoped", projectRoot: first.projectRoot } : prev,
             )
           }
         }
@@ -106,12 +107,11 @@ export function CreateMemory() {
 
     startTransition(async () => {
       try {
-        const res = await fetch(url, {
+        await apiFetch<unknown>(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         })
-        if (!res.ok) throw new Error(`API returned ${res.status}`)
         router.push("/dashboard/memories/")
         // Note: no setState after router.push — the component unmounts on navigation.
       } catch (e) {

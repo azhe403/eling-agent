@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Folder, FolderOpen, File, Loader2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { apiFetch } from "@/lib/api"
 
 export interface HostPathPickerProps {
   open: boolean
@@ -40,20 +41,21 @@ export function HostPathPicker({ open, mode, title, onSelect, onClose }: HostPat
     setError(null)
     try {
       if (!target) {
-        const res = await fetch("/api/agent/host/drives")
-        if (!res.ok) throw new Error(`Drives list failed: HTTP ${res.status}`)
-        const drives: string[] = await res.json()
+        const drives = await apiFetch<string[] | undefined>("/api/agent/host/drives")
+        const list = Array.isArray(drives) ? drives : []
         setPath(null)
         setParent(null)
-        setEntries(drives.map((d) => ({ path: d, isDirectory: true })))
+        setEntries(list.map((d) => ({ path: d, isDirectory: true })))
         return
       }
-      const res = await fetch(`/api/agent/host/browse?path=${encodeURIComponent(target)}`)
-      if (!res.ok) throw new Error(`Browse failed: HTTP ${res.status}`)
-      const data = await res.json()
-      setPath(data.path ?? target)
-      setParent(data.parent ?? null)
-      setEntries(data.entries ?? [])
+      const data = await apiFetch<{
+        path?: string | null
+        parent?: string | null
+        entries?: HostEntry[] | null
+      } | null>(`/api/agent/host/browse?path=${encodeURIComponent(target)}`)
+      setPath(data?.path ?? target)
+      setParent(data?.parent ?? null)
+      setEntries(data?.entries ?? [])
     } catch (err) {
       setEntries([])
       setError(err instanceof Error ? err.message : "Failed to browse host.")

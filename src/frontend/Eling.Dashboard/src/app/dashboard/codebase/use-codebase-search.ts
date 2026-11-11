@@ -20,6 +20,7 @@ import {
   type SearchStats,
 } from "./searchTabs"
 import { rememberQuery } from "./searchPrefs"
+import { apiFetch } from "@/lib/api"
 import type { WorkspaceSelection } from "@/components/workspaces/selection"
 import type { SelectedFile } from "./fileDetailApi"
 
@@ -167,11 +168,21 @@ export function useCodebaseSearch({
       if (!silent) setSearching(true)
       setSearchError(null)
       try {
-        const res = await fetch(searchUrl(trimmed, targetSelection, scope, effectiveLimit), {
+        const data = await apiFetch<{
+          results?: unknown[]
+          stats?: {
+            tookMs?: unknown
+            hits?: unknown
+            totalHits?: unknown
+            files?: unknown
+            chunks?: unknown
+            workspaces?: unknown
+            workspacesWithHits?: unknown
+          } | null
+          mode?: string
+        }>(searchUrl(trimmed, targetSelection, scope, effectiveLimit), {
           cache: "no-store",
         })
-        if (!res.ok) throw new Error(`API returned ${res.status}`)
-        const data = await res.json()
         if (searchSeq.current !== seq) return
 
         const stats: SearchStats | undefined = data.stats
@@ -199,9 +210,9 @@ export function useCodebaseSearch({
         // screen, so they live in separate lists instead of one list the
         // renderer has to inspect.
         if (scope === "content") {
-          setResults(data.results || [])
+          setResults((data.results ?? []) as CodebaseHit[])
         } else {
-          setFileResults(data.results || [])
+          setFileResults((data.results ?? []) as import("./FileResultList").FileResult[])
         }
       } catch (e) {
         if (searchSeq.current !== seq) return

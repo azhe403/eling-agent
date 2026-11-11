@@ -9,6 +9,9 @@ import type { WorkspaceGroupMode } from "./grouping"
  * always a fresh request, and two surfaces that want the same mode share one
  * request instead of issuing two.
  */
+/** Wraps a payload in the standard envelope so stubs match the live wire format. */
+const env = (data: unknown) => JSON.stringify({ code: "ok", message: "ok", data })
+
 describe("useWorkspaceTrees", () => {
   let requests: string[]
 
@@ -21,7 +24,7 @@ describe("useWorkspaceTrees", () => {
         const url = String(input)
         requests.push(url)
         return new Response(
-          JSON.stringify({
+          env({
             rows: [{ root: "/work/alpha", alive: true }],
             group: "flat",
             nodes: [
@@ -111,7 +114,7 @@ describe("useWorkspaceTrees with answers in flight", () => {
             resolve: () =>
               resolve(
                 new Response(
-                  JSON.stringify({
+                  env({
                     rows: [{ root: `/work/${group}`, alive: true }],
                     group,
                     nodes: [],

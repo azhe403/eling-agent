@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { apiFetch } from "@/lib/api"
 import { utcToLocal, utcToLocalDate } from "@/lib/date-utils"
 
 import { HostPathPicker } from "@/components/host-path-picker"
@@ -119,9 +120,7 @@ export function ShellConfigCard() {
   const [outputError, setOutputError] = useState<string | null>(null)
 
   const load = useCallback(async (): Promise<ShellConfigDto> => {
-    const res = await fetch("/api/shell/config", { cache: "no-store" })
-    if (!res.ok) throw new Error(`Failed to load shell configuration: HTTP ${res.status}`)
-    return (await res.json()) as ShellConfigDto
+    return apiFetch<ShellConfigDto>("/api/shell/config", { cache: "no-store" })
   }, [])
 
   useEffect(() => {
@@ -155,21 +154,16 @@ export function ShellConfigCard() {
       setSaving(true)
       setSaveError(null)
       try {
-        const res = await fetch("/api/shell/config", {
+        const updated = await apiFetch<ShellConfigDto>("/api/shell/config", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(next),
         })
-        if (!res.ok) throw new Error((await res.text()) || `Update failed: HTTP ${res.status}`)
-        setConfig((await res.json()) as ShellConfigDto)
+        setConfig(updated)
       } catch (err) {
         try {
-          const res = await fetch("/api/shell/config", { cache: "no-store" })
-          if (res.ok) {
-            setConfig((await res.json()) as ShellConfigDto)
-          } else {
-            setConfig(previous)
-          }
+          const fresh = await apiFetch<ShellConfigDto>("/api/shell/config", { cache: "no-store" })
+          setConfig(fresh)
         } catch {
           setConfig(previous)
         }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { useMemoriesSse, type SseStatus } from "@/hooks/use-memories-sse"
+import { apiFetch, ApiError } from "@/lib/api"
 import {
   group,
   type WorkspaceGroup,
@@ -182,25 +183,19 @@ function apiUrl(path: string): string {
 }
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(apiUrl(path), { cache: "no-store", signal })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return apiFetch<T>(apiUrl(path), { cache: "no-store", signal })
+}
 
-  // The dashboard's unknown routes fall through to the SPA shell, and that
-  // shell answers with 200 and an HTML body. So a route this dashboard knows
-  // but the running backend does not - an older backend, or one that was not
-  // restarted after a release - comes back as HTML, and "Unexpected token
-  // '<'" tells the reader nothing. Saying what actually happened is worth
-  // more than the parse error.
-  const contentType = res.headers.get("content-type") ?? ""
-  if (!contentType.includes("json")) {
-    const kind = contentType.split(";")[0].trim() || "an unknown type"
-    throw new Error(`${kind} instead of JSON - the backend may predate this dashboard`)
-  }
-
-  return (await res.json()) as T
+function isMissingBackend(reason: unknown): boolean {
+  // An unknown /api route on an older backend falls through to the SPA shell,
+  // which answers 200 HTML; the envelope client reports that as
+  // `invalid_response`. A 404 is also a stale route. Both mean "the backend
+  // does not know this route yet", not "the page is broken".
+  return reason instanceof ApiError && (reason.code === "invalid_response" || reason.code === "not_found")
 }
 
 function messageOf(reason: unknown): string {
+  if (isMissingBackend(reason)) return "invalid_response"
   if (reason instanceof Error) return reason.message
   return String(reason)
 }

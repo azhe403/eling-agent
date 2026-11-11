@@ -1,5 +1,7 @@
 "use client"
 
+import { apiFetch } from "@/lib/api"
+
 /** A file selected in the result list, and the project that owns it. */
 export type SelectedFile = {
   projectRoot: string
@@ -27,19 +29,7 @@ type FileContent = {
 }
 
 async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(url, { cache: "no-store", signal })
-  if (!res.ok) throw new Error(await errorMessage(res))
-  return (await res.json()) as T
-}
-
-async function errorMessage(res: Response): Promise<string> {
-  // The endpoints answer with a plain-text reason, which is far more useful
-  // than a bare status code — a rejected path names the offender.
-  const body = await res.text().catch(() => {
-    console.debug("error body unreadable, falling back to status code")
-    return ""
-  })
-  return body.trim() || `API returned ${res.status}`
+  return apiFetch<T>(url, { cache: "no-store", signal })
 }
 
 /** Every indexed chunk for the file, in line order. */

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { apiFetch } from "@/lib/api"
 
 /** Shown until the backend answers, and kept if it never does. */
 const FALLBACK_NAME = "anonymous"
@@ -37,9 +38,8 @@ export function useHostIdentity(): HostIdentity {
 
     const controller = new AbortController()
 
-    fetch(url, { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: unknown) => {
+    apiFetch<unknown>(url, { signal: controller.signal })
+      .then((data) => {
         const record = data as Record<string, unknown> | null
         // Tolerate either casing: the dashboard's other fetchers do the same,
         // since the serializer's casing is a backend detail.

@@ -27,6 +27,7 @@ import {
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { useCodebaseSearch } from "./use-codebase-search"
 import { useCodebaseUrlState } from "./use-codebase-url-state"
+import { apiFetch } from "@/lib/api"
 import { utcToLocal } from "@/lib/date-utils"
 import { XL_BREAKPOINT } from "@/lib/constants"
 import { cn } from "@/lib/utils"
@@ -91,6 +92,23 @@ type CodebaseHit = {
   endLine: number
   content: string
   score: number
+}
+
+// What the search endpoint's payload looks like before the per-field
+// coercion below: results rows and raw stats numbers (the wire may carry
+// them as strings, so `Number(...)` guards stay in place).
+type SearchApiResponse = {
+  results?: FileResult[]
+  stats?: {
+    tookMs?: unknown
+    hits?: unknown
+    totalHits?: unknown
+    files?: unknown
+    chunks?: unknown
+    workspaces?: unknown
+    workspacesWithHits?: unknown
+  } | null
+  mode?: string
 }
 
 // URL builders and this page's URL binding of the selection live in ./scope.ts;
@@ -192,9 +210,7 @@ export function CodebaseList() {
   // cascade an extra render commit per scope change.
   const loadStatus = useCallback(async () => {
     try {
-      const res = await fetch(statusUrl(selection), { cache: "no-store" })
-      if (!res.ok) throw new Error(`API returned ${res.status}`)
-      const s = (await res.json()) as CodebaseStatus
+      const s = await apiFetch<CodebaseStatus>(statusUrl(selection), { cache: "no-store" })
       setStatus(s)
       lastIndexedAtRef.current = s.lastIndexedAt
       setStatusError(null)
@@ -210,11 +226,10 @@ export function CodebaseList() {
     if (!silent) setTopLoading(true)
     const effectiveLimit = limitToUse ?? searchLimit
     try {
-      const res = await fetch(searchUrl("", selection, searchScope, effectiveLimit), {
-        cache: "no-store",
-      })
-      if (!res.ok) throw new Error(`API returned ${res.status}`)
-      const data = await res.json()
+      const data = await apiFetch<SearchApiResponse>(
+        searchUrl("", selection, searchScope, effectiveLimit),
+        { cache: "no-store" }
+      )
       setTopFiles(Array.isArray(data.results) ? data.results : [])
       if (data.stats) {
         setTopStats({
@@ -290,9 +305,7 @@ export function CodebaseList() {
   // "runtimes" on membership changes. No polling — refresh only on events.
   const handleCodebaseEvent = useCallback(async () => {
     try {
-      const statusRes = await fetch(statusUrl(selection), { cache: "no-store" })
-      if (!statusRes.ok) return
-      const s = (await statusRes.json()) as CodebaseStatus
+      const s = await apiFetch<CodebaseStatus>(statusUrl(selection), { cache: "no-store" })
       setStatus(s)
       lastIndexedAtRef.current = s.lastIndexedAt
     } catch {

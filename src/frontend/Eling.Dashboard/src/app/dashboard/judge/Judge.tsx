@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { apiFetch, ApiError } from "@/lib/api"
 
 interface JudgeView {
   enabled: boolean
@@ -85,19 +86,12 @@ export function Judge() {
           apiKey: key?.trim() || null,
         }
 
-        const res = await fetch("/api/judge/models", {
+        const data = await apiFetch<ModelsResponse | undefined>("/api/judge/models", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         })
-
-        if (!res.ok) {
-          const text = await res.text()
-          throw new Error(text || `Failed to fetch models: HTTP ${res.status}`)
-        }
-
-        const data: ModelsResponse = await res.json()
-        const list = data.models ?? []
+        const list = data?.models ?? []
         setAvailableModels(list)
 
         if (list.length > 0) {
@@ -130,20 +124,16 @@ export function Judge() {
   const reload = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch("/api/judge/config", { cache: "no-store" })
-      if (!res.ok) {
-        throw new Error(`Failed to fetch judge config: HTTP ${res.status}`)
-      }
-      const data: JudgeView = await res.json()
-      setEnabled(data.enabled ?? false)
-      setBaseUrl(data.baseUrl ?? "")
-      const initialModel = data.model ?? ""
+      const data = await apiFetch<JudgeView | undefined>("/api/judge/config", { cache: "no-store" })
+      setEnabled(data?.enabled ?? false)
+      setBaseUrl(data?.baseUrl ?? "")
+      const initialModel = data?.model ?? ""
       setModel(initialModel)
-      setHasApiKey(data.hasApiKey ?? false)
-      setIsConfigured(data.isConfigured ?? false)
-      setTimeoutSeconds(data.timeoutSeconds != null ? String(data.timeoutSeconds) : "10")
+      setHasApiKey(data?.hasApiKey ?? false)
+      setIsConfigured(data?.isConfigured ?? false)
+      setTimeoutSeconds(data?.timeoutSeconds != null ? String(data.timeoutSeconds) : "10")
 
-      if (data.baseUrl) {
+      if (data?.baseUrl) {
         void fetchModelsForUrl(data.baseUrl, initialModel)
       }
     } catch (err) {
@@ -161,37 +151,37 @@ export function Judge() {
 
     async function loadInitial() {
       try {
-        const res = await fetch("/api/judge/config", { cache: "no-store" })
-        if (!res.ok) {
-          throw new Error(`Failed to fetch judge config: HTTP ${res.status}`)
-        }
-        const data: JudgeView = await res.json()
+        const data = await apiFetch<JudgeView | undefined>("/api/judge/config", { cache: "no-store" })
         if (ignore) return
 
-        setEnabled(data.enabled ?? false)
-        setBaseUrl(data.baseUrl ?? "")
-        const initialModel = data.model ?? ""
+        setEnabled(data?.enabled ?? false)
+        setBaseUrl(data?.baseUrl ?? "")
+        const initialModel = data?.model ?? ""
         setModel(initialModel)
-        setHasApiKey(data.hasApiKey ?? false)
-        setIsConfigured(data.isConfigured ?? false)
-        setTimeoutSeconds(data.timeoutSeconds != null ? String(data.timeoutSeconds) : "10")
+        setHasApiKey(data?.hasApiKey ?? false)
+        setIsConfigured(data?.isConfigured ?? false)
+        setTimeoutSeconds(data?.timeoutSeconds != null ? String(data.timeoutSeconds) : "10")
 
-        if (data.baseUrl) {
+        if (data?.baseUrl) {
           const payload = {
             baseUrl: data.baseUrl.trim() || null,
           }
-          const modelsRes = await fetch("/api/judge/models", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          })
-          if (modelsRes.ok && !ignore) {
-            const modelsData: ModelsResponse = await modelsRes.json()
-            const list = modelsData.models ?? []
-            setAvailableModels(list)
-            if (list.length > 0 && (!initialModel || !list.includes(initialModel))) {
-              setModel(list[0])
+          try {
+            const modelsData = await apiFetch<ModelsResponse | undefined>("/api/judge/models", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            })
+            const list = modelsData?.models ?? []
+            if (!ignore) {
+              setAvailableModels(list)
+              if (list.length > 0 && (!initialModel || !list.includes(initialModel))) {
+                setModel(list[0] ?? "")
+              }
             }
+          } catch (modelsErr) {
+            // A non-2xx from the provider probe used to be ignored silently.
+            if (!(modelsErr instanceof ApiError)) throw modelsErr
           }
         }
       } catch (err) {
@@ -229,23 +219,17 @@ export function Judge() {
         timeoutSeconds: Number(timeoutSeconds) > 0 ? Number(timeoutSeconds) : 10,
       }
 
-      const res = await fetch("/api/judge/config", {
+      const updated = await apiFetch<JudgeView | undefined>("/api/judge/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
-
-      if (!res.ok) {
-        throw new Error(`Failed to save configuration: HTTP ${res.status}`)
-      }
-
-      const updated: JudgeView = await res.json()
-      setEnabled(updated.enabled)
-      setBaseUrl(updated.baseUrl ?? "")
-      setModel(updated.model ?? "")
-      setHasApiKey(updated.hasApiKey)
-      setIsConfigured(updated.isConfigured)
-      setTimeoutSeconds(updated.timeoutSeconds != null ? String(updated.timeoutSeconds) : "10")
+      setEnabled(updated?.enabled ?? false)
+      setBaseUrl(updated?.baseUrl ?? "")
+      setModel(updated?.model ?? "")
+      setHasApiKey(updated?.hasApiKey ?? false)
+      setIsConfigured(updated?.isConfigured ?? false)
+      setTimeoutSeconds(updated?.timeoutSeconds != null ? String(updated.timeoutSeconds) : "10")
       setApiKey("")
 
       setMessage({
@@ -274,19 +258,12 @@ export function Judge() {
         apiKey: apiKey.trim() || null,
       }
 
-      const res = await fetch("/api/judge/test", {
+      const data = await apiFetch<TestResponse | undefined>("/api/judge/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
-
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `Test failed with status ${res.status}`)
-      }
-
-      const data: TestResponse = await res.json()
-      setTestResult(data)
+      setTestResult(data ?? null)
     } catch (err) {
       setTestResult({
         ok: false,

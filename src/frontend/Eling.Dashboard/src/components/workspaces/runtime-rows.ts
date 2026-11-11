@@ -11,6 +11,8 @@
 // renamed field fails at runtime rather than at compile time. So the mapping
 // in grouping.ts reads defensively instead of trusting the shape.
 
+import { apiFetch } from "@/lib/api"
+
 /** One workspace row as the coordinator sends it. */
 export type WorkspaceRowPayload = {
   root?: string | null
@@ -80,11 +82,10 @@ export type WorkspaceExpansion = {
 }
 
 export async function fetchWorkspaceExpansion(): Promise<WorkspaceExpansion> {
-  const res = await fetch(WORKSPACE_EXPANDED_URL, { cache: "no-store" })
-  if (!res.ok) throw new Error(`API returned ${res.status}`)
-  const data = (await res.json()) as
-    | { expanded?: readonly string[] | null; collapsed?: readonly string[] | null }
-    | null
+  const data = await apiFetch<{
+    expanded?: readonly string[] | null
+    collapsed?: readonly string[] | null
+  } | null>(WORKSPACE_EXPANDED_URL, { cache: "no-store" })
   return {
     expanded: data?.expanded ?? [],
     collapsed: data?.collapsed ?? [],
@@ -94,23 +95,20 @@ export async function fetchWorkspaceExpansion(): Promise<WorkspaceExpansion> {
 export async function saveWorkspaceExpansion(
   expansion: WorkspaceExpansion,
 ): Promise<void> {
-  const res = await fetch(WORKSPACE_EXPANDED_URL, {
+  await apiFetch<unknown>(WORKSPACE_EXPANDED_URL, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(expansion),
   })
-  if (!res.ok) throw new Error(`API returned ${res.status}`)
 }
 
 export async function fetchWorkspaceTrees(
   group: WorkspaceGroupMode,
 ): Promise<WorkspaceTreesPayload> {
-  const res = await fetch(
+  const data = await apiFetch<WorkspaceTreesPayload | null>(
     `${WORKSPACE_TREES_URL}?group=${group}`,
     { cache: "no-store" },
   )
-  if (!res.ok) throw new Error(`API returned ${res.status}`)
-  const data = (await res.json()) as WorkspaceTreesPayload | null
   return data ?? {}
 }
 

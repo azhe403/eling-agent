@@ -36,6 +36,7 @@ import { useMemoriesSse, type SseTopic } from "@/hooks/use-memories-sse"
 import { utcToLocal } from "@/lib/date-utils"
 import { formatBytes, formatMegabytes } from "@/lib/format"
 import { PathText } from "@/components/path-text"
+import { apiFetch } from "@/lib/api"
 import { group, uptime, type RuntimeDto, type WorkspaceGroup } from "./aggregate"
 import {
   DEFAULT_SORT,
@@ -89,17 +90,17 @@ type ToolbarParam = "status" | "q" | "sort" | "dir"
 async function fetchWorkspacesAndStatuses() {
   // allProcesses: every live eling process, not the old single deduped row per
   // workspace — one folder can host several sessions at once. Grouping and the
-  // metric sums happen client-side in ./aggregate.
-  const [runtimesRes, statusesRes] = await Promise.all([
-    fetch("/api/coordinator/runtimes?includeRegistered=true&allProcesses=true", { cache: "no-store" }),
-    fetch("/api/coordinator/projects/codebase-statuses", { cache: "no-store" }),
+  // metric sums happen client-side in ./aggregate. A failed runtimes call is
+  // fatal (the apiFetch throws an ApiError); a failed statuses call is not —
+  // the page renders with zeros for the index metrics.
+  const [runtimes, statusesList] = await Promise.all([
+    apiFetch<RuntimeDto[]>("/api/coordinator/runtimes?includeRegistered=true&allProcesses=true", { cache: "no-store" }),
+    apiFetch<WorkspaceCodebaseStatusItem[] | undefined>("/api/coordinator/projects/codebase-statuses", { cache: "no-store" })
+      .catch(() => null),
   ])
-  if (!runtimesRes.ok) throw new Error(`HTTP ${runtimesRes.status} from coordinator`)
-  const runtimes = (await runtimesRes.json()) as RuntimeDto[]
 
   const statuses: Record<string, CodebaseStatusDto> = {}
-  if (statusesRes.ok) {
-    const statusesList = (await statusesRes.json()) as WorkspaceCodebaseStatusItem[]
+  if (Array.isArray(statusesList)) {
     for (const item of statusesList) {
       statuses[item.workspaceRoot.toLowerCase()] = {
         files: item.files,
@@ -229,11 +230,10 @@ export function WorkspacesList() {
   const triggerReindex = async (root: string) => {
     setReindexingRoot(root)
     try {
-      const res = await fetch(
+      await apiFetch<unknown>(
         `/api/codebase/rebuild-index?full=false&project=${encodeURIComponent(root)}`,
         { method: "POST" }
       )
-      if (!res.ok) throw new Error(`Re-index failed (HTTP ${res.status})`)
       void loadData()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to trigger re-index")
@@ -247,7 +247,10 @@ export function WorkspacesList() {
     setIsDeleting(true)
     setError(null)
     try {
-      const res = await fetch("/api/coordinator/project/delete", {
+      const body = await apiFetch<{
+        success?: boolean
+        warnings?: string[]
+      } | null>("/api/coordinator/project/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -257,14 +260,9 @@ export function WorkspacesList() {
           deleteDotEling,
         }),
       })
-      if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`)
       // The backend reports a component it could not remove. The warning is
       // shown only when something actually survived — a successful delete
       // says nothing.
-      const body = (await res.json().catch(() => null)) as {
-        success?: boolean
-        warnings?: string[]
-      } | null
       setDeleteTarget(null)
       if (body?.warnings?.length) {
         setError(body.warnings.join(" "))

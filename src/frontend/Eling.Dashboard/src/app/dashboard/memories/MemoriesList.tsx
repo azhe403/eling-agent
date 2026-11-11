@@ -35,6 +35,7 @@ import { LoadingBar } from "@/components/ui/loading-bar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import { utcToLocal } from "@/lib/date-utils"
+import { apiFetch, ApiError } from "@/lib/api"
 import { TYPES } from "@/lib/types"
 import type { Memory } from "@/lib/types"
 import {
@@ -80,13 +81,17 @@ type ProjectScope = {
  * target is any `.eling` scope — including one nobody is running in.
  */
 async function loadProjectScopes(): Promise<ProjectScope[]> {
-  const res = await fetch("/api/project/scopes", {
-    cache: "no-store",
-    headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
-  })
-  if (!res.ok) return []
-  const data = await res.json()
-  return Array.isArray(data?.scopes) ? (data.scopes as ProjectScope[]) : []
+  try {
+    const data = await apiFetch<{ scopes?: ProjectScope[] } | null>("/api/project/scopes", {
+      cache: "no-store",
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+    })
+    const scopes = data?.scopes
+    return Array.isArray(scopes) ? scopes : []
+  } catch {
+    // ignore — the picker still offers All and Global
+    return []
+  }
 }
 
 function scopeTileLabel(selection: MemoryScope): string {
@@ -281,13 +286,15 @@ export function MemoriesList() {
             `%c[FETCH MEMORIES] 📡 Fetching fresh data${triggeredBy ? ` (Trigger: ${triggeredBy})` : ""} from ${url}`,
             "color: #0284c7; font-weight: bold;"
           )
-          const res = await fetch(url, {
+          const data = await apiFetch<{
+            items?: Memory[]
+            metadata?: { total?: unknown; matching?: unknown }
+          }>(url, {
             cache: "no-store",
             headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
           })
-          if (!res.ok) throw new Error(`API returned ${res.status}`)
-          const data = await res.json()
-          const items: Memory[] = Array.isArray(data?.items) ? data.items : []
+          const rawItems = data?.items
+          const items: Memory[] = Array.isArray(rawItems) ? rawItems : []
           const total =
             typeof data?.metadata?.total === "number"
               ? data.metadata.total
@@ -374,9 +381,14 @@ export function MemoriesList() {
       url = `/api/project/memories/${m.id}?projectRoot=${encodeURIComponent(m.project.root)}&tier=project-local`
     else if (selection.kind === "selection" && selection.roots.length === 1)
       url = `/api/memories/${m.id}?projectRoot=${encodeURIComponent(selection.roots[0])}${tier === "project-local" ? "&tier=project-local" : ""}`
-    const res = await fetch(url, { method: "DELETE" })
-    if (res.ok || res.status === 404) {
+    try {
+      await apiFetch<unknown>(url, { method: "DELETE" })
       setMemories((x) => x.filter((y) => y.id !== m.id))
+    } catch (e) {
+      // A 404 still counts as gone; anything else leaves the row in place.
+      if (e instanceof ApiError && e.status === 404) {
+        setMemories((x) => x.filter((y) => y.id !== m.id))
+      }
     }
   }
 
@@ -392,13 +404,12 @@ export function MemoriesList() {
       url = `/api/project/memories/${id}?projectRoot=${encodeURIComponent(target.project.root)}`
     else if (target?.scope === "project-local" && target.project?.root)
       url = `/api/project/memories/${id}?projectRoot=${encodeURIComponent(target.project.root)}&tier=project-local`
-    const res = await fetch(url, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
-    if (res.ok) {
-      const updated = (await res.json()) as Memory
+    try {
+      const updated = await apiFetch<Memory>(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
       setMemories((x) =>
         x.map((y) =>
           y.id === id
@@ -408,6 +419,10 @@ export function MemoriesList() {
       )
       setEditingId(null)
       scrollToTop()
+    } catch (e) {
+      // A non-2xx answer used to be ignored silently; transport or envelope
+      // failures still propagate.
+      if (!(e instanceof ApiError)) throw e
     }
   }
 
@@ -415,32 +430,44 @@ export function MemoriesList() {
     if (m.scope === target || !m.project?.root) return
     const root = m.project.root
     const url = target === "project-local" ? "/api/scoped/move-to-local" : "/api/scoped/move-to-project"
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: m.id, sourceScope: m.scope, sourceProjectRoot: root, targetProjectRoot: root }),
-    })
-    if (res.ok) {
+    try {
+      await apiFetch<unknown>(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: m.id, sourceScope: m.scope, sourceProjectRoot: root, targetProjectRoot: root }),
+      })
       await load()
       scrollToTop()
-    } else {
-      setError(`Move failed: ${res.status}`)
+    } catch (e) {
+      setError(
+        e instanceof ApiError
+          ? `Move failed: ${e.status}`
+          : e instanceof Error
+            ? `Move failed: ${e.message}`
+            : "Move failed"
+      )
     }
   }
 
   async function promote(m: Memory, move = false) {
     if (m.scope !== "project" || !m.project?.root) return
-    const res = await fetch("/api/scoped/promote-to-global", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: m.id, sourceProjectRoot: m.project.root, move }),
-    })
-    if (res.ok) {
+    try {
+      await apiFetch<unknown>("/api/scoped/promote-to-global", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: m.id, sourceProjectRoot: m.project.root, move }),
+      })
       // reload list so the user sees the new global entry (or the removed source on move)
       await load()
       scrollToTop()
-    } else {
-      setError(`Promote failed: ${res.status}`)
+    } catch (e) {
+      setError(
+        e instanceof ApiError
+          ? `Promote failed: ${e.status}`
+          : e instanceof Error
+            ? `Promote failed: ${e.message}`
+            : "Promote failed"
+      )
     }
   }
 
@@ -455,16 +482,22 @@ export function MemoriesList() {
           targetProjectRoot: targetRoot,
           move,
         }
-    const res = await fetch("/api/scoped/copy-to-project", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
-    if (res.ok) {
+    try {
+      await apiFetch<unknown>("/api/scoped/copy-to-project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
       await load()
       scrollToTop()
-    } else {
-      setError(`Copy failed: ${res.status}`)
+    } catch (e) {
+      setError(
+        e instanceof ApiError
+          ? `Copy failed: ${e.status}`
+          : e instanceof Error
+            ? `Copy failed: ${e.message}`
+            : "Copy failed"
+      )
     }
   }
 

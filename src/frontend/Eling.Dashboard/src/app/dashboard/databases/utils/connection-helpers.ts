@@ -122,31 +122,5 @@ export const buildWherePk = (
     .join(" AND ")
 }
 
-/** Parse an API error message into a human-friendly string. */
-export const parseApiError = (text: string): string => {
-  const trimmed = text.trim()
-  if (!trimmed) return "Request failed."
-  try {
-    const j = JSON.parse(trimmed)
-    const msg = j?.detail || j?.title || j?.message || j?.error
-    if (typeof msg === "string" && msg.length > 0) {
-      const lower = msg.toLowerCase()
-      if (lower.includes("mutations not allowed on read-only")) {
-        return "This connection is read-only, so data changes are disabled."
-      }
-      if (lower.includes("not a mutation statement")) {
-        return "Only INSERT / UPDATE / DELETE statements are allowed here."
-      }
-      if (lower.includes("no primary key")) {
-        return "This table has no primary key, so rows cannot be edited."
-      }
-      return msg
-    }
-  } catch {
-    // not JSON — fall through to raw text
-  }
-  return trimmed.length > 200 ? trimmed.slice(0, 200) + "…" : trimmed
-}
-
 /** The API base path. */
 export const API = "/api/databases"

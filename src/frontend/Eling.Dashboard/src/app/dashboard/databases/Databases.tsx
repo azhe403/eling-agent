@@ -21,7 +21,8 @@ import { useMediaQuery } from "@/hooks/use-media-query"
 import { XL_BREAKPOINT } from "@/lib/constants"
 
 import type { DbConn, Detected, QueryResult } from "./types"
-import { API, parseApiError } from "./utils"
+import { API } from "./utils"
+import { apiFetch } from "@/lib/api"
 
 import { useNotifications } from "./hooks/useNotifications"
 import { useConnectionForm } from "./hooks/useConnectionForm"
@@ -275,9 +276,7 @@ export function Databases() {
     try {
       if (!reducedMotion) await new Promise((resolve) => setTimeout(resolve, fadeOutMs))
 
-      const res = await fetch(API + connSortQuery(connSort, connOrder), { cache: "no-store" })
-      if (!res.ok) throw new Error(parseApiError(await res.text()))
-      const data = (await res.json()) as DbConn[]
+      const data = await apiFetch<DbConn[]>(API + connSortQuery(connSort, connOrder), { cache: "no-store" })
       setConns(data)
       // The list is ground truth: an expanded id that is not in it anymore
       // (connection deleted elsewhere) is pruned here, or the 30-second
@@ -679,7 +678,7 @@ export function Databases() {
 
   const removeConnection = useCallback(
     async (id: string) => {
-      await fetch(API + "/" + id, { method: "DELETE" })
+      await apiFetch<unknown>(API + "/" + id, { method: "DELETE" })
       await load()
     },
     [load]
@@ -693,12 +692,12 @@ export function Databases() {
     setCreateTesting(true)
     setCreateTestResult(null)
     try {
-      const res = await fetch(API + "/test-connection", {
+      const result = await apiFetch<{ ok: boolean; message: string; latencyMs: number }>(API + "/test-connection", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(createPayload()),
       })
-      setCreateTestResult(await res.json())
+      setCreateTestResult(result)
     } catch (e: unknown) {
       setCreateTestResult({ ok: false, message: e instanceof Error ? e.message : "failed", latencyMs: 0 })
     } finally {
@@ -716,10 +715,10 @@ export function Databases() {
     setEditTesting(true)
     setEditTestResult(null)
     try {
-      let res: Response
+      let result: { ok: boolean; message: string; latencyMs: number }
       if (edit.mode === "raw") {
         if (edit.connStr.trim() !== "") {
-          res = await fetch(API + "/test-connection", {
+          result = await apiFetch<{ ok: boolean; message: string; latencyMs: number }>(API + "/test-connection", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -732,18 +731,18 @@ export function Databases() {
             }),
           })
         } else {
-          res = await fetch(API + "/" + edit.id + "/test", { method: "POST" })
+          result = await apiFetch<{ ok: boolean; message: string; latencyMs: number }>(API + "/" + edit.id + "/test", { method: "POST" })
         }
       } else {
         // The edited fields are layered over the stored connection on the
         // server, so a blank password keeps the stored one.
-        res = await fetch(API + "/" + edit.id + "/test", {
+        result = await apiFetch<{ ok: boolean; message: string; latencyMs: number }>(API + "/" + edit.id + "/test", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ manual: body.manual }),
         })
       }
-      setEditTestResult(await res.json())
+      setEditTestResult(result)
     } catch (e: unknown) {
       setEditTestResult({ ok: false, message: e instanceof Error ? e.message : "failed", latencyMs: 0 })
     } finally {
@@ -757,12 +756,11 @@ export function Databases() {
       return
     }
     try {
-      const res = await fetch(API, {
+      await apiFetch<unknown>(API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(createPayload()),
       })
-      if (!res.ok) throw new Error(parseApiError(await res.text()))
       setShowCreate(false)
       resetCreate()
       await load()
@@ -779,12 +777,11 @@ export function Databases() {
       return
     }
     try {
-      const res = await fetch(API + "/" + edit?.id, {
+      await apiFetch<unknown>(API + "/" + edit?.id, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
-      if (!res.ok) throw new Error(parseApiError(await res.text()))
       closeEdit()
       await load()
     } catch (e: unknown) {
@@ -798,13 +795,11 @@ export function Databases() {
    * with what was just typed.
    */
   const loadCreateDatabases = useCallback(async (): Promise<string[]> => {
-    const res = await fetch(API + "/list-databases", {
+    const data = await apiFetch<unknown>(API + "/list-databases", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(createPayload()),
     })
-    if (!res.ok) throw new Error(parseApiError(await res.text()))
-    const data = await res.json()
     return Array.isArray(data) ? data : []
   }, [createPayload])
 
@@ -815,13 +810,11 @@ export function Databases() {
    */
   const loadEditDatabases = useCallback(async (): Promise<string[]> => {
     if (!edit) return []
-    const res = await fetch(API + "/" + edit.id + "/databases", {
+    const data = await apiFetch<unknown>(API + "/" + edit.id + "/databases", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ manual: editPayload()?.manual }),
     })
-    if (!res.ok) throw new Error(parseApiError(await res.text()))
-    const data = await res.json()
     return Array.isArray(data) ? data : []
   }, [edit, editPayload])
 
@@ -838,13 +831,11 @@ export function Databases() {
           notifyDb("error", "Read-only connection", "This connection is read-only, so data changes are disabled.")
           return
         }
-        const res = await fetch(API + "/" + selectedId + "/mutate", {
+        const data = await apiFetch<{ affectedRows: number; truncated: boolean }>(API + "/" + selectedId + "/mutate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sql: trimmed, maxAffectedRows: 1000, database: activeTable?.database ?? null }),
         })
-        if (!res.ok) throw new Error(parseApiError(await res.text()))
-        const data = await res.json()
         setQResult({
           columns: ["affectedRows", "truncated"],
           rows: [[data.affectedRows, data.truncated]],
@@ -856,13 +847,11 @@ export function Databases() {
       if (!/\blimit\b/i.test(finalSql)) {
         finalSql = finalSql.replace(/;?\s*$/, "") + " LIMIT 100"
       }
-      const res = await fetch(API + "/" + selectedId + "/query", {
+      const qData = await apiFetch<QueryResult>(API + "/" + selectedId + "/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: finalSql, maxRows: 100, database: activeTable?.database ?? null }),
       })
-      if (!res.ok) throw new Error(parseApiError(await res.text()))
-      const qData = (await res.json()) as QueryResult
       setQResult(qData)
       if (qData.fromCache) {
         const conn = conns.find((c) => c.id === selectedId)
@@ -884,12 +873,11 @@ export function Databases() {
   /* ---------------------------------------------------------------- import */
 
   const doImport = useCallback(async () => {
-    const res = await fetch(API + "/import", {
+    await apiFetch<unknown>(API + "/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ settingsKeys: selectedKeys }),
     })
-    await res.json()
     setSelectedKeys([])
     setDetected([])
     setShowImportConfirm(false)

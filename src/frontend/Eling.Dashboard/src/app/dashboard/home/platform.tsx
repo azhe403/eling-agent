@@ -126,12 +126,11 @@ function backendValue(error: string | null, pid: number | undefined): string {
 /**
  * A route the backend does not have is not the same as a backend that is
  * down: an older backend answers an unknown route with the dashboard's own
- * HTML shell, so the dashboard is talking to a live process that simply does
- * not know the new route yet. That is a warning - restart the backend - and
- * not a red failure.
+ * HTML shell (the envelope client reports `invalid_response`), or with a
+ * JSON 404. That is a warning - restart the backend - and not a red failure.
  */
 function isMissingRoute(error: string): boolean {
-  return error.includes("not JSON") || error.includes("HTTP 404")
+  return error === "invalid_response" || error.includes("HTTP 404")
 }
 
 function backendState(error: string | null, answered: boolean): StatusState {

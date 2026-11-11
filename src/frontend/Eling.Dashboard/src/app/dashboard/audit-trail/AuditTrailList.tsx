@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import { utcToLocal } from "@/lib/date-utils"
 import { DateRangePicker } from "@/components/ui/date-range-picker"
+import { apiFetch } from "@/lib/api"
 
 type AuditEntry = {
   timestamp: string
@@ -141,12 +142,7 @@ export function AuditTrailList() {
         const pages = await Promise.all(
           keys.map(async (key) => {
             const url = `/api/audit/${key}?${queryString}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
-            const res = await fetch(url, { cache: "no-store" })
-            if (!res.ok) {
-              const text = await res.text()
-              throw new Error(text || `Request failed (${res.status})`)
-            }
-            return (await res.json()) as AuditPage
+            return apiFetch<AuditPage>(url, { cache: "no-store" })
           }),
         )
         if (id !== requestId.current) return
