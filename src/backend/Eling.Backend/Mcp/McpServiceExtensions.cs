@@ -6,6 +6,7 @@ using Eling.Backend.Judging;
 using Eling.Backend.Mcp.Filters;
 using Eling.Backend.Mcp.Telemetry;
 using Eling.Backend.Scope;
+using Eling.Backend.Shell;
 using Eling.Backend.Tools;
 using Eling.Backend.Updates;
 using Eling.Core;
@@ -83,6 +84,7 @@ public static class McpServiceExtensions
 
         // Bounded filesystem tools sandboxed to the project root.
         services.TryAddSingleton<IFileSystemService>(new FileSystemService(projectScope.Root));
+        services.TryAddSingleton(new ShellSessionRoot(projectScope.Root));
 
         AddCodebaseServices(services, projectScope.Root);
 
@@ -96,6 +98,8 @@ public static class McpServiceExtensions
             userScope,
             sp.GetService<ILoggerFactory>()?.CreateLogger<ToolPolicyStore>()
                 ?? NullLogger<ToolPolicyStore>.Instance));
+
+        AddShellConfigStore(services, userScope);
 
         return services;
     }
@@ -203,9 +207,11 @@ public static class McpServiceExtensions
         services.AddScoped<IMemoryRecallService, MemoryRecallService>();
         services.AddScoped<IMemoryMaintenanceService, MemoryMaintenanceService>();
 
-        // Same sandbox wiring for the scope-chain path: head level or cwd.
+        // Same sandbox wiring for the scope-chain path: the filesystem belongs to
+        // the memory head, while the shell operates on the launched workspace.
         services.TryAddSingleton<IFileSystemService>(
             new FileSystemService(chain.Head?.Root ?? chain.Cwd));
+        services.TryAddSingleton(new ShellSessionRoot(chain.Cwd));
 
         // The codebase index is rooted at the working directory — the
         // workspace the backend was launched in — never at the nearest
@@ -221,12 +227,20 @@ public static class McpServiceExtensions
             sp.GetService<ILoggerFactory>()?.CreateLogger<ToolPolicyStore>()
                 ?? NullLogger<ToolPolicyStore>.Instance));
 
+        AddShellConfigStore(services, userScope);
+
         // Update-check graph (cache readers only — no background pump here, so MCP
         // peers never fetch; the dashboard owner writes the shared cache file).
         UpdateServices.Add(services, userScope);
 
         return services;
     }
+
+    private static void AddShellConfigStore(IServiceCollection services, UserScope userScope)
+        => services.AddSingleton(sp => new ShellConfigStore(
+            userScope,
+            sp.GetService<ILoggerFactory>()?.CreateLogger<ShellConfigStore>()
+                ?? NullLogger<ShellConfigStore>.Instance));
 
     /// <summary>
     /// Registers the audit trail's writer for one host container: the JSONL file

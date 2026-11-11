@@ -27,6 +27,8 @@ public static class ServerInstructions
         "Databases & Redis: SQL tools (db_list_connections, db_get_schema, db_query, db_detect_connections, db_import_connections) plus redis_scan/redis_inspect. db_query is read-only (SELECT/EXPLAIN/PRAGMA/SHOW/DESCRIBE/DESC/WITH); Redis entries are rejected by db_get_schema/db_query. A connection registered without a database is server-level. No credentials ever appear in parameters, outputs, or error messages. Import only with explicit approval - detect first, show each unimported candidate (settingsKey, derived name, source file), then import exactly the approved keys; never auto-import. `fromCache=true` means the answer came from a stale cache: re-read once the database is back.",
 
         "Diagnostics: use `log_list`/`log_read` for the rolling daily logs (backend / desktop streams; level, substring, and tail filters) rather than reading .eling log paths directly.",
+
+        "`shell_execute` runs a shell command in the workspace. It is disabled unless enabled in `<user-scope>/config/shell-config.json` (or the dashboard Shell page); when disabled it returns `{ ok: false, code: \"shell_disabled\" }`. Enabling it is RCE-equivalent: restrict paths and rules deliberately.",
     ];
 
     /// <summary>

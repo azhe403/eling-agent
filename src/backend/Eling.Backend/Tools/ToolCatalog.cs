@@ -50,6 +50,7 @@ public static class ToolCatalog
         new("file_search", FilesystemGroup, "Search file contents under a base path."),
         new("log_list", DiagnosticsGroup, "List available Eling log files (active + rotated archives)."),
         new("log_read", DiagnosticsGroup, "Read recent entries from an Eling log file for diagnosis."),
+        new("shell_execute", DiagnosticsGroup, "Run a shell command through the platform shell with a configurable sandbox, timeout and output cap. Disabled by default."),
         new("db_list_connections", DatabaseGroup, "List registered database connections and any unimported ones found in the workspace."),
         new("db_detect_connections", DatabaseGroup, "Preview database connection strings found in the workspace appsettings*.json files."),
         new("db_import_connections", DatabaseGroup, "Import approved connection strings into the registry as read-only connections."),
