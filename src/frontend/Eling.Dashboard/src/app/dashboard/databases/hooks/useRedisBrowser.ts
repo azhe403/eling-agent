@@ -217,8 +217,15 @@ export function useRedisBrowser({
    * background revalidate with `refresh: true` asks the server for the real
    * answer. An explicit refresh skips the cache. */
   const fetchRedisPrefix = useCallback(
-    async (id: string, database: number, prefix: string, refresh?: boolean) => {
-      redisSetLoading(1)
+    async (id: string, database: number, prefix: string, refresh?: boolean, opts?: { silent?: boolean }) => {
+      // The spinner belongs to the user who is waiting, not to a background
+      // revalidate: a cache paint settles almost instantly, and a user who
+      // just opened a tab should not watch Redis' 10s live answer decide
+      // whether the page is on screen. Only an explicit refresh or a page we
+      // do not have yet is allowed to raise it.
+      const pageKey = redisPageKey(id, database, prefix)
+      const showLoading = !opts?.silent && (refresh === true || redisPagesRef.current[pageKey] === undefined)
+      if (showLoading) redisSetLoading(1)
       try {
         const qs = new URLSearchParams()
         qs.set("database", String(database))
@@ -228,7 +235,7 @@ export function useRedisBrowser({
         qs.set("pageSize", "200")
         if (refresh) qs.set("refresh", "true")
         const page = await apiFetch<RedisPage>(`${API}/${id}/keys?${qs.toString()}`)
-        setRedisPages((prev) => ({ ...prev, [redisPageKey(id, database, prefix)]: page }))
+        setRedisPages((prev) => ({ ...prev, [pageKey]: page }))
         if (!refresh && page.fromCache) {
           void (async () => {
             try {
@@ -241,7 +248,7 @@ export function useRedisBrowser({
               qs2.set("refresh", "true")
               const live = await apiFetch<RedisPage>(`${API}/${id}/keys?${qs2.toString()}`).catch(() => null)
               if (!live) return
-              setRedisPages((prev) => ({ ...prev, [redisPageKey(id, database, prefix)]: live }))
+              setRedisPages((prev) => ({ ...prev, [pageKey]: live }))
             } catch {
               // Offline revalidate keeps the cached paint; the next keep-fresh
               // tick or a manual refresh will ask again.
@@ -251,7 +258,7 @@ export function useRedisBrowser({
       } catch (e: unknown) {
         notifyDb("error", "Redis key browse failed", e instanceof Error ? e.message : String(e))
       } finally {
-        redisSetLoading(-1)
+        if (showLoading) redisSetLoading(-1)
       }
     },
     [notifyDb]
@@ -603,7 +610,7 @@ export function useRedisBrowser({
     const db = activeRedisDb
     const prefix = redisRootPrefix
     const timer = setInterval(() => {
-      void fetchRedisPrefix(connId, db, prefix, true)
+      void fetchRedisPrefix(connId, db, prefix, true, { silent: true })
     }, redisAutoRefreshMs)
     return () => clearInterval(timer)
   }, [redisAutoRefresh, redisAutoRefreshMs, activeTable, activeRedisDb, redisRootPrefix, fetchRedisPrefix])
@@ -737,7 +744,7 @@ export function useRedisBrowser({
               if (Date.now() - last < GONE_REFETCH_MIN_INTERVAL_MS) continue
               lastGoneRefetchRef.current.set(entry.pageKey, Date.now())
               refetched.add(entry.pageKey)
-              void fetchRedisPrefix(entry.connId, entry.db, entry.prefix, true)
+              void fetchRedisPrefix(entry.connId, entry.db, entry.prefix, true, { silent: true })
             }
           } catch {
             // A probe that could not be answered leaves the rows as they were;
