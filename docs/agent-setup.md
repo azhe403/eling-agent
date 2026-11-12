@@ -4,7 +4,7 @@
 > the job is **not done** when the binary lands. The agent must finish the whole chain:
 > install the binary, register the MCP server in the host the user actually runs, verify it, and offer project init.
 
-This is the agent-facing playbook. Humans can follow it too. Every step is copy-pasteable.
+This is the agent-facing playbook. Humans can follow it too. Every step is copy-pasteable; where the install commands live, the step points at their single source.
 
 ## Contract (do this every time)
 
@@ -33,20 +33,11 @@ command -v eling-backend || ls -l "$HOME/.local/bin/eling-backend"
 
 ## Step 1 — Install the binary
 
-```powershell
-# Windows PowerShell
-irm https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.ps1 | iex
-```
+Run the one-line installer for this machine's OS from the TL;DR section of the install document — it is the single source for the commands, do not copy them from elsewhere:
 
-```cmd
-REM Windows cmd.exe
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.ps1 | iex"
-```
+https://raw.githubusercontent.com/azhe403/eling-agent/main/INSTALL.md
 
-```bash
-# Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.sh | bash
-```
+Fetch that document, pick the codeblock that matches this machine's OS (`powershell` / `cmd` / `bash`), and run it.
 
 The installer fetches the latest stable release, falling back to the latest pre-release when no stable exists.
 It drops the binary in the user-local bin and adds that dir to `PATH`.

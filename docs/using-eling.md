@@ -1,6 +1,6 @@
 # Using Eling — Quick Start Guide
 
-**Eling** (Javanese: *to remember / to be mindful*) is an autonomous, Git-native persistent memory layer for AI coding agents.
+**Eling** (Javanese: *to remember / to be mindful*) is an autonomous, durable memory and context layer for AI coding agents.
 
 Eling provides **no terminal CLI**. It operates purely behind the scenes through **MCP**, a **Web Dashboard**, and a **Desktop Client**.
 
@@ -30,8 +30,8 @@ Just talk to your coding agent naturally:
 | Interface | URL / Access | Description |
 |---|---|---|
 | **AI Agent (MCP)** | Stdio / in-app | Primary interface. Agents autonomously use tools like `memory_recall`, `memory_save`, `codebase_search`, and sandboxed file tools. |
-| **Web Dashboard** | `http://127.0.0.1:4427` | Browser UI for visual memory browsing, real-time SSE event inspection, active runtimes, and audit trail. |
-| **Desktop App (`Eling.Desktop`)** | Native Application | Avalonia desktop app for standalone memory browsing, runtime monitoring, and direct agent chat. |
+| **Web Dashboard** | `http://127.0.0.1:4317` | Browser UI served by the backend binary (dev: `http://127.0.0.1:4427`, proxying to the dev backend on 4417). Visual memory browsing, live event inspection, active runtimes, and audit trail. |
+| **Desktop App (`Eling.Desktop`, experimental)** | Native Application | Avalonia desktop app for standalone memory browsing, runtime monitoring, and direct agent chat. |
 
 ---
 

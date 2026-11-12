@@ -2,7 +2,9 @@
 
 > Readable by humans and agents. Every step is copy-pasteable.
 
-## TL;DR — copy-paste install (one line)
+## TL;DR — install the binary (one line)
+
+One line per OS installs the `eling-backend` binary + dashboard UI and adds it to `PATH`. It does **not** register the MCP server — for the full setup (binary + MCP config + verify + optional project memory), follow [docs/agent-setup.md](docs/agent-setup.md), or paste the agent prompt from the top of [README](README.md) into your agent.
 
 ```powershell
 # Windows PowerShell

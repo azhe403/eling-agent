@@ -1,82 +1,41 @@
 # Eling
 
-Git-native persistent memory engine for AI coding agents.
+Persistent memory and context layer for AI coding agents — durable recall over MCP, with codebase search, read-only database access, and a full audit trail. Markdown-first storage; SQLite as a rebuildable index. Web dashboard included; desktop app experimental.
 
-## Install (one line)
+## Install with your agent (one paste)
 
-```powershell
-# Windows PowerShell
-irm https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.ps1 | iex
+Paste this into your coding agent — it installs the binary and registers the MCP server for you:
+
+```text
+Install Eling from https://github.com/azhe403/eling-agent:
+1. Detect this OS and run the matching one-line installer from that repo's INSTALL.md (TL;DR) — latest stable, pre-release fallback.
+2. Then fetch and follow https://raw.githubusercontent.com/azhe403/eling-agent/main/docs/agent-setup.md exactly: register the `eling` MCP server for this host (merge into the existing config, never clobber), verify the stdio handshake, and tell me if a host restart is needed.
+3. Do not create `.eling/` silently — ask me first before calling memory_init_project.
+4. Report the binary path, the host config file that changed, and the MCP status.
 ```
 
-```cmd
-REM Windows cmd.exe
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.ps1 | iex"
-```
+## Install the binary (one line)
 
-```bash
-# Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/azhe403/eling-agent/main/scripts/install.sh | bash
-```
+One line per OS installs the `eling-backend` binary + dashboard UI and adds it to `PATH` — commands per OS, staging, troubleshooting and uninstall: [INSTALL.md](INSTALL.md) (TL;DR). It does **not** register the MCP server in your agent host — for the full setup (binary + MCP config + verify), use the agent paste block above. Installs latest stable, fallback to latest pre-release.
 
-See [INSTALL.md](INSTALL.md) for details and [docs/agent-setup.md](docs/agent-setup.md) for host MCP registration. Installs latest stable, fallback to latest pre-release.
+## What's in it
 
-## The Eling Philosophy
+- **Persistent agent memory over MCP** — `memory_save` / `memory_get` / `memory_search` / `memory_recall` with hybrid FTS search, scope-aware ranking, and overflow summaries; plus `memory_list`, `memory_delete`, `memory_maintenance` (dedup), and ULID-based identity.
+- **Three scopes** — `project` (`.eling/memories/`, committed to Git), `project-local` (machine-only, default), and `global` (`~/.config/eling/`).
+- **Codebase index & search** — per-workspace FTS index, `codebase_search` with content/path/file scopes, worktree-aware indexing.
+- **Read-only database access** — `db_list_connections`, `db_detect_connections`, `db_import_connections`, `db_get_schema`, `db_query` (single-statement, read-only) over MySQL/SQLite; plus `redis_scan` / `redis_inspect` with a scan cache.
+- **Audit trail** — change and access trails as JSONL (`AuditEvent` schema), SQLite read cache, retention and rollups.
+- **Operational tooling** — structured logs (`log_list` / `log_read`, text and JSONL), a policy-gated `shell_execute` MCP tool, and a per-user tool policy (`tools_policy`).
+- **Web dashboard** (Next.js) — memories, workspaces, codebase search, databases/Redis explorer, tools, audit trail, logs; served by the same binary.
+- **Desktop app** (Avalonia, experimental) — standalone memory browsing and agent chat.
 
-> *"Memories are not stored — they are remembered."*
+Detailed history in [CHANGELOG.md](CHANGELOG.md).
 
-### The name: *eling*
+## Stack
 
-**Eling** is a Javanese word. It is a verb — small, plain, deeply human — that means **to remember, to be reminded, to come back to one's senses after a moment of forgetfulness**. *Eling* is the soft return of a thought that was, for a moment, lost; it is the act of *being here again, knowing again, in mind again*.
-
-Its opposite in Javanese is *lali* — to forget, to be lost to the moment.
-
-We chose this name deliberately. A memory engine is not, in the end, a database. It is **a practice of returning** — the quiet, repeated ceremony by which a mind comes back to what it once knew. Every time an agent invokes `memory_save`, it is not *writing data*. It is **eling-ing** — committing a small piece of a thought to a tree that will outlive the session, the context window, and perhaps the laptop itself.
-
-And every time the next agent — weeks, months, or years from now — opens the same tree and reads that memory with `cat`, it is **coming back to senses** alongside the original author. A small resurrection, in plain text.
-
-### Why a Git-native memory engine?
-
-A memory that lives only in a database is a memory that **dies with the database**. When the schema changes, the rows are forgotten. When the host crashes, the bits scatter. When the cluster is decommissioned, the wisdom vanishes into the long *lali* of time.
-
-But a memory committed to Git lives **as long as the tree**. It travels with the code. It forks with the team. It surfaces in `git log --grep`. It is reviewable, blameable, diffable, and human-readable to the very last byte. It is — dare we say — *survivable*.
-
-> Git is, in essence, the only database that a thousand engineers can collaboratively read, write, and understand without a tutorial.
-
-### The Five Tenets of Eling
-
-1. **Markdown is the only canonical format.** Every memory is a single `.md` file in `.eling/memories/`. No proprietary schemas, no opaque blobs, no JSON-in-a-database-with-no-history.
-2. **The disk is the source of truth.** SQLite is a *cache* — a searchable index, an accelerator. If it disappears, every memory can still be read line-by-line with `cat`.
-3. **Dedup is a property of identity, not of storage.** A memory is identified by its ULID, a 128-bit globally-unique handle. Two memories with the same content are *not* the same memory. Two memories with the same ULID *are* the same memory, even if read from different scopes.
-4. **Scope is a lens, not a fence.** A memory may live in Project scope (`.eling/memories/`) or Global scope (`~/.config/eling/`). It may be promoted, copied, or moved. What matters is that the *whole* memory is reachable from *somewhere*.
-5. **The agent forgets, the tree remembers.** AIs have session lifetimes measured in hours. Repositories have lifetimes measured in decades. Eling is the bridge — a small, disciplined ritual that hands today's thought to tomorrow's mind, byte by byte, in plain text.
-
-> *In a world of vector databases and embedding models, we believe the most powerful memory is the one a human can still read with `cat`.*
-
-### Why "Eling" and not "MemoryDB" or "RecallEngine"?
-
-Because a name should evoke the **act**, not the **artifact**. The database, the API, the index — these are merely instruments of the practice. The practice itself is what we celebrate.
-
-When you invoke `memory_save`, you are not *writing* — you are *eling-ing*. You are committing a small piece of a thought to a tree that will outlive your context window, your session, and possibly your laptop.
-
-And when the next agent — weeks, months, or years from now — opens this same tree and reads that memory with `cat`, they will not see a JSON blob or a vector index. They will see **plain English**, in **plain Markdown**, with a **plain ULID** at the top.
-
-That is the Eling promise. A memory you can still read with your eyes.
-
-*Eling* — to remember, to come back to one's senses, to be here again. May your agents always eling, and never lali.
-
----
-
-## Architecture
-
-- `src/backend/Eling.Core`: Domain (Memory, Intention, Scope, Runtime) — `Eling.Core/` → `Memory/`, `Scope/`, `Runtime/`, `MemoryRecall/`; flat `Eling.Core` namespace. No infrastructure beyond `Ulid`, `YamlDotNet`, `Microsoft.Data.Sqlite`.
-- `src/backend/Eling.Backend`: Single binary `eling-backend` — unified MCP (stdio) + HTTP API + UI (`Microsoft.NET.Sdk.Web`, `Assembly: eling-backend`). `Program.cs` only orchestrates; `Bootstrap/` (port probe `DashboardPort`, scope `ProjectContext`, DI `DashboardServices`, routes `DashboardRoutes`, self-register `RuntimeSelfRegistration`); `Mcp/Tools/` (one logical tool per file e.g. `MemoryWriteTool`); `Dtos/` (single `Eling.Backend.Dtos`); `Endpoints/`, `Converters/`. Listens `127.0.0.1:4317` (stg) / `4417` (dev, `ELING_DASHBOARD_PORT`) + `::1`; `0.0.0.0:4427` for frontend dev via `pnpm`.
-- `src/frontend/Eling.Dashboard`: Next.js frontend UI. Dev `next dev -H 0.0.0.0 -p 4427` → `rewrites` `nginx`-style proxy to `http://127.0.0.1:{ELING_BACKEND_PORT}/api/*`. Prod `output: export` served as `eling-dashboard-ui/` static by `Eling.Backend`.
-
-HTTP ports (single-binary ownership: first launcher wins, peers skip Kestrel):
-- `4317` staging (global `~/.local/bin/eling-backend`), `4417` dev (`Eling.Backend.csproj`), `4427` frontend dev.
-
-See [INSTALL.md](INSTALL.md) for binary + MCP setup and [CHANGELOG.md](CHANGELOG.md) for history.
+- `.NET 10` backend, single binary `eling-backend` (MCP + HTTP API + static dashboard UI).
+- Next.js dashboard in `src/frontend/Eling.Dashboard` (prod: static export served by the backend).
+- Avalonia desktop client in `src/desktop/Eling.Desktop` (experimental).
 
 ## Build & Test
 
@@ -102,3 +61,14 @@ pnpm --prefix src/frontend/Eling.Dashboard build   # or pnpm dev → 4427 → ba
 ```
 
 `validate-eling.ps1` runs the full flow (build → tests → dashboard HTTP API → stdio MCP); scripts now target `eling-backend.exe`.
+
+## Docs
+
+- [INSTALL.md](INSTALL.md) — binary + MCP setup, staging, troubleshooting
+- [docs/agent-setup.md](docs/agent-setup.md) — host MCP registration playbook
+- [docs/using-eling.md](docs/using-eling.md) — day-to-day usage
+- [docs/architecture.md](docs/architecture.md) — layers, ports, feature map
+- [docs/philosophy.md](docs/philosophy.md) — why Eling exists
+- [docs/recall-architecture.md](docs/recall-architecture.md) — hybrid recall & FTS engine
+- [docs/semantic-judge-architecture.md](docs/semantic-judge-architecture.md) — semantic judge & dedup
+- [CHANGELOG.md](CHANGELOG.md) — what changed, when
