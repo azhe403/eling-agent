@@ -42,9 +42,12 @@ public sealed class ElingApiClient
     /// <summary>
     /// Reads a response that speaks the standard envelope (code/message/data).
     /// Falls back to the raw body when the backend predates the envelope so the
-    /// desktop keeps working against an older backend. Returns default on any
-    /// decode failure - the call sites already keep a "default + log" failure
-    /// policy, so an unreadable payload behaves exactly like a missing one.
+    /// desktop keeps working against an older backend - and says so in the log,
+    /// once per call, so a mixed-version install is visible instead of silent.
+    /// Works on any status: an error body carries the same envelope, so the
+    /// failure path unwraps it the same way. Returns default on any decode
+    /// failure - the call sites already keep a "default + log" failure policy,
+    /// so an unreadable payload behaves exactly like a missing one.
     /// </summary>
     private async Task<T?> ReadEnvelopeAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
     {
@@ -60,6 +63,9 @@ public sealed class ElingApiClient
             {
                 return JsonSerializer.Deserialize<T>(data.GetRawText(), JsonOptions);
             }
+            _logger.LogWarning(
+                "Response from {Path} did not carry the standard envelope; decoding the raw body (backend may predate it)",
+                response.RequestMessage?.RequestUri?.PathAndQuery);
             return JsonSerializer.Deserialize<T>(raw, JsonOptions);
         }
         catch (Exception ex)
@@ -68,6 +74,49 @@ public sealed class ElingApiClient
             return default;
         }
     }
+
+    /// <summary>
+    /// Logs one warning for a response that failed, carrying the envelope's
+    /// code and message when the body speaks it. The HTTP status alone says
+    /// little; the backend's own words say why. Body read is capped to
+    /// <see cref="MaxFailureBodyChars"/> so a hostile or broken endpoint cannot
+    /// flood the log.
+    /// </summary>
+    private async Task WarnOnFailureAsync(string operation, HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (raw.Length > MaxFailureBodyChars)
+            {
+                raw = raw[..MaxFailureBodyChars];
+            }
+            string detail = raw.Trim();
+            try
+            {
+                using var document = JsonDocument.Parse(raw);
+                var root = document.RootElement;
+                if (root.ValueKind == JsonValueKind.Object
+                    && root.TryGetProperty("code", out var code)
+                    && root.TryGetProperty("message", out var message))
+                {
+                    detail = $"{code.GetString()}: {message.GetString()}";
+                }
+            }
+            catch (Exception ex) when (ex is JsonException)
+            {
+                // Not an envelope after all; the raw body fragment is the detail.
+                _logger.LogDebug(ex, "Failure body from {Operation} did not parse as JSON", operation);
+            }
+            _logger.LogWarning("{Operation} failed with HTTP {StatusCode}: {Detail}", operation, (int)response.StatusCode, detail);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "{Operation} failed with HTTP {StatusCode} and the body could not be read", operation, (int)response.StatusCode);
+        }
+    }
+
+    private const int MaxFailureBodyChars = 512;
 
     private HttpClient GetClient()
     {
@@ -139,7 +188,7 @@ public sealed class ElingApiClient
             {
                 return await ReadEnvelopeAsync<MemoryListDto>(response, cancellationToken);
             }
-            _logger.LogWarning("GetMemories failed with status {StatusCode}", response.StatusCode);
+            await WarnOnFailureAsync("GetMemories", response, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -167,7 +216,7 @@ public sealed class ElingApiClient
             {
                 return await ReadEnvelopeAsync<MemoryDto>(response, cancellationToken);
             }
-            _logger.LogWarning("CreateMemory failed with status {StatusCode}", response.StatusCode);
+            await WarnOnFailureAsync("CreateMemory", response, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -203,7 +252,7 @@ public sealed class ElingApiClient
             {
                 return await ReadEnvelopeAsync<MemoryDto>(response, cancellationToken);
             }
-            _logger.LogWarning("UpdateMemory failed with status {StatusCode}", response.StatusCode);
+            await WarnOnFailureAsync("UpdateMemory", response, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -236,7 +285,7 @@ public sealed class ElingApiClient
             using var client = GetClient();
             var response = await client.PostAsJsonAsync(endpoint, payload, cancellationToken);
             if (response.IsSuccessStatusCode) return true;
-            _logger.LogWarning("MoveMemoryTier failed with status {StatusCode}", response.StatusCode);
+            await WarnOnFailureAsync("MoveMemoryTier", response, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -537,7 +586,7 @@ public sealed class ElingApiClient
             {
                 return await ReadEnvelopeAsync<ProviderViewDto>(response, cancellationToken);
             }
-            _logger.LogWarning("GetProvider failed with status {StatusCode}", response.StatusCode);
+            await WarnOnFailureAsync("GetProvider", response, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -557,7 +606,7 @@ public sealed class ElingApiClient
             {
                 return await ReadEnvelopeAsync<ProviderViewDto>(response, cancellationToken);
             }
-            _logger.LogWarning("UpdateProvider failed with status {StatusCode}", response.StatusCode);
+            await WarnOnFailureAsync("UpdateProvider", response, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -577,7 +626,7 @@ public sealed class ElingApiClient
                 var result = await ReadEnvelopeAsync<ModelListDto>(response, cancellationToken);
                 return result?.Models ?? [];
             }
-            _logger.LogWarning("FetchModels failed with status {StatusCode}", response.StatusCode);
+            await WarnOnFailureAsync("FetchModels", response, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -615,7 +664,7 @@ public sealed class ElingApiClient
                 var result = await ReadEnvelopeAsync<WorkspaceListDto>(response, cancellationToken);
                 return result?.Roots ?? [];
             }
-            _logger.LogWarning("GetWorkspaces failed with status {StatusCode}", response.StatusCode);
+            await WarnOnFailureAsync("GetWorkspaces", response, cancellationToken);
         }
         catch (Exception ex)
         {
