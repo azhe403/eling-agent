@@ -159,7 +159,7 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
         />
       </aside>
 
-      <main className={`min-h-0 flex-1 overflow-hidden ${activeIsRedis ? "flex flex-col gap-4" : "space-y-4"}`}>
+      <main className={`min-h-0 flex-1 overflow-hidden flex flex-col gap-4`}>
       <ExplorerTabBar
         conns={conns}
         openTabs={openTabs}
@@ -168,7 +168,7 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
         onCloseTab={props.onCloseTab}
         onTabContextMenu={props.onTabContextMenu}
       />
-        <div className="flex gap-2 border-b pb-2">
+        <div className="flex shrink-0 gap-2 border-b pb-2">
           <Button size="sm" variant={rightTab === "data" ? "default" : "outline"} onClick={() => props.onRightTabChange("data")}>
             Data
           </Button>

@@ -127,8 +127,8 @@ export const DataGrid = ({
   )
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="flex min-h-0 flex-1 flex-col">
+      <CardHeader className="shrink-0">
         <CardTitle className="flex items-center gap-2">
           Data - {activeTable?.table}
           {browseResult?.fromCache ? (
@@ -145,8 +145,8 @@ export const DataGrid = ({
           ) : null}
         </CardTitle>
       </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
+      <CardContent className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col space-y-2">
           {selectedIsReadOnly && !browseResult?.fromCache ? (
             <p className="text-xs text-muted-foreground">
               Read-only connection - cells can be edited, but never persisted.
@@ -158,7 +158,7 @@ export const DataGrid = ({
             </p>
           ) : null}
 
-          <div className="mb-2 flex items-center gap-3">
+          <div className="mb-2 flex shrink-0 items-center gap-3">
             <Button
               size="sm"
               variant="outline"
@@ -191,7 +191,7 @@ export const DataGrid = ({
 
           {browseResult ? (
             <>
-              <Table className="text-sm" containerClassName="h-[calc(100vh-280px)] rounded-md border">
+              <Table className="text-sm" containerClassName="min-h-0 flex-1 rounded-md border">
                 <TableHeader>
                   <TableRow className="sticky top-0 z-20 bg-background">
                     {columns.map((col) => (
@@ -365,7 +365,7 @@ export const DataGrid = ({
               {browseResult.truncated ? <p className="mt-1 text-xs text-muted-foreground">Truncated.</p> : null}
             </>
           ) : (
-            <Table className="text-sm" containerClassName="h-[calc(100vh-280px)] rounded-md border">
+            <Table className="text-sm" containerClassName="min-h-0 flex-1 rounded-md border">
               <TableHeader>
                 <TableRow className="sticky top-0 z-20 bg-background">
                   {(activeSchema()?.columns ?? []).map((col) => (
@@ -390,7 +390,7 @@ export const DataGrid = ({
           )}
         </div>
 
-        <div className="sticky bottom-0 z-20 flex items-center gap-2 rounded-md bg-muted/80 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur">
+        <div className="sticky bottom-0 z-20 flex shrink-0 items-center gap-2 rounded-md bg-muted/80 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur">
           <span>
             {browseResult
               ? browseTotal !== null
