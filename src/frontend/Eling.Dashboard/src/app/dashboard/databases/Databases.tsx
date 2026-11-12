@@ -7,6 +7,7 @@ import { DashboardHeader } from "@/components/dashboard-header"
 import { Button } from "@/components/ui/button"
 
 import { DbTab, isRedisTab, tabKey, persistableTab } from "./db-tabs"
+import { effectiveBrowseLimit, effectiveBrowsePage } from "./utils/browse-paging"
 import { RedisDbInfo, fetchRedisDatabases, pickRedisDb, parseRedisDb } from "./redis-browser"
 import {
   DEFAULT_CONN_ORDER,
@@ -416,6 +417,10 @@ export function Databases() {
     },
     [patchActiveTab, browseData]
   )
+
+  // The footer renders the effective view of the tab on screen.
+  const browseLimit = effectiveBrowseLimit(activeTable)
+  const browsePage = effectiveBrowsePage(activeTable)
 
   const {
     pkNames,
@@ -1010,6 +1015,10 @@ export function Databases() {
           browseResult={browseResult}
           browseTotal={browseTotal}
           browseLoading={browseLoading}
+          browseLimit={browseLimit}
+          browsePage={browsePage}
+          onBrowseLimitChange={setBrowseLimit}
+          onBrowsePageChange={setBrowsePage}
           mutating={mutating}
           editingCell={editingCell}
           editValue={editValue}

@@ -106,6 +106,11 @@ export interface ExplorerPanelsProps {
   onConfirmDeletePrefix: (connId: string, db: number, prefix: string) => void
   onAutoRefreshChange: (enabled: boolean) => void
   onAutoRefreshMsChange: (ms: number) => void
+  /** Effective per-tab view state, computed by the page. */
+  browseLimit: number
+  browsePage: number
+  onBrowseLimitChange: (limit: number) => void
+  onBrowsePageChange: (page: number) => void
 }
 
 /**
@@ -116,7 +121,7 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
   const {
     conns, expandedConns, expandedDbs, connSchemas, dbSchemas, redisDbs, activeTable, openTabs,
     rightTab, connSort, connOrder, loading, isFading, schemaConnId, schemaInfo, schemaLoading,
-    selectedId, selectedIsReadOnly, selectedIsRedis, browseResult, browseTotal, browseLoading,
+    selectedId, selectedIsReadOnly, selectedIsRedis, browseResult, browseTotal, browseLoading, browseLimit, browsePage,
     mutating, editingCell, editValue, savingCell, newRow, pkNames, sql, qResult, qLoading,
     activeRedisDb, redisPrefix, redisRootPrefix, redisPages, redisExpanded, redisInspectKey,
     redisLoading, redisInspect, redisInspectOpen,
@@ -253,6 +258,10 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
             savingCell={savingCell}
             newRow={newRow}
             pkColumnNames={pkNames}
+            browseLimit={browseLimit}
+            browsePage={browsePage}
+            onBrowseLimitChange={props.onBrowseLimitChange}
+            onBrowsePageChange={props.onBrowsePageChange}
             onRefresh={props.onRefreshData}
             onAddRow={props.onAddRow}
             onStartEdit={props.onStartEdit}

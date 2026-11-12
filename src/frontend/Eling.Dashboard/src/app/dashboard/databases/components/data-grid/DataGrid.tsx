@@ -3,9 +3,11 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DatePicker } from "@/components/ui/date-picker"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useCallback, useMemo } from "react"
 import { DbTab, QueryResult, SchemaInfo, ColumnSchema } from "@/app/dashboard/databases/types"
 import { formatCacheAge, isStaleCache } from "@/app/dashboard/databases/utils/format-helpers"
+import { BROWSE_LIMIT_OPTIONS, totalPages } from "@/app/dashboard/databases/utils/browse-paging"
 
 export interface DataGridProps {
   activeTable: DbTab | null
@@ -21,6 +23,12 @@ export interface DataGridProps {
   newRow: Record<string, string> | null
   /** The primary key columns of the active table; empty means read-only. */
   pkColumnNames: string[]
+  /** Effective page size of this tab; one of BROWSE_LIMIT_OPTIONS. */
+  browseLimit: number
+  /** Effective 1-based page of this tab. */
+  browsePage: number
+  onBrowseLimitChange: (limit: number) => void
+  onBrowsePageChange: (page: number) => void
   onRefresh: () => void
   onAddRow: () => void
   onStartEdit: (row: number, col: number, value: unknown) => void
@@ -46,6 +54,10 @@ export const DataGrid = ({
   savingCell,
   newRow,
   pkColumnNames,
+  browseLimit,
+  browsePage,
+  onBrowseLimitChange,
+  onBrowsePageChange,
   onRefresh,
   onAddRow,
   onStartEdit,
@@ -59,6 +71,11 @@ export const DataGrid = ({
 }: DataGridProps) => {
   const columns = useMemo(() => browseResult?.columns ?? [], [browseResult])
   const rows = useMemo(() => browseResult?.rows ?? [], [browseResult])
+  /** How many pages the total spans; null while the count is unknown. */
+  const pages = totalPages(browseTotal, browseLimit)
+  // With an unknown count, offer Next while a full page came back; an empty
+  // grid has nothing to page into.
+  const nextDisabled = pages !== null ? browsePage >= pages : !browseResult || browseResult.rows.length < browseLimit
 
   /** The schema of the table the grid shows, or null when it is not known. */
   const activeSchema = useCallback(
@@ -374,11 +391,56 @@ export const DataGrid = ({
         </div>
 
         <div className="sticky bottom-0 z-20 flex items-center gap-2 rounded-md bg-muted/80 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur">
-          {browseResult
-            ? browseTotal !== null
-              ? `Total rows: ${browseTotal} (showing ${browseResult.rows.length}${browseResult.truncated ? ", truncated" : ""})`
-              : `Total rows: ${browseResult.rows.length}`
-            : "Total rows: -"}
+          <span>
+            {browseResult
+              ? browseTotal !== null
+                ? `Total rows: ${browseTotal} (showing ${browseResult.rows.length}${browseResult.truncated ? ", truncated" : ""})`
+                : `Total rows: ${browseResult.rows.length}`
+              : "Total rows: -"}
+          </span>
+          <span className="ml-auto flex items-center gap-2">
+            <Select
+              value={String(browseLimit)}
+              disabled={browseLoading}
+              onValueChange={(v) => {
+                if (v) onBrowseLimitChange(Number(v))
+              }}
+            >
+              <SelectTrigger className="h-6 w-24 text-xs" aria-label="Rows per page">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BROWSE_LIMIT_OPTIONS.map((n) => (
+                  <SelectItem key={n} value={String(n)}>
+                    Rows {n}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 w-6 p-0"
+              disabled={browseLoading || browsePage <= 1}
+              onClick={() => onBrowsePageChange(browsePage - 1)}
+              aria-label="Previous page"
+            >
+              ‹
+            </Button>
+            <span className="tabular-nums">
+              {pages === null ? `Halaman ${browsePage} dari ?` : `Halaman ${browsePage} dari ${pages}`}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 w-6 p-0"
+              disabled={browseLoading || nextDisabled}
+              onClick={() => onBrowsePageChange(browsePage + 1)}
+              aria-label="Next page"
+            >
+              ›
+            </Button>
+          </span>
         </div>
       </CardContent>
     </Card>
