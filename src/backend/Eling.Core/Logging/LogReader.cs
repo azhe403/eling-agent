@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Eling.Core.Logging;
@@ -10,6 +11,26 @@ namespace Eling.Core.Logging;
 public static class LogReader
 {
     private static readonly Regex DateRegex = new(@"^\d{4}-\d{2}-\d{2}$", RegexOptions.Compiled);
+    private static readonly Regex JsonlTimestampRegex = new("\"Timestamp\":\"([^\"]+)\"", RegexOptions.Compiled);
+
+    // One segment's read: the file and its filtered tail result.
+    private readonly record struct SegmentRead(
+        string Path,
+        FilteredTailResult Read);
+
+    // Sort key for one merged line: the parsed key (unparseable lines inherit
+    // the previous parsed key in the same segment), then the segment index,
+    // then the line's original index — the stable tie-break for a switch day.
+    private readonly record struct LineSortKey(
+        DateTimeOffset Key,
+        int Segment,
+        int Index);
+
+    // A line paired with its sort key within the merged read.
+    private readonly record struct KeyedLine(
+        string Line,
+        LineSortKey SortKey);
+
     private static readonly HashSet<string> AllowedStreams = new(StringComparer.OrdinalIgnoreCase) { "backend", "desktop" };
 
     /// <summary>
@@ -97,20 +118,28 @@ public static class LogReader
     }
 
     /// <summary>
-    /// Read a tailed, filtered view of a single log file.
+    /// Read a tailed, filtered view using the Text format. Forwards to the
+    /// <see cref="LogFormat"/> overload.
     /// </summary>
     public static LogReadResult Read(string logsDirectory, string stream, string? date, string? level, string? contains, int tail)
         => Read(logsDirectory, stream, date, level, contains, tail, LogFormat.Text);
 
     /// <summary>
-    /// Read a tailed, filtered view of a single log file, resolving its
-    /// extension from <paramref name="format"/>.
+    /// Read a tailed, filtered view of the log file(s) for a stream, resolving
+    /// extensions from <paramref name="format"/>: text logs stay <c>.log</c>,
+    /// JSONL switches to <c>.jsonl</c>. A read gathers every segment it can find
+    /// — a dated read takes both <c>{stream}-{date}.log</c> and
+    /// <c>{stream}-{date}.jsonl</c>; an active read takes today's archives plus
+    /// the active file for the current format (the active file is the newest
+    /// segment) — merges them per line by timestamp, and tails/sums as one
+    /// sequence.
     /// </summary>
     /// <remarks>
-    /// A dated archive can predate the current format setting: switching to
-    /// JSONL mid-day leaves earlier days as <c>.log</c> files. So a date read
-    /// falls back to the other extension when the preferred one is absent,
-    /// which keeps history readable whatever the user picked today.
+    /// A switch mid-day parks half the day in each extension, so reading only
+    /// the configured extension loses data. Segments are merged with a stable
+    /// per-line sort; lines whose timestamp fails to parse inherit the previous
+    /// parsed key in their segment (or <see cref="DateTimeOffset.MinValue"/>
+    /// when none exists), keeping each segment's write order.
     /// </remarks>
     public static LogReadResult Read(
         string logsDirectory,
@@ -122,30 +151,142 @@ public static class LogReader
         LogFormat format)
     {
         tail = Math.Clamp(tail, 1, 5000);
-        var path = ResolvePath(logsDirectory, stream, date, format);
-
-        if (!File.Exists(path) && !string.IsNullOrWhiteSpace(date))
+        var segments = Segments(logsDirectory, stream, date, format);
+        if (segments.Count == 0)
         {
-            var alternate = ResolvePath(
-                logsDirectory,
-                stream,
-                date,
-                format == LogFormat.Jsonl ? LogFormat.Text : LogFormat.Jsonl);
-            if (File.Exists(alternate))
+            var missing = ResolvePath(logsDirectory, stream, date, format);
+            return new LogReadResult(Path.GetFileName(missing)!, logsDirectory, false, 0, 0, 0, Array.Empty<string>());
+        }
+
+        // Per segment: totals are summed, and at most `tail` lines are kept.
+        var parts = segments
+            .Select(p => new SegmentRead(p, ReadFilteredTail(p, level, contains, tail)))
+            .ToList();
+
+        var keyed = new List<KeyedLine>();
+        for (var seg = 0; seg < parts.Count; seg++)
+        {
+            DateTimeOffset? previousKey = null;
+            var lines = parts[seg].Read.Lines;
+            for (var i = 0; i < lines.Count; i++)
             {
-                path = alternate;
+                keyed.Add(new KeyedLine(lines[i], SortKey(lines[i], seg, i, ref previousKey)));
             }
         }
-        if (!File.Exists(path))
+
+        var merged = keyed
+            .OrderBy(t => t.SortKey.Key)
+            .ThenBy(t => t.SortKey.Segment)
+            .ThenBy(t => t.SortKey.Index)
+            .Select(t => t.Line)
+            .ToList();
+
+        // The per-segment budget caps each file individually, so the merged
+        // list could outgrow what a transport can carry. Re-apply the same
+        // MaxResponseBytes cap to the merged selection: drop the oldest
+        // matching lines, keep the newest (mirrors ReadFilteredTail's byte
+        // accounting). Totals stay summed; Returned shrinks instead.
+        var selected = new List<string>();
+        var bytes = 0;
+        for (var i = merged.Count - 1; i >= 0 && selected.Count < tail; i--)
         {
-            return new LogReadResult(Path.GetFileName(path), logsDirectory, false, 0, 0, 0, Array.Empty<string>());
+            var len = merged[i].Length;
+            if (bytes + len > MaxResponseBytes) break;
+            bytes += len;
+            selected.Add(merged[i]);
+        }
+        selected.Reverse();
+
+        return new LogReadResult(
+            Path.GetFileName(segments[0])!,
+            logsDirectory,
+            true,
+            parts.Sum(p => p.Read.Total),
+            parts.Sum(p => p.Read.Filtered),
+            selected.Count,
+            selected,
+            segments.Select(p => Path.GetFileName(p)!).ToList());
+    }
+
+    // Every segment a read can see, in segment order: dated reads take the two
+    // archives for the date; active reads take today's archives (a switch today
+    // parks the stale active as an archive) plus the active file for the current
+    // format — the active file last, as the newest segment.
+    private static List<string> Segments(string logsDirectory, string stream, string? date, LogFormat format)
+    {
+        var s = stream.Trim();
+        var candidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(date))
+        {
+            var d = date.Trim();
+            candidates.Add(Path.Combine(logsDirectory, $"{s}-{d}.log"));
+            candidates.Add(Path.Combine(logsDirectory, $"{s}-{d}.jsonl"));
+        }
+        else
+        {
+            var today = DateTime.Now.ToString("yyyy-MM-dd");
+            candidates.Add(Path.Combine(logsDirectory, $"{s}-{today}.log"));
+            candidates.Add(Path.Combine(logsDirectory, $"{s}-{today}.jsonl"));
+            candidates.Add(ResolvePath(logsDirectory, s, null, format));
         }
 
-        var read = ReadFilteredTail(path, level, contains, tail);
-        var total = read.Total;
-        var filtered = read.Filtered;
-        var lines = read.Lines;
-        return new LogReadResult(Path.GetFileName(path), logsDirectory, true, total, filtered, lines.Count, lines);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return candidates
+            .Where(File.Exists)
+            .Where(p => seen.Add(Path.GetFullPath(p)))
+            .ToList();
+    }
+
+    // Sort key for one merged line: the parsed key (unparseable lines inherit
+    // the previous parsed key in the same segment, or MinValue when none exists),
+    // then the segment index, then the line's original index — the stable tie-break
+    // that keeps text-before-jsonl write order on a switch day.
+    private static LineSortKey SortKey(
+        string line, int segment, int index, ref DateTimeOffset? previousKey)
+    {
+        if (TryParseSortKey(line, out var timestamp))
+        {
+            previousKey = timestamp;
+            return new LineSortKey(timestamp, segment, index);
+        }
+        return new LineSortKey(previousKey ?? DateTimeOffset.MinValue, segment, index);
+    }
+
+    private static bool TryParseSortKey(string line, out DateTimeOffset timestamp)
+    {
+        // Branch on line kind first: a TEXT line whose message embeds the
+        // substring "Timestamp":"..." (e.g. a payload logged via Serilog's
+        // {Message:lj}) must key off its leading timestamp, not the embedded
+        // value — JSONL lines carry the real "Timestamp" member, but text
+        // lines must never be keyed by an embedded lookalike.
+        var trimmedStart = line.TrimStart();
+        if (trimmedStart.StartsWith('{'))
+        {
+            var json = JsonlTimestampRegex.Match(line);
+            if (json.Success)
+            {
+                return DateTimeOffset.TryParse(
+                    json.Groups[1].Value,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal,
+                    out timestamp);
+            }
+
+            // JSONL-shaped line without a parseable Timestamp: fall through
+            // to the text path would be misleading, so report failure and
+            // let the carry-forward rule keep the line in segment order.
+            timestamp = default;
+            return false;
+        }
+
+        // Text: the default output template leads with "yyyy-MM-dd HH:mm:ss.fff zzz"
+        // (exactly 30 chars, e.g. "2026-11-05 10:00:00.000 +07:00").
+        var prefix = line.Length > 30 ? line[..30] : line;
+        return DateTimeOffset.TryParse(
+            prefix,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeLocal,
+            out timestamp);
     }
 
     /// <summary>
@@ -296,12 +437,21 @@ public static class LogReader
                 if (!Matches(line, level, contains)) continue;
                 filteredCount++;
 
-                // Stop before the answer outgrows what a transport can carry.
-                if (bytes + line.Length > MaxResponseBytes) break;
-
+                // The budget applies to the window of kept lines only, never
+                // by stopping the scan: totals count the whole file. Enqueue
+                // first, then drop the oldest kept lines (subtracting their
+                // lengths) until the window fits both the count and the
+                // per-file byte cap.
                 bytes += line.Length;
                 tailBuffer.Enqueue(line);
-                if (tailBuffer.Count > tail) tailBuffer.Dequeue();
+                while (bytes > MaxResponseBytes && tailBuffer.Count > 0)
+                {
+                    bytes -= tailBuffer.Dequeue().Length;
+                }
+                if (tailBuffer.Count > tail)
+                {
+                    bytes -= tailBuffer.Dequeue().Length;
+                }
             }
         }
 

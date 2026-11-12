@@ -17,4 +17,5 @@ public sealed record LogReadResult(
     int TotalLines,
     int FilteredTotal,
     int Returned,
-    IReadOnlyList<string> Lines);
+    IReadOnlyList<string> Lines,
+    IReadOnlyList<string>? Files = null);
