@@ -47,7 +47,7 @@ public sealed class UpdateControllerTests : IAsyncLifetime
         _app = builder.Build();
         _app.MapControllers();
         await _app.StartAsync();
-        _client = _app.GetTestClient();
+        _client = _app.CreateEnvelopeClient();
     }
 
     public async Task DisposeAsync()

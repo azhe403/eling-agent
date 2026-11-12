@@ -85,7 +85,7 @@ public class AgentChatTests : IAsyncLifetime, IDisposable
 
         using var app = TestAppBuilder.CreateSelfContained(dashboardPort: port);
         await app.StartAsync();
-        using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
+        using var client = new HttpClient(new EnvelopeTestHandler { InnerHandler = new HttpClientHandler() }) { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
 
         var attach = await client.PostAsJsonAsync("/api/agent/workspaces/", new { path = _workspace });
         attach.EnsureSuccessStatusCode();

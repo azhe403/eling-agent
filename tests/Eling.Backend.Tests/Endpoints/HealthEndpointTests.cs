@@ -26,7 +26,7 @@ public sealed class HealthEndpointTests : IAsyncLifetime, IDisposable
 
         _app = TestAppBuilder.CreateSelfContained(dashboardPort: port);
         await _app.StartAsync();
-        _client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
+        _client = new HttpClient(new EnvelopeTestHandler { InnerHandler = new HttpClientHandler() }) { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
     }
 
     [Theory]

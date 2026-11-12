@@ -238,7 +238,7 @@ public sealed class AuditCodebaseHookTests : IAsyncLifetime
         app.MapCodebaseRoutes();
         app.MapSseEvents();
         await app.StartAsync();
-        using var client = app.GetTestClient();
+        using var client = app.CreateEnvelopeClient();
 
         try
         {
@@ -313,7 +313,7 @@ public sealed class AuditCodebaseHookTests : IAsyncLifetime
         app.MapCodebaseRoutes();
         app.MapSseEvents();
         await app.StartAsync();
-        using var client = app.GetTestClient();
+        using var client = app.CreateEnvelopeClient();
 
         try
         {

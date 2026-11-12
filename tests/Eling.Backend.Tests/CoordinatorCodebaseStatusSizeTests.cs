@@ -70,7 +70,7 @@ public sealed class CoordinatorCodebaseStatusSizeTests : IAsyncLifetime
         var app = builder.Build();
         app.MapControllers();
         await app.StartAsync();
-        _client = app.GetTestClient();
+        _client = app.CreateEnvelopeClient();
     }
 
     public async Task DisposeAsync()

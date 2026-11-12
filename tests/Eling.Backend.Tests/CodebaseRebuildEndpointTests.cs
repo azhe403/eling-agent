@@ -100,7 +100,7 @@ public sealed class CodebaseRebuildEndpointTests : IAsyncLifetime
         _app.MapCodebaseRoutes();
         _app.MapSseEvents();
         await _app.StartAsync();
-        _client = _app.GetTestClient();
+        _client = _app.CreateEnvelopeClient();
     }
 
     public async Task DisposeAsync()

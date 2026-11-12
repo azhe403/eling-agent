@@ -19,7 +19,10 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
     private readonly List<Process> _processes = [];
     private readonly List<string> _tempDirs = [];
     private readonly List<System.Collections.Concurrent.ConcurrentQueue<string>> _stderrLines = [];
-    private readonly HttpClient _client = new() { Timeout = TimeSpan.FromSeconds(2), BaseAddress = new Uri(TestProcesses.BaseUrl) };
+    // The spawned dashboard answers through the API envelope like every other
+    // HTTP consumer (HealthEndpointTests, dashboard apiFetch): unwrap before
+    // reading /health's pid or the runtimes array instead of hitting the raw body.
+    private readonly HttpClient _client = new(new EnvelopeTestHandler { InnerHandler = new HttpClientHandler() }) { Timeout = TimeSpan.FromSeconds(2), BaseAddress = new Uri(TestProcesses.BaseUrl) };
 
     public Task InitializeAsync() => Task.CompletedTask;
 

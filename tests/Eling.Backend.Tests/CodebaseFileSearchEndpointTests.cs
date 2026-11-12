@@ -89,7 +89,7 @@ public sealed class CodebaseFileSearchEndpointTests : IAsyncLifetime
         _app = builder.Build();
         _app.MapCodebaseRoutes();
         await _app.StartAsync();
-        _client = _app.GetTestClient();
+        _client = _app.CreateEnvelopeClient();
     }
 
     [Fact]

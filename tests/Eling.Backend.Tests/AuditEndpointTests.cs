@@ -77,7 +77,7 @@ public sealed class AuditEndpointTests : IAsyncLifetime
         _app = builder.Build();
         _app.MapAuditRoutes();
         await _app.StartAsync();
-        _client = _app.GetTestClient();
+        _client = _app.CreateEnvelopeClient();
     }
 
     public async Task DisposeAsync()

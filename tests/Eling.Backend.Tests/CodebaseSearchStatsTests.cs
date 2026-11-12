@@ -62,7 +62,7 @@ public sealed class CodebaseSearchStatsTests : IAsyncLifetime
         var app = builder.Build();
         app.MapCodebaseRoutes();
         await app.StartAsync();
-        _client = app.GetTestClient();
+        _client = app.CreateEnvelopeClient();
     }
 
     public async Task DisposeAsync()

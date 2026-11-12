@@ -63,7 +63,7 @@ public sealed class PeerMemoryNotifyTests : IAsyncLifetime, IDisposable
         // so the SSE stream and the coordinator endpoint are the real ones.
         OwnerApp = TestAppBuilder.CreateSelfContained(dashboardPort: Port);
         await OwnerApp.StartAsync();
-        OwnerClient = new HttpClient
+        OwnerClient = new HttpClient(new EnvelopeTestHandler { InnerHandler = new HttpClientHandler() })
         {
             BaseAddress = new Uri($"http://127.0.0.1:{Port}"),
             Timeout = Timeout.InfiniteTimeSpan
