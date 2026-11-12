@@ -61,9 +61,9 @@ public sealed class RedisConnectionPool : IRedisConnectionPool, IDisposable
 
         var options = ConfigurationOptions.Parse(connection.ConnectionString);
         options.AbortOnConnectFail = false;
-        options.ConnectTimeout = 5000;
-        options.SyncTimeout = 5000;
-        options.AsyncTimeout = 5000;
+        options.ConnectTimeout = 2000;
+        options.SyncTimeout = 3000;
+        options.AsyncTimeout = 3000;
         options.ClientName = "eling-dashboard";
         options.AllowAdmin = false;
 
