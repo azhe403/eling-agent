@@ -14,9 +14,6 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
     private readonly IRedisConnectionPool _pool;
     private readonly IRedisReadCache _cache;
     private readonly ILogger<RedisKeyReadService>? _logger;
-    /// <summary>How long a connection counts as unreachable after an unreachable-type failure.</summary>
-    private static readonly TimeSpan UnreachableWindow = TimeSpan.FromSeconds(60);
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _unreachableSince = new();
 
     public RedisKeyReadService(
         IRedisConnectionPool pool,
@@ -83,16 +80,6 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
         var left = expires - DateTimeOffset.UtcNow;
         return left <= TimeSpan.Zero ? 0 : (long)left.TotalSeconds;
     }
-
-    private bool IsRecentlyUnreachable(string connectionId) =>
-        _unreachableSince.TryGetValue(connectionId, out var since)
-        && DateTimeOffset.UtcNow - since < UnreachableWindow;
-
-    private void MarkUnreachable(string connectionId) =>
-        _unreachableSince[connectionId] = DateTimeOffset.UtcNow;
-
-    private void MarkReachable(string connectionId) =>
-        _unreachableSince.TryRemove(connectionId, out _);
 
     private bool TryServeCachedInspection(string connectionId, RedisDatabaseIndex database, string key, out KeyInspectResult cached)
     {
@@ -357,7 +344,6 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
         try
         {
             var live = await InspectLiveAsync(connection, database, key, ct);
-            MarkReachable(connection.Id);
             _cache.SetKey(connection.Id, database, live);
             return live;
         }
@@ -369,19 +355,12 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
         }
         catch (Exception ex) when (IsUnreachable(ex))
         {
-            MarkUnreachable(connection.Id);
             if (TryServeCachedInspection(connection.Id, database, key, out var cached))
             {
                 _logger?.LogWarning(ex, "Redis unavailable; serving cached inspection for {Key}", key);
                 return cached;
             }
 
-            throw;
-        }
-        catch
-        {
-            // The server answered (even by rejecting) - it is not unreachable.
-            MarkReachable(connection.Id);
             throw;
         }
     }

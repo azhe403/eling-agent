@@ -96,15 +96,20 @@ public sealed class DatabaseReadService : IDatabaseReadService
         var serverLevel = DatabaseConnectionStringFactory.IsServerLevel(connection.Provider, connection.ConnectionString);
         var isServerSchema = serverLevel && string.IsNullOrWhiteSpace(database);
 
+        // SQLite reads are microseconds from a local file; the snapshot costs
+        // more than it saves and can never answer stale-ish the right way.
+        var skipCache = connection.Provider == DatabaseProvider.Sqlite;
+
         if (isServerSchema)
         {
-            return await ReadDatabaseListAsync(connection, cancellationToken, preferCache);
+            return await ReadDatabaseListAsync(connection, cancellationToken, skipCache ? false : preferCache);
         }
 
         // A snapshot on file answers at once, whatever its age: the caller
         // shows the tables and asks again for the real answer. No database
         // round trip on the first paint.
-        if (preferCache
+        if (!skipCache
+            && preferCache
             && _cache.TryGetSchema(connection.Id, database, out var cached, out var cachedAt)
             && cached is not null && cachedAt is not null)
         {
@@ -116,7 +121,10 @@ public sealed class DatabaseReadService : IDatabaseReadService
         try
         {
             var schema = await adapter.GetSchemaAsync(database, cancellationToken);
-            _cache.SetSchema(connection.Id, database, schema);
+            if (connection.Provider != DatabaseProvider.Sqlite)
+            {
+                _cache.SetSchema(connection.Id, database, schema);
+            }
             return schema with { Source = CacheSources.Live };
         }
         catch (DatabaseUnavailableException ex)

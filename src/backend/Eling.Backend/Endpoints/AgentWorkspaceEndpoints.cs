@@ -78,9 +78,7 @@ public static class AgentWorkspaceEndpoints
             }
             catch (UnauthorizedAccessException ex)
             {
-                logger.LogWarning(ex, "Workspace escape attempt root={Root} path={Path}", root, path);
-                httpContext.Items[ApiEnvelopeMiddleware.ErrorCodeItem] = "path_outside_root";
-                return Results.Json(new { error = "That path is outside the workspace root - open a file inside one of the registered workspaces." }, statusCode: StatusCodes.Status403Forbidden);
+                return PathOutsideRoot(httpContext, logger, ex, root, path, "open a file");
             }
             catch (ArgumentException ex)
             {
@@ -101,9 +99,7 @@ public static class AgentWorkspaceEndpoints
             }
             catch (UnauthorizedAccessException ex)
             {
-                logger.LogWarning(ex, "Workspace escape attempt root={Root} path={Path}", root, path);
-                httpContext.Items[ApiEnvelopeMiddleware.ErrorCodeItem] = "path_outside_root";
-                return Results.Json(new { error = "That path is outside the workspace root - open a file inside one of the registered workspaces." }, statusCode: StatusCodes.Status403Forbidden);
+                return PathOutsideRoot(httpContext, logger, ex, root, path, "open a file");
             }
             catch (ArgumentException ex)
             {
@@ -129,9 +125,7 @@ public static class AgentWorkspaceEndpoints
             }
             catch (UnauthorizedAccessException ex)
             {
-                logger.LogWarning(ex, "Workspace escape attempt root={Root} path={Path}", req.Root, req.Path);
-                httpContext.Items[ApiEnvelopeMiddleware.ErrorCodeItem] = "path_outside_root";
-                return Results.Json(new { error = "That path is outside the workspace root - write inside one of the registered workspaces only." }, statusCode: StatusCodes.Status403Forbidden);
+                return PathOutsideRoot(httpContext, logger, ex, req.Root, req.Path, "write");
             }
             catch (ArgumentException ex)
             {
@@ -140,6 +134,14 @@ public static class AgentWorkspaceEndpoints
         });
 
         return app;
+    }
+
+    /// <summary>One 403 for an escape attempt: the log line, the code, the message.</summary>
+    private static IResult PathOutsideRoot(HttpContext httpContext, ILogger logger, UnauthorizedAccessException ex, string root, string? path, string verb)
+    {
+        logger.LogWarning(ex, "Workspace escape attempt root={Root} path={Path}", root, path);
+        httpContext.Items[ApiEnvelopeMiddleware.ErrorCodeItem] = "path_outside_root";
+        return Results.Json(new { error = $"That path is outside the workspace root - {verb} inside one of the registered workspaces only." }, statusCode: StatusCodes.Status403Forbidden);
     }
 
     /// <summary>

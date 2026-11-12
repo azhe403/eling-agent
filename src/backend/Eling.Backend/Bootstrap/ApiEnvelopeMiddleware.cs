@@ -25,8 +25,6 @@ public sealed class ApiEnvelopeMiddleware
 {
     /// <summary>An endpoint may set this to a lower_snake_case code; it wins over the status-derived generic.</summary>
     public const string ErrorCodeItem = "errorCode";
-    /// <summary>An endpoint may set this to a full-sentence success message; it wins over the verb-derived default.</summary>
-    public const string SuccessMessageItem = "successMessage";
 
     private static readonly JsonSerializerOptions CompactJson = new(JsonSerializerDefaults.Web);
 
@@ -78,6 +76,7 @@ public sealed class ApiEnvelopeMiddleware
         };
         var bytes = JsonSerializer.SerializeToUtf8Bytes(envelope, CompactJson);
         context.Response.StatusCode = context.Response.StatusCode is >= 100 and <= 599 ? context.Response.StatusCode : 500;
+        context.Response.ContentLength = bytes.Length;
         await target.WriteAsync(bytes);
         await target.FlushAsync();
     }
@@ -239,7 +238,7 @@ public sealed class ApiEnvelopeMiddleware
             if (response.StatusCode >= 200 && response.StatusCode < 300 && bodyBytes.Length == 0)
             {
                 // 2xx with an empty body: bare Ok() and friends still get the uniform shape.
-                var successMessage = context.Items[SuccessMessageItem] as string ?? VerbSuccessMessage(context.Request.Method);
+                var successMessage = VerbSuccessMessage(context.Request.Method);
                 response.ContentType = "application/json; charset=utf-8";
                 await WriteEnvelopeAsync(context, original, "ok", successMessage, data: null);
                 return;
@@ -253,7 +252,7 @@ public sealed class ApiEnvelopeMiddleware
             }
             if (IsJsonContent(contentType))
             {
-                var successMessage = context.Items[SuccessMessageItem] as string ?? VerbSuccessMessage(context.Request.Method);
+                var successMessage = VerbSuccessMessage(context.Request.Method);
                 JsonNode? dataNode;
                 try
                 {
@@ -280,7 +279,7 @@ public sealed class ApiEnvelopeMiddleware
             string Code,
             string Message);
 
-        private static ErrorAnswer NormalizeError(HttpResponse response, byte[] body, HttpContext context)
+        private ErrorAnswer NormalizeError(HttpResponse response, byte[] body, HttpContext context)
         {
             var domainCode = context.Items[ErrorCodeItem] as string;
             var code = domainCode ?? GenericCode(response.StatusCode);
@@ -288,7 +287,7 @@ public sealed class ApiEnvelopeMiddleware
             return new ErrorAnswer(code, message);
         }
 
-        private static string? ExtractMessage(HttpResponse response, byte[] body)
+        private string? ExtractMessage(HttpResponse response, byte[] body)
         {
             if (body.Length == 0) return null;
             var text = Encoding.UTF8.GetString(body).Trim();
@@ -316,9 +315,11 @@ public sealed class ApiEnvelopeMiddleware
                     }
                     return null;
                 }
-                catch (JsonException)
+                catch (JsonException ex)
                 {
-                    // Not JSON after all; fall through to the raw text.
+                    // Not JSON after all; fall back to the raw text so the reader
+                    // still gets whatever the endpoint said.
+                    _logger?.LogDebug(ex, "Body ({StatusCode}) did not parse as JSON; using raw text", response.StatusCode);
                 }
             }
             return Cap(text);

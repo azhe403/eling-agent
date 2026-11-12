@@ -133,20 +133,19 @@ public sealed class RedisKeyReadServiceOfflineTests : IDisposable
     }
 
     [Fact]
-    public async Task Inspect_WhenRecentlyMarkedUnreachable_ServesTheCachedAnswerWithoutHittingThePool()
+    public async Task Inspect_WhenASnapshotExists_ServesTheCachedAnswerWithoutHittingThePool()
     {
         var cache = NewCache();
         Assert.True(RedisDatabaseIndex.TryCreate(0, out var db));
         var pool = new CountingDeadPool();
         var service = new RedisKeyReadService(pool, cache);
 
-        // First call: nothing cached, the server is down - it fails, and the
-        // connection is marked unreachable.
+        // First call: nothing cached, the server is down - it fails.
         await Assert.ThrowsAsync<TimeoutException>(() => service.InspectAsync(Connection(), db, "session:abc"));
         Assert.Equal(1, pool.GetAsyncCount);
 
-        // Cache lands. The second call must not touch the pool at all while
-        // the unreachable window is still open - it costs exactly nothing.
+        // Cache lands. The second call must not touch the pool at all: the
+        // snapshot answers at once, whatever the server's mood is.
         cache.SetKey("c1", db, Result("session:abc"));
         var result = await service.InspectAsync(Connection(), db, "session:abc");
         Assert.True(result.FromCache);

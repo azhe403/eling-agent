@@ -22,17 +22,13 @@ public sealed class DatabaseReadServiceCacheTests : IDisposable
     private DatabaseReadService NewService()
         => new(new JsonDatabaseReadCache(_dir), NullLogger<DatabaseReadService>.Instance);
 
-    /// <summary>A SQLite connection string pointing at a directory: opening it fails.</summary>
+    /// <summary>A MySQL connection to a refused port: opening it fails fast.</summary>
     private DatabaseConnection BrokenConnection()
-    {
-        var notADatabase = Path.Combine(_dir, "a-directory");
-        Directory.CreateDirectory(notADatabase);
-        return DatabaseConnection.Create(
+        => DatabaseConnection.Create(
             "broken@local",
-            DatabaseProvider.Sqlite,
-            new SqliteConnectionStringBuilder { DataSource = notADatabase }.ToString(),
+            DatabaseProvider.MySql,
+            "Server=127.0.0.1;Port=1;Database=broken;User Id=u;Password=p;ConnectionTimeout=1",
             DatabaseEnvironment.ReadOnly);
-    }
 
     private static DatabaseSchemaInfo Schema(params string[] tables)
         => new([.. tables.Select(t => new TableSchema(t, "table", [], [], []))]);
@@ -144,21 +140,11 @@ public sealed class DatabaseReadServiceCacheTests : IDisposable
         Assert.Equal("users", Assert.Single(result.Tables).Name);
     }
 
-    [Fact]
-    public async Task AnUnreachableDatabase_WithASnapshot_AnswersOffline()
-    {
-        // The shape the dashboard actually sees: the tree is open, the
-        // database goes away, and the snapshot answers marked offline.
-        var connection = await HealthyConnectionAsync();
-        await NewService().GetSchemaAsync(connection, null, preferCache: false);
-
-        var broken = connection with { ConnectionString = BrokenConnection().ConnectionString };
-        var result = await NewService().GetSchemaAsync(broken, null, preferCache: false);
-
-        Assert.Equal(CacheSources.Offline, result.Source);
-        Assert.True(result.FromCache);
-        Assert.NotNull(result.CacheTtlSeconds);
-    }
+    // Note: this used to "DB goes away mid-session", seeding through a live
+    // SQLite read. SQLite no longer seeds the snapshot (local reads are
+    // live-only by design), so that shape cannot be built without a live
+    // server - and it asserted exactly what
+    // PreferCacheFalse_OnAnUnreachableDatabase_FallsBackToTheSnapshot does.
 
     [Fact]
     public async Task ACachedAnswer_CarriesAConsistentTtl()

@@ -47,7 +47,7 @@ public static class DatabaseEndpoints
         group.MapGet("/{id}", async (string id, HttpContext httpContext, IDatabaseConnectionStore store, IAuditLogger auditLogger, CancellationToken ct) =>
         {
             var row = await store.FindAsync(id, ct);
-            if (row is null) return ConnectionNotFound(id, httpContext);
+            if (row is null) return ConnectionNotFoundResult.Create(id, httpContext);
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var view = ToView(row);
             sw.Stop();
@@ -104,7 +104,7 @@ public static class DatabaseEndpoints
         {
             var logger = loggerFactory.CreateLogger("Database");
             var existing = await store.FindAsync(id, ct);
-            if (existing is null) return ConnectionNotFound(id, httpContext);
+            if (existing is null) return ConnectionNotFoundResult.Create(id, httpContext);
 
             var name = req.Name ?? existing.Name;
             var env = req.Environment ?? existing.Environment;
@@ -141,7 +141,7 @@ public static class DatabaseEndpoints
         group.MapDelete("/{id}", async (string id, HttpContext httpContext, IDatabaseConnectionStore store, IDatabaseReadCache readCache, IRedisReadCache redisReadCache, IRedisConnectionPool redisPool, CancellationToken ct) =>
         {
             var ok = await store.RemoveAsync(id, ct);
-            if (!ok) return ConnectionNotFound(id, httpContext);
+            if (!ok) return ConnectionNotFoundResult.Create(id, httpContext);
             readCache.InvalidateConnection(id);
             redisReadCache.InvalidateConnection(id);
             // The row is gone; any pooled multiplexer it left behind would
@@ -252,7 +252,7 @@ public static class DatabaseEndpoints
         {
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
-            if (row is null) return ConnectionNotFound(id, httpContext);
+            if (row is null) return ConnectionNotFoundResult.Create(id, httpContext);
 
             // No body: the stored connection is tested as it is. With a body the
             // caller is trying out an edit, so the entered fields are layered
@@ -317,7 +317,7 @@ public static class DatabaseEndpoints
         {
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
-            if (row is null) return ConnectionNotFound(id, httpContext);
+            if (row is null) return ConnectionNotFoundResult.Create(id, httpContext);
             if (row.Provider == DatabaseProvider.Redis)
             {
                 return Results.BadRequest(RedisRequirement.NotSql(row, "use /keys"));
@@ -384,7 +384,7 @@ public static class DatabaseEndpoints
         {
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
-            if (row is null) return ConnectionNotFound(id, httpContext);
+            if (row is null) return ConnectionNotFoundResult.Create(id, httpContext);
 
             // The stored password is not in the form, so the entered fields
             // are layered over the stored connection - a blank password keeps
@@ -443,7 +443,7 @@ public static class DatabaseEndpoints
         {
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
-            if (row is null) return ConnectionNotFound(id, httpContext);
+            if (row is null) return ConnectionNotFoundResult.Create(id, httpContext);
             if (row.Provider == DatabaseProvider.Redis)
             {
                 return Results.BadRequest(RedisRequirement.NotSql(row, "use /keys"));
@@ -521,7 +521,7 @@ public static class DatabaseEndpoints
         {
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
-            if (row is null) return ConnectionNotFound(id, httpContext);
+            if (row is null) return ConnectionNotFoundResult.Create(id, httpContext);
             if (row.Provider == DatabaseProvider.Redis)
             {
                 return Results.BadRequest(RedisRequirement.NotSql(row, "mutations are not supported"));
@@ -664,18 +664,6 @@ public static class DatabaseEndpoints
         });
 
         return app;
-    }
-
-    /// <summary>
-    /// A 404 the client can act on: the id is not in the registry. The body
-    /// is what the dashboard shows, so it names the connection and tells the
-    /// reader what happened and what to do; the envelope carries the stable
-    /// machine code alongside.
-    /// </summary>
-    private static IResult ConnectionNotFound(string id, HttpContext httpContext)
-    {
-        httpContext.Items[ApiEnvelopeMiddleware.ErrorCodeItem] = "connection_not_found";
-        return Results.NotFound(new { error = $"Connection '{id}' is gone - it may have been deleted in another tab or by another eling app; the connection list is being refreshed." });
     }
 
     private static DatabaseConnectionView ToView(DatabaseConnection c) => new(
