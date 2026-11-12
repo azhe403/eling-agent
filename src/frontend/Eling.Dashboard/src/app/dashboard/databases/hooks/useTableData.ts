@@ -6,6 +6,7 @@ import { API, quoteIdent, sqlQuote, buildWherePk } from "../utils/connection-hel
 import { apiFetch } from "@/lib/api"
 import { pkColumnNames } from "../utils/schema-helpers"
 import type { NotifyDb } from "./useNotifications"
+import { effectiveBrowseLimit, effectiveBrowsePage, clampPage } from "../utils/browse-paging"
 
 /** How long a cached read waits before asking the database again. */
 const POLL_MS = 5000
@@ -21,6 +22,7 @@ export function useTableData({
   notifyDb,
   conns,
   activeTableRef,
+  onClampPage,
 }: {
   notifyDb: NotifyDb
   conns: DbConn[]
@@ -30,6 +32,13 @@ export function useTableData({
   selectedConn: DbConn | null | undefined
   selectedIsReadOnly: boolean
   schemaInfo: SchemaInfo | null
+  /**
+   * Called when a fetch resolves and the requested page no longer exists
+   * (rows were deleted under it). The tab's page is set to the last valid
+   * one; the empty response is not painted. Without it, the empty page is
+   * shown and the Prev/Next buttons stay usable.
+   */
+  onClampPage?: (page: number) => void
 }) {
   const [browseTable, setBrowseTable] = useState<string | null>(null)
   const [browseResult, setBrowseResult] = useState<QueryResult | null>(null)
@@ -65,16 +74,21 @@ export function useTableData({
         setBrowseResult(null)
         setBrowseTotal(null)
       }
+      // Limit and page are read from the tab at request time, so a poll
+      // fired after the reader switched tabs asks for that tab's window.
+      const limit = effectiveBrowseLimit(current)
+      const page = effectiveBrowsePage(current)
+      const offset = (page - 1) * limit
       try {
         const conn = conns.find((c) => c.id === id)
         const quote = conn?.provider === "MySql" ? "`" : '"'
         const escaped = table.replace(new RegExp(quote, "g"), quote + quote)
-        const selectSql = "SELECT * FROM " + quote + escaped + quote + " LIMIT 100"
+        const selectSql = "SELECT * FROM " + quote + escaped + quote + " LIMIT " + limit + " OFFSET " + offset
         const [data, countData] = await Promise.all([
           apiFetch<QueryResult>(API + "/" + id + "/query", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sql: selectSql, maxRows: 100, database: database ?? null, refresh }),
+            body: JSON.stringify({ sql: selectSql, maxRows: limit, database: database ?? null, refresh }),
           }),
           apiFetch<QueryResult>(API + "/" + id + "/query", {
             method: "POST",
@@ -87,14 +101,26 @@ export function useTableData({
             }),
           }).catch(() => null),
         ])
-        if (request === browseInFlightRef.current) setBrowseResult(data)
+        // Count first: when the requested page no longer exists (rows were
+        // deleted under it), hand the clamp to the caller and paint nothing.
+        // The empty response would render as a grid of nothing on page 99.
+        let countedTotal: number | null = null
         if (countData) {
           const v = countData?.rows?.[0]?.[0]
-          if (v !== null && v !== undefined) {
-            const n = typeof v === "number" ? v : Number(v)
-            if (Number.isFinite(n)) setBrowseTotal(n)
+          const n = typeof v === "number" ? v : v != null ? Number(v) : NaN
+          if (Number.isFinite(n)) countedTotal = n
+        }
+        if (countedTotal !== null) {
+          const safePage = clampPage(page, countedTotal, limit)
+          if (safePage !== page && onClampPage) {
+            onClampPage(safePage)
+            if (browsePollRef.current) clearTimeout(browsePollRef.current)
+            browsePollRef.current = null
+            return
           }
         }
+        if (request === browseInFlightRef.current) setBrowseResult(data)
+        if (countedTotal !== null) setBrowseTotal(countedTotal)
         if (browsePollRef.current) clearTimeout(browsePollRef.current)
         if (request === browseInFlightRef.current) {
           // Cached rows are read again later; live ones are fresh.
@@ -115,7 +141,7 @@ export function useTableData({
         })
       }
     },
-    [browseTable, conns, notifyDb, activeTableRef]
+    [browseTable, conns, notifyDb, activeTableRef, onClampPage]
   )
 
   return {

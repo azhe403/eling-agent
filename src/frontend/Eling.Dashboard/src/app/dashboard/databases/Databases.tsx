@@ -6,7 +6,7 @@ import { RefreshCw, Plus } from "lucide-react"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { Button } from "@/components/ui/button"
 
-import { DbTab, isRedisTab, tabKey } from "./db-tabs"
+import { DbTab, isRedisTab, tabKey, persistableTab } from "./db-tabs"
 import { RedisDbInfo, fetchRedisDatabases, pickRedisDb, parseRedisDb } from "./redis-browser"
 import {
   DEFAULT_CONN_ORDER,
@@ -350,6 +350,22 @@ export function Databases() {
 
   /* ---------------------------------------------------------------- the grid */
 
+  // The active tab carries its browseLimit/browsePage; patching them has to
+  // move the ref, the state and the tab bar together, or the grid, the footer
+  // and the poll would each see a different tab.
+  const patchActiveTab = useCallback(
+    (patch: Partial<DbTab>): DbTab | null => {
+      const cur = activeTableRef.current
+      if (!cur) return null
+      const nextTab = { ...cur, ...patch }
+      activeTableRef.current = nextTab
+      setActiveTable(nextTab)
+      setOpenTabs((prev) => prev.map((t) => (tabKey(t) === tabKey(cur) ? nextTab : t)))
+      return nextTab
+    },
+    [setActiveTable, setOpenTabs]
+  )
+
   const {
     setBrowseTable,
     browseResult,
@@ -367,6 +383,10 @@ export function Databases() {
     selectedConn,
     selectedIsReadOnly,
     schemaInfo,
+    onClampPage: (page) => {
+      const t = patchActiveTab({ browsePage: page })
+      if (t) void browseData(t.connId, t.table, t.database, false, true)
+    },
   })
 
   const refreshData = useCallback(async () => {
@@ -375,6 +395,27 @@ export function Databases() {
     // the selection wrote another database's rows under this table's name.
     await browseData(activeTable.connId, activeTable.table, activeTable.database, false, true)
   }, [activeTable, browseData])
+
+  // Limit change resets the page; page change stays put. Both re-fetch, and
+  // both touch only the active tab - the ref is updated inside patchActiveTab
+  // before the fetch, so browseData reads the new window.
+  const setBrowseLimit = useCallback(
+    (limit: number) => {
+      const t = patchActiveTab({ browseLimit: limit, browsePage: 1 })
+      if (!t) return
+      void browseData(t.connId, t.table, t.database, false, true)
+    },
+    [patchActiveTab, browseData]
+  )
+
+  const setBrowsePage = useCallback(
+    (page: number) => {
+      const t = patchActiveTab({ browsePage: Math.max(1, Math.floor(page)) })
+      if (!t) return
+      void browseData(t.connId, t.table, t.database, false, true)
+    },
+    [patchActiveTab, browseData]
+  )
 
   const {
     pkNames,
@@ -554,11 +595,11 @@ export function Databases() {
       const connId = urlConn || st?.schemaConnId || st?.selectedId
       const tab = urlTab || st?.rightTab || "data"
 
-      const savedTab = (st?.activeTable as DbTab | null) ?? null
+      const savedTab = st?.activeTable ? persistableTab(st.activeTable as DbTab) : null
 
       // eslint-disable-next-line react-hooks/set-state-in-effect -- restoring the saved explorer position is a one-shot hydrate from localStorage and the URL.
       if (st?.expandedConns) setExpandedConns(new Set(st.expandedConns))
-      if (Array.isArray(st?.openTabs)) setOpenTabs(st.openTabs)
+      if (Array.isArray(st?.openTabs)) setOpenTabs(st.openTabs.map(persistableTab))
       if (connId) {
         setSelectedId(connId)
         setSchemaConnId(connId)
@@ -645,8 +686,8 @@ export function Databases() {
           rightTab,
           selectedId,
           schemaConnId,
-          activeTable,
-          openTabs,
+          activeTable: activeTable ? persistableTab(activeTable) : null,
+          openTabs: openTabs.map(persistableTab),
           sort: connSort,
           order: connOrder,
         })
