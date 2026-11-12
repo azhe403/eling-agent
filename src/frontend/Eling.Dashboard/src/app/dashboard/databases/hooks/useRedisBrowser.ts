@@ -381,20 +381,14 @@ export function useRedisBrowser({
       if (!connId) return
       const request = ++redisInspectRequestRef.current
       setRedisInspectKey(key)
-      try {
-        const qs = new URLSearchParams()
-        qs.set("key", key)
-        qs.set("database", String(activeRedisDb))
-        const payload = await apiFetch<RedisInspect>(`${API}/${connId}/keys/inspect?${qs.toString()}`)
-        // A slower answer must not land on a tab that has moved on.
-        if (request !== redisInspectRequestRef.current) return
-        setRedisInspect(payload)
-        setRedisInspectOpen(true)
 
-        // The inspector just read the key from the server, which is newer and
-        // better than whatever the row was saying. A row marked "gone" that a
-        // reader clicks and finds alive is the worst case: the list and the
-        // panel disagree, and the list is the wrong one.
+      /**
+       * Fold the inspect answer back into the list rows. The row marked
+       * "gone" that a reader clicks and finds alive is the worst case: the
+       * list and the panel disagree, and the list is the wrong one. Used by
+       * the first paint and by the background revalidate behind it.
+       */
+      const applyInspectToRows = (payload: RedisInspect) => {
         const pagePrefix = redisPageScope(connId, activeRedisDb)
         const probeKey = `${connId}:${activeRedisDb}:${key}`
         redisProbedRef.current.delete(probeKey)
@@ -416,6 +410,38 @@ export function useRedisBrowser({
           }
           return touched ? next : prev
         })
+      }
+
+      try {
+        const qs = new URLSearchParams()
+        qs.set("key", key)
+        qs.set("database", String(activeRedisDb))
+        const payload = await apiFetch<RedisInspect>(`${API}/${connId}/keys/inspect?${qs.toString()}`)
+        // A slower answer must not land on a tab that has moved on.
+        if (request !== redisInspectRequestRef.current) return
+        setRedisInspect(payload)
+        setRedisInspectOpen(true)
+
+        applyInspectToRows(payload)
+
+        // A cached answer painted at once; the ask for the real answer goes
+        // out behind it, like /schema and /keys. The panel quietly flips to
+        // live data when the server answers; if it cannot be reached, the
+        // snapshot stays on screen and the row badge keeps saying so.
+        if (payload.fromCache) {
+          const freshQs = new URLSearchParams(qs)
+          freshQs.set("refresh", "true")
+          try {
+            const fresh = await apiFetch<RedisInspect>(`${API}/${connId}/keys/inspect?${freshQs.toString()}`)
+            if (request !== redisInspectRequestRef.current) return
+            setRedisInspect(fresh)
+            applyInspectToRows(fresh)
+          } catch (e: unknown) {
+            // The server is unreachable or refused; the snapshot stays, and
+            // the log says why the flip never happened.
+            console.warn("redis inspect background revalidate failed", e)
+          }
+        }
       } catch (e: unknown) {
         if (request !== redisInspectRequestRef.current) return
         notifyDb("error", "Redis inspect failed", e instanceof Error ? e.message : String(e))

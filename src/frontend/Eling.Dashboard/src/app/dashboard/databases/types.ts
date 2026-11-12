@@ -93,6 +93,9 @@ export type RedisInspect = {
   expiresAt: string | null
   length: number
   encoding: string | null
+  /** True when the answer painted from the snapshot; the server has not confirmed it yet. */
+  fromCache?: boolean
+  cachedAt?: string | null
   preview: {
     kind: string
     entries: Array<{ field: string | null; value: string | null }>

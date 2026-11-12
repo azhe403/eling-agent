@@ -14,6 +14,8 @@ import {
   redisPageKey,
   redisTtlLabel,
   fetchRedisKeyProbeBatch,
+  pageAsOf,
+  inspectAsOf,
   type RedisDbInfo,
   type RedisPage,
 } from "./redis-browser"
@@ -55,6 +57,36 @@ describe("dbRowAsOf", () => {
 
   it("ignores an unparseable stamp", () => {
     expect(dbRowAsOf({ index: 3, keys: 3, fromCache: true, cachedAt: "not a date" })).toBe("cached")
+  })
+})
+
+describe("inspectAsOf", () => {
+  it("says nothing for a live payload", () => {
+    expect(inspectAsOf({ fromCache: false, cachedAt: null })).toBeNull()
+  })
+
+  it("says nothing when there is no payload at all", () => {
+    expect(inspectAsOf(null)).toBeNull()
+  })
+
+  it("stamps a cached payload with the moment it was taken", () => {
+    const at = "2026-10-27T08:15:00.000Z"
+    expect(inspectAsOf({ fromCache: true, cachedAt: at })).toBe(`cached as of ${new Date(at).toLocaleString()}`)
+  })
+
+  it("still says cached when the stamp is missing", () => {
+    expect(inspectAsOf({ fromCache: true, cachedAt: null })).toBe("cached")
+  })
+
+  it("ignores an unparseable stamp", () => {
+    expect(inspectAsOf({ fromCache: true, cachedAt: "not a date" })).toBe("cached")
+  })
+})
+
+describe("pageAsOf", () => {
+  it("shares the inspect wording", () => {
+    const at = "2026-10-27T08:15:00.000Z"
+    expect(pageAsOf({ fromCache: true, cachedAt: at } as RedisPage)).toBe(inspectAsOf({ fromCache: true, cachedAt: at }))
   })
 })
 

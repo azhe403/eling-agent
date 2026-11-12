@@ -134,11 +134,32 @@ export function Databases() {
 
   // A 404 from /schema can only mean the connection is gone from the registry
   // (deleted in another tab or by the agent, or this page is pointed at another
-  // backend). The list re-reads itself, throttled: one dead row in a tree full
-  // of them must not fan out into a reload per row.
+  // backend). The key it reports is the retry ladder's cache key: the
+  // connection id, or `id:database` for one database on a server-level
+  // connection. Either way the connection is gone, so its expanded rows go
+  // with it - otherwise the tree keeps probing a dead id forever. The list
+  // re-reads itself, throttled: one dead row in a tree full of them must not
+  // fan out into a reload per row.
   const reloadListRef = useRef<() => void>(() => {})
   const lastMissingReloadAt = useRef(0)
-  const handleConnectionMissing = useCallback(() => {
+  const handleConnectionMissing = useCallback((key: string) => {
+    const connId = key.includes(":") ? key.slice(0, key.indexOf(":")) : key
+    setExpandedConns((prev) => {
+      if (!prev.has(connId)) return prev
+      const next = new Set(prev)
+      next.delete(connId)
+      return next
+    })
+    setExpandedDbs((prev) => {
+      const prefix = `${connId}:`
+      let changed = false
+      const next = new Set<string>()
+      for (const candidate of prev) {
+        if (candidate === key || candidate.startsWith(prefix)) { changed = true; continue }
+        next.add(candidate)
+      }
+      return changed ? next : prev
+    })
     const now = Date.now()
     if (now - lastMissingReloadAt.current < 2000) return
     lastMissingReloadAt.current = now

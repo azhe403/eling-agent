@@ -376,6 +376,15 @@ export const fetchRedisPrefixDelete = async (
   }
 }
 
+/** One wording for "this answer is a snapshot", shared by pages and inspect payloads. */
+const cachedAsOfLabel = (entry: { fromCache?: boolean; cachedAt?: string | null } | null | undefined): string | null => {
+  if (!entry?.fromCache) return null
+  if (!entry.cachedAt) return "cached"
+  const when = new Date(entry.cachedAt)
+  if (Number.isNaN(when.getTime())) return "cached"
+  return `cached as of ${when.toLocaleString()}`
+}
+
 /**
  * How the counts line says a cached page is not live.
  *
@@ -384,10 +393,12 @@ export const fetchRedisPrefixDelete = async (
  * the reader knows the tree is a snapshot, not the current keyspace. Null
  * when the page is live, which keeps the counts quiet in the normal case.
  */
-export const pageAsOf = (page: RedisPage | null | undefined): string | null => {
-  if (!page?.fromCache) return null
-  if (!page.cachedAt) return "cached"
-  const when = new Date(page.cachedAt)
-  if (Number.isNaN(when.getTime())) return "cached"
-  return `cached as of ${when.toLocaleString()}`
-}
+export const pageAsOf = (page: RedisPage | null | undefined): string | null => cachedAsOfLabel(page)
+
+/**
+ * The same line for the inspect payload: a key the reader is looking at may
+ * be served from the snapshot, and the panel says so until the background
+ * revalidate behind it lands.
+ */
+export const inspectAsOf = (inspect: { fromCache?: boolean; cachedAt?: string | null } | null | undefined): string | null =>
+  cachedAsOfLabel(inspect)

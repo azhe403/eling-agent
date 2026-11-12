@@ -40,8 +40,8 @@ const fetchSchema = (
 export function useSchema(
   notifyDb: NotifyDb,
   isSqlConnection: (connId: string) => boolean = () => true,
-  /** Called when /schema answers 404: the connection is gone from the registry. */
-  onConnectionMissing?: () => void,
+  /** Called with the retry-ladder cache key when /schema answers 404: the registry no longer has the connection. */
+  onConnectionMissing?: (key: string) => void,
 ) {
   const [schemaInfo, setSchemaInfo] = useState<SchemaInfo | null>(null)
   const [connSchemas, setConnSchemas] = useState<Record<string, SchemaInfo>>({})
@@ -61,17 +61,25 @@ export function useSchema(
   useEffect(() => { isSqlConnectionRef.current = isSqlConnection }, [isSqlConnection])
   useEffect(() => { onConnectionMissingRef.current = onConnectionMissing }, [onConnectionMissing])
 
-  /** A 404 means the connection is not in the registry anymore; tell the page. */
-  const reportConnectionMissing = (e: unknown) => {
-    if (e instanceof ApiError && e.status === 404) onConnectionMissingRef.current?.()
-  }
-
   const {
     schedule: scheduleRetry,
     cancel: cancelRetry,
     attemptOf: retryAttemptOf,
     label: retryLabel,
   } = useExponentialRetry()
+
+  /**
+   * Tell the page the connection is gone, so the tree can prune it and its
+   * retry ladder can stop. The key is the same cache key the retry ladder
+   * uses: the connection id for a top-level read, or `connId:database` for
+   * one. Only a 404 ends the ladder - a database that is merely offline is
+   * retried on the same schedule its neighbours are.
+   */
+  const reportConnectionMissing = useCallback((key: string, e: unknown) => {
+    if (!(e instanceof ApiError) || e.status !== 404) return
+    onConnectionMissingRef.current?.(key)
+    cancelRetry(key)
+  }, [cancelRetry])
 
   /**
    * The reads reach themselves through a ref: the retry ladder calls them
@@ -81,7 +89,7 @@ export function useSchema(
   const ensureSchemaRef = useRef<(id: string, opts?: { force?: boolean; bypass?: boolean }) => Promise<void>>(
     async () => {}
   )
-  const ensureDbSchemaRef = useRef<(connId: string, database: string) => Promise<void>>(async () => {})
+  const ensureDbSchemaRef = useRef<(connId: string, database: string, opts?: { force?: boolean; bypass?: boolean }) => Promise<void>>(async () => {})
 
   /**
    * Reads the schema of a connection, unless a live answer is already here.
@@ -120,11 +128,11 @@ export function useSchema(
         // reported once - ten toasts for one dead database is noise.
         const first = retryAttemptOf(id) === 0
         scheduleRetry(id, "offline", () => { void ensureSchemaRef.current(id, { force: true, bypass: true }) })
-        reportConnectionMissing(e)
+        reportConnectionMissing(id, e)
         if (first) notifyDb("error", e instanceof Error ? e.message : "schema failed")
       }
     },
-    [notifyDb, scheduleRetry, cancelRetry, retryAttemptOf]
+    [notifyDb, scheduleRetry, cancelRetry, retryAttemptOf, reportConnectionMissing]
   )
 
   /**
@@ -132,18 +140,21 @@ export function useSchema(
    * name is part of the cache key, so two databases never share a schema.
    */
   const ensureDbSchema = useCallback(
-    async (connId: string, database: string) => {
+    async (connId: string, database: string, opts?: { force?: boolean; bypass?: boolean }) => {
       // Same refusal as above, one level down.
       if (!isSqlConnectionRef.current(connId)) return
       const key = `${connId}:${database}`
-      if (dbSchemasRef.current[key]?.source === "live") return
+      // Same skip as the connection-level read: a live answer sticks.
+      const force = opts?.force ?? false
+      const bypass = opts?.bypass ?? false
+      if (!force && dbSchemasRef.current[key]?.source === "live") return
 
       try {
-        const fresh = await fetchSchema(connId, database)
+        const fresh = await fetchSchema(connId, database, bypass)
         setDbSchemas((prev) => ({ ...prev, [key]: fresh }))
         if (fresh.source === "cached" || fresh.source === "offline") {
           scheduleRetry(key, fresh.source === "offline" ? "offline" : "revalidate", () => {
-            void ensureDbSchemaRef.current(connId, database)
+            void ensureDbSchemaRef.current(connId, database, { bypass: true })
           })
         } else {
           cancelRetry(key)
@@ -152,12 +163,12 @@ export function useSchema(
         // Unreachable: the retry ladder runs on the same schedule, and the tree
         // shows the same countdown under this database.
         const first = retryAttemptOf(key) === 0
-        scheduleRetry(key, "offline", () => { void ensureDbSchemaRef.current(connId, database) })
-        reportConnectionMissing(e)
+        scheduleRetry(key, "offline", () => { void ensureDbSchemaRef.current(connId, database, { bypass: true }) })
+        reportConnectionMissing(key, e)
         if (first) notifyDb("error", e instanceof Error ? e.message : "schema failed")
       }
     },
-    [notifyDb, scheduleRetry, cancelRetry, retryAttemptOf]
+    [notifyDb, scheduleRetry, cancelRetry, retryAttemptOf, reportConnectionMissing]
   )
 
   useEffect(() => { ensureSchemaRef.current = ensureSchema }, [ensureSchema])
@@ -180,13 +191,13 @@ export function useSchema(
         setConnSchemas((prev) => ({ ...prev, [id]: data }))
         if (database) setDbSchemas((prev) => ({ ...prev, [`${id}:${database}`]: data }))
       } catch (e: unknown) {
-        reportConnectionMissing(e)
+        reportConnectionMissing(database ? `${id}:${database}` : id, e)
         notifyDb("error", e instanceof Error ? e.message : "schema failed")
       } finally {
         setSchemaLoading(false)
       }
     },
-    [notifyDb]
+    [notifyDb, reportConnectionMissing]
   )
 
   return {

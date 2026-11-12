@@ -12,27 +12,12 @@ import {
 } from "@/components/ui/select"
 import { X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { DbConn, DbTab, RedisPage } from "@/app/dashboard/databases/types"
+import { DbConn, DbTab, RedisPage, RedisInspect } from "@/app/dashboard/databases/types"
 import { RedisPrefixTree } from "@/app/dashboard/databases/redis-tree"
 import type { RedisPrefixPreview, RedisTtlMode } from "@/app/dashboard/databases/redis-browser"
 import { RedisDeleteConfirmDialog } from "../dialogs/RedisDeleteConfirmDialog"
 import { RedisPrefixDeleteConfirmDialog } from "../dialogs/RedisPrefixDeleteConfirmDialog"
-import { pageAsOf, redisPageKey, redisPageScope, redisTtlLabel } from "@/app/dashboard/databases/redis-browser"
-
-/** The value a key holds, as the inspector reads it. */
-export type RedisInspect = {
-  key: string
-  type: string
-  ttlSeconds: number
-  expiresAt: string | null
-  length: number
-  encoding: string | null
-  preview: {
-    kind: string
-    entries: Array<{ field: string | null; value: string | null }>
-    truncated: boolean
-  }
-}
+import { pageAsOf, inspectAsOf, redisPageKey, redisPageScope, redisTtlLabel } from "@/app/dashboard/databases/redis-browser"
 
 export interface RedisBrowserProps {
   activeTable: DbTab | null
@@ -228,6 +213,7 @@ export const RedisBrowser = ({
   const inspectMeta = redisInspect
     ? `${redisInspect.type} · len ${redisInspect.length} · ${redisTtlLabel(inspectedLeaf ?? redisInspect, ttlNow, redisTtlMode)}`
     : ""
+  const inspectSnapshot = inspectAsOf(redisInspect)
 
   return (
     <Card className="flex-1 min-h-0">
@@ -372,6 +358,7 @@ export const RedisBrowser = ({
                 </Button>
               </div>
               <p className="shrink-0 text-xs text-muted-foreground">{inspectMeta}</p>
+              {inspectSnapshot ? <p className="shrink-0 text-xs text-amber-600">{inspectSnapshot} · asking the server in the background</p> : null}
               <div className="min-h-0 flex-1 overflow-y-auto">{inspectBody}</div>
             </div>
           ) : null}
@@ -384,6 +371,7 @@ export const RedisBrowser = ({
                 <DialogTitle className="break-all font-mono text-sm">{redisInspect.key}</DialogTitle>
               </DialogHeader>
               <p className="text-xs text-muted-foreground">{inspectMeta}</p>
+              {inspectSnapshot ? <p className="text-xs text-amber-600">{inspectSnapshot} · asking the server in the background</p> : null}
               {inspectBody}
             </DialogContent>
           </Dialog>
