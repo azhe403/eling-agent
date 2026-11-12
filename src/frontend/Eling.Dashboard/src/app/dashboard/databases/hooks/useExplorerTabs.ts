@@ -3,6 +3,7 @@
 import { useCallback } from "react"
 import type { DbTab, QueryResult, SchemaInfo, RedisInspect } from "../types"
 import { isRedisTab, tabKey } from "../db-tabs"
+import { defaultBrowseLimit } from "../utils/browse-paging"
 import { redisPageKey, type RedisPage } from "../redis-browser"
 
 /**
@@ -71,7 +72,13 @@ export function useExplorerTabs({
     async (connId: string, table: string, database?: string | null) => {
       autoScrollPendingRef.current = false
       setError(null)
-      const newActive = { connId, table, database: database ?? null }
+      // A new table tab inherits the mode of the limits of the open table
+      // tabs; a tab that is already open keeps its remembered limit/page.
+      const existing = openTabs.find(
+        (t) => t.connId === connId && t.table === table && (t.database ?? null) === (database ?? null)
+      )
+      const newActive = { connId, table, database: database ?? null, browseLimit: defaultBrowseLimit(openTabs) }
+      const active = existing ?? newActive
       // Open (or reuse) a tab for this table so multiple tables can stay open.
       setOpenTabs((prev) => {
         const exists = prev.some(
@@ -80,8 +87,8 @@ export function useExplorerTabs({
         if (exists) return prev
         return [...prev, newActive]
       })
-      setActiveTable(newActive)
-      activeTableRef.current = newActive
+      setActiveTable(active)
+      activeTableRef.current = active
       setSelectedId(connId)
       setSchemaConnId(connId)
       setBrowseTable(table)
@@ -124,6 +131,7 @@ export function useExplorerTabs({
       setSchemaConnId,
       setActiveTable,
       setOpenTabs,
+      openTabs,
       activeTableRef,
       rightTabRef,
       autoScrollPendingRef,
