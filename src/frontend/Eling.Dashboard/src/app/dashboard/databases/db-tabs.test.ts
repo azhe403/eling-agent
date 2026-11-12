@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { REDIS_TAB_TABLE, isRedisTab, redisTabKey, tabKey } from "./db-tabs"
+import { REDIS_TAB_TABLE, isRedisTab, redisTabKey, tabKey, persistableTab } from "./db-tabs"
 
 describe("isRedisTab", () => {
   it("is true for a tab flagged as Redis", () => {
@@ -55,5 +55,15 @@ describe("tabKey", () => {
 
   it("keeps two SQL tables of one connection apart", () => {
     expect(tabKey({ connId: "c1", table: "orders" })).not.toBe(tabKey({ connId: "c1", table: "items" }))
+  })
+})
+describe("persistableTab", () => {
+  it("drops browseLimit and browsePage but keeps identity fields", () => {
+    const t = { connId: "c1", table: "orders", database: "db", browseLimit: 500, browsePage: 3 }
+    expect(persistableTab(t)).toEqual({ connId: "c1", table: "orders", database: "db" })
+  })
+  it("keeps redis identity fields", () => {
+    const t = { connId: "c1", table: "Redis keys", kind: "redis" as const, redisDb: 2, browseLimit: 250, browsePage: 2 }
+    expect(persistableTab(t)).toEqual({ connId: "c1", table: "Redis keys", kind: "redis", redisDb: 2 })
   })
 })

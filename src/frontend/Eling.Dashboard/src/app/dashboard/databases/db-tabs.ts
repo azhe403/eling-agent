@@ -17,6 +17,13 @@ export type DbTab = {
   kind?: "redis"
   /** The logical Redis database this tab shows. Only set for a Redis tab. */
   redisDb?: number
+  /**
+   * How many rows the Data tab fetches. Session view state: lives on the tab
+   * so switching tabs keeps each tab's choice, never persisted.
+   */
+  browseLimit?: number
+  /** The 1-based page of the Data tab. Session view state, like browseLimit. */
+  browsePage?: number
 }
 
 /**
@@ -40,3 +47,13 @@ export const tabKey = (tab: DbTab): string =>
   isRedisTab(tab) ? redisTabKey(tab) : `sql:${tab.connId}:${tab.database ?? ""}:${tab.table}`
 
 export const redisTabKey = (tab: DbTab): string => `${tab.connId}:${tab.redisDb ?? 0}`
+
+/**
+ * The persisted form of a tab: identity only. `browseLimit` and `browsePage`
+ * are session view state - saving them would resurrect a page 9 of an empty
+ * table and a stale limit after a reload, so they never reach localStorage.
+ */
+export const persistableTab = (tab: DbTab): DbTab => {
+  const { browseLimit: _browseLimit, browsePage: _browsePage, ...rest } = tab
+  return rest
+}
