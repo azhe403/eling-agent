@@ -386,6 +386,340 @@ public sealed class CodeOrganizationConventionTests
             "Multi-parameter records must be chopped one-param-per-line:\n" + string.Join("\n", offenders));
     }
 
+    /// <summary>
+    /// Standing rule (user, 2026-09-30): EVERY catch block logs, in any form,
+    /// at any layer — an empty catch, or one that only carries a comment, is a
+    /// swallowed failure and is never acceptable.
+    /// </summary>
+    /// <remarks>
+    /// Heuristic detector: finds each <c>catch</c> keyword, skips an optional
+    /// parameter and <c>when</c> filter, brace-matches to the closing brace,
+    /// strips comments and whitespace, and reports a body with nothing left.
+    /// String contents (including <c>"""raw</c> strings and characters like
+    /// '}' or '//' inside them) are never stripped, so a catch whose body is
+    /// code never reports. A catch whose body holds only a raw string with
+    /// braces would misclose early — that is a false negative, which is the
+    /// safe direction for this check. Keep literal "catch {" out of strings;
+    /// reword such strings instead.
+    /// </remarks>
+    [Fact]
+    public void CatchBlocks_MustNotBeSilent()
+    {
+        var repoRoot = RepoRoot();
+        var byFile = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in Sources())
+        {
+            // This file is the detector; its own literals spell out "catch {" shapes.
+            if (file.EndsWith("CodeOrganizationConventionTests.cs", StringComparison.OrdinalIgnoreCase)) continue;
+            var rel = Relative(repoRoot, file);
+            var n = SilentCatches(File.ReadAllText(file), rel).Count();
+            if (n > 0) byFile[rel] = n;
+        }
+
+        var offenders = new List<string>();
+        foreach (var (rel, count) in byFile.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            if (SilentCatchAllowlist.TryGetValue(rel, out var allowed))
+            {
+                if (count > allowed)
+                    offenders.Add($"{rel}: {count} silent catch(s), allowlist permits {allowed} (list is shrink-only, never extend)");
+                else if (count < allowed)
+                    offenders.Add($"{rel}: silent-catch count dropped to {count} - lower/remove its allowlist entry (shrink-only)");
+            }
+            else
+            {
+                offenders.Add($"{rel}: {count} silent catch(s) — silent catches are never acceptable");
+            }
+        }
+        foreach (var rel in SilentCatchAllowlist.Keys)
+        {
+            if (!byFile.ContainsKey(rel))
+                offenders.Add($"{rel}: allowlist entry no longer matches any silent catch - remove it (shrink-only)");
+        }
+        Assert.True(offenders.Count == 0,
+            "Every catch block must log, at any layer - no empty or comment-only bodies:\n"
+            + string.Join("\n", offenders));
+    }
+
+    /// <summary>
+    /// Baseline of silent catches present on 2026-11-12 (178 sites, 118 files,
+    /// harvested from the whole-tree scan; fix these as you touch each file).
+    /// SHRINK-ONLY: a PR may reduce a count but may never raise one, and a
+    /// file that reaches zero must have its entry removed — the test fails
+    /// either way rather than silently blessing a new site.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, int> SilentCatchAllowlist =
+        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["src/backend/Eling.Backend/AuditDirWatcher.cs"] = 1,
+            ["src/backend/Eling.Backend/Bootstrap/CodebaseWatcherService.cs"] = 2,
+            ["src/backend/Eling.Backend/Bootstrap/DashboardPort.cs"] = 1,
+            ["src/backend/Eling.Backend/Bootstrap/FrontendDevSpawner.cs"] = 1,
+            ["src/backend/Eling.Backend/Bootstrap/HttpLoop.cs"] = 1,
+            ["src/backend/Eling.Backend/Bootstrap/RuntimeSelfRegistration.cs"] = 1,
+            ["src/backend/Eling.Backend/Bootstrap/ZombieProcessCleaner.cs"] = 1,
+            ["src/backend/Eling.Backend/CodebaseDirWatcher.cs"] = 1,
+            ["src/backend/Eling.Backend/Controllers/CoordinatorController.cs"] = 5,
+            ["src/backend/Eling.Backend/DatabaseRegistryWatcher.cs"] = 1,
+            ["src/backend/Eling.Backend/HttpCoordinatorMemoryChangeNotifier.cs"] = 1,
+            ["src/backend/Eling.Backend/Logging/LogFormatSwitcher.cs"] = 2,
+            ["src/backend/Eling.Backend/Mcp/DisposableAuditLogger.cs"] = 1,
+            ["src/backend/Eling.Backend/Mcp/Tools/MemoryReadTool.cs"] = 1,
+            ["src/backend/Eling.Backend/Mcp/Tools/MemoryWriteTool.cs"] = 1,
+            ["src/backend/Eling.Backend/RuntimeDirWatcher.cs"] = 1,
+            ["src/backend/Eling.Backend/RuntimeRegistry.cs"] = 6,
+            ["src/backend/Eling.Backend/Services/RuntimeMetricsBroadcaster.cs"] = 2,
+            ["src/backend/Eling.Backend/Updates/UpdateCheckerService.cs"] = 2,
+            ["src/backend/Eling.Core/Audit/Storage/BufferedAuditLogger.cs"] = 4,
+            ["src/backend/Eling.Core/Audit/Storage/SqliteAuditIndex.cs"] = 2,
+            ["src/backend/Eling.Core/Database/AppSettingsConnectionScanner.cs"] = 3,
+            ["src/backend/Eling.Core/Database/JsonDatabaseConnectionStore.cs"] = 1,
+            ["src/backend/Eling.Core/Database/RedisConnectionPool.cs"] = 5,
+            ["src/backend/Eling.Core/Memory/ScopedMemoryService.cs"] = 2,
+            ["src/backend/Eling.Core/Projects/JsonWorkspaceRegistry.cs"] = 1,
+            ["src/backend/Eling.Core/Scope/CanonicalProjectRoot.cs"] = 1,
+            ["src/backend/Eling.Core/Scope/CentralAgentDirectory.cs"] = 2,
+            ["src/backend/Eling.Core/Scope/CentralAuditDirectory.cs"] = 1,
+            ["src/backend/Eling.Core/Scope/CentralLogDirectory.cs"] = 1,
+            ["src/backend/Eling.Core/Workspaces/WorkspaceExpansionStore.cs"] = 1,
+            ["src/desktop/Eling.Desktop/Models/MessageBlock.cs"] = 1,
+            ["src/desktop/Eling.Desktop/Services/BackendSupervisor.cs"] = 1,
+            ["src/desktop/Eling.Desktop/Services/ElingApiClient.cs"] = 1,
+            ["src/desktop/Eling.Desktop/ViewModels/FoldersViewModel.cs"] = 1,
+            ["src/desktop/Eling.Desktop/ViewModels/MainViewModel.cs"] = 1,
+            ["src/desktop/Eling.Desktop/Views/MainWindow.axaml.cs"] = 1,
+            ["tests/Eling.Backend.Tests/AgentBuiltinMcpToolTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/AgentChatStreamTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/AgentChatTests.cs"] = 2,
+            ["tests/Eling.Backend.Tests/AgentHostBrowseTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/AgentStoreMigrationTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/AgentTurnPromptCompositionTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/AgentWorkspaceTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/CodebaseExclusionTests.cs"] = 4,
+            ["tests/Eling.Backend.Tests/CodebaseRebuildScopeTests.cs"] = 2,
+            ["tests/Eling.Backend.Tests/CodebaseStaleSweepTests.cs"] = 2,
+            ["tests/Eling.Backend.Tests/CodebaseUninitializedIndexTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/CodebaseWorkspaceRootTests.cs"] = 4,
+            ["tests/Eling.Backend.Tests/DashboardLifecycleTests.cs"] = 3,
+            ["tests/Eling.Backend.Tests/DatabaseDetectImportTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/DatabaseRegistryWatcherTests.cs"] = 3,
+            ["tests/Eling.Backend.Tests/Endpoints/StatsEndpointsTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/FileSystem/FileSystemServiceTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/HttpLoopConfigurationIsolationTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/JsonProjectScopePolicyStoreTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/JudgeEndpointsTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/Logging/LogConfigStoreTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/Logging/LogFormatForwardingSinkTests.cs"] = 2,
+            ["tests/Eling.Backend.Tests/Logging/LogFormatSwitcherTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/Logging/RollingDailyFileSinkJsonlTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/LoggingTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/Mcp/ToolPolicyFilterTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/Mcp/ToolsPolicyToolTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/McpHostConfigurationIsolationTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/McpProcessTests.cs"] = 2,
+            ["tests/Eling.Backend.Tests/MeaiGatewayTests.cs"] = 2,
+            ["tests/Eling.Backend.Tests/MemoryApiTests.cs"] = 2,
+            ["tests/Eling.Backend.Tests/MemoryMaintenanceApiTests.cs"] = 3,
+            ["tests/Eling.Backend.Tests/MemoryProjectScopePolicyToolTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/MemoryProjectToolsTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/MemoryProvenanceDtoTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/MemoryRecallToolCodebaseTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/MemoryRecallToolOverflowSummaryTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/MemoryRecallToolProjectScopeTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/MemoryRecallToolTopicAliasTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/MemoryWriteToolProjectScopeTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/Pecut10VerificationTests.cs"] = 2,
+            ["tests/Eling.Backend.Tests/PeerMemoryNotifyTests.cs"] = 2,
+            ["tests/Eling.Backend.Tests/ProjectContextNoAutoCreateTests.cs"] = 2,
+            ["tests/Eling.Backend.Tests/ProjectIdentityLoggingTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/ProjectMemoryChainEndpointTests.cs"] = 2,
+            ["tests/Eling.Backend.Tests/ProjectScopeCatalogTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/RuntimeDirWatcherTests.cs"] = 2,
+            ["tests/Eling.Backend.Tests/RuntimeMetricsSamplerTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/RuntimeRegistryWorkspacePruneTests.cs"] = 3,
+            ["tests/Eling.Backend.Tests/RuntimeRegistryWorkspaceRecordingTests.cs"] = 3,
+            ["tests/Eling.Backend.Tests/ScopeChainDiTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/ScopeChainSmokeTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/SemanticJudgeStoreTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/Shell/ShellConfigStoreTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/Shell/ShellToolsTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/ShellAgentToolTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/TestProcesses.cs"] = 5,
+            ["tests/Eling.Backend.Tests/Tools/ToolPolicyStoreTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/Updates/FileUpdateCacheTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/Updates/UpdateCheckerTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/Updates/UpdateNoticeBlockTests.cs"] = 1,
+            ["tests/Eling.Backend.Tests/ZombieProcessCleanerTests.cs"] = 2,
+            ["tests/Eling.Core.Tests/AppSettingsConnectionScannerTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/AppSettingsSourceResolverTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/CacheFileGateTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/CodebaseIndexSizeTests.cs"] = 2,
+            ["tests/Eling.Core.Tests/CodebaseSiblingReadOnlyFirstTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/DatabaseReadServiceCacheTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/JsonDatabaseReadCacheTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/JsonRedisReadCacheTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/JsonWorkspaceRegistryTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/LogReaderJsonlTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/LogReaderTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/ProjectScopeDiscoverChainTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/ProjectScopeTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/RedisKeyReadServiceOfflineTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/RedisScanCommandTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/ScopeChainTests.cs"] = 1,
+            ["tests/Eling.Core.Tests/TempWorkspace.cs"] = 2,
+            ["tests/Eling.Core.Tests/UserScopeTests.cs"] = 1,
+        };
+
+
+    private static IEnumerable<string> SilentCatches(string text, string rel)
+    {
+        const string keyword = "catch";
+        var index = 0;
+        while ((index = text.IndexOf(keyword, index, StringComparison.Ordinal)) >= 0)
+        {
+            var at = index;
+            index += keyword.Length;
+
+            var cursor = SkipWhitespaceAndComments(text, index);
+            if (cursor < text.Length && text[cursor] == '(')
+            {
+                var close = MatchClosing(text, cursor, '(', ')');
+                if (close < 0) continue;
+                cursor = SkipWhitespaceAndComments(text, close + 1);
+            }
+            if (HasWordAt(text, cursor, "when"))
+            {
+                cursor = SkipWhitespaceAndComments(text, cursor + 4);
+                if (cursor < text.Length && text[cursor] == '(')
+                {
+                    var close = MatchClosing(text, cursor, '(', ')');
+                    if (close < 0) continue;
+                    cursor = SkipWhitespaceAndComments(text, close + 1);
+                }
+            }
+            if (cursor >= text.Length || text[cursor] != '{') continue;
+
+            var open = cursor;
+            var closeBrace = MatchClosing(text, open, '{', '}');
+            if (closeBrace < 0) continue;
+
+            if (IsEffectivelyEmpty(text.Substring(open + 1, closeBrace - open - 1)))
+            {
+                var lineNo = 1 + text.AsSpan(0, at).Count('\n');
+                yield return $"{rel}:{lineNo}: empty or comment-only catch body";
+            }
+        }
+    }
+
+    /// <summary>Advance past whitespace and comments (both kinds).</summary>
+    private static int SkipWhitespaceAndComments(string text, int start)
+    {
+        var i = start;
+        while (i < text.Length)
+        {
+            if (char.IsWhiteSpace(text[i])) { i++; continue; }
+            if (i + 1 < text.Length && text[i] == '/' && text[i + 1] == '/')
+            {
+                var nl = text.IndexOf('\n', i);
+                i = nl < 0 ? text.Length : nl + 1;
+                continue;
+            }
+            if (i + 1 < text.Length && text[i] == '/' && text[i + 1] == '*')
+            {
+                var end = text.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                i = end < 0 ? text.Length : end + 2;
+                continue;
+            }
+            break;
+        }
+        return i;
+    }
+
+    /// <summary>
+    /// Brace/paren matching that is string- and comment-aware, so a bracket
+    /// inside a string or comment never shifts the balance.
+    /// </summary>
+    private static int MatchClosing(string text, int openAt, char open, char close)
+    {
+        var depth = 0;
+        for (var i = openAt; i < text.Length; i++)
+        {
+            var ch = text[i];
+            if (ch == open) { depth++; continue; }
+            if (ch == close)
+            {
+                depth--;
+                if (depth == 0) return i;
+                continue;
+            }
+            if (ch == '"' || ch == '\'')
+            {
+                i = SkipString(text, i, ch);
+                continue;
+            }
+            if (ch == '/' && i + 1 < text.Length && text[i + 1] == '/')
+            {
+                var nl = text.IndexOf('\n', i);
+                i = nl < 0 ? text.Length : nl;
+                continue;
+            }
+            if (ch == '/' && i + 1 < text.Length && text[i + 1] == '*')
+            {
+                var end = text.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                if (end < 0) return -1;
+                i = end + 1;
+                continue;
+            }
+        }
+        return -1;
+    }
+
+    /// <summary>Skip a string/char literal; escapes are honoured.</summary>
+    private static int SkipString(string text, int start, char quote)
+    {
+        for (var i = start + 1; i < text.Length; i++)
+        {
+            if (text[i] == '\\') { i++; continue; }
+            if (text[i] == quote) return i;
+        }
+        return text.Length - 1;
+    }
+
+    /// <summary>True when the body reduces to nothing once strings can hold content and comments/whitespace are removed.</summary>
+    private static bool IsEffectivelyEmpty(string body)
+    {
+        var i = 0;
+        while (i < body.Length)
+        {
+            var ch = body[i];
+            if (char.IsWhiteSpace(ch)) { i++; continue; }
+            if (ch == '/' && i + 1 < body.Length && body[i + 1] == '/')
+            {
+                var nl = body.IndexOf('\n', i);
+                i = nl < 0 ? body.Length : nl + 1;
+                continue;
+            }
+            if (ch == '/' && i + 1 < body.Length && body[i + 1] == '*')
+            {
+                var end = body.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                if (end < 0) return false; // unterminated comment is still code-shaped; leave it to the compiler
+                i = end + 2;
+                continue;
+            }
+            // Anything else — code, or the contents of a string — counts as present.
+            return false;
+        }
+        return true;
+    }
+
+    private static bool HasWordAt(string text, int index, string word)
+    {
+        if (index + word.Length > text.Length) return false;
+        if (string.CompareOrdinal(text, index, word, 0, word.Length) != 0) return false;
+        var after = index + word.Length;
+        return after >= text.Length || char.IsWhiteSpace(text[after]) || text[after] == '(';
+    }
+
     [Fact]
     public void NoTuples_BeyondAllowlist()
     {
