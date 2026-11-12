@@ -153,7 +153,7 @@ public sealed class DomainCodeEndpointTests : IAsyncLifetime
             new("the Redis read service is never reached in these tests - every key route answers 404 first");
 
         public Task<KeyPage> ScanAsync(DatabaseConnection connection, RedisDatabaseIndex database, string prefix, long cursor, int pageOffset, int pageSize, CancellationToken cancellationToken = default, bool preferCache = true) => throw Unused();
-        public Task<KeyInspectResult> InspectAsync(DatabaseConnection connection, RedisDatabaseIndex database, string key, CancellationToken cancellationToken = default) => throw Unused();
+        public Task<KeyInspectResult> InspectAsync(DatabaseConnection connection, RedisDatabaseIndex database, string key, CancellationToken cancellationToken = default, bool preferCache = true) => throw Unused();
         public Task<RedisKeyProbeResult> ProbeKeyAsync(DatabaseConnection connection, RedisDatabaseIndex database, string key, CancellationToken cancellationToken = default) => throw Unused();
         public Task<IReadOnlyList<RedisKeyProbeResult>> ProbeKeysAsync(DatabaseConnection connection, RedisDatabaseIndex database, IReadOnlyList<string> keys, CancellationToken cancellationToken = default) => throw Unused();
         public Task<RedisCommandResult> ExecuteCommandAsync(DatabaseConnection connection, RedisDatabaseIndex database, string command, IReadOnlyList<string> args, CancellationToken cancellationToken = default) => throw Unused();
