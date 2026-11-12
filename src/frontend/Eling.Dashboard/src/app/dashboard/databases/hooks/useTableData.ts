@@ -104,6 +104,8 @@ export function useTableData({
         // Count first: when the requested page no longer exists (rows were
         // deleted under it), hand the clamp to the caller and paint nothing.
         // The empty response would render as a grid of nothing on page 99.
+        // The clamp belongs to the newest request only - a stale in-flight
+        // response must not yank the reader off the page they chose.
         let countedTotal: number | null = null
         if (countData) {
           const v = countData?.rows?.[0]?.[0]
@@ -113,6 +115,8 @@ export function useTableData({
         if (countedTotal !== null) {
           const safePage = clampPage(page, countedTotal, limit)
           if (safePage !== page && onClampPage) {
+            if (request !== browseInFlightRef.current) return
+            setBrowseTotal(countedTotal)
             onClampPage(safePage)
             if (browsePollRef.current) clearTimeout(browsePollRef.current)
             browsePollRef.current = null
