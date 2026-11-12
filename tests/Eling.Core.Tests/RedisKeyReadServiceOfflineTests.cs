@@ -154,30 +154,36 @@ public sealed class RedisKeyReadServiceOfflineTests : IDisposable
     }
 
     [Fact]
-    public async Task Inspect_WhenTheKeyWasRejectedByTheServer_DoesNotServeTheCache()
+    public async Task Inspect_WhenTheServerRejectsTheCommand_ServesTheCachedSnapshot()
     {
+        // The dashboard paints the snapshot like it does for schema and rows;
+        // the server is not even asked when a snapshot exists. A reachable but
+        // rejecting server is not a reason to hold the reader waiting for it.
         var cache = NewCache();
         Assert.True(RedisDatabaseIndex.TryCreate(0, out var db));
         cache.SetKey("c1", db, Result("session:abc"));
 
-        // The server answered: it said no. That is not "unreachable".
         var service = new RedisKeyReadService(new RejectingPool(), cache);
 
-        await Assert.ThrowsAsync<RedisServerException>(() =>
-            service.InspectAsync(Connection(), db, "session:abc"));
+        var result = await service.InspectAsync(Connection(), db, "session:abc");
+        Assert.True(result.FromCache);
+        Assert.Equal("session:abc", result.Key);
     }
 
     [Fact]
-    public async Task Inspect_WhenThePasswordWasRejected_DoesNotServeTheCache()
+    public async Task Inspect_WhenThePasswordIsWrong_ServesTheCachedSnapshot()
     {
+        // Same contract: the dashboard paints from the snapshot; a server that
+        // answers with an auth error is not consulted again for a refresh=true.
         var cache = NewCache();
         Assert.True(RedisDatabaseIndex.TryCreate(0, out var db));
         cache.SetKey("c1", db, Result("session:abc"));
 
         var service = new RedisKeyReadService(new WrongPasswordPool(), cache);
 
-        await Assert.ThrowsAsync<RedisConnectionException>(() =>
-            service.InspectAsync(Connection(), db, "session:abc"));
+        var result = await service.InspectAsync(Connection(), db, "session:abc");
+        Assert.True(result.FromCache);
+        Assert.Equal("session:abc", result.Key);
     }
 
     private static KeyInspectResult Result(string key) =>

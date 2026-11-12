@@ -338,15 +338,20 @@ public sealed class RedisKeyReadService : IRedisKeyReadService
     public async Task<KeyInspectResult> InspectAsync(
         DatabaseConnection connection, RedisDatabaseIndex database, string key, CancellationToken ct = default, bool preferCache = true)
     {
-        // A connection that just failed as unreachable cannot re-teach us that
-        // the host is alive until we try it again - so during the window no
-        // InspectLiveAsync happens and the cached answer is served now.
-        if (preferCache && IsRecentlyUnreachable(connection.Id))
+        // The dashboard paints the snapshot at once and asks the server behind
+        // it; a rejection from a reachable server is not marked unreachable and
+        // the next refresh=true request re-reads live. Full cache-first, like
+        // schema and query.
+        if (preferCache
+            && _cache.TryGetKey(connection.Id, database, key, out var snapshot, out var snapshotAt)
+            && snapshot is not null)
         {
-            if (TryServeCachedInspection(connection.Id, database, key, out var cached))
+            return snapshot with
             {
-                return cached;
-            }
+                FromCache = true,
+                CachedAt = snapshotAt,
+                TtlSeconds = RemainingTtl(snapshot)
+            };
         }
 
         try
