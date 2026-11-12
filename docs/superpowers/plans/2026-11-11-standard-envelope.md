@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> **Status (2026-11-12): Tasks 1–6 done and committed.** Task 7 (live verification) runs after the dev backend restarts; see the spec's Implemented note when done. Commits so far: 66f55dd (middleware + tests), e07fb5a (domain codes), 45e39e5 (apiFetch), 6e51efb (databases explorer), ba232b9 (rest of dashboard), 7c79e17 (Desktop client).
+> **Status (2026-11-12): Tasks 1-6 done and committed; Task 7 (live verification) dropped — live smoke skipped by user decision, TestServer reproduces the full pipeline (see the spec's Implemented note). Commits so far: 66f55dd (middleware + tests), e07fb5a (domain codes), 45e39e5 (apiFetch), 6e51efb (databases explorer), ba232b9 (rest of dashboard), 7c79e17 (Desktop client), plus the cache-first batch (887d0eb, 28fc64b, 34505a3, 3ad5695, 0f8ff6d) and the two-axis review fixes.
 
 **Goal:** Every JSON response from the Eling backend carries the standard envelope `{ code, message, data }` — machine `code` first (always filled), always-filled English `message`, `data` last — and every HTTP client in the repo (dashboard frontend, `Eling.Desktop`) reads it through one unwrap helper.
 

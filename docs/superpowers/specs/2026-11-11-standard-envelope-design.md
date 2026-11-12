@@ -1,7 +1,7 @@
 # Standard Response Envelope — Design
 
 - **Date:** 2026-11-11
-- **Status:** Implemented (2026-11-12) — middleware, endpoint polish, `apiFetch` migration, Desktop client; all test layers green (backend 1056, frontend 155, desktop 108). Live smoke against 4417 skipped by user decision; TestServer reproduces the full pipeline.
+- **Status:** Implemented (2026-11-12) - middleware, endpoint polish, `apiFetch` migration, Desktop client; all test layers green (core 754, backend 1057, frontend 182, desktop 108). Live smoke against 4417 skipped by user decision; TestServer reproduces the full pipeline.
 - **Scope:** `src/backend/Eling.Backend` (pipeline + a few endpoint polish spots), `src/frontend/Eling.Dashboard/src` (API helper + ~74 call-site migration), `src/desktop/Eling.Desktop` (`Services/ElingApiClient.cs` + one more file; 21 `ReadFromJsonAsync`/`GetFromJsonAsync` sites migrated via a `ReadEnvelopeAsync<T>` unwrap helper, choice (a) — user-picked)
 - **Extends:** `2026-11-11-no-empty-endpoint-responses-design.md` (now absorbed and deleted). The no-empty-response guarantee and the envelope are ONE middleware, not two buffering passes.
 
