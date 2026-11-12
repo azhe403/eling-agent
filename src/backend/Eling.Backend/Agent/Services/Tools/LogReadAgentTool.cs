@@ -8,7 +8,7 @@ public sealed class LogReadAgentTool(LogTools tool) : IAgentTool
 {
     public string Name => "log_read";
 
-    public string Description => "Read diagnostic log entries from a stream ('backend' or 'desktop') with level, substring, and tail filters.";
+    public string Description => "Read diagnostic log entries from a stream ('backend' or 'desktop'). Reads the format configured in log.json unless 'format' is given; dated reads span both .log and .jsonl. An undated read also merges today's archives (.log and .jsonl) with the active file. JSONL lines are raw JSON object strings.";
 
     public string ParametersJsonSchema => """
     {
@@ -18,7 +18,8 @@ public sealed class LogReadAgentTool(LogTools tool) : IAgentTool
         "date": { "type": "string", "description": "Optional archive date: YYYY-MM-DD." },
         "level": { "type": "string", "description": "Level filter: DEBUG, INFO, WARN, ERROR, FATAL." },
         "filter": { "type": "string", "description": "Case-insensitive substring filter." },
-        "tail": { "type": "integer", "description": "Max entries from end (1-5000, default 100)." }
+        "tail": { "type": "integer", "description": "Max entries from the end of the merged sequence (1-5000, default 100)." },
+        "format": { "type": "string", "description": "Optional format override: 'text' or 'jsonl'. Empty/'auto' = configured format." }
       }
     }
     """;
@@ -33,7 +34,8 @@ public sealed class LogReadAgentTool(LogTools tool) : IAgentTool
         var level = root.TryGetProperty("level", out var lElem) ? lElem.GetString() : null;
         var filter = root.TryGetProperty("filter", out var fElem) ? fElem.GetString() : null;
         var tail = root.TryGetProperty("tail", out var tElem) && tElem.TryGetInt32(out var t) ? t : 100;
+        var format = root.TryGetProperty("format", out var fmElem) ? fmElem.GetString() : null;
 
-        return Task.FromResult(tool.ReadLog(stream, date, tail, level, filter));
+        return Task.FromResult(tool.ReadLog(stream, date, tail, level, filter, format));
     }
 }

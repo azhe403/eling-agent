@@ -133,6 +133,14 @@ public static class McpHostBuilder
             services.AddSingleton<IMemoryChangeNotifier>(
                 _ => new HttpCoordinatorMemoryChangeNotifier(effectivePort));
             services.AddSingleton(shared.UserScope);
+            // The log_read MCP tool follows log.json live (the Func seam re-reads it via
+            // RefreshIfStale); only the sink's initial format above is static.
+            services.TryAddSingleton(sp => new Eling.Backend.Logging.LogConfigStore(
+                shared.UserScope,
+                sp.GetService<ILogger<Eling.Backend.Logging.LogConfigStore>>()
+                    ?? NullLogger<Eling.Backend.Logging.LogConfigStore>.Instance));
+            services.TryAddSingleton<Func<Eling.Core.Logging.LogFormat>>(sp =>
+                () => sp.GetRequiredService<Eling.Backend.Logging.LogConfigStore>().GetFormat());
 
             services.AddSingleton(shared);
             services.AddSingleton(effectiveContext);

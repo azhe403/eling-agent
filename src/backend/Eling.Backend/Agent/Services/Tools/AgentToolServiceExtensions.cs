@@ -42,6 +42,14 @@ public static class AgentToolServiceExtensions
         services.AddScoped<DatabaseGetSchemaTool>();
         services.AddScoped<DatabaseQueryTool>();
         services.AddScoped<LogTools>();
+        // log_read follows <user-scope>/config/log.json when a store is registered
+        // (dashboard host); bare agent-tool test containers get Text.
+        services.TryAddSingleton<Func<Eling.Core.Logging.LogFormat>>(sp =>
+        {
+            var store = sp.GetService<Eling.Backend.Logging.LogConfigStore>();
+            return store is null ? () => Eling.Core.Logging.LogFormat.Text
+                                 : () => store.GetFormat();
+        });
 
         // Agent-facing adapters expose the MCP tools to the LLM agent loop.
         services.AddScoped<IAgentTool, MemoryRecallAgentTool>();
