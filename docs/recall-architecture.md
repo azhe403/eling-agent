@@ -1,4 +1,4 @@
-# Eling Memory Recall Architecture & Flow
+# Eling Recall Architecture & Flow
 
 This document details the complete recall architecture in Eling, combining the strategic Quality Gate policies for AI agents and the internal 3-layer search engine mechanism.
 
