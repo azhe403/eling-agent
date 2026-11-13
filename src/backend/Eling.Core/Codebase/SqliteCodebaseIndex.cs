@@ -424,7 +424,7 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
                 FROM codebase_files f LEFT JOIN codebase_chunks c ON c.file_path = f.path
                 GROUP BY f.path ORDER BY f.last_indexed_at DESC LIMIT $lim;
                 """;
-            Add(cmd, "$lim", Math.Min(Math.Max(limit, 1), 100));
+            Add(cmd, "$lim", Math.Min(Math.Max(limit, 1), 20000));
             var rows = new List<CodebaseFileEntry>();
             await using var r = await cmd.ExecuteReaderAsync(ct);
             while (await r.ReadAsync(ct)) rows.Add(new CodebaseFileEntry(r.GetString(0), r.GetInt32(1), r.GetString(2)));
@@ -473,7 +473,11 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
                 LIMIT $lim;
                 """;
             Add(cmd, "$needle", needle.Trim());
-            Add(cmd, "$lim", Math.Min(Math.Max(limit, 1), 100));
+            // One effective cap shared by the LIMIT and the comparison below:
+            // comparing rows.Count against the uncapped parameter misjudged
+            // whether to run the count query.
+            var effectiveLimit = Math.Min(Math.Max(limit, 1), 20000);
+            Add(cmd, "$lim", effectiveLimit);
             var rows = new List<CodebaseFileEntry>();
             await using var r = await cmd.ExecuteReaderAsync(ct);
             while (await r.ReadAsync(ct))
@@ -482,7 +486,7 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
             }
 
             var totalCount = rows.Count;
-            if (rows.Count == limit)
+            if (rows.Count == effectiveLimit)
             {
                 await using var countCmd = c.CreateCommand();
                 Add(countCmd, "$needle", needle.Trim());

@@ -223,7 +223,7 @@ public static class CodebaseEndpoints
         using var _actor = AuditActorContext.Begin(DashboardActor());
         var audit = AuditFor(context);
         var logger = loggerFactory.CreateLogger("Eling.Backend.Endpoints.CodebaseEndpoints");
-        if (limit is < 1 or > 100)
+        if (limit is < 1 or > 20000)
             limit = 20;
         var sw = Stopwatch.StartNew();
         try
@@ -259,10 +259,13 @@ public static class CodebaseEndpoints
             if (searchScope != SearchScope.Content)
             {
                 var match = searchScope == SearchScope.Path ? CodebaseFileMatch.Path : CodebaseFileMatch.FileName;
-                var matched = await svc.SearchFilesAsync(q, limit ?? 20, match, roots);
+                var fileSearch = await svc.SearchFilesWithTotalsAsync(q, limit ?? 20, match, roots);
+                var matched = fileSearch.Files;
                 await audit.RecordSearchAsync(q, matched.Count, svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
+                // The total is limit-independent: a federated run sums every root's
+                // complete match count, matching the content scope's semantics.
                 var totalMatches = matched.Count > 0
-                    ? Math.Max(matched.Count, matched.GroupBy(f => f.ProjectRoot).Sum(g => g.First().TotalMatches))
+                    ? fileSearch.TotalByRoot.Values.Sum()
                     : 0;
                 var stats = new
                 {
@@ -278,9 +281,12 @@ public static class CodebaseEndpoints
             }
 
             IReadOnlyList<ScopedCodebaseHit> hits;
+            IReadOnlyDictionary<string, int>? federatedTotals = null;
             if (roots is not null)
             {
-                hits = await svc.SearchAllAsync(q, limit ?? 20, roots, pathPrefix);
+                var federated = await svc.SearchAllWithTotalsAsync(q, limit ?? 20, roots, pathPrefix);
+                hits = federated.Hits;
+                federatedTotals = federated.TotalByRoot;
             }
             else
             {
@@ -289,9 +295,12 @@ public static class CodebaseEndpoints
                     .ToList();
             }
             await audit.RecordSearchAsync(q, hits.Count, svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
-            var totalContentMatches = hits.Count > 0
-                ? Math.Max(hits.Count, hits.GroupBy(h => h.ProjectRoot).Sum(g => g.First().TotalMatches))
-                : 0;
+            // The total is limit-independent: a federated run sums every root's
+            // complete match count (including roots whose hits fell below the
+            // page), a single-root run takes the one root's count.
+            var totalContentMatches = federatedTotals is not null
+                ? federatedTotals.Values.Sum()
+                : hits.Count > 0 ? hits.Max(h => h.TotalMatches) : 0;
             var contentStats = new
             {
                 tookMs = (int)sw.ElapsedMilliseconds,

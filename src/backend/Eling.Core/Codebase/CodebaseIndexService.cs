@@ -370,6 +370,18 @@ public sealed class CodebaseIndexService
     }
 
     /// <summary>
+    /// The outcome of one federated search: the merged, limit-trimmed hit list
+    /// every caller shows, plus the complete match count of each root that
+    /// produced hits, taken from the per-root FTS passes (which count the
+    /// full matched set, not the trimmed page). Callers that need an honest
+    /// "N of M matches" read M from here — summing only the roots whose hits
+    /// survived the global Take made M grow with the page size.
+    /// </summary>
+    public sealed record FederatedSearchResult(
+        IReadOnlyList<ScopedCodebaseHit> Hits,
+        IReadOnlyDictionary<string, int> TotalByRoot);
+
+    /// <summary>
     /// Federated search over this project plus the given sibling project roots
     /// ("all scope"). Each sibling DB is opened read-only: roots without an
     /// existing index file are skipped, per-project failures never fail the
@@ -377,6 +389,22 @@ public sealed class CodebaseIndexService
     /// Local hits get a small locality bias so ties favor this project.
     /// </summary>
     public async Task<IReadOnlyList<ScopedCodebaseHit>> SearchAllAsync(
+        string query,
+        int limit = 20,
+        IEnumerable<string>? projectRoots = null,
+        string? pathPrefix = null,
+        string? filePattern = null,
+        CancellationToken ct = default)
+        => (await SearchAllWithTotalsAsync(query, limit, projectRoots, pathPrefix, filePattern, ct)).Hits;
+
+    /// <summary>
+    /// <see cref="SearchAllAsync"/> with the per-root match totals the endpoint
+    /// needs for a limit-independent totalHits. The per-root total is the
+    /// largest TotalMatches any hit from that root carries — each hit is
+    /// stamped with its pass's complete match count, so this survives the
+    /// global Take that trims the hit list itself.
+    /// </summary>
+    public async Task<FederatedSearchResult> SearchAllWithTotalsAsync(
         string query,
         int limit = 20,
         IEnumerable<string>? projectRoots = null,
@@ -444,9 +472,14 @@ public sealed class CodebaseIndexService
         // OrderByDescending is a stable sort, so equal scores keep the
         // completion-order-independence the serial version had: parallel
         // workers must never reorder the hit list.
-        var merged = all.OrderByDescending(h => h.Score).Take(Math.Min(Math.Max(limit, 1), 100)).ToList();
+        var merged = all.OrderByDescending(h => h.Score).Take(Math.Min(Math.Max(limit, 1), 20000)).ToList();
+        // The totals come from the untrimmed bag, so roots whose hits all fell
+        // below the Take still contribute what they matched.
+        var totals = all
+            .GroupBy(h => h.ProjectRoot, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Max(h => h.TotalMatches), StringComparer.OrdinalIgnoreCase);
         _logger.LogDebug("Federated search for '{Query}' completed across {RootCount} roots: {TotalHits} total hits returned.", query, roots.Count, merged.Count);
-        return merged;
+        return new FederatedSearchResult(merged, totals);
     }
 
     /// <summary>
@@ -492,30 +525,56 @@ public sealed class CodebaseIndexService
                 continue;
             }
         }
-        return all.OrderByDescending(f => f.LastIndexedAt, StringComparer.Ordinal).Take(Math.Min(Math.Max(limit, 1), 100)).ToList();
+        return all.OrderByDescending(f => f.LastIndexedAt, StringComparer.Ordinal).Take(Math.Min(Math.Max(limit, 1), 20000)).ToList();
     }
 
     /// <summary>
-    /// Indexed files whose path — or file name — contains the needle, across
-    /// the given project roots (or this project when null). This is the file
-    /// half of the dashboard's codebase search: the query is matched against
-    /// the indexed paths instead of the indexed contents, and the answer is a
-    /// list of files rather than a list of snippets.
-    ///
-    /// The needle is a case-insensitive substring, never a glob — the user
-    /// types a fragment they remember, and a folder name is as valid a
-    /// fragment as a file name. Read-only, never throws for missing indexes.
+    /// The outcome of one federated file search: the merged, limit-trimmed
+    /// file list, plus the complete match count of each root that produced
+    /// files — taken before the global row budget is applied, so a caller
+    /// reporting "N of M matches" does not see M move with the page size.
     /// </summary>
-    public async Task<IReadOnlyList<CodebaseFileSummary>> SearchFilesAsync(
+    public sealed record FileSearchResult(
+        IReadOnlyList<CodebaseFileSummary> Files,
+        IReadOnlyDictionary<string, int> TotalByRoot);
+
+    /// <summary>
+    /// <see cref="SearchFilesAsync"/> with the per-root match totals the endpoint needs for
+    /// a limit-independent totalHits. The per-root total is the largest TotalMatches any
+    /// file from that root carries — each row is stamped with its root's complete match
+    /// count.
+    /// </summary>
+    public async Task<FileSearchResult> SearchFilesWithTotalsAsync(
         string needle,
         int limit = 20,
         CodebaseFileMatch match = CodebaseFileMatch.Path,
         IEnumerable<string>? projectRoots = null,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(needle)) return Array.Empty<CodebaseFileSummary>();
+        return await SearchFilesCoreAsync(needle, limit, match, projectRoots, ct);
+    }
+
+    public async Task<IReadOnlyList<CodebaseFileSummary>> SearchFilesAsync(
+        string needle,
+        int limit = 20,
+        CodebaseFileMatch match = CodebaseFileMatch.Path,
+        IEnumerable<string>? projectRoots = null,
+        CancellationToken ct = default)
+        => (await SearchFilesCoreAsync(needle, limit, match, projectRoots, ct)).Files;
+
+    private async Task<FileSearchResult> SearchFilesCoreAsync(
+        string needle,
+        int limit,
+        CodebaseFileMatch match,
+        IEnumerable<string>? projectRoots,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(needle))
+            return new FileSearchResult(
+                Array.Empty<CodebaseFileSummary>(),
+                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
         var roots = NormalizeRoots(projectRoots);
-        var capped = Math.Min(Math.Max(limit, 1), 100);
+        var capped = Math.Min(Math.Max(limit, 1), 20000);
 
         var all = new List<CodebaseFileSummary>();
         foreach (var root in roots)
@@ -552,11 +611,17 @@ public sealed class CodebaseIndexService
         // Path order, then workspace: a file search is a list to scan, and the
         // same relative path can exist in two workspaces — the root breaks
         // the tie so the order stays total.
-        return all
+        var paged = all
             .OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
             .ThenBy(f => f.ProjectRoot, StringComparer.Ordinal)
             .Take(capped)
             .ToList();
+        // The totals come from the untrimmed list, so roots whose files fell
+        // below the cap still contribute what they matched.
+        var totals = all
+            .GroupBy(f => f.ProjectRoot, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Max(f => f.TotalMatches), StringComparer.OrdinalIgnoreCase);
+        return new FileSearchResult(paged, totals);
     }
 
     /// <summary>
