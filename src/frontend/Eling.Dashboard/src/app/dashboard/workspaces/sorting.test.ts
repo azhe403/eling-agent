@@ -101,7 +101,7 @@ describe("sortWorkspaces", () => {
 
   it("puts running workspaces first, then by name — reversed when flipped", () => {
     const groups = [
-      ws("/w/zed"),
+      ws("/w/zeta"),
       ws("/w/beta", { running: true }),
       ws("/w/alpha", { running: true }),
       ws("/w/abc"),
@@ -111,13 +111,13 @@ describe("sortWorkspaces", () => {
       "/w/alpha",
       "/w/beta",
       "/w/abc",
-      "/w/zed",
+      "/w/zeta",
     ])
     // flipped: the offline group on top, the name order within a group runs
     // in its own direction, so the two read alpha-to-z either way.
     expect(names(sortWorkspaces(groups, "status", "flipped"))).toEqual([
       "/w/abc",
-      "/w/zed",
+      "/w/zeta",
       "/w/alpha",
       "/w/beta",
     ])

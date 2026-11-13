@@ -1,7 +1,7 @@
 /**
  * One row per live eling process (or one per remembered workspace). Several
- * stdio sessions can run in one folder — one per opencode/openchamber
- * session, plus peers and the desktop app — so the workspaces page groups
+ * stdio sessions can run in one folder — one per agent harness session,
+ * plus peers and the desktop app — so the workspaces page groups
  * the rows back per folder and sums the metrics instead of following the
  * old `Alive()` dedupe, which kept a single, arbitrary representative
  * process. Nothing here touches React: same input, same output.
