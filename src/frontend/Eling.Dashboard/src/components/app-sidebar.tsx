@@ -15,6 +15,7 @@ import {
   FileText,
   Settings,
   SquareTerminal,
+  GitCommitHorizontal,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -47,6 +48,11 @@ const navMain = [
     title: "Codebase",
     url: "/dashboard/codebase",
     icon: <BookOpen className="size-4" />,
+  },
+  {
+    title: "Commit Lease",
+    url: "/dashboard/commit-lease",
+    icon: <GitCommitHorizontal className="size-4" />,
   },
   {
     title: "Memories",

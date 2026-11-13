@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { useDashboardData } from "./home/data"
+import { CommitLeaseCard } from "./home/commit-lease"
 import { RecentActivity } from "./home/recent-activity"
 import { RecentMemories } from "./home/recent-memories"
 import { PlatformStatus } from "./home/platform"
@@ -69,6 +70,7 @@ export function DashboardHome() {
               <div className="flex flex-col gap-4">
                 <PlatformStatus data={data} streamStatus={streamStatus} />
                 <WorkspaceList section={data.workspaces} />
+                <CommitLeaseCard />
               </div>
             </div>
           </>
