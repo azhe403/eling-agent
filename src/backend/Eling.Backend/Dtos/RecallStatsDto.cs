@@ -1,13 +1,13 @@
 using System.Text.Json.Serialization;
 using Eling.Core;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 
 namespace Eling.Backend.Dtos;
 
 /// <summary>
 /// Recall summary counts surfaced to MCP clients.
 /// </summary>
-public sealed class MemoryRecallStatsDto
+public sealed class RecallStatsDto
 {
     [JsonPropertyName("totalMemories")]
     public int TotalMemories { get; set; }
@@ -24,7 +24,7 @@ public sealed class MemoryRecallStatsDto
     [JsonPropertyName("recentCount")]
     public int RecentCount { get; set; }
 
-    public static MemoryRecallStatsDto From(MemoryRecallStats stats) => new()
+    public static RecallStatsDto From(RecallStats stats) => new()
     {
         TotalMemories = stats.TotalMemories,
         ActiveMemories = stats.ActiveMemories,

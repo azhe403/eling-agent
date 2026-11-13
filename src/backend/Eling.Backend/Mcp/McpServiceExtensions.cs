@@ -17,7 +17,7 @@ using Eling.Core.FileSystem;
 using Eling.Core.Memory;
 using Eling.Core.Memory.Serialization;
 using Eling.Core.Memory.Storage;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 using Eling.Core.Scope;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -88,7 +88,7 @@ public static class McpServiceExtensions
 
         AddCodebaseServices(services, projectScope.Root);
 
-        services.AddScoped<IMemoryRecallService, MemoryRecallService>();
+        services.AddScoped<IRecallService, RecallService>();
         services.AddScoped<IMemoryMaintenanceService, MemoryMaintenanceService>();
 
         services.TryAddSingleton<IProjectScopePolicyStore>(sp =>
@@ -204,7 +204,7 @@ public static class McpServiceExtensions
             return new ScopedMemoryService(levels, globalService, policy, merger, chain.Cwd, localService: localService, canonicalRoot: localCanonicalRoot, auditLogger: sp.GetService<IAuditLogger>());
         });
 
-        services.AddScoped<IMemoryRecallService, MemoryRecallService>();
+        services.AddScoped<IRecallService, RecallService>();
         services.AddScoped<IMemoryMaintenanceService, MemoryMaintenanceService>();
 
         // Same sandbox wiring for the scope-chain path: the filesystem belongs to

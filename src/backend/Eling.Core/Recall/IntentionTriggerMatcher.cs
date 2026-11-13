@@ -2,11 +2,11 @@ using Eling.Core.Intention;
 using Eling.Core.Matching;
 using Eling.Core.Memory;
 
-namespace Eling.Core.MemoryRecall;
+namespace Eling.Core.Recall;
 
 internal static class IntentionTriggerMatcher
 {
-    public static (bool Matched, bool Expired) Match(Intention.Intention intention, MemoryRecallContext? context, DateTimeOffset now)
+    public static (bool Matched, bool Expired) Match(Intention.Intention intention, RecallContext? context, DateTimeOffset now)
     {
         if (IsExpired(intention, now)) return (false, true);
         var matched = intention.TriggerType switch

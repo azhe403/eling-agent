@@ -4,7 +4,7 @@ Single binary, three faces: the same process serves MCP (stdio), the HTTP API, a
 
 ## Layers
 
-- `src/backend/Eling.Core`: Domain (Memory, Intention, Scope, Runtime) — `Eling.Core/` → `Memory/`, `Scope/`, `Runtime/`, `MemoryRecall/`; flat `Eling.Core` namespace. No infrastructure beyond `Ulid`, `YamlDotNet`, `Microsoft.Data.Sqlite`.
+- `src/backend/Eling.Core`: Domain (Memory, Intention, Scope, Runtime) — `Eling.Core/` → `Memory/`, `Scope/`, `Runtime/`, `Recall/`; flat `Eling.Core` namespace. No infrastructure beyond `Ulid`, `YamlDotNet`, `Microsoft.Data.Sqlite`.
 - `src/backend/Eling.Backend`: Single binary `eling-backend` — unified MCP (stdio) + HTTP API + UI (`Microsoft.NET.Sdk.Web`, `Assembly: eling-backend`). `Program.cs` only orchestrates; `Bootstrap/` (port probe `DashboardPort`, scope `ProjectContext`, DI `DashboardServices`, routes `DashboardRoutes`, self-register `RuntimeSelfRegistration`); `Mcp/Tools/` (one logical tool per file e.g. `MemoryWriteTool`); `Dtos/` (single `Eling.Backend.Dtos`); `Endpoints/`, `Converters/`. Listens `127.0.0.1:4317` (stg) / `4417` (dev, `ELING_DASHBOARD_PORT`) + `::1`; `0.0.0.0:4427` for frontend dev via `pnpm`.
 - `src/frontend/Eling.Dashboard`: Next.js frontend UI. Dev `next dev -H 0.0.0.0 -p 4427` → `rewrites` `nginx`-style proxy to `http://127.0.0.1:{ELING_BACKEND_PORT}/api/*`. Prod `output: export` served as `eling-dashboard-ui/` static by `Eling.Backend`.
 - `src/desktop/Eling.Desktop`: Avalonia desktop client (experimental) — standalone memory browsing, runtime monitoring, direct agent chat. Shares the backend DTOs through the HTTP API.

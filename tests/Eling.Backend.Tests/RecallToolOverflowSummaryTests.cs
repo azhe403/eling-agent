@@ -1,7 +1,7 @@
 using Eling.Backend.Dtos;
 using Eling.Backend.Mcp.Tools;
 using Eling.Core.Memory;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 
 namespace Eling.Backend.Tests;
 
@@ -31,7 +31,7 @@ public sealed class RecallToolOverflowSummaryTests : IDisposable
         var summarizer = new StubSummarizer(new MemorySummary(["digest paragraph one", "digest paragraph two"], "judge"));
         var tool = new RecallTool(new OverflowRecallService(ResultWithOverflow(12)), cwd: _root, summarizer: summarizer);
 
-        var response = await tool.RecallAsync(new MemoryRecallContextInput { Topics = ["any"] });
+        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] });
 
         Assert.NotNull(response.RecallSummary);
         Assert.Equal(12, response.RecallSummary!.ItemCount);
@@ -50,7 +50,7 @@ public sealed class RecallToolOverflowSummaryTests : IDisposable
             cwd: _root,
             summarizer: new StubSummarizer(throwing: true));
 
-        var response = await tool.RecallAsync(new MemoryRecallContextInput { Topics = ["any"] });
+        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] });
 
         Assert.Equal("heuristic", response.RecallSummary!.Source);
         Assert.Contains("judge-failed", response.RecallSummary.Note);
@@ -65,7 +65,7 @@ public sealed class RecallToolOverflowSummaryTests : IDisposable
             cwd: _root,
             summarizer: new StubSummarizer(new MemorySummary([], "judge")));
 
-        var response = await tool.RecallAsync(new MemoryRecallContextInput { Topics = ["any"] });
+        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] });
 
         Assert.Equal("heuristic", response.RecallSummary!.Source);
         Assert.Contains("no usable summary", response.RecallSummary.Note);
@@ -76,7 +76,7 @@ public sealed class RecallToolOverflowSummaryTests : IDisposable
     {
         var tool = new RecallTool(new OverflowRecallService(ResultWithOverflow(3)), cwd: _root);
 
-        var response = await tool.RecallAsync(new MemoryRecallContextInput { Topics = ["any"] });
+        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] });
 
         Assert.Equal("heuristic", response.RecallSummary!.Source);
         Assert.Contains("judge not configured", response.RecallSummary.Note);
@@ -90,7 +90,7 @@ public sealed class RecallToolOverflowSummaryTests : IDisposable
             cwd: _root,
             summarizer: new StubSummarizer(new MemorySummary(["x"], "judge")));
 
-        var response = await tool.RecallAsync(new MemoryRecallContextInput { Topics = ["any"] }, summarizeOverflow: false);
+        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] }, summarizeOverflow: false);
 
         Assert.Null(response.RecallSummary);
     }
@@ -103,23 +103,23 @@ public sealed class RecallToolOverflowSummaryTests : IDisposable
             cwd: _root,
             summarizer: new StubSummarizer(new MemorySummary(["x"], "judge")));
 
-        var response = await tool.RecallAsync(new MemoryRecallContextInput { Topics = ["any"] });
+        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] });
 
         Assert.Null(response.RecallSummary);
     }
 
-    private static MemoryRecallResult ResultWithOverflow(int overflowCount)
+    private static RecallResult ResultWithOverflow(int overflowCount)
     {
         var overflow = Enumerable.Range(0, overflowCount)
-            .Select(i => new MemoryRecallHit(new Memory(MemoryType.Fact, $"overflow fact {i}"), ["porter"], 1.0, 0.0, "or-fallback"))
+            .Select(i => new RecallHit(new Memory(MemoryType.Fact, $"overflow fact {i}"), ["porter"], 1.0, 0.0, "or-fallback"))
             .ToList();
-        return new MemoryRecallResult([], [], [], new MemoryRecallStats(0, 0, 0, 0, 0), null, overflow);
+        return new RecallResult([], [], [], new RecallStats(0, 0, 0, 0, 0), null, overflow);
     }
 
-    private sealed class OverflowRecallService(MemoryRecallResult result) : IMemoryRecallService
+    private sealed class OverflowRecallService(RecallResult result) : IRecallService
     {
-        public Task<MemoryRecallResult> RecallAsync(
-            MemoryRecallContext? context,
+        public Task<RecallResult> RecallAsync(
+            RecallContext? context,
             int recallLimit = 10,
             int recentLimit = 10,
             string? scope = null,

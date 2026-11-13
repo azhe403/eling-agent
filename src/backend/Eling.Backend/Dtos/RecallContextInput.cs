@@ -4,10 +4,10 @@ namespace Eling.Backend.Dtos;
 
 /// <summary>
 /// Task context passed to <c>recall</c>. Mirrors the application
-/// layer <c>MemoryRecallContext</c> but is decoupled so the MCP DTO can evolve
+/// layer <c>RecallContext</c> but is decoupled so the MCP DTO can evolve
 /// independently.
 /// </summary>
-public sealed class MemoryRecallContextInput
+public sealed class RecallContextInput
 {
     [JsonPropertyName("filePath")]
     public string? FilePath { get; set; }

@@ -1,7 +1,7 @@
 using Eling.Backend.Dtos;
 using Eling.Backend.Mcp.Tools;
 using Eling.Backend.Updates;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 using Xunit;
 
 namespace Eling.Backend.Tests.Updates;
@@ -91,15 +91,15 @@ public sealed class UpdateNoticeBlockTests : IDisposable
         Assert.Null(UpdateNoticeDto.FromStatus(Quiet));
     }
 
-    private sealed class EmptyRecallService : IMemoryRecallService
+    private sealed class EmptyRecallService : IRecallService
     {
-        public Task<MemoryRecallResult> RecallAsync(
-            MemoryRecallContext? context,
+        public Task<RecallResult> RecallAsync(
+            RecallContext? context,
             int recallLimit = 10,
             int recentLimit = 10,
             string? scope = null,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(new MemoryRecallResult([], [], [], new MemoryRecallStats(0, 0, 0, 0, 0)));
+            => Task.FromResult(new RecallResult([], [], [], new RecallStats(0, 0, 0, 0, 0)));
     }
 
     private sealed class StubChecker : IUpdateChecker

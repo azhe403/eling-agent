@@ -2,7 +2,7 @@ using Eling.Backend.Agent.Ports;
 using Eling.Backend.Dtos;
 using Eling.Backend.Mcp;
 using Eling.Core.Codebase;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 using Microsoft.Extensions.Logging;
 using System.Text;
 
@@ -13,7 +13,7 @@ public sealed class AgentTurnService(
     IEnumerable<IAgentTool> tools,
     BackendChatStore chats,
     ProviderStore provider,
-    IMemoryRecallService recall,
+    IRecallService recall,
     CodebaseIndexService codebase,
     ILogger<AgentTurnService> logger)
 {
@@ -57,7 +57,7 @@ public sealed class AgentTurnService(
             {
                 var topics = new List<string> { message, "standing rules", "preferences", "decisions", "lessons", "recent work", "conventions", "recently touched work" };
                 var recallResult = await recall.RecallAsync(
-                    new MemoryRecallContext(topics, null, workspace), 10, 10, "merged", ct);
+                    new RecallContext(topics, null, workspace), 10, 10, "merged", ct);
 
                 var sb = new StringBuilder();
                 sb.AppendLine();

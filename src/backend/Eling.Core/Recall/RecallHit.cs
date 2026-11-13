@@ -1,6 +1,6 @@
 using Eling.Core.Memory;
 
-namespace Eling.Core.MemoryRecall;
+namespace Eling.Core.Recall;
 
 /// <summary>
 /// A recalled memory with the search-layer metadata that produced it:
@@ -11,7 +11,7 @@ namespace Eling.Core.MemoryRecall;
 /// given topics and which query strategy was used. Carries scope
 /// provenance: which chain level (or global) the hit came from.
 /// </summary>
-public sealed record MemoryRecallHit(
+public sealed record RecallHit(
     Memory.Memory Memory,
     IReadOnlyCollection<string>? MatchedVia = null,
     double PorterScore = 0.0,

@@ -1,6 +1,6 @@
 using Eling.Core.Memory;
 
-namespace Eling.Core.MemoryRecall;
+namespace Eling.Core.Recall;
 
 /// <summary>
 /// Result of a memory recall. <see cref="RecallMemories"/> is derived from
@@ -15,10 +15,10 @@ namespace Eling.Core.MemoryRecall;
 /// hits beyond <c>recallLimit</c> that would otherwise be dropped; they are
 /// meant to be summarized, not skipped.
 /// </summary>
-public sealed record MemoryRecallResult(
-    IReadOnlyList<MemoryRecallHit> RecallMemories,
+public sealed record RecallResult(
+    IReadOnlyList<RecallHit> RecallMemories,
     IReadOnlyList<ScopedMemory> RecentMemories,
-    IReadOnlyList<MemoryRecallIntentionResult> Intentions,
-    MemoryRecallStats Stats,
-    IReadOnlyList<MemoryRecallHit>? StandingMemories = null,
-    IReadOnlyList<MemoryRecallHit>? OverflowMemories = null);
+    IReadOnlyList<RecallIntentionResult> Intentions,
+    RecallStats Stats,
+    IReadOnlyList<RecallHit>? StandingMemories = null,
+    IReadOnlyList<RecallHit>? OverflowMemories = null);

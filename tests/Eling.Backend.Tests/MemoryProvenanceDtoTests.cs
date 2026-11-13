@@ -3,7 +3,7 @@ using Eling.Backend.Mcp.Tools;
 using Eling.Core;
 using Eling.Core.Memory;
 using Eling.Core.Memory.Storage;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 
 namespace Eling.Backend.Tests;
 
@@ -24,7 +24,7 @@ public sealed class MemoryProvenanceDtoTests
     public void RecallDto_ProjectMemory_CarriesNameAndRoot()
     {
         var memory = new Memory(MemoryType.Fact, "content");
-        var hit = new MemoryRecallHit(
+        var hit = new RecallHit(
             memory,
             MatchedVia: ["porter"],
             PorterScore: -3.0,
@@ -33,7 +33,7 @@ public sealed class MemoryProvenanceDtoTests
             Scope: MemoryScopeKind.Project,
             ProjectRoot: RootPath);
 
-        var dto = MemoryRecallMemory.From(hit);
+        var dto = RecallMemory.From(hit);
 
         Assert.Equal("project", dto.Scope);
         Assert.Equal(RootName, dto.ProjectName);
@@ -44,7 +44,7 @@ public sealed class MemoryProvenanceDtoTests
     public void RecallDto_GlobalMemory_NullNameAndRoot()
     {
         var memory = new Memory(MemoryType.Fact, "content");
-        var hit = new MemoryRecallHit(
+        var hit = new RecallHit(
             memory,
             MatchedVia: ["porter"],
             PorterScore: -3.0,
@@ -53,7 +53,7 @@ public sealed class MemoryProvenanceDtoTests
             Scope: MemoryScopeKind.Global,
             ProjectRoot: null);
 
-        var dto = MemoryRecallMemory.From(hit);
+        var dto = RecallMemory.From(hit);
 
         Assert.Equal("global", dto.Scope);
         Assert.Null(dto.ProjectName);
@@ -65,7 +65,7 @@ public sealed class MemoryProvenanceDtoTests
     {
         var memory = new Memory(MemoryType.Fact, "content");
 
-        var dto = MemoryRecallMemory.From(memory);
+        var dto = RecallMemory.From(memory);
 
         Assert.Equal("project", dto.Scope);
         Assert.Null(dto.ProjectName);

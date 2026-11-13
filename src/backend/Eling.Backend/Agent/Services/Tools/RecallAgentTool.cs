@@ -52,10 +52,10 @@ public sealed class RecallAgentTool(RecallTool tool) : IAgentTool
         var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson);
         var root = doc.RootElement;
 
-        MemoryRecallContextInput? context = null;
+        RecallContextInput? context = null;
         if (root.TryGetProperty("context", out var ctxElem) && ctxElem.ValueKind == JsonValueKind.Object)
         {
-            context = JsonSerializer.Deserialize<MemoryRecallContextInput>(ctxElem.GetRawText(), JsonOptions);
+            context = JsonSerializer.Deserialize<RecallContextInput>(ctxElem.GetRawText(), JsonOptions);
         }
 
         var recallLimit = root.TryGetProperty("recallLimit", out var rlElem) && rlElem.TryGetInt32(out var rl) ? rl : 10;

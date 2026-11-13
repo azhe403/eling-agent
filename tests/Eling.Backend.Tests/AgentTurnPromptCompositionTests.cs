@@ -3,7 +3,7 @@ using Eling.Backend.Agent.Services;
 using Eling.Backend.Bootstrap;
 using Eling.Backend.Mcp;
 using Eling.Core.Codebase;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -76,20 +76,20 @@ public sealed class AgentTurnPromptCompositionTests
         }
     }
 
-    private sealed class StubRecallService : IMemoryRecallService
+    private sealed class StubRecallService : IRecallService
     {
-        public Task<MemoryRecallResult> RecallAsync(
-            MemoryRecallContext? context,
+        public Task<RecallResult> RecallAsync(
+            RecallContext? context,
             int recallLimit = 10,
             int recentLimit = 10,
             string? scope = null,
             CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(new MemoryRecallResult(
+            return Task.FromResult(new RecallResult(
                 [],
                 [],
                 [],
-                new MemoryRecallStats(0, 0, 0, 0, 0)));
+                new RecallStats(0, 0, 0, 0, 0)));
         }
     }
 }

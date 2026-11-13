@@ -2,7 +2,7 @@ using Eling.Backend.Agent.Services.Tools;
 using Eling.Backend.Dtos;
 using Eling.Backend.Mcp.Tools;
 using Eling.Core.Memory;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 
 namespace Eling.Backend.Tests;
 
@@ -44,7 +44,7 @@ public sealed class RecallToolTopicAliasTests : IDisposable
         var service = new CapturingRecallService();
         var tool = new RecallTool(service, cwd: _root);
 
-        await tool.RecallAsync(new MemoryRecallContextInput { Topics = ["changelog", "startup"] });
+        await tool.RecallAsync(new RecallContextInput { Topics = ["changelog", "startup"] });
 
         Assert.Equal(["changelog", "startup"], service.CapturedContext!.Topics);
     }
@@ -56,7 +56,7 @@ public sealed class RecallToolTopicAliasTests : IDisposable
         var tool = new RecallTool(service, cwd: _root);
 
         await tool.RecallAsync(
-            new MemoryRecallContextInput { Topics = ["nested"], FilePath = "a.cs" },
+            new RecallContextInput { Topics = ["nested"], FilePath = "a.cs" },
             topics: ["alias"]);
 
         Assert.Equal(["alias"], service.CapturedContext!.Topics);
@@ -99,42 +99,42 @@ public sealed class RecallToolTopicAliasTests : IDisposable
     [Fact]
     public async Task RecallAsync_StandingBaseline_SurfacesInResponse()
     {
-        var hit = new MemoryRecallHit(
+        var hit = new RecallHit(
             new Memory(MemoryType.Preference, "always run git hygiene"),
             ["standing"], 0.0, 0.0, "standing-baseline");
         var tool = new RecallTool(new StandingRecallService(hit), cwd: _root);
 
-        var response = await tool.RecallAsync(new MemoryRecallContextInput { Topics = ["anything"] });
+        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["anything"] });
 
         var standing = Assert.Single(response.StandingMemories);
         Assert.Equal(MemoryType.Preference, standing.Type);
         Assert.Equal("standing-baseline", standing.QueryMode);
     }
 
-    private sealed class CapturingRecallService : IMemoryRecallService
+    private sealed class CapturingRecallService : IRecallService
     {
-        public MemoryRecallContext? CapturedContext { get; private set; }
+        public RecallContext? CapturedContext { get; private set; }
 
-        public Task<MemoryRecallResult> RecallAsync(
-            MemoryRecallContext? context,
+        public Task<RecallResult> RecallAsync(
+            RecallContext? context,
             int recallLimit = 10,
             int recentLimit = 10,
             string? scope = null,
             CancellationToken cancellationToken = default)
         {
             CapturedContext = context;
-            return Task.FromResult(new MemoryRecallResult([], [], [], new MemoryRecallStats(0, 0, 0, 0, 0)));
+            return Task.FromResult(new RecallResult([], [], [], new RecallStats(0, 0, 0, 0, 0)));
         }
     }
 
-    private sealed class StandingRecallService(MemoryRecallHit standing) : IMemoryRecallService
+    private sealed class StandingRecallService(RecallHit standing) : IRecallService
     {
-        public Task<MemoryRecallResult> RecallAsync(
-            MemoryRecallContext? context,
+        public Task<RecallResult> RecallAsync(
+            RecallContext? context,
             int recallLimit = 10,
             int recentLimit = 10,
             string? scope = null,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(new MemoryRecallResult([], [], [], new MemoryRecallStats(0, 0, 0, 0, 0), [standing]));
+            => Task.FromResult(new RecallResult([], [], [], new RecallStats(0, 0, 0, 0, 0), [standing]));
     }
 }

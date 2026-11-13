@@ -1,6 +1,6 @@
 using Eling.Core.Intention;
 using Eling.Core.Memory;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 
 namespace Eling.Core.Tests;
 
@@ -13,8 +13,8 @@ public sealed class RecallValueTests
     public void Context_Equality_ByValue()
     {
         // Act
-        var left = new MemoryRecallContext(["a"], "f.cs", "/tmp");
-        var right = new MemoryRecallContext(["a"], "f.cs", "/tmp");
+        var left = new RecallContext(["a"], "f.cs", "/tmp");
+        var right = new RecallContext(["a"], "f.cs", "/tmp");
 
         // Assert — record holds a collection, so compare element-wise
         Assert.Equal(left.Topics, right.Topics);
@@ -26,7 +26,7 @@ public sealed class RecallValueTests
     public void Context_AllowsNulls()
     {
         // Act
-        var context = new MemoryRecallContext([], null, null);
+        var context = new RecallContext([], null, null);
 
         // Assert
         Assert.Empty(context.Topics);
@@ -41,7 +41,7 @@ public sealed class RecallValueTests
         var memory = SampleMemory();
 
         // Act
-        var hit = new MemoryRecallHit(memory);
+        var hit = new RecallHit(memory);
 
         // Assert
         Assert.Equal(memory, hit.Memory);
@@ -60,8 +60,8 @@ public sealed class RecallValueTests
         var memory = SampleMemory();
 
         // Act
-        var left = new MemoryRecallHit(memory, ["porter"], 1.0, 2.0, "and", MemoryScopeKind.Global, null);
-        var right = new MemoryRecallHit(memory, ["porter"], 1.0, 2.0, "and", MemoryScopeKind.Global, null);
+        var left = new RecallHit(memory, ["porter"], 1.0, 2.0, "and", MemoryScopeKind.Global, null);
+        var right = new RecallHit(memory, ["porter"], 1.0, 2.0, "and", MemoryScopeKind.Global, null);
 
         // Assert — MatchedVia is a collection, compare element-wise
         Assert.Same(memory, left.Memory);
@@ -77,8 +77,8 @@ public sealed class RecallValueTests
     public void Stats_Equality_ByValue()
     {
         // Act
-        var left = new MemoryRecallStats(10, 9, 1, 2, 3);
-        var right = new MemoryRecallStats(10, 9, 1, 2, 3);
+        var left = new RecallStats(10, 9, 1, 2, 3);
+        var right = new RecallStats(10, 9, 1, 2, 3);
 
         // Assert
         Assert.Equal(left, right);
@@ -93,8 +93,8 @@ public sealed class RecallValueTests
         var intention = new Intention.Intention("do x", TriggerType.Topic, ["t"]);
 
         // Act
-        var left = new MemoryRecallIntentionResult(intention, true, false);
-        var right = new MemoryRecallIntentionResult(intention, true, false);
+        var left = new RecallIntentionResult(intention, true, false);
+        var right = new RecallIntentionResult(intention, true, false);
 
         // Assert
         Assert.Equal(left, right);
@@ -105,15 +105,15 @@ public sealed class RecallValueTests
     {
         // Arrange
         var memory = SampleMemory();
-        var hit = new MemoryRecallHit(memory);
+        var hit = new RecallHit(memory);
         var scoped = new ScopedMemory(memory, MemoryScopeKind.Project, "/tmp");
-        var intention = new MemoryRecallIntentionResult(
+        var intention = new RecallIntentionResult(
             new Intention.Intention("do x", TriggerType.Topic), false, false);
-        var stats = new MemoryRecallStats(1, 1, 0, 1, 1);
+        var stats = new RecallStats(1, 1, 0, 1, 1);
 
         // Act
-        var left = new MemoryRecallResult([hit], [scoped], [intention], stats);
-        var right = new MemoryRecallResult([hit], [scoped], [intention], stats);
+        var left = new RecallResult([hit], [scoped], [intention], stats);
+        var right = new RecallResult([hit], [scoped], [intention], stats);
 
         // Assert — result holds collections, compare structurally
         Assert.Single(left.RecallMemories);

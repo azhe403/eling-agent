@@ -7,7 +7,7 @@ using Eling.Backend.Updates;
 using Eling.Core;
 using Eling.Core.Codebase;
 using Eling.Core.Memory;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
@@ -24,7 +24,7 @@ namespace Eling.Backend.Mcp.Tools;
 [McpServerToolType]
 public sealed class RecallTool
 {
-    private readonly IMemoryRecallService _recall;
+    private readonly IRecallService _recall;
     private readonly ILogger<RecallTool>? _logger;
     private readonly string? _cwd;
     private readonly string? _userHomeDirectory;
@@ -39,7 +39,7 @@ public sealed class RecallTool
     private const int MaxSummarizedItems = 10;
 
     public RecallTool(
-        IMemoryRecallService recall,
+        IRecallService recall,
         ILogger<RecallTool>? logger = null,
         string? cwd = null,
         string? userHomeDirectory = null,
@@ -63,8 +63,8 @@ public sealed class RecallTool
     }
 
     [McpServerTool(Name = "recall"), Description("Call this BEFORE answering or acting, not after. On the first user turn of any session, on every step progression/subtask transition, and whenever the topic shifts, call this first — with a BROAD topic set: topics derived from the current step or message AND topics covering other relevant areas (standing rules and preferences, standing decisions, lessons and known gotchas, workflow and repo conventions, recently touched work); never anchor solely on the opening message's subject. Pass topics as `context: { topics: [...] }` — a top-level `topics` array is also accepted and, when non-empty, replaces `context.topics`. It costs ~500ms and prevents wrong assumptions about project conventions and past decisions. After a session-start call, check `stats.recallCount`: if it is 0, the call was mis-shaped or matched nothing — re-issue with `context: { topics: [...] }` and broader terms before proceeding (bounded retries). Also triggers on 'eling <topic>'. When topic recall returns more than `recallLimit` items, the response also carries `recallSummary` — digest paragraphs of the overflowing items (the ones the limit would drop); pass `summarizeOverflow: false` to skip it, and read `source` to tell a judge-written digest ('judge') from a deterministic one ('heuristic'). Every response also carries `standingMemories` — a topic-independent baseline of standing rules/preferences, standing decisions, and lessons (project-first, capped); read it on session start even when your topic call was narrow, because it is the server-enforced consistency spine. Returns topic-relevant full memories (search-based recall), the most recently updated active memories (so writes from other agents are visible), the standing baseline, the overflow digest, outstanding intentions with their trigger-match state, the project-scope posture (posture, policy, adoptable) so the agent can offer onboarding only when adoptable, codebase status (file/chunk counts, freshness, watcher state), and lightweight stats.")]
-    public async Task<MemoryRecallResponse> RecallAsync(
-        [Description("Current task context (filePath, topics, project). Optional.")] MemoryRecallContextInput? context = null,
+    public async Task<RecallResponse> RecallAsync(
+        [Description("Current task context (filePath, topics, project). Optional.")] RecallContextInput? context = null,
         [Description("Max recalled memories (default 10).")] int recallLimit = 10,
         [Description("Max recent memories (default 10).")] int recentLimit = 10,
         [Description("project | global | merged (default merged).")] string scope = "merged",
@@ -76,7 +76,7 @@ public sealed class RecallTool
         {
             var ctx = context is null
                 ? null
-                : new MemoryRecallContext(context.Topics ?? [], context.FilePath, context.Project);
+                : new RecallContext(context.Topics ?? [], context.FilePath, context.Project);
 
             // Convenience alias: agents intuitively pass a top-level topics
             // array; older builds silently ignored that shape. When present
@@ -86,7 +86,7 @@ public sealed class RecallTool
                 var alias = topics.Where(t => !string.IsNullOrWhiteSpace(t)).ToArray();
                 if (alias.Length > 0)
                 {
-                    ctx = new MemoryRecallContext(alias, context?.FilePath, context?.Project);
+                    ctx = new RecallContext(alias, context?.FilePath, context?.Project);
                     _logger?.LogInformation(
                         "recall normalized a top-level topics alias ({TopicCount} topic(s)) into context",
                         alias.Length);
@@ -100,14 +100,14 @@ public sealed class RecallTool
 
             var posture = await ProjectScopePosture.EvaluateAsync(_cwd, _userHomeDirectory, _policyStore);
 
-            var response = new MemoryRecallResponse
+            var response = new RecallResponse
             {
-                RecallMemories = result.RecallMemories.Select(MemoryRecallMemory.From).ToList().AsReadOnly(),
-                RecentMemories = result.RecentMemories.Select(MemoryRecallMemory.From).ToList().AsReadOnly(),
-                StandingMemories = result.StandingMemories?.Select(MemoryRecallMemory.From).ToList().AsReadOnly() ?? [],
-                Intentions = result.Intentions.Select(MemoryRecallIntention.From).ToList().AsReadOnly(),
-                Stats = MemoryRecallStatsDto.From(result.Stats),
-                ProjectScope = new MemoryRecallProjectScopeDto
+                RecallMemories = result.RecallMemories.Select(RecallMemory.From).ToList().AsReadOnly(),
+                RecentMemories = result.RecentMemories.Select(RecallMemory.From).ToList().AsReadOnly(),
+                StandingMemories = result.StandingMemories?.Select(RecallMemory.From).ToList().AsReadOnly() ?? [],
+                Intentions = result.Intentions.Select(RecallIntention.From).ToList().AsReadOnly(),
+                Stats = RecallStatsDto.From(result.Stats),
+                ProjectScope = new RecallProjectScopeDto
                 {
                     Posture = posture.Posture,
                     Policy = posture.Policy,
@@ -139,7 +139,7 @@ public sealed class RecallTool
     /// judge-failed posture so a dead provider is diagnosable, not silent.
     /// </summary>
     private async Task<RecallSummaryDto?> BuildRecallSummaryAsync(
-        IReadOnlyList<MemoryRecallHit>? overflow,
+        IReadOnlyList<RecallHit>? overflow,
         bool summarizeOverflow,
         CancellationToken cancellationToken)
     {
@@ -196,7 +196,7 @@ public sealed class RecallTool
     /// Attaches the codebase status for the current workspace. Isolated in its own
     /// try block so an indexer query failure can never break recall itself.
     /// </summary>
-    private async Task AttachCodebaseStatusAsync(MemoryRecallResponse response, CancellationToken cancellationToken)
+    private async Task AttachCodebaseStatusAsync(RecallResponse response, CancellationToken cancellationToken)
     {
         if (_codebaseIndex is null)
         {
@@ -225,7 +225,7 @@ public sealed class RecallTool
     /// Attaches the update notice when one is available. Isolated in its own
     /// try block so a checker failure can never break recall itself.
     /// </summary>
-    private async Task AttachUpdateNoticeAsync(MemoryRecallResponse response, CancellationToken cancellationToken)
+    private async Task AttachUpdateNoticeAsync(RecallResponse response, CancellationToken cancellationToken)
     {
         if (_updateChecker is null)
         {

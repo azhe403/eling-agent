@@ -5,7 +5,7 @@ using Eling.Core;
 using Eling.Core.Intention;
 using Eling.Core.Memory;
 using Eling.Core.Memory.Serialization;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 using Eling.Core.Scope;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -112,8 +112,8 @@ public sealed class ScopeChainSmokeTests : IDisposable
         Assert.Equal("project-local", defaultSave.Scope);
 
         // 5. recall merged contains own memory
-        var recallService = new MemoryRecallService(ownScoped, new NoopIntentionStorage());
-        var recall = await recallService.RecallAsync(new MemoryRecallContext(["memory"], null, null));
+        var recallService = new RecallService(ownScoped, new NoopIntentionStorage());
+        var recall = await recallService.RecallAsync(new RecallContext(["memory"], null, null));
         var contents = recall.RecallMemories.Select(h => h.Memory.Content).ToList();
         Assert.Contains("own-scope memory", contents);
         var ownHit = recall.RecallMemories.First(h => h.Memory.Content == "own-scope memory");

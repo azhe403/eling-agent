@@ -1,14 +1,14 @@
 using System.Text.Json.Serialization;
 using Eling.Core;
 using Eling.Core.Memory;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 
 namespace Eling.Backend.Dtos;
 
 /// <summary>
 /// Lightweight intention descriptor exposed by <c>recall</c>.
 /// </summary>
-public sealed class MemoryRecallIntention
+public sealed class RecallIntention
 {
     [JsonPropertyName("id")]
     public MemoryId Id { get; set; }
@@ -31,7 +31,7 @@ public sealed class MemoryRecallIntention
     [JsonPropertyName("updatedAt")]
     public DateTimeOffset UpdatedAt { get; set; }
 
-    public static MemoryRecallIntention From(MemoryRecallIntentionResult result) => new()
+    public static RecallIntention From(RecallIntentionResult result) => new()
     {
         Id = result.Intention.Id,
         Description = result.Intention.Description,

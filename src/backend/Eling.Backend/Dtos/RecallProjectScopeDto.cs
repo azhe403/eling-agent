@@ -8,7 +8,7 @@ namespace Eling.Backend.Dtos;
 /// when <see cref="Policy"/> is <c>disabled</c> it must not, and should use
 /// <c>scope=global</c>.
 /// </summary>
-public sealed class MemoryRecallProjectScopeDto
+public sealed class RecallProjectScopeDto
 {
     [JsonPropertyName("posture")]
     public string Posture { get; set; } = "uninitialized";

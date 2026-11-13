@@ -1,6 +1,6 @@
 using Eling.Core.Memory;
 using Eling.Core.Memory.Serialization;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 using Eling.Core.Scope;
 
 namespace Eling.Core.Tests;
@@ -9,7 +9,7 @@ namespace Eling.Core.Tests;
 /// Recall provenance: topic hits and recent items carry the scope level
 /// (own root, ancestor root, or null for global) they were recalled from.
 /// </summary>
-public sealed class MemoryRecallServiceChainTests
+public sealed class RecallServiceChainTests
 {
     private const string ChildRoot = @"C:\work\acme\integrations\payments";
     private const string ParentRoot = @"C:\work\acme\integrations";
@@ -82,8 +82,8 @@ public sealed class MemoryRecallServiceChainTests
         var (scoped, _, parent, _) = Build();
         await parent.SaveAsync(new Memory.Memory(MemoryType.Fact, "parent topic"));
 
-        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
-        var result = await service.RecallAsync(new MemoryRecallContext(["topic"], null, null));
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new RecallContext(["topic"], null, null));
 
         var hit = Assert.Single(result.RecallMemories);
         Assert.Equal(MemoryScopeKind.Project, hit.Scope);
@@ -96,8 +96,8 @@ public sealed class MemoryRecallServiceChainTests
         var (scoped, child, _, _) = Build();
         await child.SaveAsync(new Memory.Memory(MemoryType.Fact, "own topic"));
 
-        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
-        var result = await service.RecallAsync(new MemoryRecallContext(["topic"], null, null));
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new RecallContext(["topic"], null, null));
 
         var hit = Assert.Single(result.RecallMemories);
         Assert.Equal(MemoryScopeKind.Project, hit.Scope);
@@ -116,9 +116,9 @@ public sealed class MemoryRecallServiceChainTests
         await parent.SaveAsync(new Memory.Memory(MemoryType.Fact, "topic parent 2"));
         await global.SaveAsync(new Memory.Memory(MemoryType.Fact, "topic global 1"));
 
-        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
         var result = await service.RecallAsync(
-            new MemoryRecallContext(["topic"], null, null),
+            new RecallContext(["topic"], null, null),
             recallLimit: 10);
 
         Assert.Equal(10, result.RecallMemories.Count);
@@ -142,9 +142,9 @@ public sealed class MemoryRecallServiceChainTests
         await parent.SaveAsync(new Memory.Memory(MemoryType.Fact, "unrelated parent note"));
         await global.SaveAsync(new Memory.Memory(MemoryType.Fact, "topic global 1"));
 
-        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
         var result = await service.RecallAsync(
-            new MemoryRecallContext(["topic"], null, null),
+            new RecallContext(["topic"], null, null),
             recallLimit: 10);
 
         // No quota is reserved for a level without hits: the limit is still filled.
@@ -159,7 +159,7 @@ public sealed class MemoryRecallServiceChainTests
         await child.SaveAsync(new Memory.Memory(MemoryType.Fact, "project recent"));
         await global.SaveAsync(new Memory.Memory(MemoryType.Fact, "global recent"));
 
-        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
         var result = await service.RecallAsync(context: null, recentLimit: 10);
 
         var projectRecent = Assert.Single(result.RecentMemories, m => m.Memory.Content == "project recent");
@@ -175,8 +175,8 @@ public sealed class MemoryRecallServiceChainTests
         var (scoped, child, _, _) = Build();
         await child.SaveAsync(new Memory.Memory(MemoryType.Preference, "always run git hygiene before review"));
 
-        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
-        var result = await service.RecallAsync(new MemoryRecallContext(["zzz-nomatch"], null, null));
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new RecallContext(["zzz-nomatch"], null, null));
 
         Assert.Empty(result.RecallMemories);
         var standing = Assert.Single(result.StandingMemories!);
@@ -191,8 +191,8 @@ public sealed class MemoryRecallServiceChainTests
         var (scoped, child, _, _) = Build();
         await child.SaveAsync(new Memory.Memory(MemoryType.Fact, "a plain fact"));
 
-        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
-        var result = await service.RecallAsync(new MemoryRecallContext(["fact"], null, null));
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new RecallContext(["fact"], null, null));
 
         Assert.Single(result.RecallMemories);
         Assert.Empty(result.StandingMemories!);
@@ -207,8 +207,8 @@ public sealed class MemoryRecallServiceChainTests
             await child.SaveAsync(new Memory.Memory(MemoryType.Preference, $"rule {i}"));
         }
 
-        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
-        var result = await service.RecallAsync(new MemoryRecallContext(["zzz-nomatch"], null, null));
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new RecallContext(["zzz-nomatch"], null, null));
 
         Assert.Equal(5, result.StandingMemories!.Count);
     }
@@ -219,8 +219,8 @@ public sealed class MemoryRecallServiceChainTests
         var (scoped, child, _, _) = Build();
         await child.SaveAsync(new Memory.Memory(MemoryType.Decision, "decision about topic"));
 
-        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
-        var result = await service.RecallAsync(new MemoryRecallContext(["topic"], null, null));
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new RecallContext(["topic"], null, null));
 
         Assert.Single(result.RecallMemories);
         Assert.Empty(result.StandingMemories!);
@@ -234,8 +234,8 @@ public sealed class MemoryRecallServiceChainTests
         await parent.SaveAsync(new Memory.Memory(
             MemoryType.Preference, "parent rule", updatedAt: DateTimeOffset.UtcNow.AddHours(1)));
 
-        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
-        var result = await service.RecallAsync(new MemoryRecallContext(["zzz-nomatch"], null, null));
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new RecallContext(["zzz-nomatch"], null, null));
 
         Assert.Equal(2, result.StandingMemories!.Count);
         Assert.Equal(ChildRoot, result.StandingMemories[0].ProjectRoot);
@@ -251,8 +251,8 @@ public sealed class MemoryRecallServiceChainTests
             await child.SaveAsync(new Memory.Memory(MemoryType.Fact, $"topic item {i}"));
         }
 
-        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
-        var result = await service.RecallAsync(new MemoryRecallContext(["topic"], null, null), recallLimit: 10);
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new RecallContext(["topic"], null, null), recallLimit: 10);
 
         Assert.Equal(10, result.RecallMemories.Count);
         Assert.Equal(2, result.OverflowMemories!.Count);
@@ -269,8 +269,8 @@ public sealed class MemoryRecallServiceChainTests
             await child.SaveAsync(new Memory.Memory(MemoryType.Fact, $"topic item {i}"));
         }
 
-        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
-        var result = await service.RecallAsync(new MemoryRecallContext(["topic"], null, null), recallLimit: 10);
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new RecallContext(["topic"], null, null), recallLimit: 10);
 
         Assert.Equal(10, result.RecallMemories.Count);
         Assert.Equal(10, result.OverflowMemories!.Count);
@@ -285,8 +285,8 @@ public sealed class MemoryRecallServiceChainTests
             await child.SaveAsync(new Memory.Memory(MemoryType.Fact, $"topic item {i}"));
         }
 
-        var service = new MemoryRecallService(scoped, new EmptyIntentionStorage());
-        var result = await service.RecallAsync(new MemoryRecallContext(["topic"], null, null), recallLimit: 10);
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new RecallContext(["topic"], null, null), recallLimit: 10);
 
         Assert.Equal(4, result.RecallMemories.Count);
         Assert.Null(result.OverflowMemories);

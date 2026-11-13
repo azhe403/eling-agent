@@ -2,7 +2,7 @@ using Eling.Core.Memory;
 using Eling.Core.Memory.Serialization;
 using Microsoft.Extensions.Logging;
 
-namespace Eling.Core.MemoryRecall;
+namespace Eling.Core.Recall;
 
 /// <summary>
 /// Application-layer service that bundles topic-based recall, recently
@@ -13,24 +13,24 @@ namespace Eling.Core.MemoryRecall;
 /// performs a search across <see cref="IScopedMemoryService"/> using the
 /// joined topics as the query, so recall is no longer a no-op.
 /// </summary>
-public sealed class MemoryRecallService : IMemoryRecallService
+public sealed class RecallService : IRecallService
 {
     private readonly IScopedMemoryService _scoped;
     private readonly IIntentionStorage _intentions;
-    private readonly ILogger<MemoryRecallService>? _logger;
+    private readonly ILogger<RecallService>? _logger;
 
-    public MemoryRecallService(
+    public RecallService(
         IScopedMemoryService scoped,
         IIntentionStorage intentions,
-        ILogger<MemoryRecallService>? logger = null)
+        ILogger<RecallService>? logger = null)
     {
         _scoped = scoped;
         _intentions = intentions;
         _logger = logger;
     }
 
-    public async Task<MemoryRecallResult> RecallAsync(
-        MemoryRecallContext? context,
+    public async Task<RecallResult> RecallAsync(
+        RecallContext? context,
         int recallLimit = 10,
         int recentLimit = 10,
         string? scope = null,
@@ -47,13 +47,13 @@ public sealed class MemoryRecallService : IMemoryRecallService
         // there, and it remains useful for the on-demand recall use case.
         var allIntentions = await _intentions.ListAllAsync();
         var intentionResults = allIntentions.Count == 0
-            ? (IReadOnlyList<MemoryRecallIntentionResult>)[]
-            : new List<MemoryRecallIntentionResult>(allIntentions.Count);
+            ? (IReadOnlyList<RecallIntentionResult>)[]
+            : new List<RecallIntentionResult>(allIntentions.Count);
         var triggered = 0;
         var expired = 0;
         if (allIntentions.Count > 0)
         {
-            var intentionList = (List<MemoryRecallIntentionResult>)intentionResults;
+            var intentionList = (List<RecallIntentionResult>)intentionResults;
             foreach (var intention in allIntentions)
             {
                 if (!IntentionTriggerMatcher.IsOutstanding(intention, now))
@@ -64,7 +64,7 @@ public sealed class MemoryRecallService : IMemoryRecallService
                 var (matched, isExpired) = IntentionTriggerMatcher.Match(intention, context, now);
                 if (isExpired) expired++;
                 if (matched) triggered++;
-                intentionList.Add(new MemoryRecallIntentionResult(intention, matched, isExpired));
+                intentionList.Add(new RecallIntentionResult(intention, matched, isExpired));
             }
         }
 
@@ -72,8 +72,8 @@ public sealed class MemoryRecallService : IMemoryRecallService
         // and resolve the ranked IDs back to full Memory payloads. We rely
         // on SearchAsync's ranking (SQLite FTS5 BM25) to order results, so
         // no client-side re-ranking is needed.
-        var recall = new List<MemoryRecallHit>(recallLimit);
-        var overflow = new List<MemoryRecallHit>(OverflowWindow);
+        var recall = new List<RecallHit>(recallLimit);
+        var overflow = new List<RecallHit>(OverflowWindow);
         var topics = context?.Topics ?? [];
         if (topics.Count > 0 && recallLimit > 0)
         {
@@ -103,7 +103,7 @@ public sealed class MemoryRecallService : IMemoryRecallService
                     }
                     if (scoped is not null)
                     {
-                        recall.Add(new MemoryRecallHit(
+                        recall.Add(new RecallHit(
                             scoped.Memory,
                             hit.MatchedVia,
                             hit.PorterScore,
@@ -138,7 +138,7 @@ public sealed class MemoryRecallService : IMemoryRecallService
                         var scoped = await _scoped.GetByIdAsync(reference);
                         if (scoped is not null)
                         {
-                            overflow.Add(new MemoryRecallHit(
+                            overflow.Add(new RecallHit(
                                 scoped.Memory,
                                 hit.MatchedVia,
                                 hit.PorterScore,
@@ -186,14 +186,14 @@ public sealed class MemoryRecallService : IMemoryRecallService
         // hard-coded project/global calls, so they reflect whatever scope
         // the caller asked for.
         var allMemories = await _scoped.ListAsync(scope, null);
-        var stats = new MemoryRecallStats(
+        var stats = new RecallStats(
             TotalMemories: allMemories.Count,
             ActiveMemories: activeMemories.Count,
             ActiveIntentions: intentionResults.Count,
             RecallCount: recall.Count,
             RecentCount: recent.Count);
 
-        return new MemoryRecallResult(recall, recent, intentionResults, stats, standing, overflow.Count > 0 ? overflow : null);
+        return new RecallResult(recall, recent, intentionResults, stats, standing, overflow.Count > 0 ? overflow : null);
     }
 
     /// <summary>Cap on the standing baseline so a broad payload never swamps the topic hits.</summary>
@@ -219,10 +219,10 @@ public sealed class MemoryRecallService : IMemoryRecallService
     /// Ids already present in the topic hits are skipped so the same memory
     /// never shows up twice in the two primary sections.
     /// </summary>
-    private static IReadOnlyList<MemoryRecallHit> BuildStandingBaseline(
+    private static IReadOnlyList<RecallHit> BuildStandingBaseline(
         IReadOnlyCollection<ScopedMemory> active,
         string? currentRoot,
-        IReadOnlyCollection<MemoryRecallHit> topicHits)
+        IReadOnlyCollection<RecallHit> topicHits)
     {
         var alreadySurfaced = topicHits.Select(h => h.Memory.Id).ToHashSet();
         return active
@@ -230,7 +230,7 @@ public sealed class MemoryRecallService : IMemoryRecallService
             .OrderBy(s => IsCurrentProject(s, currentRoot) ? 0 : 1)
             .ThenByDescending(s => s.Memory.UpdatedAt)
             .Take(StandingBaselineLimit)
-            .Select(s => new MemoryRecallHit(
+            .Select(s => new RecallHit(
                 s.Memory,
                 ["standing"],
                 0.0,

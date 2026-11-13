@@ -2,23 +2,23 @@ using System.Text.Json;
 using Eling.Backend.Dtos;
 using Eling.Core;
 using Eling.Core.Memory;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 
 namespace Eling.Backend.Tests;
 
-public class MemoryRecallDtosTests
+public class RecallDtosTests
 {
     [Fact]
-    public void From_MemoryRecallHit_CarriesMatchedViaAndScores()
+    public void From_RecallHit_CarriesMatchedViaAndScores()
     {
         var memory = new Memory(MemoryType.Fact, "Test content", tags: new[] { "git", "hygiene" });
-        var hit = new MemoryRecallHit(
+        var hit = new RecallHit(
             memory,
             MatchedVia: new[] { "porter", "trigram" },
             PorterScore: 1.2,
             TrigramScore: 0.8);
 
-        var dto = MemoryRecallMemory.From(hit);
+        var dto = RecallMemory.From(hit);
 
         Assert.Equal(memory.Id, dto.Id);
         Assert.Equal(new[] { "porter", "trigram" }, dto.MatchedVia);
@@ -31,7 +31,7 @@ public class MemoryRecallDtosTests
     {
         var memory = new Memory(MemoryType.Fact, "Test content");
 
-        var dto = MemoryRecallMemory.From(memory);
+        var dto = RecallMemory.From(memory);
 
         Assert.Null(dto.MatchedVia);
         Assert.Equal(0.0, dto.PorterScore);
@@ -39,10 +39,10 @@ public class MemoryRecallDtosTests
     }
 
     [Fact]
-    public void Serialize_MemoryRecallMemory_IncludesMatchedViaJsonProperty()
+    public void Serialize_RecallMemory_IncludesMatchedViaJsonProperty()
     {
         var memory = new Memory(MemoryType.Fact, "Test content");
-        var dto = MemoryRecallMemory.From(new MemoryRecallHit(
+        var dto = RecallMemory.From(new RecallHit(
             memory,
             MatchedVia: new[] { "porter" },
             PorterScore: 0.9,
@@ -56,14 +56,14 @@ public class MemoryRecallDtosTests
     }
 
     [Fact]
-    public void Serialize_MemoryRecallResponse_RoundTripsRecallMemories()
+    public void Serialize_RecallResponse_RoundTripsRecallMemories()
     {
         var memory = new Memory(MemoryType.Lesson, "Recall response content", tags: new[] { "workflow" });
-        var response = new MemoryRecallResponse
+        var response = new RecallResponse
         {
             RecallMemories = new[]
             {
-                MemoryRecallMemory.From(new MemoryRecallHit(
+                RecallMemory.From(new RecallHit(
                     memory,
                     MatchedVia: new[] { "porter", "trigram" },
                     PorterScore: 1.5,
@@ -74,7 +74,7 @@ public class MemoryRecallDtosTests
         var options = new JsonSerializerOptions();
         options.Converters.Add(new Eling.Backend.Converters.MemoryIdJsonConverter());
         var json = JsonSerializer.Serialize(response, options);
-        var deserialized = JsonSerializer.Deserialize<MemoryRecallResponse>(json, options);
+        var deserialized = JsonSerializer.Deserialize<RecallResponse>(json, options);
 
         Assert.NotNull(deserialized);
         var hit = Assert.Single(deserialized!.RecallMemories);
@@ -85,17 +85,17 @@ public class MemoryRecallDtosTests
     }
 
     [Fact]
-    public void From_MemoryRecallHit_CarriesQueryMode()
+    public void From_RecallHit_CarriesQueryMode()
     {
         var memory = new Memory(MemoryType.Fact, "Test content");
-        var hit = new MemoryRecallHit(
+        var hit = new RecallHit(
             memory,
             MatchedVia: new[] { "porter", "trigram" },
             PorterScore: 1.2,
             TrigramScore: 0.8,
             QueryMode: "or-fallback");
 
-        var dto = MemoryRecallMemory.From(hit);
+        var dto = RecallMemory.From(hit);
 
         Assert.Equal("or-fallback", dto.QueryMode);
     }
@@ -105,16 +105,16 @@ public class MemoryRecallDtosTests
     {
         var memory = new Memory(MemoryType.Fact, "Test content");
 
-        var dto = MemoryRecallMemory.From(memory);
+        var dto = RecallMemory.From(memory);
 
         Assert.Null(dto.QueryMode);
     }
 
     [Fact]
-    public void Serialize_MemoryRecallMemory_IncludesQueryModeJsonProperty()
+    public void Serialize_RecallMemory_IncludesQueryModeJsonProperty()
     {
         var memory = new Memory(MemoryType.Fact, "Test content");
-        var dto = MemoryRecallMemory.From(new MemoryRecallHit(
+        var dto = RecallMemory.From(new RecallHit(
             memory,
             MatchedVia: new[] { "porter" },
             PorterScore: 0.9,

@@ -1,14 +1,14 @@
-namespace Eling.Core.MemoryRecall;
+namespace Eling.Core.Recall;
 
 /// <summary>
 /// Builds a recall payload that bundles topic-based recall, recently updated
 /// active memories, and outstanding intentions so MCP clients can hydrate
 /// context on demand at any point in a conversation.
 /// </summary>
-public interface IMemoryRecallService
+public interface IRecallService
 {
-    Task<MemoryRecallResult> RecallAsync(
-        MemoryRecallContext? context,
+    Task<RecallResult> RecallAsync(
+        RecallContext? context,
         int recallLimit = 10,
         int recentLimit = 10,
         string? scope = null,

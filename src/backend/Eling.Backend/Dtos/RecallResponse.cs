@@ -5,13 +5,13 @@ namespace Eling.Backend.Dtos;
 /// <summary>
 /// Root <c>recall</c> response.
 /// </summary>
-public sealed class MemoryRecallResponse
+public sealed class RecallResponse
 {
     [JsonPropertyName("recallMemories")]
-    public IReadOnlyCollection<MemoryRecallMemory> RecallMemories { get; set; } = [];
+    public IReadOnlyCollection<RecallMemory> RecallMemories { get; set; } = [];
 
     [JsonPropertyName("recentMemories")]
-    public IReadOnlyCollection<MemoryRecallMemory> RecentMemories { get; set; } = [];
+    public IReadOnlyCollection<RecallMemory> RecentMemories { get; set; } = [];
 
     /// <summary>
     /// Digest of relevant hits beyond the recall limit. Present only when
@@ -27,16 +27,16 @@ public sealed class MemoryRecallResponse
     /// call still carries this consistency spine.
     /// </summary>
     [JsonPropertyName("standingMemories")]
-    public IReadOnlyCollection<MemoryRecallMemory> StandingMemories { get; set; } = [];
+    public IReadOnlyCollection<RecallMemory> StandingMemories { get; set; } = [];
 
     [JsonPropertyName("intentions")]
-    public IReadOnlyCollection<MemoryRecallIntention> Intentions { get; set; } = [];
+    public IReadOnlyCollection<RecallIntention> Intentions { get; set; } = [];
 
     [JsonPropertyName("stats")]
-    public MemoryRecallStatsDto Stats { get; set; } = new();
+    public RecallStatsDto Stats { get; set; } = new();
 
     [JsonPropertyName("projectScope")]
-    public MemoryRecallProjectScopeDto ProjectScope { get; set; } = new();
+    public RecallProjectScopeDto ProjectScope { get; set; } = new();
 
     /// <summary>
     /// Codebase index status for the current workspace. Included so agents can

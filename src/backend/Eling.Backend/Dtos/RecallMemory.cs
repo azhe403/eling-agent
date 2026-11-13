@@ -1,7 +1,7 @@
 using System.Text.Json.Serialization;
 using Eling.Core;
 using Eling.Core.Memory;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 
 namespace Eling.Backend.Dtos;
 
@@ -11,7 +11,7 @@ namespace Eling.Backend.Dtos;
 /// active memories, and outstanding intentions so a client can hydrate
 /// context on demand at any point in a conversation.
 /// </summary>
-public sealed class MemoryRecallMemory
+public sealed class RecallMemory
 {
     private const int ContentMaxLength = 200;
 
@@ -65,7 +65,7 @@ public sealed class MemoryRecallMemory
     private static string? NameOf(string? root)
         => root is null ? null : Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar));
 
-    public static MemoryRecallMemory From(Memory memory) => new()
+    public static RecallMemory From(Memory memory) => new()
     {
         Id = memory.Id,
         Type = memory.Type,
@@ -78,7 +78,7 @@ public sealed class MemoryRecallMemory
         Scope = "project"
     };
 
-    public static MemoryRecallMemory From(MemoryRecallHit hit)
+    public static RecallMemory From(RecallHit hit)
     {
         var dto = From(hit.Memory);
         dto.Scope = MemoryScopeLabels.ToWireString(hit.Scope);
@@ -91,7 +91,7 @@ public sealed class MemoryRecallMemory
         return dto;
     }
 
-    public static MemoryRecallMemory From(ScopedMemory scoped) => new()
+    public static RecallMemory From(ScopedMemory scoped) => new()
     {
         Id = scoped.Memory.Id,
         Type = scoped.Memory.Type,

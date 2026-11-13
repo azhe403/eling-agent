@@ -51,7 +51,7 @@ To prevent context bloat and empty retrieval loops, all agents interacting with 
 
 ## 2. Engine-Side Search Pipeline (3-Layer FTS5 + Adaptive Fallback)
 
-When `recall` or `memory_search` is called, `SqliteMemoryIndex` and `MemoryRecallService` execute a multi-tier search process:
+When `recall` or `memory_search` is called, `SqliteMemoryIndex` and `RecallService` execute a multi-tier search process:
 
 ```
                           1. Raw Query Topics

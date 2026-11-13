@@ -9,7 +9,7 @@ using Eling.Core.FileSystem;
 using Eling.Core.Memory;
 using Eling.Core.Scope;
 using Eling.Core.Memory.Serialization;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 using Eling.Core.Projects;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -130,10 +130,10 @@ public class AgentChatTests : IAsyncLifetime, IDisposable
         services.AddScoped<IMemoryService>(_ => memory);
         services.AddScoped<IScopedMemoryService>(_ => new ScopedMemoryService(memory, memory, new MemoryScopePolicy(), new MemoryMerger(), _workspace));
         services.AddScoped<IIntentionStorage>(_ => new FileSystemIntentionStorage(_workspace));
-        services.AddScoped<IMemoryRecallService, MemoryRecallService>();
+        services.AddScoped<IRecallService, RecallService>();
         var sp = services.BuildServiceProvider();
 
-        var recall = sp.GetRequiredService<IMemoryRecallService>();
+        var recall = sp.GetRequiredService<IRecallService>();
         var codebase = new CodebaseIndexService(_workspace, new SqliteCodebaseIndex(Eling.Core.Scope.ElingPaths.ResolveCodebaseDbPath(_workspace)));
 
         var tools = Array.Empty<IAgentTool>();

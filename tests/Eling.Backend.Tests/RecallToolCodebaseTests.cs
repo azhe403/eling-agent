@@ -1,6 +1,6 @@
 using Eling.Backend.Mcp.Tools;
 using Eling.Core.Codebase;
-using Eling.Core.MemoryRecall;
+using Eling.Core.Recall;
 
 namespace Eling.Backend.Tests;
 
@@ -45,14 +45,14 @@ public sealed class RecallToolCodebaseTests : IDisposable
         Assert.False(response.Codebase.WatcherActive);
     }
 
-    private sealed class EmptyRecallService : IMemoryRecallService
+    private sealed class EmptyRecallService : IRecallService
     {
-        public Task<MemoryRecallResult> RecallAsync(
-            MemoryRecallContext? context,
+        public Task<RecallResult> RecallAsync(
+            RecallContext? context,
             int recallLimit = 10,
             int recentLimit = 10,
             string? scope = null,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(new MemoryRecallResult([], [], [], new MemoryRecallStats(0, 0, 0, 0, 0)));
+            => Task.FromResult(new RecallResult([], [], [], new RecallStats(0, 0, 0, 0, 0)));
     }
 }
