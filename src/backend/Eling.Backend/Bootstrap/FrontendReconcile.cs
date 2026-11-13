@@ -95,7 +95,7 @@ internal static class FrontendReconcile
     /// Reads the ELING_WATCH_DASHBOARD environment variable as a boolean.
     /// </summary>
     /// <remarks>
-    /// This variable has been set in opencode.json all along but no code ever
+    /// This variable has been set in the harness config file all along but no code ever
     /// read it. Without an explicit gate, every backend process running from
     /// inside the repo takes over port 4427 - including test processes, which
     /// then kill each other's frontend.

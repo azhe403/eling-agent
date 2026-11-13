@@ -52,7 +52,7 @@ public sealed class CoordinatorController(
     /// <para>
     /// With <paramref name="allProcesses"/> the live list is no longer deduped
     /// to one row per workspace: several stdio sessions can run in one folder
-    /// (one per opencode/openchamber session, plus peers and the desktop app),
+    /// (one per agent harness session, plus peers and the desktop app),
     /// and the dashboard aggregates or lists them instead of showing a single
     /// representative process. Remembered rows still appear only for roots no
     /// live process covers.

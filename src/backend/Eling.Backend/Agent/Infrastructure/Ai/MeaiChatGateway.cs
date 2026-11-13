@@ -13,7 +13,7 @@ public sealed class MeaiChatGateway(ProviderStore store, ILogger<MeaiChatGateway
     private static readonly TimeSpan StreamFirstByteTimeout = TimeSpan.FromSeconds(20);
 
     /// <summary>
-    /// The opencode gateway routes a request by session and answers
+    /// The agent gateway routes a request by session and answers
     /// <c>HTTP 400 (MissingSessionID:)</c> when this header is absent. It is
     /// hardcoded rather than a provider setting: the value is the chat's own id,
     /// which arrives on <see cref="SingleShotRequest.SessionId"/>, so there is
@@ -49,7 +49,7 @@ public sealed class MeaiChatGateway(ProviderStore store, ILogger<MeaiChatGateway
     /// Maps the stored turn history onto the wire format. An assistant message
     /// that called tools is replayed WITH those tool calls: the tool messages
     /// that follow are only valid as the answer to a declared tool_call, and
-    /// opencode rejects an orphaned one with <c>invalid_request_error</c>.
+    /// the gateway rejects an orphaned one with <c>invalid_request_error</c>.
     /// </summary>
     private static List<ChatMessage> BuildMessages(SingleShotRequest request)
     {

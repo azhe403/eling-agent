@@ -226,8 +226,8 @@ public sealed class CoordinatorControllerTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Several stdio sessions can live in one folder — one per opencode or
-    /// openchamber session, plus peers and the desktop app. The default stays
+    /// Several stdio sessions can live in one folder — one per agent harness
+    /// session, plus peers and the desktop app. The default stays
     /// deduped because memory and codebase-tool consumers want one root; the
     /// flag returns every live process so the dashboard can aggregate them.
     /// </summary>
