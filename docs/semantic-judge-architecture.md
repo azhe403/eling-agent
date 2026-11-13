@@ -174,7 +174,7 @@ Example log output:
 
 ## 6. Recall Summaries (judge reuse)
 
-The same provider-backed judge also digests memory for the **recall** path. When `memory_recall` surfaces more relevant hits than `recallLimit`, the overflow is summarized instead of dropped: `ProviderSemanticJudge` implements `ISemanticSummarizer` alongside `ISemanticJudge`, sharing the config store, the Polly pipeline, and the circuit breaker — one configured provider, two callers. The register-time rationale is identical to §4: the judge is a per-user setting, decoupled from the Desktop agent gateway.
+The same provider-backed judge also digests memory for the **recall** path. When `recall` surfaces more relevant hits than `recallLimit`, the overflow is summarized instead of dropped: `ProviderSemanticJudge` implements `ISemanticSummarizer` alongside `ISemanticJudge`, sharing the config store, the Polly pipeline, and the circuit breaker — one configured provider, two callers. The register-time rationale is identical to §4: the judge is a per-user setting, decoupled from the Desktop agent gateway.
 
 Two contracts, deliberately different shapes:
 

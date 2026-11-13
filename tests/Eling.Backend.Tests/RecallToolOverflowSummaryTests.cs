@@ -10,11 +10,11 @@ namespace Eling.Backend.Tests;
 /// summarizer answers, deterministic digest with a note when it does not,
 /// nothing when there is no overflow or the caller opts out.
 /// </summary>
-public sealed class MemoryRecallToolOverflowSummaryTests : IDisposable
+public sealed class RecallToolOverflowSummaryTests : IDisposable
 {
     private readonly string _root;
 
-    public MemoryRecallToolOverflowSummaryTests()
+    public RecallToolOverflowSummaryTests()
     {
         _root = Path.Combine(Path.GetTempPath(), "eling-overflow-summary-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_root);
@@ -29,7 +29,7 @@ public sealed class MemoryRecallToolOverflowSummaryTests : IDisposable
     public async Task Recall_OverflowPresent_JudgeSummarySurfaces()
     {
         var summarizer = new StubSummarizer(new MemorySummary(["digest paragraph one", "digest paragraph two"], "judge"));
-        var tool = new MemoryRecallTool(new OverflowRecallService(ResultWithOverflow(12)), cwd: _root, summarizer: summarizer);
+        var tool = new RecallTool(new OverflowRecallService(ResultWithOverflow(12)), cwd: _root, summarizer: summarizer);
 
         var response = await tool.RecallAsync(new MemoryRecallContextInput { Topics = ["any"] });
 
@@ -45,7 +45,7 @@ public sealed class MemoryRecallToolOverflowSummaryTests : IDisposable
     [Fact]
     public async Task Recall_SummarizerThrows_FallsBackToHeuristicWithNote()
     {
-        var tool = new MemoryRecallTool(
+        var tool = new RecallTool(
             new OverflowRecallService(ResultWithOverflow(3)),
             cwd: _root,
             summarizer: new StubSummarizer(throwing: true));
@@ -60,7 +60,7 @@ public sealed class MemoryRecallToolOverflowSummaryTests : IDisposable
     [Fact]
     public async Task Recall_SummarizerReturnsNothing_HeuristicWithNote()
     {
-        var tool = new MemoryRecallTool(
+        var tool = new RecallTool(
             new OverflowRecallService(ResultWithOverflow(3)),
             cwd: _root,
             summarizer: new StubSummarizer(new MemorySummary([], "judge")));
@@ -74,7 +74,7 @@ public sealed class MemoryRecallToolOverflowSummaryTests : IDisposable
     [Fact]
     public async Task Recall_NoSummarizerConfigured_HeuristicWithNote()
     {
-        var tool = new MemoryRecallTool(new OverflowRecallService(ResultWithOverflow(3)), cwd: _root);
+        var tool = new RecallTool(new OverflowRecallService(ResultWithOverflow(3)), cwd: _root);
 
         var response = await tool.RecallAsync(new MemoryRecallContextInput { Topics = ["any"] });
 
@@ -85,7 +85,7 @@ public sealed class MemoryRecallToolOverflowSummaryTests : IDisposable
     [Fact]
     public async Task Recall_SummarizeOverflowDisabled_NoSummary()
     {
-        var tool = new MemoryRecallTool(
+        var tool = new RecallTool(
             new OverflowRecallService(ResultWithOverflow(3)),
             cwd: _root,
             summarizer: new StubSummarizer(new MemorySummary(["x"], "judge")));
@@ -98,7 +98,7 @@ public sealed class MemoryRecallToolOverflowSummaryTests : IDisposable
     [Fact]
     public async Task Recall_NoOverflow_NoSummary()
     {
-        var tool = new MemoryRecallTool(
+        var tool = new RecallTool(
             new OverflowRecallService(ResultWithOverflow(0)),
             cwd: _root,
             summarizer: new StubSummarizer(new MemorySummary(["x"], "judge")));

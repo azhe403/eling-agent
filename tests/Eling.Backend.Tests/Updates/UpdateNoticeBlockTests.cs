@@ -55,7 +55,7 @@ public sealed class UpdateNoticeBlockTests : IDisposable
     [Fact]
     public async Task Recall_UpdateAvailable_CarriesNotice()
     {
-        var tool = new MemoryRecallTool(new EmptyRecallService(), cwd: NewWorkspace(), updateChecker: new StubChecker(Available));
+        var tool = new RecallTool(new EmptyRecallService(), cwd: NewWorkspace(), updateChecker: new StubChecker(Available));
 
         var response = await tool.RecallAsync();
 
@@ -68,7 +68,7 @@ public sealed class UpdateNoticeBlockTests : IDisposable
     [Fact]
     public async Task Recall_NoUpdate_OmitsNotice()
     {
-        var tool = new MemoryRecallTool(new EmptyRecallService(), cwd: NewWorkspace(), updateChecker: new StubChecker(Quiet));
+        var tool = new RecallTool(new EmptyRecallService(), cwd: NewWorkspace(), updateChecker: new StubChecker(Quiet));
 
         var response = await tool.RecallAsync();
 
@@ -78,7 +78,7 @@ public sealed class UpdateNoticeBlockTests : IDisposable
     [Fact]
     public async Task Recall_WithoutChecker_OmitsNotice()
     {
-        var tool = new MemoryRecallTool(new EmptyRecallService(), cwd: NewWorkspace());
+        var tool = new RecallTool(new EmptyRecallService(), cwd: NewWorkspace());
 
         var response = await tool.RecallAsync();
 

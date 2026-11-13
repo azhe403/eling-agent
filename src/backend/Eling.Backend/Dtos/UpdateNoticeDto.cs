@@ -4,7 +4,7 @@ using Eling.Backend.Updates;
 namespace Eling.Backend.Dtos;
 
 /// <summary>
-/// Update notice carried inside <c>memory_recall</c> responses. Present only
+/// Update notice carried inside <c>recall</c> responses. Present only
 /// when an update is available; omitted otherwise so quiet payloads stay lean.
 /// </summary>
 public sealed class UpdateNoticeDto

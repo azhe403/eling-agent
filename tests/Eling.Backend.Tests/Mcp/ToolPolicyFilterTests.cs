@@ -90,7 +90,7 @@ public sealed class ToolPolicyFilterTests : IDisposable
     public async Task CallFilter_ProtectedTool_IsNeverBlocked()
     {
         var store = NewStore();
-        store.DisableTools(["tools_policy", "memory_recall"]);
+        store.DisableTools(["tools_policy", "recall"]);
         var nextInvoked = false;
 
         McpRequestHandler<CallToolRequestParams, CallToolResult> next = (context, cancellationToken) =>
@@ -145,7 +145,7 @@ public sealed class ToolPolicyFilterTests : IDisposable
                 new() { Name = "file_delete" },
                 new() { Name = "file_search" },
                 new() { Name = "memory_delete" },
-                new() { Name = "memory_recall" },
+                new() { Name = "recall" },
             }
         };
 
@@ -158,7 +158,7 @@ public sealed class ToolPolicyFilterTests : IDisposable
         Assert.Equal(3, result.Tools.Count);
         Assert.Contains(result.Tools, tool => tool.Name == "file_read");
         Assert.Contains(result.Tools, tool => tool.Name == "file_search");
-        Assert.Contains(result.Tools, tool => tool.Name == "memory_recall");
+        Assert.Contains(result.Tools, tool => tool.Name == "recall");
         Assert.DoesNotContain(result.Tools, tool => tool.Name == "file_delete");
         Assert.DoesNotContain(result.Tools, tool => tool.Name == "memory_delete");
     }

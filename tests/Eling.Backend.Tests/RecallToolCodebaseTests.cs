@@ -4,11 +4,11 @@ using Eling.Core.MemoryRecall;
 
 namespace Eling.Backend.Tests;
 
-public sealed class MemoryRecallToolCodebaseTests : IDisposable
+public sealed class RecallToolCodebaseTests : IDisposable
 {
     private readonly string _root;
 
-    public MemoryRecallToolCodebaseTests()
+    public RecallToolCodebaseTests()
     {
         _root = Path.Combine(Path.GetTempPath(), "eling-recall-cb-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_root);
@@ -22,7 +22,7 @@ public sealed class MemoryRecallToolCodebaseTests : IDisposable
     [Fact]
     public async Task RecallAsync_WithoutCodebaseService_LeavesCodebaseNull()
     {
-        var tool = new MemoryRecallTool(new EmptyRecallService(), cwd: _root);
+        var tool = new RecallTool(new EmptyRecallService(), cwd: _root);
 
         var response = await tool.RecallAsync();
 
@@ -34,7 +34,7 @@ public sealed class MemoryRecallToolCodebaseTests : IDisposable
     {
         var index = new SqliteCodebaseIndex(Path.Combine(_root, "codebase.db"));
         var codebaseSvc = new CodebaseIndexService(_root, index);
-        var tool = new MemoryRecallTool(new EmptyRecallService(), cwd: _root, codebaseIndex: codebaseSvc);
+        var tool = new RecallTool(new EmptyRecallService(), cwd: _root, codebaseIndex: codebaseSvc);
 
         var response = await tool.RecallAsync();
 

@@ -6,7 +6,7 @@ namespace Eling.Core.Memory;
 /// back as "this tool ran" with no translation table (design §3). Only the
 /// operations <see cref="ScopedMemoryService"/> actually performs are here; the
 /// remaining memory tools (<c>memory_init_project</c>, <c>memory_rebuild_index</c>,
-/// <c>memory_maintenance</c>, <c>memory_recall</c>, <c>memory_project_status</c>)
+/// <c>memory_maintenance</c>, <c>recall</c>, <c>memory_project_status</c>)
 /// belong to their own choke points and keep their own names.
 /// </summary>
 internal static class MemoryAuditActions

@@ -11,11 +11,11 @@ namespace Eling.Backend.Tests;
 /// <c>context</c> or as the top-level <c>topics</c> alias, and the alias
 /// must never be silently dropped the way older builds ignored it.
 /// </summary>
-public sealed class MemoryRecallToolTopicAliasTests : IDisposable
+public sealed class RecallToolTopicAliasTests : IDisposable
 {
     private readonly string _root;
 
-    public MemoryRecallToolTopicAliasTests()
+    public RecallToolTopicAliasTests()
     {
         _root = Path.Combine(Path.GetTempPath(), "eling-recall-alias-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_root);
@@ -30,7 +30,7 @@ public sealed class MemoryRecallToolTopicAliasTests : IDisposable
     public async Task RecallAsync_TopLevelTopicsAlias_ReachesServiceContext()
     {
         var service = new CapturingRecallService();
-        var tool = new MemoryRecallTool(service, cwd: _root);
+        var tool = new RecallTool(service, cwd: _root);
 
         await tool.RecallAsync(topics: ["changelog", "startup"]);
 
@@ -42,7 +42,7 @@ public sealed class MemoryRecallToolTopicAliasTests : IDisposable
     public async Task RecallAsync_NestedContextTopics_ReachesServiceContext()
     {
         var service = new CapturingRecallService();
-        var tool = new MemoryRecallTool(service, cwd: _root);
+        var tool = new RecallTool(service, cwd: _root);
 
         await tool.RecallAsync(new MemoryRecallContextInput { Topics = ["changelog", "startup"] });
 
@@ -53,7 +53,7 @@ public sealed class MemoryRecallToolTopicAliasTests : IDisposable
     public async Task RecallAsync_AliasReplacesNestedTopics_WhenBothProvided()
     {
         var service = new CapturingRecallService();
-        var tool = new MemoryRecallTool(service, cwd: _root);
+        var tool = new RecallTool(service, cwd: _root);
 
         await tool.RecallAsync(
             new MemoryRecallContextInput { Topics = ["nested"], FilePath = "a.cs" },
@@ -67,7 +67,7 @@ public sealed class MemoryRecallToolTopicAliasTests : IDisposable
     public async Task RecallAsync_NoTopicsAtAll_LeavesContextNull()
     {
         var service = new CapturingRecallService();
-        var tool = new MemoryRecallTool(service, cwd: _root);
+        var tool = new RecallTool(service, cwd: _root);
 
         await tool.RecallAsync();
 
@@ -78,7 +78,7 @@ public sealed class MemoryRecallToolTopicAliasTests : IDisposable
     public async Task AgentTool_FlatTopicsJson_ReachesServiceContext()
     {
         var service = new CapturingRecallService();
-        var agentTool = new MemoryRecallAgentTool(new MemoryRecallTool(service, cwd: _root));
+        var agentTool = new RecallAgentTool(new RecallTool(service, cwd: _root));
 
         await agentTool.ExecuteAsync("{\"topics\": [\"changelog\", \"startup\"]}", CancellationToken.None);
 
@@ -89,7 +89,7 @@ public sealed class MemoryRecallToolTopicAliasTests : IDisposable
     public async Task AgentTool_NestedContextJson_ReachesServiceContext()
     {
         var service = new CapturingRecallService();
-        var agentTool = new MemoryRecallAgentTool(new MemoryRecallTool(service, cwd: _root));
+        var agentTool = new RecallAgentTool(new RecallTool(service, cwd: _root));
 
         await agentTool.ExecuteAsync("{\"context\": {\"topics\": [\"changelog\", \"startup\"]}}", CancellationToken.None);
 
@@ -102,7 +102,7 @@ public sealed class MemoryRecallToolTopicAliasTests : IDisposable
         var hit = new MemoryRecallHit(
             new Memory(MemoryType.Preference, "always run git hygiene"),
             ["standing"], 0.0, 0.0, "standing-baseline");
-        var tool = new MemoryRecallTool(new StandingRecallService(hit), cwd: _root);
+        var tool = new RecallTool(new StandingRecallService(hit), cwd: _root);
 
         var response = await tool.RecallAsync(new MemoryRecallContextInput { Topics = ["anything"] });
 

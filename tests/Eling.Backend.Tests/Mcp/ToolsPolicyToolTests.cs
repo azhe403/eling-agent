@@ -36,7 +36,7 @@ public sealed class ToolsPolicyToolTests : IDisposable
         Assert.False(TryGetError(document, out _), "list must not return an error");
         Assert.True(IsEnabled(document, "file_search"));
         Assert.True(IsProtected(document, "tools_policy"));
-        Assert.True(IsProtected(document, "memory_recall"));
+        Assert.True(IsProtected(document, "recall"));
         Assert.False(IsProtected(document, "file_search"));
     }
 
@@ -80,7 +80,7 @@ public sealed class ToolsPolicyToolTests : IDisposable
 
         Assert.True(_store.IsToolDisabled("file_search"));
         Assert.True(_store.IsToolDisabled("file_delete"));
-        Assert.False(_store.IsToolDisabled("memory_recall"));
+        Assert.False(_store.IsToolDisabled("recall"));
         Assert.False(_store.IsToolDisabled("codebase_search"));
     }
 

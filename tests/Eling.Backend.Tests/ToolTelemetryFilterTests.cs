@@ -46,7 +46,7 @@ public class ToolTelemetryFilterTests
         var testLogger = new TestLogger();
         var filter = ToolTelemetryFilter.Create(testLogger);
 
-        var requestContext = CreateRequestContext("memory_recall", new { query = "test query" });
+        var requestContext = CreateRequestContext("recall", new { query = "test query" });
 
         McpRequestHandler<CallToolRequestParams, CallToolResult> next = (ctx, ct) =>
         {
@@ -64,8 +64,8 @@ public class ToolTelemetryFilterTests
         Assert.NotNull(result);
         Assert.NotNull(result.Meta);
         Assert.True(result.Meta.ContainsKey("executionTimeMs"));
-        Assert.Contains(testLogger.Logs, l => l.Level == LogLevel.Debug && l.Message.Contains("ToolTelemetry: START tool=memory_recall"));
-        Assert.Contains(testLogger.Logs, l => l.Level == LogLevel.Information && l.Message.Contains("ToolTelemetry: END tool=memory_recall") && l.Message.Contains("status=success"));
+        Assert.Contains(testLogger.Logs, l => l.Level == LogLevel.Debug && l.Message.Contains("ToolTelemetry: START tool=recall"));
+        Assert.Contains(testLogger.Logs, l => l.Level == LogLevel.Information && l.Message.Contains("ToolTelemetry: END tool=recall") && l.Message.Contains("status=success"));
     }
 
     [Fact]

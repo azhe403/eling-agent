@@ -6,7 +6,7 @@ using Eling.Core.MemoryRecall;
 namespace Eling.Backend.Dtos;
 
 /// <summary>
-/// Payload returned by the <c>memory_recall</c> tool. Bundles the most
+/// Payload returned by the <c>recall</c> tool. Bundles the most
 /// relevant full memories for the given topics, the most recently updated
 /// active memories, and outstanding intentions so a client can hydrate
 /// context on demand at any point in a conversation.

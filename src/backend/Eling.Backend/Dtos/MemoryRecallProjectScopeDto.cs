@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Eling.Backend.Dtos;
 
 /// <summary>
-/// Lean project-scope posture surfaced by <c>memory_recall</c>. When
+/// Lean project-scope posture surfaced by <c>recall</c>. When
 /// <see cref="Adoptable"/> is true the agent may offer consent-gated onboarding;
 /// when <see cref="Policy"/> is <c>disabled</c> it must not, and should use
 /// <c>scope=global</c>.

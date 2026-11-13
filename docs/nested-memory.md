@@ -1,7 +1,7 @@
 # Nested Memory Save
 
 **Status:** Implemented (ancestor-only)
-**Related tools:** `memory_save`, `memory_delete`, `memory_recall`
+**Related tools:** `memory_save`, `memory_delete`, `recall`
 **Scope files:** `Eling.Core/Scope/ProjectScope.cs`, `Eling.Core/Memory/ScopedMemoryService.cs`, `Eling.Backend/Mcp/Tools/MemoryWriteTool.cs`
 
 ---

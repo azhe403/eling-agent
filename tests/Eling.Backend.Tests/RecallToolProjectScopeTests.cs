@@ -5,12 +5,12 @@ using Eling.Core.Scope;
 
 namespace Eling.Backend.Tests;
 
-public sealed class MemoryRecallToolProjectScopeTests : IDisposable
+public sealed class RecallToolProjectScopeTests : IDisposable
 {
     private readonly string _root;
     private DateTimeOffset _now = new(2026, 9, 11, 12, 0, 0, TimeSpan.Zero);
 
-    public MemoryRecallToolProjectScopeTests()
+    public RecallToolProjectScopeTests()
     {
         _root = Path.Combine(Path.GetTempPath(), "eling-recall-scope-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_root);
@@ -24,7 +24,7 @@ public sealed class MemoryRecallToolProjectScopeTests : IDisposable
     private JsonProjectScopePolicyStore NewStore()
         => new(new UserScope(_root), () => _now, Path.Combine(_root, "home"));
 
-    private static MemoryRecallTool NewTool(string cwd, IProjectScopePolicyStore? store = null, string? home = null)
+    private static RecallTool NewTool(string cwd, IProjectScopePolicyStore? store = null, string? home = null)
         => new(new EmptyRecallService(), cwd: cwd, userHomeDirectory: home, policyStore: store);
 
     [Fact]

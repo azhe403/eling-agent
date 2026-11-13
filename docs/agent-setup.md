@@ -158,7 +158,7 @@ curl http://127.0.0.1:4317/health
 ```
 
 Then have the user **restart or reload the host** so it picks up the new MCP server, and confirm the tools appear
-(`eling*` tools such as `memory_recall`, `memory_save`, `memory_search`).
+(`eling*` tools such as `recall`, `memory_save`, `memory_search`).
 
 ## Step 5 — Project scope (consent required)
 

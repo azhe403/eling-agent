@@ -51,7 +51,7 @@ To prevent context bloat and empty retrieval loops, all agents interacting with 
 
 ## 2. Engine-Side Search Pipeline (3-Layer FTS5 + Adaptive Fallback)
 
-When `memory_recall` or `memory_search` is called, `SqliteMemoryIndex` and `MemoryRecallService` execute a multi-tier search process:
+When `recall` or `memory_search` is called, `SqliteMemoryIndex` and `MemoryRecallService` execute a multi-tier search process:
 
 ```
                           1. Raw Query Topics
@@ -132,7 +132,7 @@ Every recall hit surfaces transparent metadata explaining *why* it matched:
 
 ## 5. Project-Scope Posture (`projectScope`)
 
-`memory_recall` also returns a `projectScope` block describing whether onboarding applies, so the agent does not have to prompt repeatedly:
+`recall` also returns a `projectScope` block describing whether onboarding applies, so the agent does not have to prompt repeatedly:
 
 ```json
 "projectScope": {

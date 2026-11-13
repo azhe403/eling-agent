@@ -7,7 +7,7 @@ namespace Eling.Core.MemoryRecall;
 /// <summary>
 /// Application-layer service that bundles topic-based recall, recently
 /// updated active memories, and outstanding intentions into a single payload
-/// for the <c>memory_recall</c> MCP tool. Replaces the previous
+/// for the <c>recall</c> MCP tool. Replaces the previous
 /// <c>session_start</c> implementation, which discarded the topics parameter
 /// and only ever returned recent memories. This implementation actually
 /// performs a search across <see cref="IScopedMemoryService"/> using the
@@ -98,7 +98,7 @@ public sealed class MemoryRecallService : IMemoryRecallService
                     if (hit.QueryMode == "or-fallback")
                     {
                         _logger?.LogDebug(
-                            "memory_recall fell back to OR queries: tokens={TokenCount}, scope={Scope}",
+                            "recall fell back to OR queries: tokens={TokenCount}, scope={Scope}",
                             topics.Count, scope);
                     }
                     if (scoped is not null)

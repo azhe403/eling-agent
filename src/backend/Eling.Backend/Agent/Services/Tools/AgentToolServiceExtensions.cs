@@ -32,7 +32,7 @@ public static class AgentToolServiceExtensions
 
         // Underlying MCP tool classes; the agent adapters take these via
         // constructor injection, so they must be resolvable from the container.
-        services.AddScoped<MemoryRecallTool>();
+        services.AddScoped<RecallTool>();
         services.AddScoped<MemoryWriteTool>();
         services.AddScoped<MemoryReadTool>();
         services.AddScoped<FileSystemTools>();
@@ -52,7 +52,7 @@ public static class AgentToolServiceExtensions
         });
 
         // Agent-facing adapters expose the MCP tools to the LLM agent loop.
-        services.AddScoped<IAgentTool, MemoryRecallAgentTool>();
+        services.AddScoped<IAgentTool, RecallAgentTool>();
         services.AddScoped<IAgentTool, MemorySaveAgentTool>();
         services.AddScoped<IAgentTool, MemorySearchAgentTool>();
         services.AddScoped<IAgentTool, FileReadAgentTool>();

@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Eling.Backend.Dtos;
 
 /// <summary>
-/// Root <c>memory_recall</c> response.
+/// Root <c>recall</c> response.
 /// </summary>
 public sealed class MemoryRecallResponse
 {

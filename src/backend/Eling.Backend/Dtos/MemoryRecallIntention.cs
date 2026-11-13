@@ -6,7 +6,7 @@ using Eling.Core.MemoryRecall;
 namespace Eling.Backend.Dtos;
 
 /// <summary>
-/// Lightweight intention descriptor exposed by <c>memory_recall</c>.
+/// Lightweight intention descriptor exposed by <c>recall</c>.
 /// </summary>
 public sealed class MemoryRecallIntention
 {

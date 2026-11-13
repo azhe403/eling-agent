@@ -33,7 +33,7 @@ public sealed class ToolsEndpointsTests : IAsyncLifetime, IDisposable
         res.EnsureSuccessStatusCode();
 
         var body = await res.Content.ReadAsStringAsync();
-        Assert.Contains("memory_recall", body);
+        Assert.Contains("recall", body);
         Assert.Contains("file_delete", body);
         Assert.Contains("codebase_search", body);
         Assert.Contains("enabled", body);
@@ -74,7 +74,7 @@ public sealed class ToolsEndpointsTests : IAsyncLifetime, IDisposable
 
         var res = await client.PutAsJsonAsync("/api/tools", new
         {
-            toolName = "memory_recall",
+            toolName = "recall",
             enabled = false,
         });
 

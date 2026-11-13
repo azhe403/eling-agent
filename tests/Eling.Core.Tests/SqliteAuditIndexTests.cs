@@ -122,7 +122,7 @@ public class SqliteAuditIndexTests : IDisposable
             AuditTrail.Access,
             [
                 new AuditEvent { Timestamp = day, Trail = AuditTrail.Access, Action = "codebase_search" },
-                new AuditEvent { Timestamp = day.AddMinutes(1), Trail = AuditTrail.Access, Action = "memory_recall" }
+                new AuditEvent { Timestamp = day.AddMinutes(1), Trail = AuditTrail.Access, Action = "recall" }
             ],
             flushToDisk: true,
             CancellationToken.None);

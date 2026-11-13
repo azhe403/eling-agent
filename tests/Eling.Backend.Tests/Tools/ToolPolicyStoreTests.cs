@@ -125,13 +125,13 @@ public sealed class ToolPolicyStoreTests : IDisposable
     {
         var store = NewStore();
 
-        var config = store.DisableTools(["tools_policy", "memory_recall", "file_delete"]);
+        var config = store.DisableTools(["tools_policy", "recall", "file_delete"]);
 
         Assert.False(store.IsToolDisabled("tools_policy"));
-        Assert.False(store.IsToolDisabled("memory_recall"));
+        Assert.False(store.IsToolDisabled("recall"));
         Assert.True(store.IsToolDisabled("file_delete"));
         Assert.DoesNotContain("tools_policy", config.DisabledTools);
-        Assert.DoesNotContain("memory_recall", config.DisabledTools);
+        Assert.DoesNotContain("recall", config.DisabledTools);
     }
 
     [Fact]

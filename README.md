@@ -20,7 +20,7 @@ One line per OS installs the `eling-backend` binary + dashboard UI and adds it t
 
 ## What's in it
 
-- **Persistent agent memory over MCP** — `memory_save` / `memory_get` / `memory_search` / `memory_recall` with hybrid FTS search, scope-aware ranking, and overflow summaries; plus `memory_list`, `memory_delete`, `memory_maintenance` (dedup), and ULID-based identity.
+- **Persistent agent memory over MCP** — `memory_save` / `memory_get` / `memory_search` / `recall` with hybrid FTS search, scope-aware ranking, and overflow summaries; plus `memory_list`, `memory_delete`, `memory_maintenance` (dedup), and ULID-based identity.
 - **Three scopes** — `project` (`.eling/memories/`, committed to Git), `project-local` (machine-only, default), and `global` (`~/.config/eling/`).
 - **Codebase index & search** — per-workspace FTS index, `codebase_search` with content/path/file scopes, worktree-aware indexing.
 - **Read-only database access** — `db_list_connections`, `db_detect_connections`, `db_import_connections`, `db_get_schema`, `db_query` (single-statement, read-only) over MySQL/SQLite; plus `redis_scan` / `redis_inspect` with a scan cache.

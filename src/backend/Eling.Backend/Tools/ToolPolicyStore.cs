@@ -26,7 +26,7 @@ public sealed class ToolPolicyStore
     private static readonly HashSet<string> ProtectedTools = new(StringComparer.OrdinalIgnoreCase)
     {
         "tools_policy",
-        "memory_recall",
+        "recall",
     };
 
     private readonly object _gate = new();

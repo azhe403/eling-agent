@@ -6,7 +6,7 @@ namespace Eling.Backend.Bootstrap;
 
 /// <summary>
 /// Shared evaluation of a workspace's project-scope posture: the scope-chain
-/// facts plus the resolved policy decision. Used by <c>memory_recall</c> and
+/// facts plus the resolved policy decision. Used by <c>recall</c> and
 /// <c>memory_project_status</c> so both agree, and so onboarding is offered only
 /// when the policy is <c>ask</c>. Read-only: never creates <c>.eling</c>.
 /// </summary>

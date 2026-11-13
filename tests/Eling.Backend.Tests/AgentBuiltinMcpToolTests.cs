@@ -37,7 +37,7 @@ public sealed class AgentBuiltinMcpToolTests : IDisposable
         var tools = scope.ServiceProvider.GetServices<IAgentTool>().ToList();
 
         Assert.Equal(21, tools.Count);
-        Assert.Contains(tools, t => t.Name == "memory_recall");
+        Assert.Contains(tools, t => t.Name == "recall");
         Assert.Contains(tools, t => t.Name == "memory_save");
         Assert.Contains(tools, t => t.Name == "memory_search");
         Assert.Contains(tools, t => t.Name == "file_read");
@@ -102,10 +102,10 @@ public sealed class AgentBuiltinMcpToolTests : IDisposable
     }
 
     [Fact]
-    public async Task MemoryRecallTool_Executes_ReturnsValidJson()
+    public async Task RecallTool_Executes_ReturnsValidJson()
     {
         using var scope = _provider.CreateScope();
-        var recallTool = scope.ServiceProvider.GetServices<IAgentTool>().First(t => t.Name == "memory_recall");
+        var recallTool = scope.ServiceProvider.GetServices<IAgentTool>().First(t => t.Name == "recall");
 
         var output = await recallTool.ExecuteAsync("{}", CancellationToken.None);
         var doc = JsonDocument.Parse(output);

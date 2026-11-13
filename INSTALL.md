@@ -193,7 +193,7 @@ eling_install:
   storage_cache: .eling/memory.db*          # gitignored, rebuildable
   runtime_probe: "GET http://127.0.0.1:$PORT/health"
   mcp_transport: stdio
-  session_start_tool: memory_recall   # on-demand context hydration (renamed from session_start; call any time during a conversation)
+  session_start_tool: recall   # on-demand context hydration (renamed from session_start; call any time during a conversation)
   memory_tools: [memory_save, memory_get, memory_search, memory_list, memory_delete]
   post_install_playbook: docs/agent-setup.md   # install → detect host → MCP config → verify → consent project init
   default_scope: global               # project scope only when the user asks

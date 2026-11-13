@@ -60,7 +60,7 @@ public sealed class HarvestNudgeFilterTests
 
         for (var i = 0; i < 10; i++)
         {
-            Assert.False(HasReminder(await CallAsync(filter, "memory_recall")));
+            Assert.False(HasReminder(await CallAsync(filter, "recall")));
         }
     }
 

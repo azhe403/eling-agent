@@ -15,7 +15,7 @@ public static class ToolCatalog
 
     public static readonly IReadOnlyList<ToolDefinition> All = new List<ToolDefinition>
     {
-        new("memory_recall", MemoryGroup, "Recall relevant memories and outstanding intentions for the current task."),
+        new("recall", MemoryGroup, "Recall relevant workspace context for the current task (memories, codebase status, project scope, update notice)."),
         new("memory_save", MemoryGroup, "Save a durable memory to the knowledge store."),
         new("memory_get", MemoryGroup, "Retrieve a memory by its ID."),
         new("memory_list", MemoryGroup, "List memories, optionally filtered by status."),

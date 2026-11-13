@@ -13,7 +13,7 @@ You do **not** need special syntax, magic commands, or prefix keywords like `eli
 Just talk to your coding agent naturally:
 
 - *"From now on, always use CliWrap for external processes."* → Agent autonomously invokes `memory_save` (tier-1 preference/rule).
-- *"How do we run the backend server?"* → Agent checks memories via `memory_recall` and provides the exact procedure.
+- *"How do we run the backend server?"* → Agent checks memories via `recall` and provides the exact procedure.
 - *"We decided to switch the database provider to PostgreSQL."* → Agent records the architectural decision to memory.
 - *"Remember this fix for next time."* → Agent persists the lesson learned.
 
@@ -29,7 +29,7 @@ Just talk to your coding agent naturally:
 
 | Interface | URL / Access | Description |
 |---|---|---|
-| **AI Agent (MCP)** | Stdio / in-app | Primary interface. Agents autonomously use tools like `memory_recall`, `memory_save`, `codebase_search`, and sandboxed file tools. |
+| **AI Agent (MCP)** | Stdio / in-app | Primary interface. Agents autonomously use tools like `recall`, `memory_save`, `codebase_search`, and sandboxed file tools. |
 | **Web Dashboard** | `http://127.0.0.1:4317` | Browser UI served by the backend binary (dev: `http://127.0.0.1:4427`, proxying to the dev backend on 4417). Visual memory browsing, live event inspection, active runtimes, and audit trail. |
 | **Desktop App (`Eling.Desktop`, experimental)** | Native Application | Avalonia desktop app for standalone memory browsing, runtime monitoring, and direct agent chat. |
 

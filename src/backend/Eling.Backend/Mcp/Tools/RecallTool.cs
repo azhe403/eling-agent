@@ -14,18 +14,18 @@ using ModelContextProtocol.Server;
 namespace Eling.Backend.Mcp.Tools;
 
 /// <summary>
-/// On-demand context hydration. Replaces the previous <c>session_start</c>
-/// tool: agents may invoke <c>memory_recall</c> at any point in a
+/// On-demand workspace context hydration. Replaces the previous <c>session_start</c>
+/// tool: agents may invoke <c>recall</c> at any point in a
 /// conversation to refresh the slice of memory that is relevant to the
 /// current task, including memories just written by other agents. It also
 /// reports the project-scope posture so the agent knows whether onboarding
 /// applies (<c>adoptable</c>) without asking repeatedly.
 /// </summary>
 [McpServerToolType]
-public sealed class MemoryRecallTool
+public sealed class RecallTool
 {
     private readonly IMemoryRecallService _recall;
-    private readonly ILogger<MemoryRecallTool>? _logger;
+    private readonly ILogger<RecallTool>? _logger;
     private readonly string? _cwd;
     private readonly string? _userHomeDirectory;
     private readonly IProjectScopePolicyStore? _policyStore;
@@ -38,9 +38,9 @@ public sealed class MemoryRecallTool
     /// <summary>Bound on how many overflow items one summary may cover.</summary>
     private const int MaxSummarizedItems = 10;
 
-    public MemoryRecallTool(
+    public RecallTool(
         IMemoryRecallService recall,
-        ILogger<MemoryRecallTool>? logger = null,
+        ILogger<RecallTool>? logger = null,
         string? cwd = null,
         string? userHomeDirectory = null,
         IProjectScopePolicyStore? policyStore = null,
@@ -62,7 +62,7 @@ public sealed class MemoryRecallTool
         _watcher = watcher;
     }
 
-    [McpServerTool(Name = "memory_recall"), Description("Call this BEFORE answering or acting, not after. On the first user turn of any session, on every step progression/subtask transition, and whenever the topic shifts, call this first — with a BROAD topic set: topics derived from the current step or message AND topics covering other relevant areas (standing rules and preferences, standing decisions, lessons and known gotchas, workflow and repo conventions, recently touched work); never anchor solely on the opening message's subject. Pass topics as `context: { topics: [...] }` — a top-level `topics` array is also accepted and, when non-empty, replaces `context.topics`. It costs ~500ms and prevents wrong assumptions about project conventions and past decisions. After a session-start call, check `stats.recallCount`: if it is 0, the call was mis-shaped or matched nothing — re-issue with `context: { topics: [...] }` and broader terms before proceeding (bounded retries). Also triggers on 'eling <topic>'. When topic recall returns more than `recallLimit` items, the response also carries `recallSummary` — digest paragraphs of the overflowing items (the ones the limit would drop); pass `summarizeOverflow: false` to skip it, and read `source` to tell a judge-written digest ('judge') from a deterministic one ('heuristic'). Every response also carries `standingMemories` — a topic-independent baseline of standing rules/preferences, standing decisions, and lessons (project-first, capped); read it on session start even when your topic call was narrow, because it is the server-enforced consistency spine. Returns topic-relevant full memories (search-based recall), the most recently updated active memories (so writes from other agents are visible), the standing baseline, the overflow digest, outstanding intentions with their trigger-match state, the project-scope posture (posture, policy, adoptable) so the agent can offer onboarding only when adoptable, codebase status (file/chunk counts, freshness, watcher state), and lightweight stats.")]
+    [McpServerTool(Name = "recall"), Description("Call this BEFORE answering or acting, not after. On the first user turn of any session, on every step progression/subtask transition, and whenever the topic shifts, call this first — with a BROAD topic set: topics derived from the current step or message AND topics covering other relevant areas (standing rules and preferences, standing decisions, lessons and known gotchas, workflow and repo conventions, recently touched work); never anchor solely on the opening message's subject. Pass topics as `context: { topics: [...] }` — a top-level `topics` array is also accepted and, when non-empty, replaces `context.topics`. It costs ~500ms and prevents wrong assumptions about project conventions and past decisions. After a session-start call, check `stats.recallCount`: if it is 0, the call was mis-shaped or matched nothing — re-issue with `context: { topics: [...] }` and broader terms before proceeding (bounded retries). Also triggers on 'eling <topic>'. When topic recall returns more than `recallLimit` items, the response also carries `recallSummary` — digest paragraphs of the overflowing items (the ones the limit would drop); pass `summarizeOverflow: false` to skip it, and read `source` to tell a judge-written digest ('judge') from a deterministic one ('heuristic'). Every response also carries `standingMemories` — a topic-independent baseline of standing rules/preferences, standing decisions, and lessons (project-first, capped); read it on session start even when your topic call was narrow, because it is the server-enforced consistency spine. Returns topic-relevant full memories (search-based recall), the most recently updated active memories (so writes from other agents are visible), the standing baseline, the overflow digest, outstanding intentions with their trigger-match state, the project-scope posture (posture, policy, adoptable) so the agent can offer onboarding only when adoptable, codebase status (file/chunk counts, freshness, watcher state), and lightweight stats.")]
     public async Task<MemoryRecallResponse> RecallAsync(
         [Description("Current task context (filePath, topics, project). Optional.")] MemoryRecallContextInput? context = null,
         [Description("Max recalled memories (default 10).")] int recallLimit = 10,
@@ -88,14 +88,14 @@ public sealed class MemoryRecallTool
                 {
                     ctx = new MemoryRecallContext(alias, context?.FilePath, context?.Project);
                     _logger?.LogInformation(
-                        "memory_recall normalized a top-level topics alias ({TopicCount} topic(s)) into context",
+                        "recall normalized a top-level topics alias ({TopicCount} topic(s)) into context",
                         alias.Length);
                 }
             }
 
             var result = await _recall.RecallAsync(ctx, recallLimit, recentLimit, scope, cancellationToken);
             _logger?.LogInformation(
-                "memory_recall returned {RecallCount} recalled, {StandingCount} standing, {OverflowCount} overflow, {RecentCount} recent, {IntentionCount} intention(s) (scope={Scope})",
+                "recall returned {RecallCount} recalled, {StandingCount} standing, {OverflowCount} overflow, {RecentCount} recent, {IntentionCount} intention(s) (scope={Scope})",
                 result.RecallMemories.Count, result.StandingMemories?.Count ?? 0, result.OverflowMemories?.Count ?? 0, result.RecentMemories.Count, result.Intentions.Count, scope);
 
             var posture = await ProjectScopePosture.EvaluateAsync(_cwd, _userHomeDirectory, _policyStore);
@@ -125,7 +125,7 @@ public sealed class MemoryRecallTool
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "memory_recall threw an exception (scope={Scope}, recallLimit={RecallLimit}, recentLimit={RecentLimit})", scope, recallLimit, recentLimit);
+            _logger?.LogError(ex, "recall threw an exception (scope={Scope}, recallLimit={RecallLimit}, recentLimit={RecentLimit})", scope, recallLimit, recentLimit);
             throw;
         }
     }
@@ -217,7 +217,7 @@ public sealed class MemoryRecallTool
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Failed to attach codebase status to memory_recall");
+            _logger?.LogWarning(ex, "Failed to attach codebase status to recall");
         }
     }
 
@@ -238,7 +238,7 @@ public sealed class MemoryRecallTool
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Failed to attach the update notice to memory_recall");
+            _logger?.LogWarning(ex, "Failed to attach the update notice to recall");
         }
     }
 }

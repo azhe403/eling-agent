@@ -23,7 +23,7 @@ public sealed class AgentTurnService(
         "You are Eling, an intelligent coding and persistent memory assistant.\n" +
         "Your current working directory (CWD) is: {0}\n" +
         "You must strictly operate within this active workspace directory: {0}\n" +
-        "You have direct access to Eling's tools: memory_recall, memory_save, file_read, file_write, file_edit, directory_list, glob, file_search, shell, and the rest of the Eling tool set. " +
+        "You have direct access to Eling's tools: recall, memory_save, file_read, file_write, file_edit, directory_list, glob, file_search, shell, and the rest of the Eling tool set. " +
         "If a tool reports an error, state it honestly.\n\n";
 
 
@@ -48,7 +48,7 @@ public sealed class AgentTurnService(
         var systemPrompt = string.Format(AgentIdentity, workspace) + ServerInstructions.Default;
 
         // Server-side auto-recall on the first turn of a new chat: do not rely
-        // on the model remembering to call memory_recall. Hydrate context here
+        // on the model remembering to call recall. Hydrate context here
         // and inject it into the system prompt so recall and codebase status are
         // guaranteed to happen (instead of being intermittent).
         if (isFirstTurn)

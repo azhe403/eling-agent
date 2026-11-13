@@ -13,7 +13,7 @@ namespace Eling.Backend.Mcp.Tools;
 /// Each call records one <c>codebase_status</c> access entry (amendment B).
 /// </summary>
 // NOTE: intentionally NOT an [McpServerToolType] anymore. Codebase status is
-// now carried by memory_recall's `codebase` field, so exposing it as a
+// now carried by recall's `codebase` field, so exposing it as a
 // standalone MCP tool only invited redundant calls. The class and method are
 // retained for direct (in-process / test) use.
 public sealed class CodebaseStatusTool
@@ -35,7 +35,7 @@ public sealed class CodebaseStatusTool
         _logger = logger;
     }
 
-    [Description("Report codebase index stats: file/chunk counts, last indexed time, watcher state, and DB path. (Internal/fallback only — not exposed as an MCP tool; status is carried by memory_recall's `codebase` field.)")]
+    [Description("Report codebase index stats: file/chunk counts, last indexed time, watcher state, and DB path. (Internal/fallback only — not exposed as an MCP tool; status is carried by recall's `codebase` field.)")]
     public async Task<CodebaseStatusResponse> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         try

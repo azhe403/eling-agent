@@ -61,7 +61,7 @@ public class MemoryService : IMemoryService
 
     private async Task<MemorySaveResult> SaveJudgedAsync(Memory memory, Retrieval retrieval)
     {
-        // Judge candidates come from the same recall results memory_recall uses: an FTS
+        // Judge candidates come from the same recall results recall uses: an FTS
         // porter+trigram scope of the incoming content. This replaces the older heuristic
         // near-match band so the judge weighs memories that actually live in the store,
         // ranked by relevance, instead of memories that happened to cross the 0.35
@@ -153,7 +153,7 @@ public class MemoryService : IMemoryService
     }
 
     /// <summary>
-    /// Builds the judge's candidate set from the same recall results memory_recall uses:
+    /// Builds the judge's candidate set from the same recall results recall uses:
     /// an FTS porter+trigram scope of the incoming content. This replaces the older
     /// heuristic near-match band so the judge weighs memories that actually live in the
     /// store, ranked by relevance, instead of memories that happened to cross the 0.35

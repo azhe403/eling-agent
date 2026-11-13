@@ -66,7 +66,7 @@ public sealed class ToolExceptionFilterTests
 
         var filter = ToolExceptionFilter.Create();
         var handler = filter(next);
-        var context = CreateCallContext("memory_recall", services: null);
+        var context = CreateCallContext("recall", services: null);
 
         var result = await handler(context, CancellationToken.None);
 
