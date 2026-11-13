@@ -61,6 +61,7 @@ public static class DashboardRoutes
         // the API. One handler, two paths, so the two cannot drift.
         app.MapGet("/api/health", () => Results.Ok(HealthPayload()));
         app.MapSseEvents();
+        app.MapCommitLeaseEndpoints();
         app.MapCoordinatorEndpoints();
         app.MapMemoryRoutes();
         app.MapScopedMemoryRoutes();
@@ -128,6 +129,25 @@ public static class DashboardRoutes
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
+
+    /// <summary>
+    /// The commit-lease surface of the dashboard owner: the snapshot the panel
+    /// renders, the push channel it subscribes to, and the snapshot route is
+    /// completed by <c>CommitLeaseController</c> (active + force-release).
+    /// Only this host maps them — a peer owns no dashboard and answers none of
+    /// these routes, exactly as for the memory SSE channel.
+    /// </summary>
+    internal static void MapCommitLeaseEndpoints(this WebApplication app)
+    {
+        // The snapshot is what the client (re)renders after every frame, so a
+        // reconnecting client resyncs from the stream itself; the REST GET
+        // stays for the first paint and for explicit refreshes.
+        app.MapGet("/api/events/commit-lease", (HttpContext context, CommitLeaseBroadcaster broadcaster) =>
+        {
+            var ct = context.RequestAborted;
+            return WriteSseAsync(context, broadcaster.SubscribeAsync(ct), item => JsonSerializer.Serialize(item, SseJsonOptions), ct);
+        });
+    }
 
     private static string SerializeRebuildProgress(CodebaseRebuildProgress snapshot) =>
         JsonSerializer.Serialize(snapshot, SseJsonOptions);

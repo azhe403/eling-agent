@@ -1,7 +1,7 @@
 # Session Context Replacement — Design
 
 Date: 2026-10-11
-Status: draft (phase 2, after file claims win)
+Status: draft (phase 2, after file leases win)
 Goal: replace `.tmp/sessions/*/context.md` with live progress in Eling.
 
 ## Scope
@@ -19,7 +19,7 @@ Goal: replace `.tmp/sessions/*/context.md` with live progress in Eling.
 - `session_register(session_id, branch, ttl)` → create or reactivate.
 - `session_heartbeat(session_id, current_step, next_intent, working_files)` → lightweight overwrite.
 - `session_get(session_id)` / `session_list(active_only=true)` → read + list.
-- `session_close(session_id)` → mark done, releases all claims.
+- `session_close(session_id)` → mark done, releases all leases.
 
 ## Agent guidance
 - Via ServerInstructions + tool descriptions only, no AGENTS.md change.

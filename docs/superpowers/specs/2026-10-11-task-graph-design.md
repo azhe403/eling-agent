@@ -1,7 +1,7 @@
 # Task Graph Replacement — Design
 
 Date: 2026-10-11
-Status: draft (phase 3, after sessions + claims stabilize)
+Status: draft (phase 3, after sessions + leases stabilize)
 Goal: replace `.tmp/tasks/<feature>/task.json + subtask_NN.json` with structured tasks in Eling.
 
 ## Scope
@@ -24,4 +24,4 @@ Goal: replace `.tmp/tasks/<feature>/task.json + subtask_NN.json` with structured
 - Validate each batch before starting the next one (keep the existing incremental pattern).
 
 ## Validation
-- One feature with 3 subtasks across two chats: no double-claimed subtask, consistent final status.
+- One feature with 3 subtasks across two chats: no double-leased subtask, consistent final status.

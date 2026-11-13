@@ -1,7 +1,9 @@
 using Eling.Backend.Database;
 using Eling.Backend.Mcp;
+using Eling.Backend.Services;
 using Eling.Core;
 using Eling.Core.Database;
+using Eling.Core.CommitLease;
 using Eling.Core.Memory;
 using Eling.Core.Projects;
 using Eling.Core.Scope;
@@ -31,7 +33,7 @@ public static class McpHostBuilder
     {
         var effectiveContext = context ?? ProjectContext.Discover();
         var effectivePort = dashboardPort ?? DashboardPort.Resolve();
-        var shared = AppServices.Create(effectiveContext);
+        var shared = AppServices.Create(effectiveContext, effectivePort);
 
         var builder = Host.CreateDefaultBuilder();
 
@@ -132,6 +134,15 @@ public static class McpHostBuilder
             // still broadcasts, so peer takeover needs no re-wiring.
             services.AddSingleton<IMemoryChangeNotifier>(
                 _ => new HttpCoordinatorMemoryChangeNotifier(effectivePort));
+            // Lease mutations are the same cross-process story as memory writes
+            // (see the note above): the shared store registered below carries
+            // this same HTTP relay, and the standalone notifier covers services
+            // that inject ICommitLeaseChangeNotifier directly.
+            services.AddSingleton<ICommitLeaseChangeNotifier>(
+                _ => new HttpCoordinatorCommitLeaseChangeNotifier(effectivePort));
+            // The shared instance both hosts consume (AppServices): one lease
+            // store per process, pointed at the machine-global commit-leases.json.
+            services.AddSingleton(shared.CommitLeaseStore);
             services.AddSingleton(shared.UserScope);
             // The log_read MCP tool follows log.json live (the Func seam re-reads it via
             // RefreshIfStale); only the sink's initial format above is static.

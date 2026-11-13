@@ -9,10 +9,12 @@ using Eling.Backend.Converters;
 using Eling.Backend.Database;
 using Eling.Backend.Identity;
 using Eling.Backend.Mcp;
+using Eling.Backend.Services;
 using Eling.Backend.Updates;
 using Eling.Core;
 using Eling.Core.Codebase;
 using Eling.Core.Database;
+using Eling.Core.CommitLease;
 using Eling.Core.Memory;
 using Eling.Core.Projects;
 using Eling.Core.Scope;
@@ -33,7 +35,8 @@ public static class DashboardServices
         IServiceCollection services,
         ProjectContext context,
         AppServices? shared = null,
-        bool isOwnerMode = true)
+        bool isOwnerMode = true,
+        int? coordinatorPort = null)
     {
         // The host's first sink must already write the stored log format
         // (text/jsonl): reading the user-scope setting here, before any logger
@@ -55,6 +58,10 @@ public static class DashboardServices
         });
 
         services.TryAddSingleton<Eling.Core.Codebase.CodebaseFileReader>();
+
+        // The controller and the lease snapshot factory resolve the project
+        // context from DI; the MCP host registers it the same way.
+        services.TryAddSingleton(context);
 
         services.TryAddSingleton<Services.ProjectScopeCatalog>();
         services.TryAddSingleton<Services.ProcessMetricsTracker>();
@@ -99,12 +106,26 @@ public static class DashboardServices
         if (shared is not null)
         {
             services.AddSingleton(shared.Workspaces);
+            // The same lease store instance the MCP host registers; both hosts
+            // in the single-binary process share it (mirrors Workspaces).
+            services.AddSingleton(shared.CommitLeaseStore);
         }
         else
         {
             services.TryAddSingleton(sp => ActivatorUtilities.CreateInstance<Eling.Core.Projects.JsonWorkspaceRegistry>(
                 sp,
                 Path.Combine(globalAgentDir, "agent-workspaces.json")));
+            // Standalone hosts (no shared AppServices) get their own store over
+            // the same machine-global file, like JsonDatabaseConnectionStore.
+            // Its change notifier is the in-proc broadcaster when one exists
+            // (owner mode registers it below), so same-process mutations wake
+            // the SSE stream without a loopback roundtrip; a peer relays to
+            // us via the coordinator bridge instead.
+            services.TryAddSingleton(sp => new JsonCommitLeaseStore(
+                Path.Combine(globalAgentDir, "commit-leases.json"),
+                sp.GetService<Services.CommitLeaseBroadcaster>(),
+                timeProvider: TimeProvider.System,
+                logger: sp.GetService<ILogger<JsonCommitLeaseStore>>()));
         }
 
         services.AddSingleton(sp => new ProviderStore(
@@ -176,6 +197,36 @@ public static class DashboardServices
                 CentralAgentDirectory.Resolve(),
                 sp.GetRequiredService<MemoryChangeBroadcaster>(),
                 sp.GetRequiredService<ILogger<DatabaseRegistryWatcher>>()));
+
+            // Mirrors what AppServices.Create and the MCP host do when the
+            // dashboard port is known: anything in this process that injects
+            // ICommitLeaseChangeNotifier relays mutations to the owner over HTTP
+            // (a self-loopback when this process owns the port). With no port
+            // known, no notifier is registered — same as AppServices with an
+            // unknown port. The standalone lease store above still pushes
+            // in-proc through the broadcaster either way.
+            if (isOwnerMode && coordinatorPort is int relayPort)
+            {
+                services.AddSingleton<ICommitLeaseChangeNotifier>(
+                    _ => new HttpCoordinatorCommitLeaseChangeNotifier(relayPort));
+            }
+
+            // The SSE channel for the commit-lease panel: subscribers get the
+            // current snapshot on connect, then a fresh one on every store
+            // change (in-proc mutations via this process's notifier, or a
+            // peer's mutation relayed as the "commit-lease" topic on the
+            // memory broadcaster). The frame is machine-global — every
+            // browser renders all checkouts and narrows selection
+            // client-side — so the payload carries checkout = null with
+            // per-row checkouts.
+            services.AddSingleton(sp => new Services.CommitLeaseBroadcaster(
+                ct => Eling.Backend.Dtos.CommitLeaseSnapshotDto.BuildAcrossCheckoutsAsync(
+                    sp.GetRequiredService<ICommitLeaseStore>(),
+                    branch: null,
+                    TimeProvider.System,
+                    ct),
+                sp.GetRequiredService<ILogger<Services.CommitLeaseBroadcaster>>(),
+                sp.GetService<MemoryChangeBroadcaster>()));
 
             services.AddSingleton<Services.RuntimeMetricsSampler>();
             services.AddSingleton(sp => new Services.RuntimeMetricsBroadcaster(

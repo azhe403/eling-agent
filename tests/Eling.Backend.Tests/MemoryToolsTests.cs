@@ -530,5 +530,11 @@ public class MemoryToolsTests
         Assert.Contains("Codebase", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("codebase_index", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("codebase_search", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Commit lease", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("commit_check_conflict", options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("commit_lease", options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("commit_release", options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("commit_wait", options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("staged_without_lease", options.ServerInstructions, StringComparison.Ordinal);
     }
 }

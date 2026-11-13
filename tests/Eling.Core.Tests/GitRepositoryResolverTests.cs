@@ -130,4 +130,98 @@ public sealed class GitRepositoryResolverTests
         Assert.Null(GitRepositoryResolver.ResolveRepositoryRoot(null));
         Assert.Null(GitRepositoryResolver.ResolveRepositoryRoot("   "));
     }
+
+    [Fact]
+    public void ResolveWorkingCopyRoot_MainCheckout_ReturnsTheCheckoutRoot()
+    {
+        using var temp = new TempWorkspace();
+        var repo = temp.Folder("repo");
+        Directory.CreateDirectory(Path.Combine(repo, ".git"));
+
+        var result = GitRepositoryResolver.ResolveWorkingCopyRoot(repo);
+
+        Assert.Equal(repo, result);
+    }
+
+    [Fact]
+    public void ResolveWorkingCopyRoot_SubdirectoryOfMainCheckout_ReturnsTheCheckoutRoot()
+    {
+        using var temp = new TempWorkspace();
+        var repo = temp.Folder("repo");
+        Directory.CreateDirectory(Path.Combine(repo, ".git"));
+        var nested = Path.Combine(repo, "src", "backend");
+        Directory.CreateDirectory(nested);
+
+        var result = GitRepositoryResolver.ResolveWorkingCopyRoot(nested);
+
+        Assert.Equal(repo, result);
+    }
+
+    [Fact]
+    public void ResolveWorkingCopyRoot_LinkedWorktree_ReturnsTheWorktreePath_NotTheMainRoot()
+    {
+        using var temp = new TempWorkspace();
+        var main = temp.Folder("main");
+        var mainGit = Path.Combine(main, ".git");
+        Directory.CreateDirectory(mainGit);
+
+        var worktree = temp.Folder("worktrees", "feature");
+        var worktreeGit = Path.Combine(mainGit, "worktrees", "feature");
+        Directory.CreateDirectory(worktreeGit);
+        File.WriteAllText(Path.Combine(worktreeGit, "commondir"), "../..");
+        File.WriteAllText(Path.Combine(worktree, ".git"), $"gitdir: {worktreeGit}");
+
+        var workingCopy = GitRepositoryResolver.ResolveWorkingCopyRoot(worktree);
+        var repository = GitRepositoryResolver.ResolveRepositoryRoot(worktree);
+
+        Assert.Equal(worktree, workingCopy);
+        Assert.Equal(main, repository);
+    }
+
+    [Fact]
+    public void ResolveWorkingCopyRoot_SubdirectoryOfLinkedWorktree_ReturnsTheWorktreePath()
+    {
+        using var temp = new TempWorkspace();
+        var main = temp.Folder("main");
+        var mainGit = Path.Combine(main, ".git");
+        Directory.CreateDirectory(mainGit);
+
+        var worktree = temp.Folder("worktrees", "feature");
+        var worktreeGit = Path.Combine(mainGit, "worktrees", "feature");
+        Directory.CreateDirectory(worktreeGit);
+        File.WriteAllText(Path.Combine(worktreeGit, "commondir"), "../..");
+        File.WriteAllText(Path.Combine(worktree, ".git"), $"gitdir: {worktreeGit}");
+        var nested = Path.Combine(worktree, "src", "backend");
+        Directory.CreateDirectory(nested);
+
+        var result = GitRepositoryResolver.ResolveWorkingCopyRoot(nested);
+
+        Assert.Equal(worktree, result);
+    }
+
+    [Fact]
+    public void ResolveWorkingCopyRoot_NotARepository_ReturnsNull()
+    {
+        using var temp = new TempWorkspace();
+        var plain = temp.Folder("plain");
+
+        var result = GitRepositoryResolver.ResolveWorkingCopyRoot(plain);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ResolveWorkingCopyRoot_RelativePath_ReturnsNull()
+    {
+        var result = GitRepositoryResolver.ResolveWorkingCopyRoot("relative/path");
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ResolveWorkingCopyRoot_NullOrWhitespace_ReturnsNull()
+    {
+        Assert.Null(GitRepositoryResolver.ResolveWorkingCopyRoot(null));
+        Assert.Null(GitRepositoryResolver.ResolveWorkingCopyRoot("   "));
+    }
 }

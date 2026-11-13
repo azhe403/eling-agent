@@ -186,7 +186,7 @@ public static class HttpLoop
             });
         }
 
-        DashboardServices.Register(builder.Services, context, shared, ownerMode);
+        DashboardServices.Register(builder.Services, context, shared, ownerMode, dashboardPort);
 
         // The dashboard owner's own container records the same trail the MCP host
         // writes, so an entry never depends on which container happened to serve

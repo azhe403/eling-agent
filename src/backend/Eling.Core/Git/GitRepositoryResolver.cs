@@ -37,6 +37,41 @@ public static class GitRepositoryResolver
     public static string? ResolveRepositoryRoot(string? path) => ResolveRepository(path).Root;
 
     /// <summary>
+    /// The root of the working copy containing <paramref name="path"/>, or null
+    /// when the path is not inside a git repository. Unlike
+    /// <see cref="ResolveRepositoryRoot"/>, which answers repo identity (the
+    /// main checkout, useful for dashboard workspace grouping), this answers
+    /// "which working copy is this": the directory whose <c>.git</c> marker was
+    /// hit while walking up from <paramref name="path"/>. A main checkout
+    /// resolves to itself, and a linked worktree resolves to the worktree path —
+    /// the two are distinct keys, which is what lease checkout scoping needs.
+    /// An unreadable <c>.git</c> pointer still marks the directory as a working
+    /// copy, so it keys by its own path rather than folding into the main repo.
+    /// </summary>
+    public static string? ResolveWorkingCopyRoot(string? path)
+    {
+        var start = Normalize(path);
+        if (start is null) return null;
+
+        var directory = start;
+        while (true)
+        {
+            var marker = Path.Combine(directory, GitDirName);
+            if (Directory.Exists(marker) || File.Exists(marker))
+            {
+                // A .git directory marks the main checkout; a .git file marks a
+                // linked worktree. Either way the directory holding the marker
+                // IS the working copy root.
+                return directory;
+            }
+
+            var parent = Directory.GetParent(directory);
+            if (parent is null) return null;
+            directory = parent.FullName;
+        }
+    }
+
+    /// <summary>
     /// The main worktree root of the repository containing <paramref name="path"/>,
     /// and whether that path sits in a linked worktree rather than in the main
     /// checkout.
