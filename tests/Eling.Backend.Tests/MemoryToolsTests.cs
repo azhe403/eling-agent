@@ -526,6 +526,8 @@ public class MemoryToolsTests
         Assert.Contains("standingMemories", options.ServerInstructions, StringComparison.Ordinal);
         Assert.Contains("recallSummary", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Save (MUST DO)", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("NEVER a fragment of the user's message", options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("stranger test", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Scope - you choose it", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Codebase", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("codebase_index", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);

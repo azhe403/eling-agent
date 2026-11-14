@@ -68,6 +68,7 @@ public sealed class AgentTurnPromptCompositionTests
             Assert.Contains("Eling is a durable markdown-backed memory system", sys);
             Assert.Contains("Recall (MUST DO)", sys);
             Assert.Contains("Save (MUST DO)", sys);
+            Assert.Contains("fragment of the user's message", sys);
             Assert.Contains("Scope - you choose it", sys);
         }
         finally
