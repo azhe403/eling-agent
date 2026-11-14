@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { workspaceName } from "@/components/workspaces/runtime-rows"
-import { relativeTime, utcToLocal } from "@/lib/date-utils"
+import { utcToLocal } from "@/lib/date-utils"
 import { formatAge } from "./lease-format"
 
 type LeaseDetailActive = {
@@ -65,10 +65,10 @@ export function LeaseDetailDialog({
           ["Session ID", lease.session_id],
           ["Workspace", lease.checkout],
           ["Branch", (lease as LeaseDetailActive).branch ?? "—"],
-          ["Since", `${utcToLocal(lease.since) || lease.since} (${lease.since})`],
+          ["Since", utcToLocal(lease.since) || lease.since],
           [
             "Last heartbeat",
-            `${utcToLocal((lease as LeaseDetailActive).last_heartbeat) || (lease as LeaseDetailActive).last_heartbeat} (${relativeTime((lease as LeaseDetailActive).last_heartbeat)})`,
+            utcToLocal((lease as LeaseDetailActive).last_heartbeat) || (lease as LeaseDetailActive).last_heartbeat,
           ],
           ["Lease age", ageSeconds != null ? formatAge(ageSeconds) : "—"],
           [
@@ -85,11 +85,11 @@ export function LeaseDetailDialog({
           ["Lease ID", lease.lease_id],
           ["Session ID", lease.session_id],
           ["Workspace", lease.checkout],
-          ["Since", `${utcToLocal(lease.since) || lease.since} (${lease.since})`],
+          ["Since", utcToLocal(lease.since) || lease.since],
           [
             "Released at",
             (lease as LeaseDetailReleased).released_at
-              ? `${utcToLocal((lease as LeaseDetailReleased).released_at!) || (lease as LeaseDetailReleased).released_at} (${relativeTime((lease as LeaseDetailReleased).released_at!)})`
+              ? utcToLocal((lease as LeaseDetailReleased).released_at!) || (lease as LeaseDetailReleased).released_at!
               : "—",
           ],
           ["Release reason", (lease as LeaseDetailReleased).release_reason ?? "—"],
@@ -98,14 +98,14 @@ export function LeaseDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] w-[94vw] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] w-[85vw] max-w-[1024px] overflow-y-auto sm:max-w-[1024px]">
         <DialogHeader>
           <DialogTitle className="break-words">{workspaceName(lease.checkout)}</DialogTitle>
           <DialogDescription className="break-all font-mono text-[11px]" title={lease.checkout}>
             {lease.checkout}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 text-xs sm:grid-cols-2">
+        <div className="flex flex-col gap-4 text-xs">
           <dl className="flex min-w-0 flex-col divide-y divide-border/60">
             {rows.map(([label, value]) => (
               <div key={label} className="flex items-baseline justify-between gap-4 py-1.5">
@@ -127,7 +127,7 @@ export function LeaseDetailDialog({
               </div>
             ))}
           </dl>
-          <div className="min-w-0">
+          <div className="min-w-0 border-t border-border/60 pt-4">
             <div className="text-muted-foreground">Paths</div>
             {paths.length === 0 ? (
               <div className="mt-1.5 text-muted-foreground">—</div>

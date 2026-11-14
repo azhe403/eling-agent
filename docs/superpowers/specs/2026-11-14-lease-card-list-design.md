@@ -22,8 +22,8 @@ Goals:
   empty state.
 - Every detail currently hidden behind the expand renders inside a "Detail" popup
   per card (see anatomy below) — one click to the full record, no expand rows.
-- Paths render in full inside the Detail dialog (no truncation); the card
-  shows none of them, keeping the grid dense.
+- Paths render in full inside the Detail dialog, below the detail rows as a
+  full-width block (not a right-hand column); the card shows none of them.
 - Live behaviour introduced with this change: the 1-second wall-clock ticker for
   age/TTL — the base rendered age as a frozen frame value; the ticker is added
   by this branch, anchored to `snapshotAt` + elapsed wall-clock (see the ledger
@@ -49,19 +49,17 @@ Active card:
 - Meta line (small, muted, icons where the Workspaces page uses them): Since
   (local, title = raw ISO), Age (live ticking), TTL left (live ticking),
   Heartbeat (relative).
-- Right action column: Detail button (opens the full Detail dialog) above Force
-  release, on both card types; released cards carry Detail only.
-- Intent, the lease/session ids, the remaining timestamps and the full paths
-  list render only inside a "Detail" popup per card (src/components/ui/dialog.tsx);
-  the card keeps the glanceable facts so it stays short on dense lists.
-- Paths (full list, no truncation), lease/session ids, branch, since/heartbeat/age/TTL
-  (or released-at/reason) and intent live in the Detail dialog.
-- Right action column: Force release (outline, destructive-tinted), same as the
-  current button.
+- Right action column: Force release only, on Active cards (released cards have
+  no action column) — outline, destructive-tinted. The detail dialog opens from
+  the card click itself (`role="button"`, Enter/Space supported), not a dedicated
+  button; Force release stopPropagation's so it never opens the dialog.
+- Intent renders directly on the card (break-words, full text). The lease/session
+  ids, branch, since/heartbeat/age/TTL and the full paths list render in the
+  Detail dialog; intent also appears there.
 
-Released card: same frame; the right action column carries Detail only; title row carries a
+Released card: same frame, no action column; the title row carries a
 `release_reason` badge (forced = destructive, else secondary). Meta line: Released
-at (local + relative) and Since. Everything else lives in the Detail dialog.
+at (local + relative) and Since. The whole card opens the Detail dialog.
 
 ## Removed
 

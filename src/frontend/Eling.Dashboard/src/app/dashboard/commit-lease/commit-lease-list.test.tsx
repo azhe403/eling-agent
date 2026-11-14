@@ -45,11 +45,36 @@ const nullReleasedLease = {
   checkout: "C:\\repo-beta",
 }
 
+const heldReleasedLease = {
+  lease_id: "lease-held-1",
+  session_id: "session-held-1",
+  since: "2026-11-14T09:10:00Z",
+  released_at: "2026-11-14T09:12:30Z",
+  release_reason: "explicit",
+  intent: "held lease fixture",
+  paths: ["src/held.ts"],
+  checkout: "C:\\repo-delta",
+  ttl_seconds: 600,
+}
+
+const normalLease = {
+  lease_id: "lease-live-1",
+  session_id: "session-live-1",
+  branch: "feat/lease",
+  since: "2026-11-14T11:00:00Z",
+  last_heartbeat: "2026-11-14T11:00:30Z",
+  lease_age_seconds: 100,
+  ttl_seconds: 3600,
+  paths: ["src/gamma.ts"],
+  intent: "live lease fixture",
+  checkout: "C:\\repo-gamma",
+}
+
 const snapshot = {
   checkout: null,
   branch: null,
-  commit_leases: [expiredLease],
-  recently_released: [nullReleasedLease],
+  commit_leases: [expiredLease, normalLease],
+  recently_released: [nullReleasedLease, heldReleasedLease],
 }
 
 class StubEventSource {
@@ -84,27 +109,44 @@ describe("CommitLease cards", () => {
     vi.unstubAllGlobals()
   })
 
+  it("shows the actual duration a released lease was held", async () => {
+    render(<CommitLease />)
+    // 09:10:00Z -> 09:12:30Z = 150s -> formatAge renders "2m 30s"
+    expect(await screen.findByText(/Held 2m 30s/)).toBeTruthy()
+  })
+
+  it("shows the configured total next to the remaining time on the TTL badge", async () => {
+    render(<CommitLease />)
+    // ttl_seconds: 3600 -> formatAge renders "1h 0m"
+    expect(await screen.findByText(/left of 1h 0m/)).toBeTruthy()
+  })
+
   it("renders the expired TTL in amber instead of a countdown", async () => {
     render(<CommitLease />)
     expect(await screen.findByText("0s · expired")).toBeTruthy()
   })
 
-  it("lists every path inside the detail dialog instead of on the card", async () => {
+  it("shows the intent directly on the card", async () => {
+    render(<CommitLease />)
+    // The fixture's intent must be reachable without opening any dialog
+    expect(await screen.findByText("expired lease fixture")).toBeTruthy()
+  })
+
+  it("lists every path inside the detail dialog, not on the card", async () => {
     render(<CommitLease />)
     await screen.findByText("repo-alpha")
     expect(screen.queryByText("a.ts")).toBeNull()
-    fireEvent.click(screen.getAllByRole("button", { name: /detail/i })[0])
+    fireEvent.click(screen.getByRole("button", { name: /lease details for repo-alpha/i }))
     const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByText("a.ts")).toBeTruthy()
-    expect(within(dialog).getByText("b.ts")).toBeTruthy()
-    expect(within(dialog).getByText("c.ts")).toBeTruthy()
-    expect(within(dialog).getByText("d.ts")).toBeTruthy()
+    for (const p of ["a.ts", "b.ts", "c.ts", "d.ts"]) {
+      expect(within(dialog).getByText(p)).toBeTruthy()
+    }
   })
 
   it("shows the full lease detail — ids, intent, branch, TTL — in the dialog", async () => {
     render(<CommitLease />)
     await screen.findByText("repo-alpha")
-    fireEvent.click(screen.getAllByRole("button", { name: /detail/i })[0])
+    fireEvent.click(screen.getByRole("button", { name: /lease details for repo-alpha/i }))
     const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByText("lease-expired-1")).toBeTruthy()
     expect(within(dialog).getByText("session-expired-1")).toBeTruthy()
@@ -117,9 +159,17 @@ describe("CommitLease cards", () => {
     render(<CommitLease />)
     expect(await screen.findByText("Released —")).toBeTruthy()
     // The same null-tolerance inside the detail dialog
-    fireEvent.click(screen.getAllByRole("button", { name: /detail/i })[1])
+    fireEvent.click(screen.getByRole("button", { name: /lease details for repo-beta/i }))
     const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByText("lease-released-1")).toBeTruthy()
     expect(within(dialog).getAllByText("—").length).toBeGreaterThan(0)
+  })
+
+  it("clicking Force release opens the confirmation, not the detail dialog", async () => {
+    render(<CommitLease />)
+    await screen.findByText("repo-alpha")
+    fireEvent.click(screen.getAllByRole("button", { name: /force release/i })[0])
+    expect(await screen.findByText("Force release lease?")).toBeTruthy()
+    expect(screen.queryByRole("dialog")).toBeNull()
   })
 })

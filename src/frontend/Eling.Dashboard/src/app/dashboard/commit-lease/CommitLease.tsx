@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  FileText,
   HeartPulse,
   RefreshCw,
   Timer,
@@ -397,7 +396,17 @@ export function CommitLease() {
                 return (
                   <div
                     key={lease.lease_id}
-                    className="flex flex-col justify-between gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-start sm:gap-4"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Lease details for ${workspaceName(lease.checkout)}`}
+                    onClick={() => setDetailTarget({ kind: "active", leaseId: lease.lease_id })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        setDetailTarget({ kind: "active", leaseId: lease.lease_id })
+                      }
+                    }}
+                    className="flex cursor-pointer flex-col justify-between gap-3 rounded-xl border bg-card p-4 transition-colors hover:border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-row sm:items-start sm:gap-4"
                   >
                     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                       <div className="flex flex-wrap items-center gap-2">
@@ -420,7 +429,7 @@ export function CommitLease() {
                             className="tabular-nums"
                             title={`TTL remaining (${lease.ttl_seconds}s total)`}
                           >
-                            {formatAge(liveTtlRemaining(lease))} left
+                            {formatAge(liveTtlRemaining(lease))} left of {formatAge(lease.ttl_seconds)}
                           </Badge>
                         )}
                       </div>
@@ -445,22 +454,18 @@ export function CommitLease() {
                           Heartbeat {relativeTime(lease.last_heartbeat)}
                         </span>
                       </div>
+                      <div className="break-words text-sm text-foreground/90">{lease.intent ?? "—"}</div>
                     </div>
-                    <div className="flex shrink-0 flex-col justify-center gap-2 self-stretch sm:w-40">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="justify-start"
-                        onClick={() => setDetailTarget({ kind: "active", leaseId: lease.lease_id })}
-                      >
-                        <FileText className="mr-1 size-3.5" />
-                        Detail
-                      </Button>
+                    <div className="flex shrink-0 flex-col justify-center self-stretch sm:w-40">
                       <Button
                         variant="outline"
                         size="sm"
                         className="justify-start border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        onClick={() => setForceTarget(lease)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setForceTarget(lease)
+                        }}
+                        onKeyDown={(e) => e.stopPropagation()}
                       >
                         Force release
                       </Button>
@@ -495,7 +500,17 @@ export function CommitLease() {
               {released.map((lease) => (
                 <div
                   key={lease.lease_id}
-                  className="flex flex-col justify-between gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-start sm:gap-4"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Lease details for ${workspaceName(lease.checkout)}`}
+                  onClick={() => setDetailTarget({ kind: "released", leaseId: lease.lease_id })}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      setDetailTarget({ kind: "released", leaseId: lease.lease_id })
+                    }
+                  }}
+                  className="flex cursor-pointer flex-col gap-1.5 rounded-xl border bg-card p-4 transition-colors hover:border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                     <div className="flex flex-wrap items-center gap-2">
@@ -503,6 +518,20 @@ export function CommitLease() {
                         {workspaceName(lease.checkout)}
                       </span>
                       <ReleaseReasonBadge reason={lease.release_reason} />
+                      {(() => {
+                        if (!lease.released_at) return null
+                        const heldSeconds = (Date.parse(lease.released_at) - Date.parse(lease.since)) / 1000
+                        if (!Number.isFinite(heldSeconds) || heldSeconds < 0) return null
+                        return (
+                          <Badge
+                            variant="secondary"
+                            className="tabular-nums"
+                            title="Actual duration held (since → released_at)"
+                          >
+                            Held {formatAge(heldSeconds)}
+                          </Badge>
+                        )
+                      })()}
                     </div>
                     <PathText prefix="📁" path={lease.checkout} className="text-xs" />
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -520,17 +549,7 @@ export function CommitLease() {
                         Since {utcToLocal(lease.since) || lease.since}
                       </span>
                     </div>
-                  </div>
-                  <div className="flex shrink-0 flex-col justify-center self-stretch sm:w-40">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="justify-start"
-                      onClick={() => setDetailTarget({ kind: "released", leaseId: lease.lease_id })}
-                    >
-                      <FileText className="mr-1 size-3.5" />
-                      Detail
-                    </Button>
+                    <div className="break-words text-sm text-foreground/90">{lease.intent ?? "—"}</div>
                   </div>
                 </div>
               ))}
