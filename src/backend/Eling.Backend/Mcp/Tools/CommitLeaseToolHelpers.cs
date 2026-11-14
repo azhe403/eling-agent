@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace Eling.Backend.Mcp.Tools;
 
 /// <summary>
-/// Shared helpers for the commit-lease tool family (<c>commit_check_conflict</c>,
+/// Shared helpers for the commit-lease tool family (<c>commit_lease</c>,
 /// <c>commit_wait</c>, <c>commit_list_active</c>, …). Not an MCP tool; registered in
 /// nothing. Keep every helper here single-purpose and branch-safe.
 /// </summary>

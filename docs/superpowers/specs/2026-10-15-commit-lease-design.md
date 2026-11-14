@@ -40,14 +40,18 @@ branch cannot sweep each other's uncommitted work into one commit. Companion to 
   and receives the holder's session, lease age, and intent.
 
 ## Tools (new, minimal)
-- `commit_lease(session_id, branch, intent?, paths?)` → takes the slot; soft-fails with
-  holder info when a live lease exists on the same `checkout` + `branch`.
+- `commit_lease(session_id, branch?, paths?, intent?)` → one call is the gate: the conflict
+  check is folded into the claim. `acquired: true` with `verdict: green` → stage.
+  `acquired: false` with `verdict: red` → a foreign live commit lease holds the slot on the
+  same `checkout` + `branch`; holder info in the response; do not stage. `acquired: true`
+  with `verdict: red` → foreign file leases collide with the paths; you hold the slot but
+  stage nothing until they clear. `staged_without_lease` is a warning, not a hard error.
+  Re-claiming your own live lease is idempotent (same lease_id returned). When `branch` is
+  omitted it is discovered via git; when the branch cannot be discovered the fail-safe scope
+  is every branch of the checkout.
 - `commit_release(session_id)` → explicit release; `session_close` releases everything
   (per the session-context spec).
 - `commit_list_active(branch?)` → the live lease for the checkout: holder, since, intent.
-- `commit_check_conflict(session_id, paths[])` → combines a live foreign commit lease
-  (same `checkout` + `branch`), file leases on the paths, and staged/dirty git state into a
-  stage/don't-stage decision.
 - `commit_wait(session_id, total_timeout_seconds?, initial_interval_seconds?)` → server-side
   wait: blocks until no foreign live commit lease exists on the same `checkout` + `branch`
   (or total timeout, default 180s), polling with exponential backoff starting at
@@ -55,12 +59,11 @@ branch cannot sweep each other's uncommitted work into one commit. Companion to 
   caller still must `commit_lease` after it returns green.
 
 ## Agent guidance (server only)
-- ServerInstructions: must call `commit_check_conflict` before `git add`; on red, either
-  call `commit_wait` (server-side blocking wait with timeout) or stop and report to the
-  user (holder info + "retry later or wait for the lease to release"), do not stage; on
-  green, must call `commit_lease` before the first staging; must call `commit_release`
-  immediately after the commit lands; heartbeat on every step change (already required by
-  the session-context phase).
+- ServerInstructions: `commit_lease` before `git add`; on verdict red, either call
+  `commit_wait` (server-side blocking wait with timeout) or stop and report to the user
+  (holder info + "retry later or wait for the lease to release"), do not stage; must call
+  `commit_release` immediately after the commit lands — and just the same when the attempt
+  fails; heartbeat on every step change (already required by the session-context phase).
 - No AGENTS.md change in this phase.
 
 ## Error handling
@@ -71,7 +74,7 @@ branch cannot sweep each other's uncommitted work into one commit. Companion to 
 - Commit lands without release → agent's explicit `commit_release` in the advisory phase;
   `post-commit` hook auto-release in the hardening phase.
 - Staged changes while the owner holds no lease of its own → warning surfaced by
-  `commit_check_conflict` in the soft phase, not a hard error; in the hardening phase,
+  `commit_lease`'s `staged_without_lease`, not a hard error; in the hardening phase,
   `pre-commit` rejects commits made while a foreign live lease exists. Strict mode
   (rejecting any commit with no active lease at all) is recorded as a hardening flag, not
   fixed now.
@@ -79,8 +82,7 @@ branch cannot sweep each other's uncommitted work into one commit. Companion to 
   the sender rebases and retries.
 
 ## Composition with file lease
-- Advisory layer: `commit_check_conflict` folds file leases on the requested paths into its
-  decision.
+- Advisory layer: `commit_lease` folds file leases on the requested paths into its verdict.
 - Hardening layer: `pre-commit` has two duties — reject while a foreign live commit lease
   exists on the `checkout` + `branch`, and reject commits whose staged paths intersect a
   foreign live file lease. File lease protects the payload, commit lease protects the slot.
@@ -163,7 +165,7 @@ self-release foreign leases.
 
 ## Validation
 - Two simulated chats on the same `checkout` + `branch`: while chat A holds a lease, chat
-  B's `commit_check_conflict` reports the correct holder and lease age, and B does not
+  B's `commit_lease` reports the correct holder and lease age, and B does not
   stage.
 - Hardening phase: a commit staged while a foreign live lease exists is rejected by
   `pre-commit`; a commit whose staged paths intersect a foreign live file lease is

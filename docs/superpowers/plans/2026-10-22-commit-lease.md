@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add the `commit_lease` / `commit_release` / `commit_list_active` / `commit_check_conflict` MCP tools plus the shared project-local lease store they rest on, so concurrent chats on one checkout+branch stop sweeping each other's uncommitted work into a single commit.
+**Goal:** Add the `commit_lease` / `commit_release` / `commit_list_active` / `commit_wait` MCP tools plus the shared commit-lease store they rest on, so concurrent chats on one checkout+branch stop sweeping each other's uncommitted work into a single commit. The conflict check is folded into `commit_lease` — one call takes the slot and reports the preflight verdict.
 
-**Architecture:** A single JSON-backed lease store lives under the project-local `.eling/runtime/` directory (never committed, shared across worktrees of one repo), guarded by a cross-process mutex like `JsonDatabaseConnectionStore`. Records carry a `Kind` discriminator (`file` | `commit`) so the same store serves both file lease and commit lease; commit records add `checkout`, `branch`, and `intent`. Liveness is derived from `last_heartbeat` vs `ttl_seconds` (default 300) — stale records drop from the active list with no cleanup. MCP tools in `Eling.Backend.Mcp.Tools` consume the store plus `GitRepositoryResolver` (for the checkout root) and the current branch. `commit_check_conflict` folds commit-lease ownership, git dirty/staged state, and (when available) file leases on the requested paths into one stage/don't-stage verdict.
+**Architecture:** A single JSON-backed lease store lives in the machine-global agent directory (`commit-leases.json`, never committed, shared across repos and worktrees), guarded by a cross-process mutex like `JsonDatabaseConnectionStore`. Records carry a `Kind` discriminator (`file` | `commit`) so the same store serves both file lease and commit lease; commit records add `checkout`, `branch`, and `intent`. Liveness is derived from `last_heartbeat` vs `ttl_seconds` (default 300) — stale records drop from the active list with no cleanup. MCP tools in `Eling.Backend.Mcp.Tools` consume the store plus `GitRepositoryResolver` (for the checkout root). `commit_lease` folds commit-lease ownership, git dirty/staged state, and (when available) file leases on the requested paths into one call that both answers the stage/don't-stage verdict and takes the slot.
 
 **Tech Stack:** .NET 10 (ASP.NET Core), ModelContextProtocol.Server, System.Text.Json, xUnit. Storage mirrors `JsonDatabaseConnectionStore` (mutex + atomic `.tmp` write).
 
@@ -30,7 +30,7 @@
 
 - **Stale lease resurrected by a heartbeat from a dead session:** `commit_release` and heartbeat updates must be scoped to the lease-owning `session_id`; a stray heartbeat must not revive a lease whose session is gone. Pinned in Task 1 (heartbeat only extends a lease owned by the same session).
 - **Two lessees racing on the same mutex:** first-wins must hold even under concurrent calls; the loser must receive the winner's holder info, not an exception. Pinned in Task 2 (concurrent-lease test).
-- **Commit lands but lease never released:** `commit_check_conflict` must surface a warning (not a hard error) when staged changes exist while the caller holds no lease; the design's strict mode is deferred. Pinned in Task 5 (staged-without-lease warning).
+- **Commit lands but lease never released:** `commit_lease`'s `staged_without_lease` surfaces the warning (not a hard error) at claim time; the design's strict mode is deferred. Pinned in Task 5 (staged-without-lease warning, now embedded in the claim).
 - **Different worktree, same repo:** a live lease in worktree 1 must raise no conflict in worktree 2 because `checkout` (resolved repo root) differs... actually the spec says same repo different worktree has separate indexes and is out of scope — but `checkout` is the resolved repo root which is SHARED across worktrees. Re-read: scope says hazard boundary is one checkout's working tree+index; different worktrees are out of scope. So `checkout` here means the *worktree root* (the actual checkout path), not the repo root. Pinned in Task 1 (lease key uses worktree root, not repo root) and Task 5 (cross-worktree no-conflict test).
 - **TTL boundary off-by-one:** a lease exactly at `now - last_heartbeat == ttl` is stale. Pinned in Task 1 (boundary test).
 
@@ -79,7 +79,7 @@
 
 **Interfaces:**
 - Consumes: `ICommitLeaseStore`, `GitRepositoryResolver` (static), `TimeProvider`.
-- Produces: tool `commit_lease(session_id, branch?, intent?, paths?)` returning either `{ lease_id, since }` on success or `{ holder_session_id, lease_age_seconds, intent }` on soft-fail. When `branch` is null/blank, resolve via `git`? The store needs a branch. Resolve branch by running `git rev-parse --abbrev-ref HEAD` in the checkout, OR accept null and treat null branch as "current" resolved inside the tool. Simpler: tool requires `branch`? Spec says `commit_lease(session_id, branch, intent?, paths?)` with branch required. Keep branch required (non-blank) to match spec; document that callers pass the current branch. Checkout resolved from `Environment.CurrentDirectory` via `GitRepositoryResolver.ResolveRepositoryRoot` (worktree root — see Review Focus).
+- Produces: tool `commit_lease(session_id, branch?, intent?, paths?)` returning `{ acquired: true, lease_id, since, verdict, staged_without_lease, conflicting_file_leases? }` on success (including idempotent re-claim of the caller's own live lease, which returns the existing `lease_id`) or `{ acquired: false, verdict: "red", holder_session_id, since, lease_age_seconds, intent }` on soft-fail when a foreign live lease holds the slot. `branch` is optional: discovered via `git branch --show-current` when omitted or blank; when undiscoverable the fail-safe scope is every branch of the checkout. The tool folds the preflight conflict check into the claim atomically (see Task 5). Checkout resolved from the injected working directory via `GitRepositoryResolver.ResolveWorkingCopyRoot` (worktree root — see Review Focus).
 
 - [ ] **Step 1: Write the failing test** — `CommitLeaseToolTests` with a temp store dir and a fake `TimeProvider`. Tests: (a) first lease succeeds and returns `lease_id`; (b) second lease on same checkout+branch returns holder info and does not overwrite; (c) lease on different checkout succeeds; (d) `paths` and `intent` round-trip into the stored record.
 
@@ -131,18 +131,22 @@
 
 ---
 
-### Task 5: `commit_check_conflict` MCP tool
+### Task 5: `commit_lease` conflict check folded into the claim
 
 **Files:**
-- Create: `src/backend/Eling.Backend/Mcp/Tools/CommitCheckConflictTool.cs`
-- Test: `tests/Eling.Backend.Tests/CommitCheckConflictToolTests.cs`
+- Create: `src/backend/Eling.Backend/Mcp/Tools/GitStatusReader.cs` (shared helper, consumed by `commit_lease` and `commit_wait`)
+- Create: `tests/Eling.Backend.Tests/GitStatusReaderTests.cs`
+- Modify: `src/backend/Eling.Backend/Mcp/Tools/CommitLeaseTool.cs`
+- Test: `tests/Eling.Backend.Tests/CommitLeaseToolTests.cs`
 
 **Interfaces:**
-- Consumes: `ICommitLeaseStore`, `GitRepositoryResolver`, and shell-out to `git status --porcelain` + `git diff --cached --name-only` (reuse existing git helpers if any; otherwise a small `GitStatusReader`).
-- Produces: tool `commit_check_conflict(session_id, paths[])` → `{ verdict: "green" | "red", holder?: {...}, staged_without_lease: bool, conflicting_file_leases?: [...] }`.
-  - Red when a *foreign* live commit lease exists on same checkout+branch.
+- Consumes: `ICommitLeaseStore`, `GitRepositoryResolver`, `TimeProvider`, shell-out to `git status --porcelain` + `git diff --cached --name-only` via `GitStatusReader`.
+- Produces: `commit_lease` response shaped as `{ acquired, lease_id?, since?, verdict, staged_without_lease, conflicting_file_leases? }` — the verdict is computed as part of the claim:
+  - `acquired: true`, `verdict: "green"` → stage.
+  - `acquired: true`, `verdict: "red"` → foreign file leases collide with the paths; the caller holds the slot but stages nothing until they clear.
+  - `acquired: false`, `verdict: "red"` → a foreign live commit lease exists on the same checkout+branch; holder info in the response; do not stage.
   - `staged_without_lease=true` (warning) when staged files exist and the caller holds no commit lease of its own.
-  - File-lease folding: when the lease store holds live `File` leases on any of `paths` owned by another session, list them in `conflicting_file_leases` and mark red. (Store already supports this via `CommitLeaseKind.File`.)
+  - File-lease folding: live `File` leases on any of `paths` owned by another session → listed in `conflicting_file_leases`, verdict red (store already supports this via `CommitLeaseKind.File`).
 
 - [ ] **Step 1: Write the failing test** — (a) no leases + clean tree → green; (b) foreign commit lease → red with holder info; (c) staged files while caller holds no lease → green verdict but `staged_without_lease=true`; (d) foreign file lease on a requested path → red with that lease listed; (e) cross-worktree: lease in worktree 1 does not make worktree 2 red.
 
@@ -194,7 +198,7 @@
 ### Task 8: Agent guidance in `ServerInstructions`
 
 **Files:**
-- Modify: `src/backend/Eling.Backend/Mcp/ServerInstructions.cs` — append a section (as a new entry in `Sections`) mirroring the spec's "Agent guidance": must call `commit_check_conflict` before `git add`; on red, stop and report; on green, must call `commit_lease` before first staging; must call `commit_release` immediately after commit lands; heartbeat on every step change.
+- Modify: `src/backend/Eling.Backend/Mcp/ServerInstructions.cs` — append a section (as a new entry in `Sections`) mirroring the spec's "Agent guidance": `commit_lease` before `git add`; on verdict red, stop and report (or wait with `commit_wait`); `commit_release` immediately after the commit lands — and just the same when the attempt fails; heartbeat on every step change (already required by the session-context phase).
 
 - [ ] **Step 1: Add the section** (verbatim-ish from spec §Agent guidance).
 - [ ] **Step 2: Verify** `ServerInstructions.Default` contains the new text (unit test in existing `ServerInstructions` tests if any; else add a small assertion test).
@@ -287,7 +291,7 @@
 - [ ] **Step 1: Backend suite** - `dotnet test Eling.slnx --artifacts-path .bin-test` → green (note: `Eling.Core.Tests.BufferedAuditLoggerTests.RecordAsync_WhenTheChannelBacksUp_NeverDropsAnEntry` is known-flaky; if it fails on attempt 1, re-run it in isolation before treating it as a regression).
 - [ ] **Step 1b: NO frontend build** - do NOT run `pnpm --dir src/frontend/Eling.Dashboard build` (dev server may run on 4427). Typecheck only: `pnpm --dir src/frontend/Eling.Dashboard exec tsc --noEmit` → clean.
 - [ ] **Step 2: MCP smoke** — start the MCP host, call `commit_lease` twice on the same branch, confirm second returns holder info; call `commit_release`, confirm `commit_lease` then succeeds.
-- [ ] **Step 3: Cross-worktree check** — lease in worktree 1, run `commit_check_conflict` in worktree 2 → green.
+- [ ] **Step 3: Cross-worktree check** — lease in worktree 1, call `commit_lease` in worktree 2 → acquires green.
 - [ ] **Step 4: Force-release smoke** — against the running owner host: GET `/api/commit-lease/active` shows the seeded lease; POST `/api/commit-lease/{leaseId}/release` releases it; it appears in `recently_released` with reason `forced`.
 - [ ] **Step 5: Ask the user whether to clean up `.tmp`/session artifacts**.
 
@@ -295,8 +299,8 @@
 
 ## Self-Review Notes
 
-- Spec coverage: store (Task 1), `commit_lease` (Task 2), `commit_release` (Task 3), `commit_list_active` (Task 4), `commit_check_conflict` (Task 5), `commit_wait` (Task 6), registration (Task 7), agent guidance (Task 8), git hook hardening (Task 9, SKIPPED by user decision 2026-11-12), dashboard backend endpoints + SSE + force-release (Task 10), dashboard page (Task 11). Turn queue and hunk/line granularity remain deferred per spec §Deferred.
-- File-lease tools themselves are out of scope for this plan (only the shared store + commit tools). The store supports `CommitLeaseKind.File` so file-lease tools can be added in a follow-up plan without store changes. `commit_check_conflict` already consumes file leases from the store.
+- Spec coverage: store (Task 1), `commit_lease` (Task 2), `commit_release` (Task 3), `commit_list_active` (Task 4), `commit_lease` verdict folding (Task 5), `commit_wait` (Task 6), registration (Task 7), agent guidance (Task 8), git hook hardening (Task 9, SKIPPED by user decision 2026-11-12), dashboard backend endpoints + SSE + force-release (Task 10), dashboard page (Task 11). Turn queue and hunk/line granularity remain deferred per spec §Deferred.
+- File-lease tools themselves are out of scope for this plan (only the shared store + commit tools). The store supports `CommitLeaseKind.File` so file-lease tools can be added in a follow-up plan without store changes. `commit_lease` folds file leases from the store into its verdict.
 - Type consistency: `CommitLeaseRecord` field names used consistently across tasks; `ICommitLeaseStore` method names match.
 - Release reasons now include `forced` (dashboard force-release) alongside `explicit` / `stale` / `post-commit`.
 - HTTP surface is `/api/commit-lease/*` (`GET /api/commit-lease/active`, `GET /api/events/commit-lease`, `POST /api/commit-lease/{lease_id}/release`); payload field is `commit_leases`; store file is `commit-leases.json`; SSE payload matches the snapshot.

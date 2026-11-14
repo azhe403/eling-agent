@@ -183,17 +183,322 @@ public sealed class CommitLeaseToolTests : IDisposable
     }
 
     [Fact]
-    public async Task BlankBranch_ReturnsError_AndStoresNothing()
+    public async Task BlankBranch_FallsBackToFailSafeScope_LikeTheSiblingTools()
     {
         using var store = NewStore();
-        var tool = NewTool(store, Checkout("a"));
+        var cwd = Checkout("a"); // no git init: branch is undiscoverable, so a foreign lease on any branch blocks
+        await SeedCommitLeaseAsync(store, cwd, "ses_test_2_000000000000000000000", "main", intent: "holds the slot");
+        var tool = NewTool(store, cwd);
 
         var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "   ");
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.False(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal("red", doc.RootElement.GetProperty("verdict").GetString());
+    }
+
+    [Fact]
+    public async Task OwnLease_Reentry_IsIdempotent()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        var first = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main");
+        var second = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main");
+
+        using var firstDoc = JsonDocument.Parse(first);
+        using var secondDoc = JsonDocument.Parse(second);
+        Assert.True(firstDoc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.True(secondDoc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal(firstDoc.RootElement.GetProperty("lease_id").GetString(), secondDoc.RootElement.GetProperty("lease_id").GetString());
+        Assert.Equal(firstDoc.RootElement.GetProperty("since").GetDateTimeOffset(), secondDoc.RootElement.GetProperty("since").GetDateTimeOffset());
+        Assert.Equal("green", secondDoc.RootElement.GetProperty("verdict").GetString());
+        Assert.False(secondDoc.RootElement.GetProperty("staged_without_lease").GetBoolean());
+    }
+
+    [Fact]
+    public async Task CleanTree_NoLeases_AcquiresAndReturnsGreen()
+    {
+        using var store = NewStore();
+        var cwd = await InitGitRepo("a");
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", paths: ["src/a.cs"]);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal("green", doc.RootElement.GetProperty("verdict").GetString());
+        Assert.False(doc.RootElement.GetProperty("staged_without_lease").GetBoolean());
+        Assert.False(doc.RootElement.TryGetProperty("holder_session_id", out _));
+        Assert.False(doc.RootElement.TryGetProperty("conflicting_file_leases", out _));
+    }
+
+    [Fact]
+    public async Task ForeignCommitLease_SameCheckoutAndBranch_DoesNotAcquire_AndReportsHolder()
+    {
+        using var store = NewStore();
+        var cwd = await InitGitRepo("a");
+        await SeedCommitLeaseAsync(store, cwd, "ses_test_2_000000000000000000000", "main", intent: "land the feature");
+        _clock.Advance(TimeSpan.FromSeconds(45));
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", paths: ["src/a.cs"]);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.False(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal("red", doc.RootElement.GetProperty("verdict").GetString());
+        Assert.Equal("ses_test_2_000000000000000000000", doc.RootElement.GetProperty("holder_session_id").GetString());
+        Assert.Equal(45, doc.RootElement.GetProperty("lease_age_seconds").GetInt64());
+        Assert.Equal("land the feature", doc.RootElement.GetProperty("intent").GetString());
+        Assert.False(doc.RootElement.GetProperty("staged_without_lease").GetBoolean());
+        var stored = Assert.Single(await store.ListAllAsync());
+        Assert.Equal("ses_test_2_000000000000000000000", stored.SessionId);
+    }
+
+    [Fact]
+    public async Task ForeignCommitLease_OnOtherBranch_AcquiresGreen()
+    {
+        using var store = NewStore();
+        var cwd = await InitGitRepo("a", branch: "main");
+        await SeedCommitLeaseAsync(store, cwd, "ses_test_2_000000000000000000000", "develop", intent: "other branch work");
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", paths: ["src/a.cs"]);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal("green", doc.RootElement.GetProperty("verdict").GetString());
+    }
+
+    [Fact]
+    public async Task NonGitDirectory_ForeignCommitLease_BlocksAnyBranch()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a"); // no git init: branch is undiscoverable, so the fail-safe scope is any branch of this checkout
+        await SeedCommitLeaseAsync(store, cwd, "ses_test_2_000000000000000000000", "main", intent: "holds the slot");
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", branch: null, paths: ["src/a.cs"]);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.False(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal("red", doc.RootElement.GetProperty("verdict").GetString());
+        Assert.Equal("ses_test_2_000000000000000000000", doc.RootElement.GetProperty("holder_session_id").GetString());
+    }
+
+    [Fact]
+    public async Task StagedFiles_CallerHoldsNoLease_VerdictGreen_AndWarns()
+    {
+        using var store = NewStore();
+        var cwd = await InitGitRepo("a");
+        File.WriteAllText(Path.Combine(cwd, "staged.cs"), "class Staged { }");
+        await RunGit(cwd, "add", "staged.cs");
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", paths: ["staged.cs"]);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.Equal("green", doc.RootElement.GetProperty("verdict").GetString());
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.True(doc.RootElement.GetProperty("staged_without_lease").GetBoolean());
+    }
+
+    [Fact]
+    public async Task StagedFiles_CallerHoldsOwnLease_DoesNotWarn()
+    {
+        using var store = NewStore();
+        var cwd = await InitGitRepo("a");
+        File.WriteAllText(Path.Combine(cwd, "staged.cs"), "class Staged { }");
+        await RunGit(cwd, "add", "staged.cs");
+        await SeedCommitLeaseAsync(store, cwd, "ses_test_1_000000000000000000000", "main");
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", paths: ["staged.cs"]);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean()); // own lease re-entry is idempotent
+        Assert.Equal("green", doc.RootElement.GetProperty("verdict").GetString());
+        Assert.False(doc.RootElement.GetProperty("staged_without_lease").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ForeignFileLease_OnRequestedPath_ListsConflict_AndStillAcquires()
+    {
+        using var store = NewStore();
+        var cwd = await InitGitRepo("a");
+        await SeedFileLeaseAsync(store, cwd, "ses_test_3_000000000000000000000", "main", ["src/a.cs"], intent: "editing it");
+        var stored = Assert.Single(await store.ListAllAsync(), l => l.Kind == CommitLeaseKind.File);
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", paths: ["src/a.cs"]);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal("red", doc.RootElement.GetProperty("verdict").GetString());
+        var conflicts = doc.RootElement.GetProperty("conflicting_file_leases").EnumerateArray().ToArray();
+        var conflict = Assert.Single(conflicts);
+        Assert.Equal(stored.LeaseId, conflict.GetProperty("lease_id").GetString());
+        Assert.Equal("ses_test_3_000000000000000000000", conflict.GetProperty("holder_session_id").GetString());
+        Assert.Equal(new[] { "src/a.cs" }, conflict.GetProperty("paths").EnumerateArray().Select(e => e.GetString()));
+    }
+
+    [Fact]
+    public async Task ForeignFileLease_WithNoPathsRequested_DoesNotConflict()
+    {
+        using var store = NewStore();
+        var cwd = await InitGitRepo("a");
+        await SeedFileLeaseAsync(store, cwd, "ses_test_3_000000000000000000000", "main", ["src/a.cs"]);
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", paths: []);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal("green", doc.RootElement.GetProperty("verdict").GetString());
+        Assert.False(doc.RootElement.TryGetProperty("conflicting_file_leases", out _));
+    }
+
+    [Fact]
+    public async Task ForeignFileLease_OnUnrequestedPath_DoesNotConflict()
+    {
+        using var store = NewStore();
+        var cwd = await InitGitRepo("a");
+        await SeedFileLeaseAsync(store, cwd, "ses_test_3_000000000000000000000", "main", ["docs/b.md"]);
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", paths: ["src/a.cs"]);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal("green", doc.RootElement.GetProperty("verdict").GetString());
+        Assert.False(doc.RootElement.TryGetProperty("conflicting_file_leases", out _));
+    }
+
+    [Fact]
+    public async Task ForeignFileLease_DirectoryCoversRequestedPath_ReturnsRed()
+    {
+        using var store = NewStore();
+        var cwd = await InitGitRepo("a");
+        await SeedFileLeaseAsync(store, cwd, "ses_test_3_000000000000000000000", "main", ["src"]);
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", paths: ["src/nested/leaf.cs"]);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal("red", doc.RootElement.GetProperty("verdict").GetString());
+        Assert.Single(doc.RootElement.GetProperty("conflicting_file_leases").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task RequestedDirectoryCoversForeignFileLease_ReturnsRed()
+    {
+        using var store = NewStore();
+        var cwd = await InitGitRepo("a");
+        await SeedFileLeaseAsync(store, cwd, "ses_test_3_000000000000000000000", "main", ["src/a.cs"]);
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", paths: ["src"]);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal("red", doc.RootElement.GetProperty("verdict").GetString());
+        Assert.Single(doc.RootElement.GetProperty("conflicting_file_leases").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task MixedForeignCommitAndFileLease_DoesNotAcquire_WithHolderAndFileLeases()
+    {
+        using var store = NewStore();
+        var cwd = await InitGitRepo("a");
+        await SeedCommitLeaseAsync(store, cwd, "ses_test_2_000000000000000000000", "main", intent: "commit slot");
+        await SeedFileLeaseAsync(store, cwd, "ses_test_3_000000000000000000000", "main", ["src/a.cs"], intent: "editing");
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", paths: ["src/a.cs"]);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.False(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal("red", doc.RootElement.GetProperty("verdict").GetString());
+        Assert.Equal("ses_test_2_000000000000000000000", doc.RootElement.GetProperty("holder_session_id").GetString());
+        var conflicts = doc.RootElement.GetProperty("conflicting_file_leases").EnumerateArray().ToArray();
+        Assert.Equal("ses_test_3_000000000000000000000", Assert.Single(conflicts).GetProperty("holder_session_id").GetString());
+    }
+
+    [Fact]
+    public async Task LeaseInOtherWorkingTree_Acquires()
+    {
+        using var store = NewStore();
+        var repo1 = await InitGitRepo("wt-1");
+        var repo2 = await InitGitRepo("wt-2");
+        var leaseTool = new CommitLeaseTool(store, _clock, repo1);
+        await leaseTool.LeaseAsync("ses_test_2_000000000000000000000", "main", intent: "worktree 1 in flight");
+        var tool = NewTool(store, repo2);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", paths: ["src/a.cs"]);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal("green", doc.RootElement.GetProperty("verdict").GetString());
+        Assert.False(doc.RootElement.TryGetProperty("holder_session_id", out _));
+    }
+
+    [Fact]
+    public async Task BlankSessionId_ReturnsError_AndStoresNothing()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("   ", "main", paths: ["src/a.cs"]);
 
         using var doc = JsonDocument.Parse(result);
         Assert.False(string.IsNullOrWhiteSpace(doc.RootElement.GetProperty("error").GetString()));
         Assert.Empty(await store.ListAllAsync());
     }
+
+    private Task SeedCommitLeaseAsync(
+        JsonCommitLeaseStore store,
+        string checkout,
+        string sessionId,
+        string branch,
+        string? intent = null,
+        int ttlSeconds = 300)
+        => store.TryLeaseAsync(new CommitLeaseRecord
+        {
+            LeaseId = Ulid.NewUlid().ToString(),
+            SessionId = sessionId,
+            Kind = CommitLeaseKind.Commit,
+            Checkout = checkout,
+            Branch = branch,
+            Since = _clock.GetUtcNow(),
+            LastHeartbeat = _clock.GetUtcNow(),
+            TtlSeconds = ttlSeconds,
+            Paths = null,
+            Intent = intent,
+        });
+
+    private Task SeedFileLeaseAsync(
+        JsonCommitLeaseStore store,
+        string checkout,
+        string sessionId,
+        string branch,
+        string[] paths,
+        string? intent = null)
+        => store.TryLeaseAsync(new CommitLeaseRecord
+        {
+            LeaseId = Ulid.NewUlid().ToString(),
+            SessionId = sessionId,
+            Kind = CommitLeaseKind.File,
+            Checkout = checkout,
+            Branch = branch,
+            Since = _clock.GetUtcNow(),
+            LastHeartbeat = _clock.GetUtcNow(),
+            TtlSeconds = 300,
+            Paths = paths,
+            Intent = intent,
+        });
 
     private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider
     {

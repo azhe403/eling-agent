@@ -100,7 +100,7 @@ public sealed class CommitWaitTool
             var caller = session_id.Trim();
             var checkout = GitRepositoryResolver.ResolveWorkingCopyRoot(_cwd) ?? _cwd;
             var branchKey = string.IsNullOrWhiteSpace(branch)
-                ? (await CommitCheckConflictTool.GitStatusReader.TryRead(checkout, _logger, cancellationToken))?.CurrentBranch
+                ? (await GitStatusReader.TryRead(checkout, _logger, cancellationToken))?.CurrentBranch
                 : branch.Trim();
             branchKey = string.IsNullOrWhiteSpace(branchKey) ? null : branchKey.Trim();
 
