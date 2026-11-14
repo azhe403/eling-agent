@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 
 import { CommitLease } from "./CommitLease"
 
@@ -89,17 +89,37 @@ describe("CommitLease cards", () => {
     expect(await screen.findByText("0s · expired")).toBeTruthy()
   })
 
-  it("reveals the 4th path behind the +1 more toggle on an active card", async () => {
+  it("lists every path inside the detail dialog instead of on the card", async () => {
     render(<CommitLease />)
-    await screen.findByText("a.ts")
-    expect(screen.queryByText("d.ts")).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: /\+1 more/i }))
-    expect(screen.getByText("d.ts")).toBeTruthy()
+    await screen.findByText("repo-alpha")
+    expect(screen.queryByText("a.ts")).toBeNull()
+    fireEvent.click(screen.getAllByRole("button", { name: /detail/i })[0])
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("a.ts")).toBeTruthy()
+    expect(within(dialog).getByText("b.ts")).toBeTruthy()
+    expect(within(dialog).getByText("c.ts")).toBeTruthy()
+    expect(within(dialog).getByText("d.ts")).toBeTruthy()
+  })
+
+  it("shows the full lease detail — ids, intent, branch, TTL — in the dialog", async () => {
+    render(<CommitLease />)
+    await screen.findByText("repo-alpha")
+    fireEvent.click(screen.getAllByRole("button", { name: /detail/i })[0])
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("lease-expired-1")).toBeTruthy()
+    expect(within(dialog).getByText("session-expired-1")).toBeTruthy()
+    expect(within(dialog).getByText("expired lease fixture")).toBeTruthy()
+    expect(within(dialog).getByText("main")).toBeTruthy()
+    expect(within(dialog).getByText("0s · expired")).toBeTruthy()
   })
 
   it("renders a released row with null fields as dashes, not a crash", async () => {
     render(<CommitLease />)
     expect(await screen.findByText("Released —")).toBeTruthy()
-    expect(screen.getByText("lease-released-1", { exact: false })).toBeTruthy()
+    // The same null-tolerance inside the detail dialog
+    fireEvent.click(screen.getAllByRole("button", { name: /detail/i })[1])
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("lease-released-1")).toBeTruthy()
+    expect(within(dialog).getAllByText("—").length).toBeGreaterThan(0)
   })
 })

@@ -20,8 +20,10 @@ Goals:
   Workspaces page: `grid grid-cols-1 2xl:grid-cols-2 gap-3`, cards
   `rounded-xl border bg-card p-4`, skeleton cards while loading, dashed-border
   empty state.
-- Every detail currently hidden behind the expand renders inline on the card.
-- Paths lists truncate to 3 entries with an inline `+N more` toggle per card.
+- Every detail currently hidden behind the expand renders inside a "Detail" popup
+  per card (see anatomy below) — one click to the full record, no expand rows.
+- Paths render in full inside the Detail dialog (no truncation); the card
+  shows none of them, keeping the grid dense.
 - Live behaviour introduced with this change: the 1-second wall-clock ticker for
   age/TTL — the base rendered age as a frozen frame value; the ticker is added
   by this branch, anchored to `snapshotAt` + elapsed wall-clock (see the ledger
@@ -47,17 +49,19 @@ Active card:
 - Meta line (small, muted, icons where the Workspaces page uses them): Since
   (local, title = raw ISO), Age (live ticking), TTL left (live ticking),
   Heartbeat (relative).
-- Mono detail line: `Lease <id>` and `Session <id>`, small, break-all.
-- Intent: full text, `break-words` (no single-line truncation).
-- Paths: up to 3 entries, mono, break-all, then `+N more` toggle that reveals the
-  rest inline (per-card local state).
+- Right action column: Detail button (opens the full Detail dialog) above Force
+  release, on both card types; released cards carry Detail only.
+- Intent, the lease/session ids, the remaining timestamps and the full paths
+  list render only inside a "Detail" popup per card (src/components/ui/dialog.tsx);
+  the card keeps the glanceable facts so it stays short on dense lists.
+- Paths (full list, no truncation), lease/session ids, branch, since/heartbeat/age/TTL
+  (or released-at/reason) and intent live in the Detail dialog.
 - Right action column: Force release (outline, destructive-tinted), same as the
   current button.
 
-Released card: same frame, no action column and no TTL badge; title row carries a
+Released card: same frame; the right action column carries Detail only; title row carries a
 `release_reason` badge (forced = destructive, else secondary). Meta line: Released
-at (local + relative) and Since. Everything else (ids, intent, paths-with-toggle)
-identical.
+at (local + relative) and Since. Everything else lives in the Detail dialog.
 
 ## Removed
 

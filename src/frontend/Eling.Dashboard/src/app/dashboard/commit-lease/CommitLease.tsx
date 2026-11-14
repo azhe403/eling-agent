@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  FileText,
   HeartPulse,
   RefreshCw,
   Timer,
@@ -14,7 +15,8 @@ import {
 
 import { DashboardHeader } from "@/components/dashboard-header"
 import { PathText } from "@/components/path-text"
-import { LeasePaths } from "./lease-paths"
+import { formatAge } from "./lease-format"
+import { LeaseDetailDialog } from "./lease-detail-dialog"
 import {
   selectAll,
   selectOnly,
@@ -114,18 +116,6 @@ function shortSession(sessionId: string): string {
   return sessionId.length > 12 ? `${sessionId.slice(0, 8)}…` : sessionId
 }
 
-function formatAge(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "—"
-  const s = Math.floor(seconds)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ${s % 60}s`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ${m % 60}m`
-  const d = Math.floor(h / 24)
-  return `${d}d ${h % 24}h`
-}
-
 function errorMessage(e: unknown): string {
   if (e instanceof ApiError) return e.message
   if (e instanceof Error) return e.message
@@ -154,6 +144,11 @@ export function CommitLease() {
   const [error, setError] = useState<string | null>(null)
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting")
   const [forceTarget, setForceTarget] = useState<CommitLeaseRow | null>(null)
+  // The card stays glanceable; the full detail lives behind one popup.
+  const [detailTarget, setDetailTarget] = useState<{
+    kind: "active" | "released"
+    leaseId: string
+  } | null>(null)
   const [releasing, setReleasing] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [selection, setSelection] = useState<WorkspaceSelection>(() => selectAll())
@@ -295,6 +290,11 @@ export function CommitLease() {
   const active = (snapshot?.commit_leases ?? []).filter((lease) => isIncluded(lease.checkout))
   const released = (snapshot?.recently_released ?? []).filter((lease) => isIncluded(lease.checkout))
   const showSkeleton = loading && snapshot === null
+  const detailLease = detailTarget
+    ? detailTarget.kind === "active"
+      ? active.find((lease) => lease.lease_id === detailTarget.leaseId)
+      : released.find((lease) => lease.lease_id === detailTarget.leaseId)
+    : undefined
 
   return (
     <div className="flex w-full flex-col">
@@ -394,7 +394,6 @@ export function CommitLease() {
                 </div>
               )}
               {active.map((lease) => {
-                const paths = lease.paths ?? []
                 return (
                   <div
                     key={lease.lease_id}
@@ -446,14 +445,17 @@ export function CommitLease() {
                           Heartbeat {relativeTime(lease.last_heartbeat)}
                         </span>
                       </div>
-                      <div className="mt-0.5 break-all font-mono text-[11px] leading-5 text-muted-foreground">
-                        <div title={lease.lease_id}>Lease {lease.lease_id}</div>
-                        <div title={lease.session_id}>Session {lease.session_id}</div>
-                      </div>
-                      <div className="break-words text-sm">{lease.intent ?? "—"}</div>
-                      <LeasePaths paths={paths} />
                     </div>
-                    <div className="flex shrink-0 flex-col justify-center self-stretch sm:w-40">
+                    <div className="flex shrink-0 flex-col justify-center gap-2 self-stretch sm:w-40">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="justify-start"
+                        onClick={() => setDetailTarget({ kind: "active", leaseId: lease.lease_id })}
+                      >
+                        <FileText className="mr-1 size-3.5" />
+                        Detail
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"
@@ -493,36 +495,43 @@ export function CommitLease() {
               {released.map((lease) => (
                 <div
                   key={lease.lease_id}
-                  className="flex flex-col gap-1.5 rounded-xl border bg-card p-4"
+                  className="flex flex-col justify-between gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-start sm:gap-4"
                 >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-base font-semibold" title={lease.checkout}>
-                      {workspaceName(lease.checkout)}
-                    </span>
-                    <ReleaseReasonBadge reason={lease.release_reason} />
+                  <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-base font-semibold" title={lease.checkout}>
+                        {workspaceName(lease.checkout)}
+                      </span>
+                      <ReleaseReasonBadge reason={lease.release_reason} />
+                    </div>
+                    <PathText prefix="📁" path={lease.checkout} className="text-xs" />
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span
+                        className="inline-flex items-center gap-1"
+                        title={lease.released_at ?? undefined}
+                      >
+                        <CheckCircle2 className="size-3.5" />
+                        {lease.released_at
+                          ? `Released ${utcToLocal(lease.released_at) || lease.released_at} (${relativeTime(lease.released_at)})`
+                          : "Released —"}
+                      </span>
+                      <span className="inline-flex items-center gap-1" title={lease.since}>
+                        <Clock className="size-3.5" />
+                        Since {utcToLocal(lease.since) || lease.since}
+                      </span>
+                    </div>
                   </div>
-                  <PathText prefix="📁" path={lease.checkout} className="text-xs" />
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                    <span
-                      className="inline-flex items-center gap-1"
-                      title={lease.released_at ?? undefined}
+                  <div className="flex shrink-0 flex-col justify-center self-stretch sm:w-40">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="justify-start"
+                      onClick={() => setDetailTarget({ kind: "released", leaseId: lease.lease_id })}
                     >
-                      <CheckCircle2 className="size-3.5" />
-                      {lease.released_at
-                        ? `Released ${utcToLocal(lease.released_at) || lease.released_at} (${relativeTime(lease.released_at)})`
-                        : "Released —"}
-                    </span>
-                    <span className="inline-flex items-center gap-1" title={lease.since}>
-                      <Clock className="size-3.5" />
-                      Since {utcToLocal(lease.since) || lease.since}
-                    </span>
+                      <FileText className="mr-1 size-3.5" />
+                      Detail
+                    </Button>
                   </div>
-                  <div className="mt-0.5 break-all font-mono text-[11px] leading-5 text-muted-foreground">
-                    <div title={lease.lease_id}>Lease {lease.lease_id}</div>
-                    <div title={lease.session_id}>Session {lease.session_id}</div>
-                  </div>
-                  <div className="break-words text-sm">{lease.intent ?? "—"}</div>
-                  <LeasePaths paths={lease.paths ?? []} />
                 </div>
               ))}
             </div>
@@ -530,6 +539,21 @@ export function CommitLease() {
         </Card>
         </div>
       </div>
+
+      {/* Full lease detail; card rows only carry the glanceable facts. Live
+          values re-render with the page's 1s ticker. */}
+      {detailTarget && detailLease && (
+        <LeaseDetailDialog
+          kind={detailTarget.kind}
+          lease={detailLease}
+          open
+          onOpenChange={(open) => {
+            if (!open) setDetailTarget(null)
+          }}
+          ageSeconds={detailTarget.kind === "active" ? liveAge(detailLease as CommitLeaseRow) : undefined}
+          ttlRemainingSeconds={detailTarget.kind === "active" ? liveTtlRemaining(detailLease as CommitLeaseRow) : undefined}
+        />
+      )}
 
       {/* Confirmation for the one destructive action on this page. */}
       <AlertDialog
