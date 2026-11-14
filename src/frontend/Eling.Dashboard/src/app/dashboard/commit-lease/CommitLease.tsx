@@ -5,13 +5,16 @@ import {
   AlertCircle,
   AlertTriangle,
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
+  Clock,
+  HeartPulse,
   RefreshCw,
+  Timer,
   X,
 } from "lucide-react"
 
 import { DashboardHeader } from "@/components/dashboard-header"
+import { PathText } from "@/components/path-text"
+import { LeasePaths } from "./lease-paths"
 import {
   selectAll,
   selectOnly,
@@ -141,11 +144,15 @@ function normalizeRoot(root: string | null | undefined): string {
 
 export function CommitLease() {
   const [snapshot, setSnapshot] = useState<CommitLeaseSnapshot | null>(null)
+  // When the last snapshot frame landed. Age/TTL are rendered as frame value
+  // + elapsed wall-clock since this moment, so the numbers tick between
+  // frames instead of freezing at whatever the last frame computed.
+  const [snapshotAt, setSnapshotAt] = useState<number>(() => Date.now())
+  const [now, setNow] = useState<number>(() => Date.now())
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting")
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [forceTarget, setForceTarget] = useState<CommitLeaseRow | null>(null)
   const [releasing, setReleasing] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
@@ -156,6 +163,13 @@ export function CommitLease() {
 
   const dismissNotification = useCallback((id: number) => {
     setNotifications((current) => current.filter((item) => item.id !== id))
+  }, [])
+
+  const applySnapshot = useCallback((next: CommitLeaseSnapshot | null) => {
+    const receivedAt = Date.now()
+    setSnapshot(next)
+    setSnapshotAt(receivedAt)
+    setNow(receivedAt)
   }, [])
 
   const notify = useCallback((type: Notification["type"], title: string, text?: string) => {
@@ -172,14 +186,14 @@ export function CommitLease() {
     setError(null)
     try {
       const data = await apiFetch<CommitLeaseSnapshot>("/api/commit-lease/active?scope=all")
-      setSnapshot(data ?? null)
+      applySnapshot(data ?? null)
     } catch (e) {
       setError(`Failed to load the lease snapshot (${errorMessage(e)})`)
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [])
+  }, [applySnapshot])
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -202,7 +216,7 @@ export function CommitLease() {
       es.onmessage = (event) => {
         if (!event.data || event.data === "connected") return
         try {
-          setSnapshot(JSON.parse(event.data) as CommitLeaseSnapshot)
+          applySnapshot(JSON.parse(event.data) as CommitLeaseSnapshot)
           setError(null)
         } catch (e) {
           // A malformed frame must never tear down a live stream, but it
@@ -228,10 +242,14 @@ export function CommitLease() {
       if (initErrorTimer) clearTimeout(initErrorTimer)
       es?.close()
     }
-  }, [])
+  }, [applySnapshot])
 
-  const toggleExpanded = useCallback((leaseId: string) => {
-    setExpanded((current) => ({ ...current, [leaseId]: !current[leaseId] }))
+  // One-second ticker: frame values are anchored to snapshotAt, so Age and
+  // the TTL countdown advance with the wall clock instead of freezing at
+  // whatever the last frame computed.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
   }, [])
 
   const confirmForceRelease = useCallback(async () => {
@@ -242,7 +260,7 @@ export function CommitLease() {
         `/api/commit-lease/${encodeURIComponent(forceTarget.lease_id)}/release?checkout=${encodeURIComponent(forceTarget.checkout)}`,
         { method: "POST" }
       )
-      if (fresh) setSnapshot(fresh)
+      if (fresh) applySnapshot(fresh)
       notify(
         "success",
         "Lease released",
@@ -258,9 +276,12 @@ export function CommitLease() {
     } finally {
       setReleasing(false)
     }
-  }, [forceTarget, notify])
+  }, [forceTarget, notify, applySnapshot])
 
   const contentColumn = "flex min-w-0 w-full flex-1 flex-col gap-4 p-4"
+  const elapsedSinceFrame = Math.max(0, (now - snapshotAt) / 1000)
+  const liveAge = (lease: CommitLeaseRow) => lease.lease_age_seconds + elapsedSinceFrame
+  const liveTtlRemaining = (lease: CommitLeaseRow) => Math.max(0, lease.ttl_seconds - liveAge(lease))
   // Frames span every checkout; narrow them to the selection client-side.
   // "all" keeps both lists untouched, so nothing refetches on a switch.
   const selectedRoots = useMemo(
@@ -273,9 +294,6 @@ export function CommitLease() {
   )
   const active = (snapshot?.commit_leases ?? []).filter((lease) => isIncluded(lease.checkout))
   const released = (snapshot?.recently_released ?? []).filter((lease) => isIncluded(lease.checkout))
-  const showWorkspace = selection.kind === "all" || selection.roots.length > 1
-  const activeColSpan = showWorkspace ? 7 : 6
-  const releasedColSpan = showWorkspace ? 6 : 5
   const showSkeleton = loading && snapshot === null
 
   return (
@@ -363,106 +381,91 @@ export function CommitLease() {
             </CardAction>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto rounded-xl border">
-              <table className="w-full min-w-max text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th scope="col" className="w-8 p-3" aria-label="Expand row" />
-                    {showWorkspace && <th scope="col" className="p-3">Workspace</th>}
-                    <th scope="col" className="p-3">Since</th>
-                    <th scope="col" className="p-3">Age</th>
-                    <th scope="col" className="p-3">TTL</th>
-                    <th scope="col" className="p-3">Intent</th>
-                    <th scope="col" className="p-3" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {showSkeleton && (
-                    <tr>
-                      <td className="p-3" colSpan={activeColSpan}>
-                        <Skeleton className="h-6 w-full" />
-                      </td>
-                    </tr>
-                  )}
-                  {!showSkeleton && active.length === 0 && (
-                    <tr>
-                      <td className="p-6 text-center text-muted-foreground" colSpan={activeColSpan}>
-                        {selection.kind === "all"
-                          ? "No active leases in any workspace. The slot is open."
-                          : "No active leases in the selected workspaces."}
-                      </td>
-                    </tr>
-                  )}
-                  {active.map((lease) => {
-                    const isExpanded = Boolean(expanded[lease.lease_id])
-                    const paths = lease.paths ?? []
-                    return [
-                      <tr key={lease.lease_id} className="border-b last:border-0 align-top">
-                        <td className="p-2">
-                          <button
-                            type="button"
-                            onClick={() => toggleExpanded(lease.lease_id)}
-                            aria-expanded={isExpanded}
-                            aria-label={isExpanded ? "Hide lease details" : "Show lease details"}
-                            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            <div className="grid min-w-0 grid-cols-1 gap-3 2xl:grid-cols-2">
+              {showSkeleton &&
+                Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-28 w-full rounded-xl" />
+                ))}
+              {!showSkeleton && active.length === 0 && (
+                <div className="flex min-h-[140px] flex-col items-center justify-center rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground 2xl:col-span-2">
+                  {selection.kind === "all"
+                    ? "No active leases in any workspace. The slot is open."
+                    : "No active leases in the selected workspaces."}
+                </div>
+              )}
+              {active.map((lease) => {
+                const paths = lease.paths ?? []
+                return (
+                  <div
+                    key={lease.lease_id}
+                    className="flex flex-col justify-between gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-start sm:gap-4"
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-base font-semibold" title={lease.checkout}>
+                          {workspaceName(lease.checkout)}
+                        </span>
+                        <Badge variant="secondary" className="font-mono">
+                          {lease.branch ?? "—"}
+                        </Badge>
+                        {liveTtlRemaining(lease) <= 0 ? (
+                          <span
+                            className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400"
+                            title={`TTL remaining (${lease.ttl_seconds}s total)`}
                           >
-                            {isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-                          </button>
-                        </td>
-                        {showWorkspace && (
-                          <td className="p-3 whitespace-nowrap" title={lease.checkout}>
-                            {workspaceName(lease.checkout)}
-                          </td>
-                        )}
-                        <td className="p-3 whitespace-nowrap" title={lease.since}>
-                          {utcToLocal(lease.since) || lease.since}
-                        </td>
-                        <td className="p-3 whitespace-nowrap tabular-nums" title="Age at the last snapshot frame">
-                          {formatAge(lease.lease_age_seconds)}
-                        </td>
-                        <td className="p-3 whitespace-nowrap tabular-nums">
-                          {formatAge(lease.ttl_seconds)}
-                        </td>
-                        <td className="max-w-56 p-3">
-                          <span className="block truncate" title={lease.intent ?? undefined}>
-                            {lease.intent ?? "—"}
+                            0s · expired
                           </span>
-                        </td>
-                        <td className="p-3 whitespace-nowrap text-right">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                            onClick={() => setForceTarget(lease)}
+                        ) : (
+                          <Badge
+                            variant="secondary"
+                            className="tabular-nums"
+                            title={`TTL remaining (${lease.ttl_seconds}s total)`}
                           >
-                            Force release
-                          </Button>
-                        </td>
-                      </tr>,
-                      isExpanded && (
-                        <tr key={`${lease.lease_id}-detail`} className="border-b last:border-0 bg-muted/30">
-                          <td className="p-3" colSpan={activeColSpan}>
-                            <CommitLeaseDetail
-                              rows={[
-                                ["Lease ID", lease.lease_id],
-                                ["Session ID", lease.session_id],
-                                ["Workspace", lease.checkout],
-                                ["Branch", lease.branch ?? "—"],
-                                ["Since", `${utcToLocal(lease.since) || lease.since} (${lease.since})`],
-                                ["Last heartbeat", `${utcToLocal(lease.last_heartbeat) || lease.last_heartbeat} (${lease.last_heartbeat})`],
-                                ["Lease age", `${formatAge(lease.lease_age_seconds)} (${lease.lease_age_seconds.toFixed(1)}s at the last frame)`],
-                                ["TTL", `${lease.ttl_seconds}s`],
-                                ["Intent", lease.intent ?? "—"],
-                              ]}
-                              paths={paths}
-                            />
-                          </td>
-                        </tr>
-                      ),
-                    ]
-                  })}
-                </tbody>
-              </table>
+                            {formatAge(liveTtlRemaining(lease))} left
+                          </Badge>
+                        )}
+                      </div>
+                      <PathText prefix="📁" path={lease.checkout} className="text-xs" />
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1" title={lease.since}>
+                          <Clock className="size-3.5" />
+                          Since {utcToLocal(lease.since) || lease.since}
+                        </span>
+                        <span
+                          className="inline-flex items-center gap-1 tabular-nums"
+                          title="Live age: frame value + elapsed wall-clock"
+                        >
+                          <Timer className="size-3.5" />
+                          Age {formatAge(liveAge(lease))}
+                        </span>
+                        <span
+                          className="inline-flex items-center gap-1"
+                          title={utcToLocal(lease.last_heartbeat) || lease.last_heartbeat}
+                        >
+                          <HeartPulse className="size-3.5" />
+                          Heartbeat {relativeTime(lease.last_heartbeat)}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 break-all font-mono text-[11px] leading-5 text-muted-foreground">
+                        <div title={lease.lease_id}>Lease {lease.lease_id}</div>
+                        <div title={lease.session_id}>Session {lease.session_id}</div>
+                      </div>
+                      <div className="break-words text-sm">{lease.intent ?? "—"}</div>
+                      <LeasePaths paths={paths} />
+                    </div>
+                    <div className="flex shrink-0 flex-col justify-center self-stretch sm:w-40">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="justify-start border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => setForceTarget(lease)}
+                      >
+                        Force release
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </CardContent>
         </Card>
@@ -475,91 +478,53 @@ export function CommitLease() {
             </CardAction>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto rounded-xl border">
-              <table className="w-full min-w-max text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th scope="col" className="w-8 p-3" aria-label="Expand row" />
-                    {showWorkspace && <th scope="col" className="p-3">Workspace</th>}
-                    <th scope="col" className="p-3">Released</th>
-                    <th scope="col" className="p-3">Reason</th>
-                    <th scope="col" className="p-3">Intent</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {showSkeleton && (
-                    <tr>
-                      <td className="p-3" colSpan={releasedColSpan}>
-                        <Skeleton className="h-6 w-full" />
-                      </td>
-                    </tr>
-                  )}
-                  {!showSkeleton && released.length === 0 && (
-                    <tr>
-                      <td className="p-6 text-center text-muted-foreground" colSpan={releasedColSpan}>
-                        {selection.kind === "all"
-                          ? "Nothing released yet. Leases land here for a while after they let go."
-                          : "Nothing released in the selected workspaces yet."}
-                      </td>
-                    </tr>
-                  )}
-                  {released.map((lease) => {
-                    const isExpanded = Boolean(expanded[lease.lease_id])
-                    const paths = lease.paths ?? []
-                    return [
-                      <tr key={lease.lease_id} className="border-b last:border-0 align-top">
-                        <td className="p-2">
-                          <button
-                            type="button"
-                            onClick={() => toggleExpanded(lease.lease_id)}
-                            aria-expanded={isExpanded}
-                            aria-label={isExpanded ? "Hide lease details" : "Show lease details"}
-                            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                          >
-                            {isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-                          </button>
-                        </td>
-                        {showWorkspace && (
-                          <td className="p-3 whitespace-nowrap" title={lease.checkout}>
-                            {workspaceName(lease.checkout)}
-                          </td>
-                        )}
-                        <td className="p-3 whitespace-nowrap" title={lease.released_at ?? undefined}>
-                          {lease.released_at
-                            ? `${utcToLocal(lease.released_at) || lease.released_at} (${relativeTime(lease.released_at)})`
-                            : "—"}
-                        </td>
-                        <td className="p-3">
-                          <ReleaseReasonBadge reason={lease.release_reason} />
-                        </td>
-                        <td className="max-w-56 p-3">
-                          <span className="block truncate" title={lease.intent ?? undefined}>
-                            {lease.intent ?? "—"}
-                          </span>
-                        </td>
-                      </tr>,
-                      isExpanded && (
-                        <tr key={`${lease.lease_id}-detail`} className="border-b last:border-0 bg-muted/30">
-                          <td className="p-3" colSpan={releasedColSpan}>
-                            <CommitLeaseDetail
-                              rows={[
-                                ["Lease ID", lease.lease_id],
-                                ["Session ID", lease.session_id],
-                                ["Workspace", lease.checkout],
-                                ["Since", `${utcToLocal(lease.since) || lease.since} (${lease.since})`],
-                                ["Released at", lease.released_at ? `${utcToLocal(lease.released_at) || lease.released_at} (${lease.released_at})` : "—"],
-                                ["Release reason", lease.release_reason ?? "—"],
-                                ["Intent", lease.intent ?? "—"],
-                              ]}
-                              paths={paths}
-                            />
-                          </td>
-                        </tr>
-                      ),
-                    ]
-                  })}
-                </tbody>
-              </table>
+            <div className="grid min-w-0 grid-cols-1 gap-3 2xl:grid-cols-2">
+              {showSkeleton &&
+                Array.from({ length: 2 }).map((_, i) => (
+                  <Skeleton key={i} className="h-28 w-full rounded-xl" />
+                ))}
+              {!showSkeleton && released.length === 0 && (
+                <div className="flex min-h-[140px] flex-col items-center justify-center rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground 2xl:col-span-2">
+                  {selection.kind === "all"
+                    ? "Nothing released yet. Leases land here for a while after they let go."
+                    : "Nothing released in the selected workspaces yet."}
+                </div>
+              )}
+              {released.map((lease) => (
+                <div
+                  key={lease.lease_id}
+                  className="flex flex-col gap-1.5 rounded-xl border bg-card p-4"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-base font-semibold" title={lease.checkout}>
+                      {workspaceName(lease.checkout)}
+                    </span>
+                    <ReleaseReasonBadge reason={lease.release_reason} />
+                  </div>
+                  <PathText prefix="📁" path={lease.checkout} className="text-xs" />
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span
+                      className="inline-flex items-center gap-1"
+                      title={lease.released_at ?? undefined}
+                    >
+                      <CheckCircle2 className="size-3.5" />
+                      {lease.released_at
+                        ? `Released ${utcToLocal(lease.released_at) || lease.released_at} (${relativeTime(lease.released_at)})`
+                        : "Released —"}
+                    </span>
+                    <span className="inline-flex items-center gap-1" title={lease.since}>
+                      <Clock className="size-3.5" />
+                      Since {utcToLocal(lease.since) || lease.since}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 break-all font-mono text-[11px] leading-5 text-muted-foreground">
+                    <div title={lease.lease_id}>Lease {lease.lease_id}</div>
+                    <div title={lease.session_id}>Session {lease.session_id}</div>
+                  </div>
+                  <div className="break-words text-sm">{lease.intent ?? "—"}</div>
+                  <LeasePaths paths={lease.paths ?? []} />
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
@@ -645,43 +610,6 @@ function ReleaseReasonBadge({ reason }: { reason: string | null }) {
     <Badge variant={reason === "forced" ? "destructive" : "secondary"} className="font-mono">
       {reason}
     </Badge>
-  )
-}
-
-function CommitLeaseDetail({
-  rows,
-  paths,
-}: {
-  rows: Array<[string, string]>
-  paths: string[]
-}) {
-  return (
-    <div className="grid gap-3 text-xs sm:grid-cols-2">
-      <dl className="flex flex-col divide-y divide-border/60">
-        {rows.map(([label, value]) => (
-          <div key={label} className="flex items-baseline justify-between gap-4 py-1.5">
-            <dt className="shrink-0 text-muted-foreground">{label}</dt>
-            <dd className="min-w-0 break-all text-right font-mono" title={value}>
-              {value}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      <div className="min-w-0">
-        <div className="text-muted-foreground">Paths</div>
-        {paths.length === 0 ? (
-          <div className="mt-1.5 text-muted-foreground">—</div>
-        ) : (
-          <ul className="mt-1.5 flex flex-col gap-1 font-mono">
-            {paths.map((p) => (
-              <li key={p} className="break-all" title={p}>
-                {p}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
   )
 }
 
