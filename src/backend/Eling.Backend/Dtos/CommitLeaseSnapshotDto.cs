@@ -69,6 +69,7 @@ public sealed record CommitLeaseSnapshotDto
                 ReleasedAt = l.ReleasedAt,
                 ReleaseReason = l.ReleaseReason,
                 Intent = l.Intent,
+                TtlSeconds = l.TtlSeconds,
                 Paths = l.Paths,
                 Checkout = l.Checkout,
             })

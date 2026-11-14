@@ -23,6 +23,9 @@ public sealed record CommitLeaseReleasedDto
     [JsonPropertyName("intent")]
     public required string? Intent { get; init; }
 
+    [JsonPropertyName("ttl_seconds")]
+    public required int TtlSeconds { get; init; }
+
     [JsonPropertyName("paths")]
     public required string[]? Paths { get; init; }
 
