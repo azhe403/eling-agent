@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { LeasePaths } from "./lease-paths"
 
@@ -34,5 +34,16 @@ describe("LeasePaths", () => {
   it("renders a dash for an empty list", () => {
     render(<LeasePaths paths={[]} />)
     expect(screen.getByText("—")).toBeTruthy()
+  })
+
+  it("renders duplicate paths without a React duplicate-key warning", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    render(<LeasePaths paths={["a.ts", "a.ts", "b.ts"]} />)
+    const keyWarnings = errorSpy.mock.calls.filter((args) =>
+      args.some((arg) => typeof arg === "string" && /same key/i.test(arg)),
+    )
+    expect(keyWarnings).toHaveLength(0)
+    expect(screen.getAllByText("a.ts")).toHaveLength(2)
+    errorSpy.mockRestore()
   })
 })

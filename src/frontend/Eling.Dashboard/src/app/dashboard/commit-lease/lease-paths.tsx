@@ -23,8 +23,8 @@ export function LeasePaths({ paths }: { paths: string[] }) {
     <div className="min-w-0">
       <div className="text-[11px] text-muted-foreground">Paths</div>
       <ul className="mt-1 flex flex-col gap-1 font-mono text-xs">
-        {visiblePaths.map((p) => (
-          <li key={p} className="break-all" title={p}>
+        {visiblePaths.map((p, i) => (
+          <li key={`${i}-${p}`} className="break-all" title={p}>
             {p}
           </li>
         ))}

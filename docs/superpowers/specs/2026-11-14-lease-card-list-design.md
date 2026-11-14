@@ -22,9 +22,11 @@ Goals:
   empty state.
 - Every detail currently hidden behind the expand renders inline on the card.
 - Paths lists truncate to 3 entries with an inline `+N more` toggle per card.
-- Live behaviour preserved: SSE full-snapshot frames, 1-second wall-clock ticker
-  for age/TTL, client-side workspace-selection filter, force-release confirmation
-  dialog, toast notifications.
+- Live behaviour introduced with this change: the 1-second wall-clock ticker for
+  age/TTL — the base rendered age as a frozen frame value; the ticker is added
+  by this branch, anchored to `snapshotAt` + elapsed wall-clock (see the ledger
+  ruling). SSE full-snapshot frames, client-side workspace-selection filter,
+  force-release confirmation dialog, and toast notifications are unchanged.
 - Force release stays a per-card action in a right-side action column
   (`sm:w-40`, self-stretch), mirroring the Workspaces card action column.
 
