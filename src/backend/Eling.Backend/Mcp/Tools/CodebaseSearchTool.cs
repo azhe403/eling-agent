@@ -75,11 +75,11 @@ public sealed class CodebaseSearchTool
             await _audit.RecordSearchAsync(query, 0, _svc.ProjectRoot, (int)sw.ElapsedMilliseconds, AuditOutcome.Error);
             return new CodebaseSearchResponse([], new CodebaseSearchStats(0, sw.ElapsedMilliseconds, false, $"Invalid match '{match}'. Valid: content, path, file."));
         }
-        var matchKind = parsed == "path" ? CodebaseFileMatch.Path : CodebaseFileMatch.FileName;
         // The content-mode path filter: a substring that can sit anywhere in
         // the workspace-relative path, unlike pathPrefix's anchored-at-the-start
         // match. Files mode has its own path matching and ignores it.
         var contains = string.IsNullOrWhiteSpace(matchPath) ? null : matchPath.Trim();
+        var filesMode = parsed != "content";
 
         try
         {
@@ -88,52 +88,58 @@ public sealed class CodebaseSearchTool
             // endpoints: a tool argument must not be a way around the
             // exclusion gate the registry enforces.
             var explicitRoots = ElingPaths.EnsureCodebaseRootsAllowed(projects ?? []).ToList();
-            IReadOnlyList<string>? searchedRoots = null;
-            IReadOnlyList<ScopedCodebaseHit> hits;
+            IReadOnlyList<string>? searchedRoots;
             if (explicitRoots.Count > 0)
             {
                 searchedRoots = explicitRoots;
-                if (parsed != "content")
-                    return await FilesResponseAsync(query, clamped, matchKind, explicitRoots, sw, cancellationToken);
-                hits = await _svc.SearchAllAsync(query, clamped, explicitRoots, prefix, filePattern, contains, cancellationToken);
             }
             else if (string.Equals(scope, "project", StringComparison.OrdinalIgnoreCase))
             {
-                // The narrow case. Explicitly asked for, so the index of one
-                // workspace is read directly instead of being federated.
+                // The narrow case: this workspace's own index, not federated.
                 searchedRoots = null;
-                if (parsed != "content")
-                    return await FilesResponseAsync(query, clamped, matchKind, null, sw, cancellationToken);
-                hits = (await _svc.SearchAsync(query, clamped, prefix, filePattern, contains, cancellationToken))
-                    .Select(h => new ScopedCodebaseHit(_svc.ProjectRoot, h.Path, h.StartLine, h.EndLine, h.Content, h.Score))
-                    .ToList();
             }
             else
             {
                 // Global by default: every indexed workspace, not only the
                 // ones a live runtime happens to cover. A codebase index is a
                 // read-only file in the global store, so a closed workspace's
-                // index is still fully readable — the same reasoning
+                // index is still fully readable - the same reasoning
                 // AliveOrRegisteredAsync documents. Searching only Alive()
                 // would make a "global" default silently miss closed projects.
                 var roots = await SearchableRootsAsync(cancellationToken);
                 roots = ApplyProjectFilter(roots, projectFilter);
                 if (roots.Count == 0)
                 {
-                    // The filter excluded everything — report that plainly
-                    // rather than returning a misleading "no hits".
+                    // The filter excluded everything - report that plainly in
+                    // the shape the caller asked for, rather than answering a
+                    // files-mode request with content mode's shape.
                     sw.Stop();
                     var reason = $"No indexed workspace matches projectFilter '{projectFilter}'.";
                     await _audit.RecordSearchAsync(query, 0, _svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
-                    return new CodebaseSearchResponse([], new CodebaseSearchStats(0, sw.ElapsedMilliseconds, false, reason));
+                    return filesMode
+                        ? new CodebaseSearchResponse([], new CodebaseSearchStats(0, sw.ElapsedMilliseconds, false, reason), "files", [])
+                        : new CodebaseSearchResponse([], new CodebaseSearchStats(0, sw.ElapsedMilliseconds, false, reason));
                 }
                 searchedRoots = roots;
-                if (parsed != "content")
-                    return await FilesResponseAsync(query, clamped, matchKind, roots, sw, cancellationToken);
-                hits = await _svc.SearchAllAsync(query, clamped, roots, prefix, filePattern, contains, cancellationToken);
+            }
+            if (filesMode)
+                return await FilesResponseAsync(query, clamped, KindFor(parsed), searchedRoots, sw, cancellationToken);
+            IReadOnlyList<ScopedCodebaseHit> hits;
+            IReadOnlyDictionary<string, int>? federatedTotals = null;
+            if (searchedRoots is null)
+            {
+                hits = (await _svc.SearchAsync(query, clamped, prefix, filePattern, contains, cancellationToken))
+                    .Select(h => new ScopedCodebaseHit(_svc.ProjectRoot, h.Path, h.StartLine, h.EndLine, h.Content, h.Score, h.TotalMatches))
+                    .ToList();
+            }
+            else
+            {
+                var federated = await _svc.SearchAllWithTotalsAsync(query, clamped, searchedRoots, prefix, filePattern, contains, cancellationToken);
+                hits = federated.Hits;
+                federatedTotals = federated.TotalByRoot;
             }
             // filePattern rides down into SQL, so the limit is already taken
-            // from the filtered set — trimming here again would only hide rows.
+            // from the filtered set - trimming here again would only hide rows.
             var filtered = hits.ToList();
             sw.Stop();
             // An empty hit list means "no match" only when an index actually
@@ -147,9 +153,15 @@ public sealed class CodebaseSearchTool
                     : "No index for this scope. Run codebase_index to build it."
                 : null;
             await _audit.RecordSearchAsync(query, filtered.Count, _svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
+            // The total is the complete match count, not the page size: the
+            // federated passes carry their own per-root totals; the local
+            // pass stamps each hit with its complete match count.
+            var totalHits = federatedTotals is not null
+                ? federatedTotals.Values.Sum()
+                : hits.Count > 0 ? hits.Max(h => h.TotalMatches) : 0;
             return new CodebaseSearchResponse(
                 filtered.Select(h => new CodebaseSearchHit(h.ProjectRoot, h.Path, h.StartLine, h.EndLine, h.Content, h.Score)).ToList(),
-                new CodebaseSearchStats(filtered.Count, sw.ElapsedMilliseconds, fresh, hint));
+                new CodebaseSearchStats(totalHits, sw.ElapsedMilliseconds, fresh, hint));
         }
         catch (ArgumentException ex)
         {
@@ -257,6 +269,13 @@ public sealed class CodebaseSearchTool
             "files",
             rows);
     }
+
+    /// <summary>
+    /// The file-match kind for the non-content scopes: the whole
+    /// workspace-relative path when 'path', the file name only otherwise.
+    /// </summary>
+    private static CodebaseFileMatch KindFor(string parsed)
+        => parsed == "path" ? CodebaseFileMatch.Path : CodebaseFileMatch.FileName;
 
     /// <summary>
     /// True when at least one index in the searched scope exists on disk. Null

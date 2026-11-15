@@ -13,47 +13,20 @@ namespace Eling.Backend.Tests;
 /// reads sibling indexes from the global store under that variable.
 /// </summary>
 [Collection(ElingDataDirCollection.Name)]
-public sealed class CodebaseSearchMatchPathTests : IDisposable
+public sealed class CodebaseSearchMatchPathTests : CodebaseSearchToolTestBase
 {
-    private const string DataDirEnv = "ELING_DATA_DIR";
     private const string Needle = "zephyrpathneedle";
-
-    private readonly string _workspace;
-    private readonly string _dataDir;
-    private readonly string? _originalDataDir;
 
     public CodebaseSearchMatchPathTests()
     {
-        var tag = Guid.NewGuid().ToString("N")[..8];
-        _workspace = Path.Combine(Path.GetTempPath(), "eling-matchpath-ws-" + tag);
-        _dataDir = Path.Combine(Path.GetTempPath(), "eling-matchpath-data-" + tag);
-        Directory.CreateDirectory(_workspace);
-        Directory.CreateDirectory(_dataDir);
-
-        _originalDataDir = Environment.GetEnvironmentVariable(DataDirEnv);
-        Environment.SetEnvironmentVariable(DataDirEnv, _dataDir);
-
         WriteAsync("src/utils/ZephyrUtil.cs", "public sealed class ZephyrPathneedle { }\n").GetAwaiter().GetResult();
         WriteAsync("src/backend/ZephyrBack.cs", "public sealed class ZephyrPathneedle { }\n").GetAwaiter().GetResult();
         WriteAsync("src/lit_a/ZephyrUnder.cs", "public sealed class ZephyrPathneedle { }\n").GetAwaiter().GetResult();
         WriteAsync("src/lita/ZephyrPlain.cs", "public sealed class ZephyrPathneedle { }\n").GetAwaiter().GetResult();
-
-        IndexedAsync(_workspace).GetAwaiter().GetResult();
+        WriteAsync("src/100%_lit/ZephyrPct.cs", "public sealed class ZephyrPathneedle { }\n").GetAwaiter().GetResult();
+        WriteAsync("src/100lit/ZephyrNoPct.cs", "public sealed class ZephyrPathneedle { }\n").GetAwaiter().GetResult();
+        IndexAsync(_workspace).GetAwaiter().GetResult();
     }
-
-    private async Task IndexedAsync(string root)
-    {
-        var svc = new CodebaseIndexService(
-            root,
-            new SqliteCodebaseIndex(ElingPaths.ResolveCodebaseDbPath(root)));
-        await svc.IndexAsync(full: true);
-    }
-
-    private CodebaseSearchTool Tool() =>
-        new(new CodebaseIndexService(
-                _workspace,
-                new SqliteCodebaseIndex(ElingPaths.ResolveCodebaseDbPath(_workspace))),
-            registry: null, logger: null);
 
     [Fact]
     public async Task Content_Search_Can_Be_Narrowed_To_A_Path_Substring()
@@ -115,6 +88,19 @@ public sealed class CodebaseSearchMatchPathTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Percent_MatchPath_Does_Not_Act_As_A_Wildcard()
+    {
+        // '100%' as a LIKE pattern would match a host of paths if the percent
+        // were not escaped; as a literal it matches exactly the one folder
+        // whose name carries the sign.
+        var response = await Tool().SearchAsync(Needle, matchPath: "100%");
+
+        Assert.NotEmpty(response.Hits);
+        Assert.All(response.Hits, h => Assert.Contains("100%", h.Path, StringComparison.Ordinal));
+        Assert.DoesNotContain(response.Hits, h => h.Path.Contains("100lit", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task MatchPath_Is_Ignored_In_File_Mode()
     {
         var response = await Tool().SearchAsync("Zephyr", match: "file", matchPath: "definitely-not-present-anywhere");
@@ -134,7 +120,7 @@ public sealed class CodebaseSearchMatchPathTests : IDisposable
         {
             await File.WriteAllTextAsync(Path.Combine(sibling, "libs/utils/ZephyrSiblingUtil.cs"), "public sealed class ZephyrPathneedle { }\n");
             await File.WriteAllTextAsync(Path.Combine(sibling, "libs/backend/ZephyrSiblingBackend.cs"), "public sealed class ZephyrPathneedle { }\n");
-            await IndexedAsync(sibling);
+            await IndexAsync(sibling);
 
             var response = await Tool().SearchAsync(Needle, matchPath: "utils", projects: [sibling]);
 
@@ -151,17 +137,4 @@ public sealed class CodebaseSearchMatchPathTests : IDisposable
         }
     }
 
-    private async Task WriteAsync(string relativePath, string contents)
-    {
-        var full = Path.Combine(_workspace, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        await File.WriteAllTextAsync(full, contents);
-    }
-
-    public void Dispose()
-    {
-        Environment.SetEnvironmentVariable(DataDirEnv, _originalDataDir);
-        CodebaseRebuildScopeTests.TryDelete(_workspace);
-        CodebaseRebuildScopeTests.TryDelete(_dataDir);
-    }
 }
