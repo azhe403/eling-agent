@@ -12,7 +12,7 @@ public sealed record CommitLeaseRecord
 {
     public required string LeaseId { get; init; }
 
-    public required string SessionId { get; init; }
+    public required string CallerId { get; init; }
 
     public required CommitLeaseKind Kind { get; init; }
 

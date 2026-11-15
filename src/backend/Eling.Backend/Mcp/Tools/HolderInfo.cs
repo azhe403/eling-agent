@@ -6,8 +6,8 @@ namespace Eling.Backend.Mcp.Tools;
 /// </summary>
 internal sealed record HolderInfo
 {
-    [System.Text.Json.Serialization.JsonPropertyName("holder_session_id")]
-    public required string HolderSessionId { get; init; }
+    [System.Text.Json.Serialization.JsonPropertyName("holder_caller_id")]
+    public required string HolderCallerId { get; init; }
 
     [System.Text.Json.Serialization.JsonPropertyName("since")]
     public required DateTimeOffset Since { get; init; }

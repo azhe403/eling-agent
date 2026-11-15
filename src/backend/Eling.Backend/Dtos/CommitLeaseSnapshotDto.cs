@@ -46,7 +46,7 @@ public sealed record CommitLeaseSnapshotDto
             .Select(l => new CommitLeaseSummaryDto
             {
                 LeaseId = l.LeaseId,
-                SessionId = l.SessionId,
+                CallerId = l.CallerId,
                 Branch = l.Branch,
                 Since = l.Since,
                 LastHeartbeat = l.LastHeartbeat,
@@ -64,7 +64,7 @@ public sealed record CommitLeaseSnapshotDto
             .Select(l => new CommitLeaseReleasedDto
             {
                 LeaseId = l.LeaseId,
-                SessionId = l.SessionId,
+                CallerId = l.CallerId,
                 Since = l.Since,
                 ReleasedAt = l.ReleasedAt,
                 ReleaseReason = l.ReleaseReason,

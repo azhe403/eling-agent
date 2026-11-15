@@ -28,19 +28,19 @@ branch cannot sweep each other's uncommitted work into one commit. Companion to 
   the default until a repo opts in.
 
 ## Model
-- `lease_id`, `session_id`, `checkout` (the working-copy root — the directory whose `.git` marker was
+- `lease_id`, `caller_id`, `checkout` (the working-copy root — the directory whose `.git` marker was
   hit; a linked worktree keys by the worktree path, distinct from the main checkout), `branch`, `paths[]` (optional,
   planned paths), `intent` (one-line summary of the planned commit), `since`,
   `last_heartbeat`, `ttl_seconds` (default 300). Released leases additionally carry
   `released_at` and `release_reason` (`explicit` | `stale` | `post-commit`).
-- `session_id` must be non-blank and at least 32 characters (a full entropy token; too-short ids collide in the shared store).
+- The identifier is `caller_id` end to end (renamed 2026-11-14 from `caller_id`: agents mistook the name for a host-issued id — and all response/record wire fields followed: `holder_caller_id`, snapshot rows, the audit payload, the on-disk store, and the dashboard). It must be a non-blank string of at least 24 characters — any stable string the caller chooses (a slug, a UUID, or the host's session id), passed as the same value on every call; the format is not validated. Minimum lowered 2026-11-14 from 32: the 32-char floor rejected well-formed 30-character host ids. The on-disk store predates the rename: legacy `sessionId` keys are patched to `callerId` on load, so live leases survive the upgrade.
 - A lease is live while `now - last_heartbeat < ttl` (== ttl is stale); otherwise it drops from
   the active list.
 - One live commit lease per `checkout` + `branch` at a time. A second lessee soft-fails
   and receives the holder's session, lease age, and intent.
 
 ## Tools (new, minimal)
-- `commit_lease(session_id, branch?, paths?, intent?)` → one call is the gate: the conflict
+- `commit_lease(caller_id, branch?, paths?, intent?)` → one call is the gate: the conflict
   check is folded into the claim. `acquired: true` with `verdict: green` → stage.
   `acquired: false` with `verdict: red` → a foreign live commit lease holds the slot on the
   same `checkout` + `branch`; holder info in the response; do not stage. `acquired: true`
@@ -49,10 +49,10 @@ branch cannot sweep each other's uncommitted work into one commit. Companion to 
   Re-claiming your own live lease is idempotent (same lease_id returned). When `branch` is
   omitted it is discovered via git; when the branch cannot be discovered the fail-safe scope
   is every branch of the checkout.
-- `commit_release(session_id)` → explicit release; `session_close` releases everything
+- `commit_release(caller_id)` → explicit release; `session_close` releases everything
   (per the session-context spec).
 - `commit_list_active(branch?)` → the live lease for the checkout: holder, since, intent.
-- `commit_wait(session_id, total_timeout_seconds?, initial_interval_seconds?)` → server-side
+- `commit_wait(caller_id, total_timeout_seconds?, initial_interval_seconds?)` → server-side
   wait: blocks until no foreign live commit lease exists on the same `checkout` + `branch`
   (or total timeout, default 180s), polling with exponential backoff starting at
   `initial_interval_seconds` (default 5s): 5s → 10s → 20s (cap). Does not take the slot;
@@ -101,7 +101,7 @@ self-release foreign leases.
 - Backend: owner-mode only. `GET /api/commit-lease/active?branch={branch}` returns
   live commit leases for the resolved checkout (branch filter optional; when
   omitted, all branches of that checkout). Response:
-  `{ checkout, branch, commit_leases: [ { lease_id, session_id, branch, since,
+  `{ checkout, branch, commit_leases: [ { lease_id, caller_id, branch, since,
   last_heartbeat, lease_age_seconds, ttl_seconds, paths, intent, checkout } ] }`.
   Cross-worktree isolation holds for the default: worktree A's leases never appear
   for worktree B. `GET /api/commit-lease/active?scope=all` is the machine-global
@@ -122,7 +122,7 @@ self-release foreign leases.
   (cap 50/checkout in the store; 20 per checkout surfaced by the snapshot API, or a
   single global 20 under `scope=all` and in the SSE frame) with `released_at` and `release_reason`
   (`explicit` | `stale` | `post-commit` | `forced`). `GET /api/commit-lease/active` also
-  returns `recently_released: [ { lease_id, session_id, since,
+  returns `recently_released: [ { lease_id, caller_id, since,
   released_at, release_reason, intent, paths, checkout } ]`. This is how the dashboard
   surfaces auto-release (stale session, explicit release, post-commit hook,
   or forced from the dashboard) even though the lease no longer appears in the active list.
@@ -142,7 +142,7 @@ self-release foreign leases.
   meta line reads "All workspaces" / "N workspaces selected" / the workspace
   name, and a per-row checkout (workspace name) column appears when more than
   one root is in view. Per-lease detail: checkout, branch,
-  session_id, since, last_heartbeat, ttl_seconds, lease_age_seconds, paths,
+  caller_id, since, last_heartbeat, ttl_seconds, lease_age_seconds, paths,
   intent, release_reason. Force-release button on each active lease, gated by a
   confirmation dialog, calls `POST /api/commit-lease/{lease_id}/release?checkout={row_checkout}`.
   Subscribes via `EventSource`, reconnects with resync on drop. Empty states for

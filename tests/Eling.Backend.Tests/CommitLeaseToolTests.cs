@@ -103,12 +103,12 @@ public sealed class CommitLeaseToolTests : IDisposable
         var result = await second.LeaseAsync("ses_test_2_000000000000000000000", "main", intent: "me too");
 
         using var doc = JsonDocument.Parse(result);
-        Assert.Equal("ses_test_1_000000000000000000000", doc.RootElement.GetProperty("holder_session_id").GetString());
+        Assert.Equal("ses_test_1_000000000000000000000", doc.RootElement.GetProperty("holder_caller_id").GetString());
         Assert.Equal(30, doc.RootElement.GetProperty("lease_age_seconds").GetInt64());
         Assert.Equal("first in line", doc.RootElement.GetProperty("intent").GetString());
         var stored = Assert.Single(await store.ListAllAsync());
         Assert.Equal(firstLeaseId, stored.LeaseId);
-        Assert.Equal("ses_test_1_000000000000000000000", stored.SessionId);
+        Assert.Equal("ses_test_1_000000000000000000000", stored.CallerId);
     }
 
     [Fact]
@@ -160,12 +160,12 @@ public sealed class CommitLeaseToolTests : IDisposable
         // not collide with the main checkout's slot.
         Assert.True(mainDoc.RootElement.TryGetProperty("lease_id", out _), $"main lease was not taken: {mainResult}");
         Assert.True(worktreeDoc.RootElement.TryGetProperty("lease_id", out _), $"worktree lease was not taken: {worktreeResult}");
-        Assert.False(worktreeDoc.RootElement.TryGetProperty("holder_session_id", out _));
+        Assert.False(worktreeDoc.RootElement.TryGetProperty("holder_caller_id", out _));
 
         var stored = await store.ListAllAsync();
         Assert.Equal(2, stored.Count);
-        Assert.Contains(stored, l => l.SessionId == "ses_test_1_000000000000000000000" && l.Checkout == GitRepositoryResolver.ResolveWorkingCopyRoot(main));
-        Assert.Contains(stored, l => l.SessionId == "ses_test_2_000000000000000000000" && l.Checkout == GitRepositoryResolver.ResolveWorkingCopyRoot(worktree));
+        Assert.Contains(stored, l => l.CallerId == "ses_test_1_000000000000000000000" && l.Checkout == GitRepositoryResolver.ResolveWorkingCopyRoot(main));
+        Assert.Contains(stored, l => l.CallerId == "ses_test_2_000000000000000000000" && l.Checkout == GitRepositoryResolver.ResolveWorkingCopyRoot(worktree));
         Assert.NotEqual(stored[0].Checkout, stored[1].Checkout);
     }
 
@@ -230,7 +230,7 @@ public sealed class CommitLeaseToolTests : IDisposable
         Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
         Assert.Equal("green", doc.RootElement.GetProperty("verdict").GetString());
         Assert.False(doc.RootElement.GetProperty("staged_without_lease").GetBoolean());
-        Assert.False(doc.RootElement.TryGetProperty("holder_session_id", out _));
+        Assert.False(doc.RootElement.TryGetProperty("holder_caller_id", out _));
         Assert.False(doc.RootElement.TryGetProperty("conflicting_file_leases", out _));
     }
 
@@ -248,12 +248,12 @@ public sealed class CommitLeaseToolTests : IDisposable
         using var doc = JsonDocument.Parse(result);
         Assert.False(doc.RootElement.GetProperty("acquired").GetBoolean());
         Assert.Equal("red", doc.RootElement.GetProperty("verdict").GetString());
-        Assert.Equal("ses_test_2_000000000000000000000", doc.RootElement.GetProperty("holder_session_id").GetString());
+        Assert.Equal("ses_test_2_000000000000000000000", doc.RootElement.GetProperty("holder_caller_id").GetString());
         Assert.Equal(45, doc.RootElement.GetProperty("lease_age_seconds").GetInt64());
         Assert.Equal("land the feature", doc.RootElement.GetProperty("intent").GetString());
         Assert.False(doc.RootElement.GetProperty("staged_without_lease").GetBoolean());
         var stored = Assert.Single(await store.ListAllAsync());
-        Assert.Equal("ses_test_2_000000000000000000000", stored.SessionId);
+        Assert.Equal("ses_test_2_000000000000000000000", stored.CallerId);
     }
 
     [Fact]
@@ -284,7 +284,7 @@ public sealed class CommitLeaseToolTests : IDisposable
         using var doc = JsonDocument.Parse(result);
         Assert.False(doc.RootElement.GetProperty("acquired").GetBoolean());
         Assert.Equal("red", doc.RootElement.GetProperty("verdict").GetString());
-        Assert.Equal("ses_test_2_000000000000000000000", doc.RootElement.GetProperty("holder_session_id").GetString());
+        Assert.Equal("ses_test_2_000000000000000000000", doc.RootElement.GetProperty("holder_caller_id").GetString());
     }
 
     [Fact]
@@ -339,7 +339,7 @@ public sealed class CommitLeaseToolTests : IDisposable
         var conflicts = doc.RootElement.GetProperty("conflicting_file_leases").EnumerateArray().ToArray();
         var conflict = Assert.Single(conflicts);
         Assert.Equal(stored.LeaseId, conflict.GetProperty("lease_id").GetString());
-        Assert.Equal("ses_test_3_000000000000000000000", conflict.GetProperty("holder_session_id").GetString());
+        Assert.Equal("ses_test_3_000000000000000000000", conflict.GetProperty("holder_caller_id").GetString());
         Assert.Equal(new[] { "src/a.cs" }, conflict.GetProperty("paths").EnumerateArray().Select(e => e.GetString()));
     }
 
@@ -421,9 +421,9 @@ public sealed class CommitLeaseToolTests : IDisposable
         using var doc = JsonDocument.Parse(result);
         Assert.False(doc.RootElement.GetProperty("acquired").GetBoolean());
         Assert.Equal("red", doc.RootElement.GetProperty("verdict").GetString());
-        Assert.Equal("ses_test_2_000000000000000000000", doc.RootElement.GetProperty("holder_session_id").GetString());
+        Assert.Equal("ses_test_2_000000000000000000000", doc.RootElement.GetProperty("holder_caller_id").GetString());
         var conflicts = doc.RootElement.GetProperty("conflicting_file_leases").EnumerateArray().ToArray();
-        Assert.Equal("ses_test_3_000000000000000000000", Assert.Single(conflicts).GetProperty("holder_session_id").GetString());
+        Assert.Equal("ses_test_3_000000000000000000000", Assert.Single(conflicts).GetProperty("holder_caller_id").GetString());
     }
 
     [Fact]
@@ -441,11 +441,27 @@ public sealed class CommitLeaseToolTests : IDisposable
         using var doc = JsonDocument.Parse(result);
         Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
         Assert.Equal("green", doc.RootElement.GetProperty("verdict").GetString());
-        Assert.False(doc.RootElement.TryGetProperty("holder_session_id", out _));
+        Assert.False(doc.RootElement.TryGetProperty("holder_caller_id", out _));
     }
 
     [Fact]
-    public async Task BlankSessionId_ReturnsError_AndStoresNothing()
+    public async Task ThirtyCharCallerId_IsAccepted()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        // caller_id is an arbitrary caller-supplied string (not tied to any
+        // host's id format); a 30-character id must clear the length gate.
+        var result = await tool.LeaseAsync("ses_1a2b3c4d5e6f7a8b9c0d1e2f3a", "main");
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal("green", doc.RootElement.GetProperty("verdict").GetString());
+    }
+
+    [Fact]
+    public async Task BlankCallerId_ReturnsError_AndStoresNothing()
     {
         using var store = NewStore();
         var cwd = Checkout("a");
@@ -461,14 +477,14 @@ public sealed class CommitLeaseToolTests : IDisposable
     private Task SeedCommitLeaseAsync(
         JsonCommitLeaseStore store,
         string checkout,
-        string sessionId,
+        string callerId,
         string branch,
         string? intent = null,
         int ttlSeconds = 300)
         => store.TryLeaseAsync(new CommitLeaseRecord
         {
             LeaseId = Ulid.NewUlid().ToString(),
-            SessionId = sessionId,
+            CallerId = callerId,
             Kind = CommitLeaseKind.Commit,
             Checkout = checkout,
             Branch = branch,
@@ -482,14 +498,14 @@ public sealed class CommitLeaseToolTests : IDisposable
     private Task SeedFileLeaseAsync(
         JsonCommitLeaseStore store,
         string checkout,
-        string sessionId,
+        string callerId,
         string branch,
         string[] paths,
         string? intent = null)
         => store.TryLeaseAsync(new CommitLeaseRecord
         {
             LeaseId = Ulid.NewUlid().ToString(),
-            SessionId = sessionId,
+            CallerId = callerId,
             Kind = CommitLeaseKind.File,
             Checkout = checkout,
             Branch = branch,

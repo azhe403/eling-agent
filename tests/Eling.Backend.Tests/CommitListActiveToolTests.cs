@@ -37,14 +37,14 @@ public sealed class CommitListActiveToolTests : IDisposable
     private Task SeedCommitLeaseAsync(
         JsonCommitLeaseStore store,
         string checkout,
-        string sessionId,
+        string callerId,
         string branch,
         string? intent = null,
         string[]? paths = null,
         int ttlSeconds = 300)
         => store.TryLeaseAsync(new CommitLeaseRecord {
             LeaseId =  Ulid.NewUlid().ToString(),
-            SessionId =  sessionId,
+            CallerId =  callerId,
             Kind =  CommitLeaseKind.Commit,
             Checkout =  checkout,
             Branch =  branch,
@@ -54,10 +54,10 @@ public sealed class CommitListActiveToolTests : IDisposable
             Paths =  paths,
             Intent =  intent});
 
-    private Task SeedFileLeaseAsync(JsonCommitLeaseStore store, string checkout, string sessionId, string branch)
+    private Task SeedFileLeaseAsync(JsonCommitLeaseStore store, string checkout, string callerId, string branch)
         => store.TryLeaseAsync(new CommitLeaseRecord {
             LeaseId =  Ulid.NewUlid().ToString(),
-            SessionId =  sessionId,
+            CallerId =  callerId,
             Kind =  CommitLeaseKind.File,
             Checkout =  checkout,
             Branch =  branch,
@@ -93,7 +93,7 @@ public sealed class CommitListActiveToolTests : IDisposable
 
         using var doc = JsonDocument.Parse(result);
         var lease = Assert.Single(doc.RootElement.GetProperty("leases").EnumerateArray());
-        Assert.Equal("ses_test_2_000000000000000000000", lease.GetProperty("holder_session_id").GetString());
+        Assert.Equal("ses_test_2_000000000000000000000", lease.GetProperty("holder_caller_id").GetString());
         Assert.Equal(_clock.GetUtcNow() - TimeSpan.FromSeconds(30), lease.GetProperty("since").GetDateTimeOffset());
         Assert.Equal(30, lease.GetProperty("lease_age_seconds").GetInt64());
         Assert.Equal("land the feature", lease.GetProperty("intent").GetString());
@@ -156,7 +156,7 @@ public sealed class CommitListActiveToolTests : IDisposable
 
         using var doc = JsonDocument.Parse(result);
         var lease = Assert.Single(doc.RootElement.GetProperty("leases").EnumerateArray());
-        Assert.Equal("ses_test_2_000000000000000000000", lease.GetProperty("holder_session_id").GetString());
+        Assert.Equal("ses_test_2_000000000000000000000", lease.GetProperty("holder_caller_id").GetString());
     }
 
     [Fact]
@@ -193,13 +193,13 @@ public sealed class CommitListActiveToolTests : IDisposable
         public Task<CommitLeaseRecord?> TryLeaseAsync(CommitLeaseRecord candidate, CancellationToken ct = default)
             => throw new InvalidOperationException("store is broken");
 
-        public Task<bool> ReleaseAsync(string sessionId, CommitLeaseKind? kind, CancellationToken ct = default)
+        public Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, CancellationToken ct = default)
             => throw new InvalidOperationException("store is broken");
 
         public Task<bool> ForceReleaseAsync(string leaseId, CancellationToken ct = default)
             => throw new InvalidOperationException("store is broken");
 
-        public Task<bool> HeartbeatAsync(string leaseId, string sessionId, CancellationToken ct = default)
+        public Task<bool> HeartbeatAsync(string leaseId, string callerId, CancellationToken ct = default)
             => throw new InvalidOperationException("store is broken");
 
         public Task<IReadOnlyList<CommitLeaseRecord>> ListActiveAcrossCheckoutsAsync(string? branch, CancellationToken ct = default)

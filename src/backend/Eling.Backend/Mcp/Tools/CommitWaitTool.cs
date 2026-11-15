@@ -74,15 +74,15 @@ public sealed class CommitWaitTool
     // commit_* tool surface is snake_case end to end.
     [McpServerTool(Name = "commit_wait"), Description("Wait server-side until no other session holds a live commit lease on this checkout and branch, then return green. Returns { verdict: 'green' | 'red', waited_seconds, holder?: {...} }. Green ends the wait without taking the lease - call commit_lease next. Red means the timeout elapsed while another session still holds the slot: stop and report the holder. branch is optional and is discovered via git when omitted.")]
     public async Task<string> WaitAsync(
-        [Description("The calling session's id. Must be at least 32 characters.")] string session_id,
+        [Description("The caller's stable identifier. Any non-blank string of at least 24 characters you choose - a slug, a UUID, or your host's session id; pass the same value on every call. If your identifier carries a date, put the date FIRST (e.g. 2026-11-15-...), never last, so plain lexical sorting matches chronological order. The format is not validated.")] string caller_id,
         [Description("Give up after this many seconds and return red. Default 180.")] double total_timeout_seconds = 180,
         [Description("First poll interval in seconds; doubles each poll, capped at 20 (values above 20 are clamped to 20). Default 5.")] double initial_interval_seconds = 5,
         [Description("Current branch of the checkout. Optional; discovered via git when omitted. Pass it to skip discovery (e.g. when git is unavailable).")] string? branch = null,
         CancellationToken cancellationToken = default)
     {
-        if (!CommitLeaseToolHelpers.IsSessionIdPlausible(session_id))
+        if (!CommitLeaseToolHelpers.IsCallerIdPlausible(caller_id))
         {
-            return CommitLeaseToolHelpers.Serialize(new CommitWaitError(CommitLeaseToolHelpers.SessionIdTooShortMessage(session_id)));
+            return CommitLeaseToolHelpers.Serialize(new CommitWaitError(CommitLeaseToolHelpers.CallerIdTooShortMessage(caller_id)));
         }
 
         if (!double.IsFinite(total_timeout_seconds) || total_timeout_seconds <= 0)
@@ -97,7 +97,7 @@ public sealed class CommitWaitTool
 
         try
         {
-            var caller = session_id.Trim();
+            var caller = caller_id.Trim();
             var checkout = GitRepositoryResolver.ResolveWorkingCopyRoot(_cwd) ?? _cwd;
             var branchKey = string.IsNullOrWhiteSpace(branch)
                 ? (await GitStatusReader.TryRead(checkout, _logger, cancellationToken))?.CurrentBranch
@@ -120,7 +120,7 @@ public sealed class CommitWaitTool
                 var activeLeases = await _leaseStore.ListActiveAsync(checkout, null, cancellationToken);
                 var foreignCommitLeases = activeLeases
                     .Where(l => l.Kind == CommitLeaseKind.Commit
-                        && !string.Equals(l.SessionId, caller, StringComparison.Ordinal)
+                        && !string.Equals(l.CallerId, caller, StringComparison.Ordinal)
                         && CommitLeaseToolHelpers.BranchMatches(l.Branch, branchKey))
                     .OrderBy(l => l.Since)
                     .ToList();
@@ -155,14 +155,14 @@ public sealed class CommitWaitTool
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // The caller cancelled: propagate so the turn aborts normally.
-            _logger?.LogDebug("commit_wait was cancelled by the caller (session {SessionId}).", session_id);
+            _logger?.LogDebug("commit_wait was cancelled by the caller (session {CallerId}).", caller_id);
             throw;
         }
         catch (Exception ex)
         {
             // The store's gate wait and its file I/O both throw; the caller gets
             // the repo's compact error shape, not an opaque host-level failure.
-            _logger?.LogWarning(ex, "commit_wait failed for session {SessionId}.", session_id);
+            _logger?.LogWarning(ex, "commit_wait failed for session {CallerId}.", caller_id);
             return CommitLeaseToolHelpers.Serialize(new CommitWaitError($"Could not wait for the commit lease: {ex.Message}"));
         }
     }
@@ -173,7 +173,7 @@ public sealed class CommitWaitTool
     private static HolderInfo HolderInfoOf(CommitLeaseRecord holder, DateTimeOffset now)
         => new()
         {
-            HolderSessionId = holder.SessionId,
+            HolderCallerId = holder.CallerId,
             Since = holder.Since,
             LeaseAgeSeconds = CommitLeaseToolHelpers.AgeSeconds(now, holder.Since),
             Intent = CommitLeaseToolHelpers.NormalizeIntent(holder.Intent),

@@ -111,7 +111,7 @@ public sealed class CommitLeaseEndpointTests : IAsyncLifetime, IDisposable
     }
 
     private async Task<CommitLeaseRecord> SeedAsync(
-        string sessionId,
+        string callerId,
         string? branch = "main",
         DateTimeOffset? lastHeartbeat = null,
         int ttlSeconds = 300,
@@ -121,7 +121,7 @@ public sealed class CommitLeaseEndpointTests : IAsyncLifetime, IDisposable
         var now = DateTimeOffset.UtcNow;
         var lease = new CommitLeaseRecord {
             LeaseId =  Ulid.NewUlid().ToString(),
-            SessionId =  sessionId,
+            CallerId =  callerId,
             Kind =  CommitLeaseKind.Commit,
             Checkout =  checkout ?? _checkout,
             Branch =  branch,
@@ -152,7 +152,7 @@ public sealed class CommitLeaseEndpointTests : IAsyncLifetime, IDisposable
 
         var row = Assert.Single(root.GetProperty("commit_leases").EnumerateArray());
         Assert.Equal(lease.LeaseId, row.GetProperty("lease_id").GetString());
-        Assert.Equal("ses_test_2_000000000000000000000", row.GetProperty("session_id").GetString());
+        Assert.Equal("ses_test_2_000000000000000000000", row.GetProperty("caller_id").GetString());
         Assert.Equal("main", row.GetProperty("branch").GetString());
         Assert.Equal(lease.Since, row.GetProperty("since").GetDateTimeOffset());
         Assert.Equal(lease.LastHeartbeat, row.GetProperty("last_heartbeat").GetDateTimeOffset());
@@ -175,7 +175,7 @@ public sealed class CommitLeaseEndpointTests : IAsyncLifetime, IDisposable
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
         var row = Assert.Single(doc.RootElement.GetProperty("commit_leases").EnumerateArray());
-        Assert.Equal("ses_test_2_000000000000000000000", row.GetProperty("session_id").GetString());
+        Assert.Equal("ses_test_2_000000000000000000000", row.GetProperty("caller_id").GetString());
         Assert.Equal("main", doc.RootElement.GetProperty("branch").GetString());
     }
 
@@ -208,7 +208,7 @@ public sealed class CommitLeaseEndpointTests : IAsyncLifetime, IDisposable
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
         var row = Assert.Single(doc.RootElement.GetProperty("commit_leases").EnumerateArray());
-        Assert.Equal("ses_own_000000000000000000000000", row.GetProperty("session_id").GetString());
+        Assert.Equal("ses_own_000000000000000000000000", row.GetProperty("caller_id").GetString());
     }
 
     [Fact]
@@ -226,16 +226,16 @@ public sealed class CommitLeaseEndpointTests : IAsyncLifetime, IDisposable
         Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("checkout").ValueKind);
         var rows = doc.RootElement.GetProperty("commit_leases").EnumerateArray().ToList();
         Assert.Equal(2, rows.Count);
-        Assert.Contains(rows, row => row.GetProperty("session_id").GetString() == "ses_own_000000000000000000000000"
+        Assert.Contains(rows, row => row.GetProperty("caller_id").GetString() == "ses_own_000000000000000000000000"
             && string.Equals(row.GetProperty("checkout").GetString(), _checkout, StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(rows, row => row.GetProperty("session_id").GetString() == "session-foreign"
+        Assert.Contains(rows, row => row.GetProperty("caller_id").GetString() == "session-foreign"
             && string.Equals(row.GetProperty("checkout").GetString(), foreignRoot, StringComparison.OrdinalIgnoreCase));
 
         // ...while the default (no scope) stays scoped to this checkout.
         var scoped = await Client.GetAsync("/api/commit-lease/active");
         using var scopedDoc = JsonDocument.Parse(await scoped.Content.ReadAsStringAsync());
         var scopedRow = Assert.Single(scopedDoc.RootElement.GetProperty("commit_leases").EnumerateArray());
-        Assert.Equal("ses_own_000000000000000000000000", scopedRow.GetProperty("session_id").GetString());
+        Assert.Equal("ses_own_000000000000000000000000", scopedRow.GetProperty("caller_id").GetString());
         Assert.Equal(_checkout, scopedDoc.RootElement.GetProperty("checkout").GetString());
     }
 
@@ -297,10 +297,10 @@ public sealed class CommitLeaseEndpointTests : IAsyncLifetime, IDisposable
         var rows = doc.RootElement.GetProperty("commit_leases").EnumerateArray().ToList();
         Assert.Equal(2, rows.Count);
         Assert.Contains(rows, row => row.GetProperty("lease_id").GetString() == own.LeaseId
-            && row.GetProperty("session_id").GetString() == "ses_sse_own_000000000000000000000000"
+            && row.GetProperty("caller_id").GetString() == "ses_sse_own_000000000000000000000000"
             && row.GetProperty("last_heartbeat").GetDateTimeOffset() == own.LastHeartbeat);
         Assert.Contains(rows, row => row.GetProperty("lease_id").GetString() == foreign.LeaseId
-            && row.GetProperty("session_id").GetString() == "ses_sse_foreign_00000000000000000000000"
+            && row.GetProperty("caller_id").GetString() == "ses_sse_foreign_00000000000000000000000"
             && row.GetProperty("last_heartbeat").GetDateTimeOffset() == foreign.LastHeartbeat);
     }
 
@@ -317,7 +317,7 @@ public sealed class CommitLeaseEndpointTests : IAsyncLifetime, IDisposable
         var released = Assert.Single(doc.RootElement.GetProperty("recently_released").EnumerateArray());
         Assert.Equal(foreign.LeaseId, released.GetProperty("lease_id").GetString());
         Assert.Equal("forced", released.GetProperty("release_reason").GetString());
-        Assert.Equal("ses_foreign_0000000000000000000000000", released.GetProperty("session_id").GetString());
+        Assert.Equal("ses_foreign_0000000000000000000000000", released.GetProperty("caller_id").GetString());
 
         // The same view after the fact: the lease is gone from the active set
         // and present in the recently-released history with reason "forced".
@@ -381,7 +381,7 @@ public sealed class CommitLeaseEndpointTests : IAsyncLifetime, IDisposable
         var foreignActive = await store.ListActiveAsync(Path.Combine(_root, "other-checkout"), branch: null);
         var survivor = Assert.Single(foreignActive);
         Assert.Equal(foreign.LeaseId, survivor.LeaseId);
-        Assert.Equal("ses_foreign_0000000000000000000000000", survivor.SessionId);
+        Assert.Equal("ses_foreign_0000000000000000000000000", survivor.CallerId);
     }
 
     [Fact]
@@ -422,7 +422,7 @@ public sealed class CommitLeaseEndpointTests : IAsyncLifetime, IDisposable
         // The full forced payload rides in the metadata content string.
         using var payload = JsonDocument.Parse(metadata.GetProperty("content").GetString()!);
         Assert.Equal(lease.LeaseId, payload.RootElement.GetProperty("lease_id").GetString());
-        Assert.Equal("ses_foreign_0000000000000000000000000", payload.RootElement.GetProperty("session_id").GetString());
+        Assert.Equal("ses_foreign_0000000000000000000000000", payload.RootElement.GetProperty("caller_id").GetString());
         Assert.Equal(_checkout, payload.RootElement.GetProperty("checkout").GetString());
         Assert.Equal("main", payload.RootElement.GetProperty("branch").GetString());
         Assert.Equal("src/a.cs", Assert.Single(payload.RootElement.GetProperty("paths").EnumerateArray()).GetString());

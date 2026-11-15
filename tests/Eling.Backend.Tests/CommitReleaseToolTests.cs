@@ -79,11 +79,11 @@ public sealed class CommitReleaseToolTests : IDisposable
         using var doc = JsonDocument.Parse(result);
         Assert.False(doc.RootElement.GetProperty("released").GetBoolean());
         var remaining = Assert.Single(await store.ListActiveAsync(cwd, null));
-        Assert.Equal("ses_test_2_000000000000000000000", remaining.SessionId);
+        Assert.Equal("ses_test_2_000000000000000000000", remaining.CallerId);
     }
 
     [Fact]
-    public async Task Release_BlankSessionId_ReturnsError_AndTouchesNothing()
+    public async Task Release_BlankCallerId_ReturnsError_AndTouchesNothing()
     {
         using var store = NewStore();
         var cwd = Checkout("a");
@@ -124,13 +124,13 @@ public sealed class CommitReleaseToolTests : IDisposable
         public Task<CommitLeaseRecord?> TryLeaseAsync(CommitLeaseRecord candidate, CancellationToken ct = default)
             => throw new InvalidOperationException("store is unavailable");
 
-        public Task<bool> ReleaseAsync(string sessionId, CommitLeaseKind? kind, CancellationToken ct = default)
+        public Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, CancellationToken ct = default)
             => throw new InvalidOperationException("store is unavailable");
 
         public Task<bool> ForceReleaseAsync(string leaseId, CancellationToken ct = default)
             => throw new InvalidOperationException("store is unavailable");
 
-        public Task<bool> HeartbeatAsync(string leaseId, string sessionId, CancellationToken ct = default)
+        public Task<bool> HeartbeatAsync(string leaseId, string callerId, CancellationToken ct = default)
             => throw new InvalidOperationException("store is unavailable");
 
         public Task<IReadOnlyList<CommitLeaseRecord>> ListActiveAcrossCheckoutsAsync(string? branch, CancellationToken ct = default)

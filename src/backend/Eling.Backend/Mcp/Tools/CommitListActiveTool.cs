@@ -47,7 +47,7 @@ public sealed class CommitListActiveTool
     // Parameter names below use snake_case deliberately: the MCP host passes
     // C# parameter names through to the wire schema unchanged, and the
     // commit_* tool surface is snake_case end to end.
-    [McpServerTool(Name = "commit_list_active"), Description("List the live commit leases on this checkout, optionally filtered by branch. Returns an object with a `leases` array of { holder_session_id, since, lease_age_seconds, intent, paths }; an empty `leases` array means no session holds a live lease. Call this before staging to see whether a sibling chat owns the commit slot. commit_lease to take it, commit_release once the commit lands.")]
+    [McpServerTool(Name = "commit_list_active"), Description("List the live commit leases on this checkout, optionally filtered by branch. Returns an object with a `leases` array of { holder_caller_id, since, lease_age_seconds, intent, paths }; an empty `leases` array means no session holds a live lease. Call this before staging to see whether a sibling chat owns the commit slot. commit_lease to take it, commit_release once the commit lands.")]
     public async Task<string> ListActiveAsync(
         [Description("Only list leases on this branch. Optional; omit to list every branch of this checkout.")] string? branch = null,
         CancellationToken cancellationToken = default)
@@ -62,7 +62,7 @@ public sealed class CommitListActiveTool
                 .Where(l => l.Kind == CommitLeaseKind.Commit)
                 .Select(l => new CommitListActiveItem
                 {
-                    HolderSessionId = l.SessionId,
+                    HolderCallerId = l.CallerId,
                     Since = l.Since,
                     LeaseAgeSeconds = (long)Math.Max(0, (now - l.Since).TotalSeconds),
                     Intent = l.Intent,
@@ -94,8 +94,8 @@ public sealed class CommitListActiveTool
 
     private sealed record CommitListActiveItem
     {
-        [JsonPropertyName("holder_session_id")]
-        public required string HolderSessionId { get; init; }
+        [JsonPropertyName("holder_caller_id")]
+        public required string HolderCallerId { get; init; }
 
         [JsonPropertyName("since")]
         public required DateTimeOffset Since { get; init; }

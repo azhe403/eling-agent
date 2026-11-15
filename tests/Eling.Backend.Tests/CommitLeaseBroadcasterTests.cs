@@ -30,7 +30,7 @@ public sealed class CommitLeaseBroadcasterTests
             new CommitLeaseSummaryDto
             {
                 LeaseId = "lease-" + tag,
-                SessionId = "session-" + tag,
+                CallerId = "session-" + tag,
                 Branch = "main",
                 Since = new DateTimeOffset(2026, 11, 13, 8, 0, 0, TimeSpan.Zero),
                 LastHeartbeat = new DateTimeOffset(2026, 11, 13, 8, 0, 0, TimeSpan.Zero),

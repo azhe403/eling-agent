@@ -28,20 +28,22 @@ internal static class CommitLeaseToolHelpers
     public static string? NormalizeIntent(string? intent)
         => string.IsNullOrWhiteSpace(intent) ? null : intent.Trim();
 
-    /// <summary>Minimum allowed length for <c>session_id</c>, after trimming. Sized to carry a full entropy token; short ids collide too easily in a shared store.</summary>
-    public const int MinSessionIdLength = 32;
+    /// <summary>Minimum allowed length for the lease tools' caller-supplied <c>caller_id</c>, after trimming. Ids are caller-supplied and format-agnostic; this floor only rejects trivially short ids like <c>"1"</c> that would collide too easily in a shared store.</summary>
+    public const int MinCallerIdLength = 24;
 
     /// <summary>
-    /// Sanity-check a caller-supplied <c>session_id</c>. Ids must be non-blank and long enough
-    /// to carry their own entropy (trivial ids like <c>"1"</c> make the store useless).
+    /// Sanity-check a caller-supplied identifier (the lease tools' <c>caller_id</c>). Ids are
+    /// caller-supplied and format-agnostic: pass your own stable unique string - a slug, a
+    /// UUID, or your host's session id - the same value on every call. Ids must be non-blank
+    /// and long enough that trivial ids like <c>"1"</c> do not collide in a shared store.
     /// </summary>
-    public static bool IsSessionIdPlausible(string? sessionId)
-        => !string.IsNullOrWhiteSpace(sessionId) && sessionId.Trim().Length >= MinSessionIdLength;
+    public static bool IsCallerIdPlausible(string? callerId)
+        => !string.IsNullOrWhiteSpace(callerId) && callerId.Trim().Length >= MinCallerIdLength;
 
-    public static string SessionIdTooShortMessage(string? sessionId)
+    public static string CallerIdTooShortMessage(string? callerId)
     {
-        var length = string.IsNullOrWhiteSpace(sessionId) ? 0 : sessionId.Trim().Length;
-        return $"session_id must be non-blank and at least {MinSessionIdLength} characters (got {length}).";
+        var length = string.IsNullOrWhiteSpace(callerId) ? 0 : callerId.Trim().Length;
+        return $"caller_id must be a non-blank string of at least {MinCallerIdLength} characters identifying the caller (got {length}). Any stable string you choose is accepted; keep it the same across calls - the format is not validated.";
     }
 
     public static string Serialize<T>(T value)

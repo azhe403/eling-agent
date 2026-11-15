@@ -8,8 +8,8 @@ public sealed record CommitLeaseSummaryDto
     [JsonPropertyName("lease_id")]
     public required string LeaseId { get; init; }
 
-    [JsonPropertyName("session_id")]
-    public required string SessionId { get; init; }
+    [JsonPropertyName("caller_id")]
+    public required string CallerId { get; init; }
 
     [JsonPropertyName("branch")]
     public required string? Branch { get; init; }

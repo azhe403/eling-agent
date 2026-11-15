@@ -142,7 +142,7 @@ public sealed class CommitLeaseController(
             var payload = JsonSerializer.Serialize(new ForceReleaseAuditPayload
             {
                 LeaseId = lease.LeaseId,
-                SessionId = lease.SessionId,
+                CallerId = lease.CallerId,
                 Checkout = checkout,
                 Branch = lease.Branch,
                 Paths = lease.Paths,
@@ -179,8 +179,8 @@ public sealed class CommitLeaseController(
         [JsonPropertyName("lease_id")]
         public required string LeaseId { get; init; }
 
-        [JsonPropertyName("session_id")]
-        public required string SessionId { get; init; }
+        [JsonPropertyName("caller_id")]
+        public required string CallerId { get; init; }
 
         [JsonPropertyName("checkout")]
         public required string Checkout { get; init; }

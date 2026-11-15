@@ -27,7 +27,7 @@ public sealed class JsonCommitLeaseStoreTests : IDisposable
         => new(StorePath, notifier, _clock);
 
     private CommitLeaseRecord Candidate(
-        string sessionId,
+        string callerId,
         string checkout,
         string? branch = "main",
         CommitLeaseKind kind = CommitLeaseKind.Commit,
@@ -38,7 +38,7 @@ public sealed class JsonCommitLeaseStoreTests : IDisposable
         var now = _clock.GetUtcNow();
         return new CommitLeaseRecord {
             LeaseId =  Ulid.NewUlid().ToString(),
-            SessionId =  sessionId,
+            CallerId =  callerId,
             Kind =  kind,
             Checkout =  checkout,
             Branch =  branch,
@@ -61,7 +61,7 @@ public sealed class JsonCommitLeaseStoreTests : IDisposable
         var active = await store.ListActiveAsync(Checkout("a"), "main");
         var only = Assert.Single(active);
         Assert.Equal(lease.LeaseId, only.LeaseId);
-        Assert.Equal(lease.SessionId, only.SessionId);
+        Assert.Equal(lease.CallerId, only.CallerId);
     }
 
     [Fact]
@@ -367,7 +367,7 @@ public sealed class JsonCommitLeaseStoreTests : IDisposable
         Assert.Empty(await store.ListActiveAsync(Checkout("a"), "main"));
         var recent = Assert.Single(await store.ListRecentlyReleasedAsync(Checkout("a")));
         Assert.Equal(lease.LeaseId, recent.LeaseId);
-        Assert.Equal("other-session", recent.SessionId);
+        Assert.Equal("other-session", recent.CallerId);
         Assert.Equal("forced", recent.ReleaseReason);
         Assert.Equal(_clock.GetUtcNow(), recent.ReleasedAt);
     }
@@ -380,7 +380,7 @@ public sealed class JsonCommitLeaseStoreTests : IDisposable
         var foreign = Candidate("ses_foreign_0000000000000000000000000", checkout);
         var own = new CommitLeaseRecord {
             LeaseId =  Ulid.NewUlid().ToString(),
-            SessionId =  "caller-session",
+            CallerId =  "caller-session",
             Kind =  CommitLeaseKind.File,
             Checkout =  checkout,
             Branch =  "main",
@@ -473,6 +473,38 @@ public sealed class JsonCommitLeaseStoreTests : IDisposable
 
         await store.ReleaseAsync("s1", kind: null);
         Assert.Equal(3, notifier.Count);
+    }
+
+    [Fact]
+    public async Task Load_ToleratesLegacySessionIdKey_AndKeepsTheLease()
+    {
+        var now = _clock.GetUtcNow();
+        // Pre-rename on-disk shape: camelCase "sessionId" from the camelCase policy.
+        var legacyJson = $$"""
+        {
+          "active": [
+            {
+              "leaseId": "legacy-lease-0000000000000000000001",
+              "sessionId": "legacy-caller",
+              "kind": 1,
+              "checkout": "{{Checkout("a").Replace('\\', '/')}}",
+              "branch": "main",
+              "since": "{{now:O}}",
+              "lastHeartbeat": "{{now:O}}",
+              "ttlSeconds": 60,
+              "paths": null,
+              "intent": "legacy lease"
+            }
+          ],
+          "recentlyReleased": []
+        }
+        """;
+        File.WriteAllText(StorePath, legacyJson);
+
+        var store = NewStore();
+
+        var lease = Assert.Single(await store.ListAllAsync());
+        Assert.Equal("legacy-caller", lease.CallerId);
     }
 
     private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider

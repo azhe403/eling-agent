@@ -32,30 +32,30 @@ public sealed class CommitReleaseTool
     // commit_* tool surface is snake_case end to end.
     [McpServerTool(Name = "commit_release"), Description("Release all commit leases owned by this session, across checkouts. Call this once the commit lands (or when abandoning the attempt) so sibling chats can take the slot. Returns { released: true } when a lease was held and removed, { released: false } when the session holds no commit lease.")]
     public async Task<string> ReleaseAsync(
-        [Description("The calling session's id. Must be at least 32 characters.")] string session_id,
+        [Description("The caller's stable identifier. Any non-blank string of at least 24 characters you choose - a slug, a UUID, or your host's session id; pass the same value on every call. If your identifier carries a date, put the date FIRST (e.g. 2026-11-15-...), never last, so plain lexical sorting matches chronological order. The format is not validated.")] string caller_id,
         CancellationToken cancellationToken = default)
     {
-        if (!CommitLeaseToolHelpers.IsSessionIdPlausible(session_id))
+        if (!CommitLeaseToolHelpers.IsCallerIdPlausible(caller_id))
         {
-            return Serialize(new CommitReleaseError(CommitLeaseToolHelpers.SessionIdTooShortMessage(session_id)));
+            return Serialize(new CommitReleaseError(CommitLeaseToolHelpers.CallerIdTooShortMessage(caller_id)));
         }
 
         try
         {
-            var released = await _leaseStore.ReleaseAsync(session_id.Trim(), CommitLeaseKind.Commit, cancellationToken);
+            var released = await _leaseStore.ReleaseAsync(caller_id.Trim(), CommitLeaseKind.Commit, cancellationToken);
             return Serialize(new CommitReleaseSuccess(released));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // The caller cancelled: propagate so the turn aborts normally.
-            _logger?.LogDebug("commit_release was cancelled by the caller (session {SessionId}).", session_id);
+            _logger?.LogDebug("commit_release was cancelled by the caller (session {CallerId}).", caller_id);
             throw;
         }
         catch (Exception ex)
         {
             // The store's gate wait and its file I/O both throw; the caller gets
             // the repo's compact error shape, not an opaque host-level failure.
-            _logger?.LogWarning(ex, "commit_release failed for session {SessionId}.", session_id);
+            _logger?.LogWarning(ex, "commit_release failed for session {CallerId}.", caller_id);
             return Serialize(new CommitReleaseError($"Could not release the commit lease: {ex.Message}"));
         }
     }

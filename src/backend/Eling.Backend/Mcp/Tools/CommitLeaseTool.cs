@@ -83,22 +83,22 @@ public sealed class CommitLeaseTool
     // Parameter names below use snake_case deliberately: the MCP host passes
     // C# parameter names through to the wire schema unchanged, and the
     // commit_* tool surface is snake_case end to end.
-    [McpServerTool(Name = "commit_lease"), Description("Take the commit lease on this checkout and branch before staging or committing. The conflict check is folded in: verdict 'green' and acquired: true - stage. verdict 'red' and acquired: false - do not stage; a foreign live commit lease holds the slot. verdict 'red' on an acquired lease means foreign file leases collide with your paths - stage nothing until they clear. Returns { acquired, lease_id?, since?, verdict, staged_without_lease, conflicting_file_leases? }; when acquired: false, holder info is in { holder_session_id, since, lease_age_seconds, intent }. Re-claiming your own live lease is idempotent (succeeds with the same lease_id). branch is optional and is discovered via git when omitted. Call commit_release once the commit lands - and just the same when the attempt fails.")]
+    [McpServerTool(Name = "commit_lease"), Description("Take the commit lease on this checkout and branch before staging or committing. The conflict check is folded in: verdict 'green' and acquired: true - stage. verdict 'red' and acquired: false - do not stage; a foreign live commit lease holds the slot. verdict 'red' on an acquired lease means foreign file leases collide with your paths - stage nothing until they clear. Returns { acquired, lease_id?, since?, verdict, staged_without_lease, conflicting_file_leases? }; when acquired: false, holder info is in { holder_caller_id, since, lease_age_seconds, intent }. Re-claiming your own live lease is idempotent (succeeds with the same lease_id). branch is optional and is discovered via git when omitted. Call commit_release once the commit lands - and just the same when the attempt fails.")]
     public async Task<string> LeaseAsync(
-        [Description("The calling session's id. Must be at least 32 characters.")] string session_id,
+        [Description("The caller's stable identifier. Any non-blank string of at least 24 characters you choose - a slug, a UUID, or your host's session id; pass the same value on every call. If your identifier carries a date, put the date FIRST (e.g. 2026-11-15-...), never last, so plain lexical sorting matches chronological order. The format is not validated.")] string caller_id,
         [Description("Current branch of the checkout. Optional; discovered via git when omitted. Pass it to skip discovery (e.g. when git is unavailable).")] string? branch = null,
         [Description("One-line summary of the planned commit. Optional.")] string? intent = null,
         [Description("Paths the commit is expected to touch. Optional.")] string[]? paths = null,
         CancellationToken cancellationToken = default)
     {
-        if (!CommitLeaseToolHelpers.IsSessionIdPlausible(session_id))
+        if (!CommitLeaseToolHelpers.IsCallerIdPlausible(caller_id))
         {
-            return CommitLeaseToolHelpers.Serialize(new CommitLeaseError { Acquired = false, Error = CommitLeaseToolHelpers.SessionIdTooShortMessage(session_id) });
+            return CommitLeaseToolHelpers.Serialize(new CommitLeaseError { Acquired = false, Error = CommitLeaseToolHelpers.CallerIdTooShortMessage(caller_id) });
         }
 
         try
         {
-            var caller = session_id.Trim();
+            var caller = caller_id.Trim();
             var checkout = GitRepositoryResolver.ResolveWorkingCopyRoot(_cwd) ?? _cwd;
             var git = await GitStatusReader.TryRead(checkout, _logger, cancellationToken);
             var branchKey = string.IsNullOrWhiteSpace(branch) ? git?.CurrentBranch : branch.Trim();
@@ -120,7 +120,7 @@ public sealed class CommitLeaseTool
                 if (lease.Kind == CommitLeaseKind.Commit)
                 {
                     if (!CommitLeaseToolHelpers.BranchMatches(lease.Branch, branchKey)) continue;
-                    if (string.Equals(lease.SessionId, caller, StringComparison.Ordinal))
+                    if (string.Equals(lease.CallerId, caller, StringComparison.Ordinal))
                     {
                         ownCommitLease ??= lease;
                         continue;
@@ -129,7 +129,7 @@ public sealed class CommitLeaseTool
                 }
                 else if (lease.Kind == CommitLeaseKind.File)
                 {
-                    if (string.Equals(lease.SessionId, caller, StringComparison.Ordinal)) continue;
+                    if (string.Equals(lease.CallerId, caller, StringComparison.Ordinal)) continue;
                     if (requestedPaths.Length > 0 && FileLeaseIntersects(lease.Paths, requestedPaths, checkout))
                     {
                         fileConflicts.Add(lease);
@@ -145,7 +145,7 @@ public sealed class CommitLeaseTool
                     .Select(l => new ConflictingFileLease
                     {
                         LeaseId = l.LeaseId,
-                        HolderSessionId = l.SessionId,
+                        HolderCallerId = l.CallerId,
                         Since = l.Since,
                         LeaseAgeSeconds = CommitLeaseToolHelpers.AgeSeconds(now, l.Since),
                         Paths = l.Paths,
@@ -159,7 +159,7 @@ public sealed class CommitLeaseTool
             var candidate = new CommitLeaseRecord
             {
                 LeaseId = Ulid.NewUlid().ToString(),
-                SessionId = caller,
+                CallerId = caller,
                 Kind = CommitLeaseKind.Commit,
                 Checkout = checkout,
                 Branch = branchKey,
@@ -198,7 +198,7 @@ public sealed class CommitLeaseTool
                 {
                     Acquired = false,
                     Verdict = "red",
-                    HolderSessionId = holder.SessionId,
+                    HolderCallerId = holder.CallerId,
                     Since = holder.Since,
                     LeaseAgeSeconds = CommitLeaseToolHelpers.AgeSeconds(now, holder.Since),
                     Intent = CommitLeaseToolHelpers.NormalizeIntent(holder.Intent),
@@ -228,7 +228,7 @@ public sealed class CommitLeaseTool
             {
                 Acquired = false,
                 Verdict = "red",
-                HolderSessionId = existingLease.SessionId,
+                HolderCallerId = existingLease.CallerId,
                 Since = existingLease.Since,
                 LeaseAgeSeconds = ageSeconds,
                 Intent = CommitLeaseToolHelpers.NormalizeIntent(existingLease.Intent),
@@ -239,14 +239,14 @@ public sealed class CommitLeaseTool
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // The caller cancelled: propagate so the turn aborts normally.
-            _logger?.LogDebug("commit_lease was cancelled by the caller (session {SessionId}).", session_id);
+            _logger?.LogDebug("commit_lease was cancelled by the caller (session {CallerId}).", caller_id);
             throw;
         }
         catch (Exception ex)
         {
             // The store's gate wait and its file I/O both throw; the caller gets
             // the repo's compact error shape, not an opaque host-level failure.
-            _logger?.LogWarning(ex, "commit_lease failed for session {SessionId}.", session_id);
+            _logger?.LogWarning(ex, "commit_lease failed for session {CallerId}.", caller_id);
             return CommitLeaseToolHelpers.Serialize(new CommitLeaseError { Acquired = false, Error = $"Could not take the commit lease: {ex.Message}" });
         }
     }
@@ -350,8 +350,8 @@ public sealed class CommitLeaseTool
         [JsonPropertyName("verdict")]
         public required string Verdict { get; init; }
 
-        [JsonPropertyName("holder_session_id")]
-        public required string HolderSessionId { get; init; }
+        [JsonPropertyName("holder_caller_id")]
+        public required string HolderCallerId { get; init; }
 
         [JsonPropertyName("since")]
         public required DateTimeOffset Since { get; init; }
@@ -374,8 +374,8 @@ public sealed class CommitLeaseTool
         [JsonPropertyName("lease_id")]
         public required string LeaseId { get; init; }
 
-        [JsonPropertyName("holder_session_id")]
-        public required string HolderSessionId { get; init; }
+        [JsonPropertyName("holder_caller_id")]
+        public required string HolderCallerId { get; init; }
 
         [JsonPropertyName("since")]
         public required DateTimeOffset Since { get; init; }

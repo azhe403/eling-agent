@@ -127,9 +127,9 @@ public sealed class JsonCommitLeaseStore : ICommitLeaseStore, IDisposable
         return conflict;
     }
 
-    public async Task<bool> ReleaseAsync(string sessionId, CommitLeaseKind? kind, CancellationToken ct = default)
+    public async Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(sessionId)) return false;
+        if (string.IsNullOrWhiteSpace(callerId)) return false;
         var releasedAny = false;
         var changed = false;
         WithGate(() =>
@@ -138,7 +138,7 @@ public sealed class JsonCommitLeaseStore : ICommitLeaseStore, IDisposable
             var now = _timeProvider.GetUtcNow();
             changed = SweepStaleLocked(data, now);
             var owned = data.Active
-                .Where(l => string.Equals(l.SessionId, sessionId, StringComparison.Ordinal))
+                .Where(l => string.Equals(l.CallerId, callerId, StringComparison.Ordinal))
                 .Where(l => kind is null || l.Kind == kind)
                 .ToList();
             if (owned.Count > 0)
@@ -188,9 +188,9 @@ public sealed class JsonCommitLeaseStore : ICommitLeaseStore, IDisposable
         return releasedTarget;
     }
 
-    public async Task<bool> HeartbeatAsync(string leaseId, string sessionId, CancellationToken ct = default)
+    public async Task<bool> HeartbeatAsync(string leaseId, string callerId, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(leaseId) || string.IsNullOrWhiteSpace(sessionId)) return false;
+        if (string.IsNullOrWhiteSpace(leaseId) || string.IsNullOrWhiteSpace(callerId)) return false;
         var extended = false;
         var changed = false;
         WithGate(() =>
@@ -199,7 +199,7 @@ public sealed class JsonCommitLeaseStore : ICommitLeaseStore, IDisposable
             var now = _timeProvider.GetUtcNow();
             changed = SweepStaleLocked(data, now);
             var idx = data.Active.FindIndex(l => string.Equals(l.LeaseId, leaseId, StringComparison.Ordinal));
-            if (idx >= 0 && string.Equals(data.Active[idx].SessionId, sessionId, StringComparison.Ordinal))
+            if (idx >= 0 && string.Equals(data.Active[idx].CallerId, callerId, StringComparison.Ordinal))
             {
                 data.Active[idx] = data.Active[idx] with { LastHeartbeat = now };
                 extended = true;
@@ -337,6 +337,10 @@ public sealed class JsonCommitLeaseStore : ICommitLeaseStore, IDisposable
         try
         {
             var json = File.ReadAllText(_filePath);
+            // Legacy records (pre-2026-11-14) persisted "sessionId"; patch it to
+            // the new name so live leases survive the rename instead of hitting the
+            // unreadable-store path and vanishing from the active list.
+            json = json.Replace("\"sessionId\":", "\"callerId\":", StringComparison.Ordinal);
             return JsonSerializer.Deserialize<LeaseStoreData>(json, JsonDefaults.Shared) ?? new LeaseStoreData();
         }
         catch (JsonException ex)

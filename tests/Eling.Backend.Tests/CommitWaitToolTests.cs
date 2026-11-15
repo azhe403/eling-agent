@@ -52,13 +52,13 @@ public sealed class CommitWaitToolTests : IDisposable
     private Task SeedCommitLeaseAsync(
         JsonCommitLeaseStore store,
         string checkout,
-        string sessionId,
+        string callerId,
         string branch,
         string? intent = null,
         int ttlSeconds = 300)
         => store.TryLeaseAsync(new CommitLeaseRecord {
             LeaseId =  Ulid.NewUlid().ToString(),
-            SessionId =  sessionId,
+            CallerId =  callerId,
             Kind =  CommitLeaseKind.Commit,
             Checkout =  checkout,
             Branch =  branch,
@@ -126,7 +126,7 @@ public sealed class CommitWaitToolTests : IDisposable
         var waited = doc.RootElement.GetProperty("waited_seconds").GetDouble();
         Assert.InRange(waited, 0.25, 5.0);
         var holder = doc.RootElement.GetProperty("holder");
-        Assert.Equal("ses_test_2_000000000000000000000", holder.GetProperty("holder_session_id").GetString());
+        Assert.Equal("ses_test_2_000000000000000000000", holder.GetProperty("holder_caller_id").GetString());
         Assert.Equal("land the feature", holder.GetProperty("intent").GetString());
     }
 
@@ -145,7 +145,7 @@ public sealed class CommitWaitToolTests : IDisposable
     }
 
     [Fact]
-    public async Task BlankSessionId_ReturnsError()
+    public async Task BlankCallerId_ReturnsError()
     {
         using var store = NewStore();
         var cwd = Checkout("a");
@@ -169,7 +169,7 @@ public sealed class CommitWaitToolTests : IDisposable
 
         using var doc = JsonDocument.Parse(result);
         Assert.Equal("red", doc.RootElement.GetProperty("verdict").GetString());
-        Assert.Equal("ses_test_2_000000000000000000000", doc.RootElement.GetProperty("holder").GetProperty("holder_session_id").GetString());
+        Assert.Equal("ses_test_2_000000000000000000000", doc.RootElement.GetProperty("holder").GetProperty("holder_caller_id").GetString());
     }
 
     private sealed class FirstPollSignalingLeaseStore(ICommitLeaseStore inner, ManualResetEventSlim firstPoll) : ICommitLeaseStore
@@ -184,14 +184,14 @@ public sealed class CommitWaitToolTests : IDisposable
         public Task<CommitLeaseRecord?> TryLeaseAsync(CommitLeaseRecord candidate, CancellationToken ct = default)
             => inner.TryLeaseAsync(candidate, ct);
 
-        public Task<bool> ReleaseAsync(string sessionId, CommitLeaseKind? kind, CancellationToken ct = default)
-            => inner.ReleaseAsync(sessionId, kind, ct);
+        public Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, CancellationToken ct = default)
+            => inner.ReleaseAsync(callerId, kind, ct);
 
         public Task<bool> ForceReleaseAsync(string leaseId, CancellationToken ct = default)
             => inner.ForceReleaseAsync(leaseId, ct);
 
-        public Task<bool> HeartbeatAsync(string leaseId, string sessionId, CancellationToken ct = default)
-            => inner.HeartbeatAsync(leaseId, sessionId, ct);
+        public Task<bool> HeartbeatAsync(string leaseId, string callerId, CancellationToken ct = default)
+            => inner.HeartbeatAsync(leaseId, callerId, ct);
 
         public Task<IReadOnlyList<CommitLeaseRecord>> ListActiveAcrossCheckoutsAsync(string? branch, CancellationToken ct = default)
             => inner.ListActiveAcrossCheckoutsAsync(branch, ct);

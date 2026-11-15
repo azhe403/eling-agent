@@ -30,32 +30,32 @@ public interface ICommitLeaseStore
     Task<CommitLeaseRecord?> TryLeaseAsync(CommitLeaseRecord candidate, CancellationToken ct = default);
 
     /// <summary>
-    /// Removes every lease owned by <paramref name="sessionId"/> (optionally
+    /// Removes every lease owned by <paramref name="callerId"/> (optionally
     /// filtered by <paramref name="kind"/>), moving them to the
     /// recently-released list with reason <c>explicit</c>. Returns true when
     /// at least one lease was removed.
     /// </summary>
-    Task<bool> ReleaseAsync(string sessionId, CommitLeaseKind? kind, CancellationToken ct = default);
+    Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, CancellationToken ct = default);
 
     /// <summary>
     /// Removes the one live lease identified by <paramref name="leaseId"/>,
-    /// regardless of which session owns it, moving it to the recently-released
+    /// regardless of which caller owns it, moving it to the recently-released
     /// list with reason <c>forced</c>. Returns false when no live lease with
     /// that id exists (unknown id, already released — including an earlier
     /// <c>stale</c> sweep, which moves the lease out of the active list as
     /// part of any read/mutation). Unlike <see cref="HeartbeatAsync"/> this is
     /// not owner-scoped: it exists so the dashboard can break a commit slot
-    /// open without asking the holding session.
+    /// open without asking the holding caller.
     /// </summary>
     Task<bool> ForceReleaseAsync(string leaseId, CancellationToken ct = default);
 
     /// <summary>
     /// Extends <see cref="CommitLeaseRecord.LastHeartbeat"/> to now, but only when
     /// the lease identified by <paramref name="leaseId"/> is owned by
-    /// <paramref name="sessionId"/>. Returns false otherwise (and never
+    /// <paramref name="callerId"/>. Returns false otherwise (and never
     /// revives a stale lease that has already been swept).
     /// </summary>
-    Task<bool> HeartbeatAsync(string leaseId, string sessionId, CancellationToken ct = default);
+    Task<bool> HeartbeatAsync(string leaseId, string callerId, CancellationToken ct = default);
 
     /// <summary>
     /// Released leases for <paramref name="checkout"/>, newest first, capped
