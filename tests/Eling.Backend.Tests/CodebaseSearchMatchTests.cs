@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Eling.Backend.Agent.Services.Tools;
 using Eling.Backend.Mcp.Tools;
 using Eling.Core.Codebase;
 using Eling.Core.Scope;
@@ -39,6 +41,18 @@ public sealed class CodebaseSearchMatchTests : IDisposable
             _workspace,
             new SqliteCodebaseIndex(ElingPaths.ResolveCodebaseDbPath(_workspace)));
         svc.IndexAsync(full: true).GetAwaiter().GetResult();
+    }
+
+    [Fact]
+    public async Task Agent_Tool_Forwards_The_Match_Parameter()
+    {
+        var agent = new CodebaseSearchAgentTool(await ToolAsync());
+
+        var json = await agent.ExecuteAsync("{\"query\":\"widget\",\"match\":\"file\"}", CancellationToken.None);
+
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal("files", doc.RootElement.GetProperty("mode").GetString());
+        Assert.NotEmpty(doc.RootElement.GetProperty("files").EnumerateArray());
     }
 
     private async Task<CodebaseSearchTool> ToolAsync() =>

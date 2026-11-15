@@ -14,7 +14,7 @@ public sealed class CodebaseSearchAgentTool(CodebaseSearchTool tool) : IAgentToo
 
     public string Name => "codebase_search";
 
-    public string Description => "FIRST move for locating code — call this before grep/glob/shell search. Ranks the FTS index (Porter+trigram, BM25) and returns path + line range + snippet ready to inject.";
+    public string Description => "FIRST move for locating code — call this before grep/glob/shell search. Ranks the FTS index (Porter+trigram, BM25) and returns path + line range + snippet ready to inject. Pass match='file' or 'path' to find files by name/path.";
 
     public string ParametersJsonSchema => """
     {
@@ -26,7 +26,8 @@ public sealed class CodebaseSearchAgentTool(CodebaseSearchTool tool) : IAgentToo
         "pathPrefix": { "type": "string", "description": "Filter by path prefix, e.g. src/backend." },
         "filePattern": { "type": "string", "description": "Glob-ish file filter, e.g. *.cs or *.md." },
         "projectFilter": { "type": "string", "description": "Narrow search by workspace folder name." },
-        "scope": { "type": "string", "description": "Scope: 'all' (default, every indexed workspace) or 'project' (this workspace only)." }
+        "scope": { "type": "string", "description": "Scope: 'all' (default, every indexed workspace) or 'project' (this workspace only)." },
+        "match": { "type": "string", "description": "What the query is matched against: 'content' (default), 'path' (workspace-relative path), 'file' (file name only). 'path'/'file' return file rows." }
       }
     }
     """;
@@ -42,8 +43,9 @@ public sealed class CodebaseSearchAgentTool(CodebaseSearchTool tool) : IAgentToo
         var filePattern = root.TryGetProperty("filePattern", out var fElem) ? fElem.GetString() : null;
         var projectFilter = root.TryGetProperty("projectFilter", out var pfElem) ? pfElem.GetString() : null;
         var scope = root.TryGetProperty("scope", out var sElem) ? sElem.GetString() ?? "all" : "all";
+        var match = root.TryGetProperty("match", out var mElem) ? mElem.GetString() : null;
 
-        var response = await tool.SearchAsync(query, limit, pathPrefix, filePattern, projectFilter, scope, cancellationToken: ct);
+        var response = await tool.SearchAsync(query, limit, pathPrefix, filePattern, projectFilter, scope, match: match, cancellationToken: ct);
         return JsonSerializer.Serialize(response, JsonOptions);
     }
 }
