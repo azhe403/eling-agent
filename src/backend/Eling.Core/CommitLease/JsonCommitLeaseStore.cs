@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 
 using Eling.Core.Serialization;
@@ -331,16 +332,54 @@ public sealed class JsonCommitLeaseStore : ICommitLeaseStore, IDisposable
         }
     }
 
+    /// <summary>
+    /// Recursively renames the legacy <c>sessionId</c> JSON property to <c>callerId</c>,
+    /// keeping only keys (never values). A record that already has <c>callerId</c>
+    /// (written by the newer schema) keeps it and drops the stale <c>sessionId</c>.
+    /// </summary>
+    private static void RenameLegacySessionIdKeys(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                if (obj.Remove("sessionId", out var legacy))
+                {
+                    if (!obj.ContainsKey("callerId"))
+                    {
+                        obj["callerId"] = legacy;
+                    }
+                }
+
+                foreach (var property in obj)
+                {
+                    RenameLegacySessionIdKeys(property.Value);
+                }
+
+                break;
+            case JsonArray array:
+                foreach (var item in array)
+                {
+                    RenameLegacySessionIdKeys(item);
+                }
+
+                break;
+        }
+    }
+
     private LeaseStoreData LoadCore()
     {
         if (!File.Exists(_filePath)) return new LeaseStoreData();
         try
         {
             var json = File.ReadAllText(_filePath);
-            // Legacy records (pre-2026-11-14) persisted "sessionId"; patch it to
-            // the new name so live leases survive the rename instead of hitting the
-            // unreadable-store path and vanishing from the active list.
-            json = json.Replace("\"sessionId\":", "\"callerId\":", StringComparison.Ordinal);
+            var node = JsonNode.Parse(json);
+            // Legacy records (pre-2026-11-14) persisted "sessionId"; walk the parsed
+            // tree and rename only those KEYS. A raw substring replace would also
+            // corrupt user-authored values (an intent string containing "sessionId":
+            // would lose its key name too). If a record already carries callerId,
+            // the legacy key is a stale duplicate and is dropped.
+            RenameLegacySessionIdKeys(node);
+            json = node?.ToJsonString() ?? json;
             return JsonSerializer.Deserialize<LeaseStoreData>(json, JsonDefaults.Shared) ?? new LeaseStoreData();
         }
         catch (JsonException ex)

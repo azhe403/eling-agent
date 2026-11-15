@@ -507,6 +507,73 @@ public sealed class JsonCommitLeaseStoreTests : IDisposable
         Assert.Equal("legacy-caller", lease.CallerId);
     }
 
+    [Fact]
+    public async Task Load_LegacySessionIdKey_LeavesUserTextContainingSessionIdKeyIntact()
+    {
+        var now = _clock.GetUtcNow();
+        // A substring replace would corrupt the word "sessionId": inside a user's
+        // intent string; the parser must only rename actual keys.
+        var trickyJson = $$"""
+        {
+          "active": [
+            {
+              "leaseId": "legacy-tricky-000000000000000000001",
+              "sessionId": "legacy-tricky-caller",
+              "kind": 1,
+              "checkout": "{{Checkout("a").Replace('\\', '/')}}",
+              "branch": "main",
+              "since": "{{now:O}}",
+              "lastHeartbeat": "{{now:O}}",
+              "ttlSeconds": 60,
+              "paths": null,
+              "intent": "docs say use \"sessionId\": field here"
+            }
+          ],
+          "recentlyReleased": []
+        }
+        """;
+        File.WriteAllText(StorePath, trickyJson);
+
+        var store = NewStore();
+
+        var lease = Assert.Single(await store.ListAllAsync());
+        Assert.Equal("legacy-tricky-caller", lease.CallerId);
+        Assert.Equal("docs say use \"sessionId\": field here", lease.Intent);
+    }
+
+    [Fact]
+    public async Task Load_LegacySessionIdKey_MigratesRecentlyReleasedRows()
+    {
+        var now = _clock.GetUtcNow();
+        var legacyJson = $$"""
+        {
+          "active": [],
+          "recentlyReleased": [
+            {
+              "leaseId": "legacy-released-0000000000000000001",
+              "sessionId": "legacy-released-caller",
+              "kind": 1,
+              "checkout": "{{Checkout("a").Replace('\\', '/')}}",
+              "branch": "main",
+              "since": "{{now:O}}",
+              "lastHeartbeat": "{{now:O}}",
+              "ttlSeconds": 60,
+              "paths": null,
+              "intent": "legacy released lease",
+              "releasedAt": "{{now:O}}",
+              "releaseReason": "stale"
+            }
+          ]
+        }
+        """;
+        File.WriteAllText(StorePath, legacyJson);
+
+        var store = NewStore();
+
+        var lease = Assert.Single(await store.ListAllAsync());
+        Assert.Equal("legacy-released-caller", lease.CallerId);
+    }
+
     private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider
     {
         private DateTimeOffset _now = now;
