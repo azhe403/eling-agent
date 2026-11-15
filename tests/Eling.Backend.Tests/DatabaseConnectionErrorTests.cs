@@ -159,6 +159,7 @@ public sealed class DatabaseConnectionErrorTests : IAsyncLifetime
 
         var error = Assert.IsType<InvalidOperationException>(thrown);
         Assert.Equal("query failed", error.Message);
+        Assert.NotNull(error.InnerException);
     }
 
     [Fact]

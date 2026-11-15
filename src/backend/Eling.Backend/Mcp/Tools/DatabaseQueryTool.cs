@@ -114,7 +114,7 @@ public sealed class DatabaseQueryTool
                 DurationMs = (int)sw.ElapsedMilliseconds,
                 FromCache = false
             }, cancellationToken) ?? ValueTask.CompletedTask);
-            throw new InvalidOperationException($"query failed: {ex.Reason}");
+            throw new InvalidOperationException($"query failed: {ex.Reason}", ex);
         }
         catch (Exception ex)
         {
@@ -130,7 +130,7 @@ public sealed class DatabaseQueryTool
                 Query = sql,
                 DurationMs = (int)sw.ElapsedMilliseconds
             }, cancellationToken) ?? ValueTask.CompletedTask);
-            throw new InvalidOperationException("query failed");
+            throw new InvalidOperationException("query failed", ex);
         }
     }
 
