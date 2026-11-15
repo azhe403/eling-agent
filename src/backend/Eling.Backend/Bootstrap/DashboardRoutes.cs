@@ -6,6 +6,9 @@ using Eling.Backend.Endpoints;
 using Eling.Backend.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Eling.Backend.Bootstrap;
 
@@ -204,7 +207,11 @@ public static class DashboardRoutes
         // Single writer, see the method doc: one loop awaits either the source
         // or the ping timer so frames flush in order at arrival time.
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
-        await using var enumerator = source.GetAsyncEnumerator(ct);
+        // Not `await using`: the finally below owns disposal with the
+        // NotSupportedException guard. A generated disposal at method exit
+        // would run unguarded after the explicit one and re-throw the same
+        // exception, tearing the stream the guard is meant to protect.
+        var enumerator = source.GetAsyncEnumerator(ct);
         var itemTask = enumerator.MoveNextAsync().AsTask();
         var pingTask = timer.WaitForNextTickAsync(ct).AsTask();
 
@@ -251,7 +258,44 @@ public static class DashboardRoutes
         }
         finally
         {
-            await enumerator.DisposeAsync();
+            var logger = context.RequestServices?.GetService<ILoggerFactory>()?.CreateLogger(nameof(DashboardRoutes))
+                ?? NullLogger.Instance;
+
+            // The exception fires when a MoveNextAsync is still in flight at
+            // DisposeAsync time (the common case on client disconnect); the
+            // compiler-generated async-iterator enumerator does not support
+            // DisposeAsync then, which tore the stream and logged a bogus
+            // error. That is expected here, so swallow it deliberately.
+            try
+            {
+                await enumerator.DisposeAsync();
+            }
+            catch (NotSupportedException ex)
+            {
+                // Expected: a MoveNextAsync was still pending when the client went away; the
+                // async-iterator enumerator does not support DisposeAsync in that state.
+                // Log at Debug so it is not noise, but never swallow silently - the convention
+                // requires a log entry per catch.
+                logger.LogDebug(ex, "SSE enumerator does not support DisposeAsync (client went away with a MoveNextAsync in flight); swallowed deliberately.");
+            }
+
+            // If the loop broke out via the ping/cancel path, the pending
+            // MoveNextAsync may never be awaited; observe its fault whenever
+            // it completes so it does not surface as unobserved. Client
+            // disconnects fault it with OperationCanceledException, which is
+            // expected and stays quiet; anything else is a real source fault
+            // and gets a log line.
+            _ = itemTask.ContinueWith(
+                t =>
+                {
+                    if (t.Exception?.InnerException is not OperationCanceledException)
+                    {
+                        logger.LogDebug(t.Exception, "SSE source MoveNextAsync faulted after the response loop ended; observed to keep it from surfacing as unobserved.");
+                    }
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
         }
     }
 }
