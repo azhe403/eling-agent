@@ -68,7 +68,7 @@ import { relativeTime, utcToLocal } from "@/lib/date-utils"
 
 type CommitLeaseRow = {
   lease_id: string
-  session_id: string
+  caller_id: string
   branch: string | null
   since: string
   last_heartbeat: string
@@ -81,7 +81,7 @@ type CommitLeaseRow = {
 
 type CommitLeaseReleasedRow = {
   lease_id: string
-  session_id: string
+  caller_id: string
   since: string
   released_at: string | null
   release_reason: string | null
@@ -111,8 +111,8 @@ const NOTIFICATION_TTL_MS = 4000
 
 let nextNotificationId = 0
 
-function shortSession(sessionId: string): string {
-  return sessionId.length > 12 ? `${sessionId.slice(0, 8)}…` : sessionId
+function shortCaller(callerId: string): string {
+  return callerId.length > 12 ? `${callerId.slice(0, 8)}…` : callerId
 }
 
 function errorMessage(e: unknown): string {
@@ -258,7 +258,7 @@ export function CommitLease() {
       notify(
         "success",
         "Lease released",
-        `Commit lease held by ${shortSession(forceTarget.session_id)} was force-released.`
+        `Commit lease held by ${shortCaller(forceTarget.caller_id)} was force-released.`
       )
       setForceTarget(null)
     } catch (e) {
@@ -599,13 +599,13 @@ export function CommitLease() {
           {forceTarget && (
             <div className="rounded-lg border bg-muted/40 p-3 text-xs">
               <div className="font-semibold text-foreground">
-                Session {shortSession(forceTarget.session_id)} · {workspaceName(forceTarget.checkout)}
+                Caller {shortCaller(forceTarget.caller_id)} · {workspaceName(forceTarget.checkout)}
               </div>
               <div className="mt-0.5 break-all font-mono text-muted-foreground" title={forceTarget.checkout}>
                 {forceTarget.checkout}
               </div>
-              <div className="mt-0.5 break-all font-mono text-muted-foreground" title={forceTarget.session_id}>
-                {forceTarget.session_id}
+              <div className="mt-0.5 break-all font-mono text-muted-foreground" title={forceTarget.caller_id}>
+                {forceTarget.caller_id}
               </div>
               {forceTarget.intent && (
                 <div className="mt-2 text-foreground">{forceTarget.intent}</div>

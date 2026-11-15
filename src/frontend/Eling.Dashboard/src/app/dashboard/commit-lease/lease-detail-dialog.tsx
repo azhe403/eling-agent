@@ -13,7 +13,7 @@ import { formatAge } from "./lease-format"
 
 type LeaseDetailActive = {
   lease_id: string
-  session_id: string
+  caller_id: string
   branch: string | null
   since: string
   last_heartbeat: string
@@ -25,7 +25,7 @@ type LeaseDetailActive = {
 
 type LeaseDetailReleased = {
   lease_id: string
-  session_id: string
+  caller_id: string
   since: string
   released_at: string | null
   release_reason: string | null
@@ -62,7 +62,7 @@ export function LeaseDetailDialog({
     kind === "active"
       ? [
           ["Lease ID", lease.lease_id],
-          ["Session ID", lease.session_id],
+          ["Caller ID", lease.caller_id],
           ["Workspace", lease.checkout],
           ["Branch", (lease as LeaseDetailActive).branch ?? "—"],
           ["Since", utcToLocal(lease.since) || lease.since],
@@ -83,7 +83,7 @@ export function LeaseDetailDialog({
         ]
       : [
           ["Lease ID", lease.lease_id],
-          ["Session ID", lease.session_id],
+          ["Caller ID", lease.caller_id],
           ["Workspace", lease.checkout],
           ["Since", utcToLocal(lease.since) || lease.since],
           [

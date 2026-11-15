@@ -23,7 +23,7 @@ const env = (data: unknown) =>
 
 const expiredLease = {
   lease_id: "lease-expired-1",
-  session_id: "session-expired-1",
+  caller_id: "session-expired-1",
   branch: "main",
   since: "2026-11-14T10:00:00Z",
   last_heartbeat: "2026-11-14T10:01:00Z",
@@ -36,7 +36,7 @@ const expiredLease = {
 
 const nullReleasedLease = {
   lease_id: "lease-released-1",
-  session_id: "session-released-1",
+  caller_id: "session-released-1",
   since: "2026-11-14T09:00:00Z",
   released_at: null,
   release_reason: null,
@@ -47,7 +47,7 @@ const nullReleasedLease = {
 
 const heldReleasedLease = {
   lease_id: "lease-held-1",
-  session_id: "session-held-1",
+  caller_id: "session-held-1",
   since: "2026-11-14T09:10:00Z",
   released_at: "2026-11-14T09:12:30Z",
   release_reason: "explicit",
@@ -59,7 +59,7 @@ const heldReleasedLease = {
 
 const normalLease = {
   lease_id: "lease-live-1",
-  session_id: "session-live-1",
+  caller_id: "session-live-1",
   branch: "feat/lease",
   since: "2026-11-14T11:00:00Z",
   last_heartbeat: "2026-11-14T11:00:30Z",

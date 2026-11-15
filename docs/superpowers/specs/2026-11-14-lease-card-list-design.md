@@ -7,7 +7,7 @@
 ## Intent
 
 The Commit Lease page renders Active and Recently released leases as tables whose row
-details (lease_id, session_id, branch, heartbeat, intent, paths) hide behind a
+details (lease_id, caller_id, branch, heartbeat, intent, paths) hide behind a
 chevron-expand. The user finds it cumbersome that seeing those details requires
 clicking expand each time. The Workspaces page already solves the same density
 problem with cards that show everything inline; the user asked to copy that pattern.
@@ -53,7 +53,7 @@ Active card:
   no action column) — outline, destructive-tinted. The detail dialog opens from
   the card click itself (`role="button"`, Enter/Space supported), not a dedicated
   button; Force release stopPropagation's so it never opens the dialog.
-- Intent renders directly on the card (break-words, full text). The lease/session
+- Intent renders directly on the card (break-words, full text). The lease/caller
   ids, branch, since/heartbeat/age/TTL and the full paths list render in the
   Detail dialog; intent also appears there.
 
