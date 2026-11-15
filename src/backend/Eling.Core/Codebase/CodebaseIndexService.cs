@@ -328,6 +328,7 @@ public sealed class CodebaseIndexService
         int limit = 20,
         string? pathPrefix = null,
         string? filePattern = null,
+        string? pathContains = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(query)) return Array.Empty<CodebaseHit>();
@@ -342,28 +343,28 @@ public sealed class CodebaseIndexService
         // would run all four passes to return a row or two.
         var minHits = Math.Min(MinHits, Math.Max(limit, 1));
 
-        var porterAnd = await _index.SearchPorterAsync(And(tokens), limit, pathPrefix, filePattern, ct);
+        var porterAnd = await _index.SearchPorterAsync(And(tokens), limit, pathPrefix, filePattern, pathContains, ct);
         if (porterAnd.Count >= minHits)
         {
             _logger.LogDebug("Codebase search '{Query}': ladder step Porter AND satisfied with {Count} hit(s).", query, porterAnd.Count);
             return porterAnd;
         }
 
-        var porter = Merge(porterAnd, await _index.SearchPorterAsync(Or(tokens), limit, pathPrefix, filePattern, ct));
+        var porter = Merge(porterAnd, await _index.SearchPorterAsync(Or(tokens), limit, pathPrefix, filePattern, pathContains, ct));
         if (porter.Count >= minHits)
         {
             _logger.LogDebug("Codebase search '{Query}': ladder step Porter OR satisfied with {Count} hit(s).", query, porter.Count);
             return porter.Take(limit).ToList();
         }
 
-        var withTrigram = Merge(porter, await _index.SearchTrigramAsync(And(tokens), limit, pathPrefix, filePattern, ct));
+        var withTrigram = Merge(porter, await _index.SearchTrigramAsync(And(tokens), limit, pathPrefix, filePattern, pathContains, ct));
         if (withTrigram.Count >= minHits)
         {
             _logger.LogDebug("Codebase search '{Query}': ladder step Trigram AND satisfied with {Count} hit(s).", query, withTrigram.Count);
             return withTrigram.Take(limit).ToList();
         }
 
-        var trigramOr = await _index.SearchTrigramAsync(Or(tokens), limit, pathPrefix, filePattern, ct);
+        var trigramOr = await _index.SearchTrigramAsync(Or(tokens), limit, pathPrefix, filePattern, pathContains, ct);
         var finalHits = Merge(withTrigram, trigramOr).Take(limit).ToList();
         _logger.LogDebug("Codebase search '{Query}': ladder step Trigram OR completed with {Count} hit(s).", query, finalHits.Count);
         return finalHits;
@@ -394,8 +395,9 @@ public sealed class CodebaseIndexService
         IEnumerable<string>? projectRoots = null,
         string? pathPrefix = null,
         string? filePattern = null,
+        string? pathContains = null,
         CancellationToken ct = default)
-        => (await SearchAllWithTotalsAsync(query, limit, projectRoots, pathPrefix, filePattern, ct)).Hits;
+        => (await SearchAllWithTotalsAsync(query, limit, projectRoots, pathPrefix, filePattern, pathContains, ct)).Hits;
 
     /// <summary>
     /// <see cref="SearchAllAsync"/> with the per-root match totals the endpoint
@@ -410,6 +412,7 @@ public sealed class CodebaseIndexService
         IEnumerable<string>? projectRoots = null,
         string? pathPrefix = null,
         string? filePattern = null,
+        string? pathContains = null,
         CancellationToken ct = default)
     {
         // Explicit roots are searched exactly as given — the caller's project
@@ -437,7 +440,7 @@ public sealed class CodebaseIndexService
                     IReadOnlyList<CodebaseHit> hits;
                     if (local)
                     {
-                        hits = await SearchAsync(query, limit, pathPrefix, filePattern, token);
+                        hits = await SearchAsync(query, limit, pathPrefix, filePattern, pathContains, token);
                     }
                     else
                     {
@@ -452,7 +455,7 @@ public sealed class CodebaseIndexService
                         }
                         using var index = new SqliteCodebaseIndex(dbPath, readOnly: true);
                         var svc = new CodebaseIndexService(root, index, _logger);
-                        hits = await svc.SearchAsync(query, limit, pathPrefix, filePattern, token);
+                        hits = await svc.SearchAsync(query, limit, pathPrefix, filePattern, pathContains, token);
                     }
                     var bias = local ? 1.1 : 1.0;
                     _logger.LogDebug("Searched workspace {Root} (local={IsLocal}): got {HitCount} hits.", root, local, hits.Count);

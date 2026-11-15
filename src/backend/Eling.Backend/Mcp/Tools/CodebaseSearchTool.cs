@@ -44,7 +44,7 @@ public sealed class CodebaseSearchTool
         _logger = logger;
     }
 
-    [McpServerTool(Name = "codebase_search"), Description("FIRST move for locating code — call this before any host-native grep/glob/shell search, which cost more tokens and more round-trips for the same answer. Ranks the FTS index (Porter+trigram, BM25) and returns, per hit, path + line range + snippet ready to inject, so one call usually replaces grep -> list files -> read several files -> grep again. Searches GLOBALLY by default: every indexed workspace, closed ones included, so a hit from another project tells you which root it came from. Narrow the search instead of widening the term: pathPrefix/filePattern for a folder or file type inside a workspace, projectFilter for a workspace by folder name, scope 'project' for this workspace only, and projects for exact roots. match 'file' or 'path' to find files by name/path instead of contents (returns file rows, no line ranges; pathPrefix/filePattern apply to content only). Query the concept ('tool registration', 'server instructions'), not only the exact identifier; then read just the returned line ranges. Returns empty hits with a hint when no index exists — that is the only reason to fall back to native search.")]
+    [McpServerTool(Name = "codebase_search"), Description("FIRST move for locating code — call this before any host-native grep/glob/shell search, which cost more tokens and more round-trips for the same answer. Ranks the FTS index (Porter+trigram, BM25) and returns, per hit, path + line range + snippet ready to inject, so one call usually replaces grep -> list files -> read several files -> grep again. Searches GLOBALLY by default: every indexed workspace, closed ones included, so a hit from another project tells you which root it came from. Narrow the search instead of widening the term: pathPrefix for a folder prefix, matchPath for a path substring ('utils' anywhere in the path), filePattern for a file type, projectFilter for a workspace by folder name, scope 'project' for this workspace only, and projects for exact roots. match 'file' or 'path' to find files by name/path instead of contents (returns file rows, no line ranges; pathPrefix/matchPath/filePattern apply to content only). Query the concept ('tool registration', 'server instructions'), not only the exact identifier; then read just the returned line ranges. Returns empty hits with a hint when no index exists — that is the only reason to fall back to native search.")]
     public async Task<CodebaseSearchResponse> SearchAsync(
         [Description("Search query: words or a short concept from the code, e.g. 'tool registration' or 'AddElingMcpTools'. FTS matches stems, so 'recall' also finds 'recalling'. Prefer concept terms over long verbatim strings.")] string query,
         [Description("Max hits (1-50, default 10).")] int limit = 10,
@@ -54,6 +54,7 @@ public sealed class CodebaseSearchTool
         [Description("Scope: 'all' (default, every indexed workspace) or 'project' (this workspace only, do this to keep a search local).")] string scope = "all",
         [Description("Explicit workspace roots to search, e.g. [\"C:/Proj/A\"]. Overrides scope when non-empty.")] string[]? projects = null,
         [Description("What the query is matched against: 'content' (default, FTS over file contents), 'path' (workspace-relative path, folders included), 'file' (file name only). 'path'/'file' return file rows, not line ranges; pathPrefix/filePattern apply to content only.")] string? match = null,
+        [Description("Narrow content-mode results to files whose workspace-relative path contains this text (case-insensitive substring, e.g. 'utils' or 'src/backend'). Content search only; ignored when match is 'path' or 'file'.")] string? matchPath = null,
         CancellationToken cancellationToken = default)
     {
         var sw = Stopwatch.StartNew();
@@ -75,6 +76,10 @@ public sealed class CodebaseSearchTool
             return new CodebaseSearchResponse([], new CodebaseSearchStats(0, sw.ElapsedMilliseconds, false, $"Invalid match '{match}'. Valid: content, path, file."));
         }
         var matchKind = parsed == "path" ? CodebaseFileMatch.Path : CodebaseFileMatch.FileName;
+        // The content-mode path filter: a substring that can sit anywhere in
+        // the workspace-relative path, unlike pathPrefix's anchored-at-the-start
+        // match. Files mode has its own path matching and ignores it.
+        var contains = string.IsNullOrWhiteSpace(matchPath) ? null : matchPath.Trim();
 
         try
         {
@@ -90,7 +95,7 @@ public sealed class CodebaseSearchTool
                 searchedRoots = explicitRoots;
                 if (parsed != "content")
                     return await FilesResponseAsync(query, clamped, matchKind, explicitRoots, sw, cancellationToken);
-                hits = await _svc.SearchAllAsync(query, clamped, explicitRoots, prefix, filePattern, cancellationToken);
+                hits = await _svc.SearchAllAsync(query, clamped, explicitRoots, prefix, filePattern, contains, cancellationToken);
             }
             else if (string.Equals(scope, "project", StringComparison.OrdinalIgnoreCase))
             {
@@ -99,7 +104,7 @@ public sealed class CodebaseSearchTool
                 searchedRoots = null;
                 if (parsed != "content")
                     return await FilesResponseAsync(query, clamped, matchKind, null, sw, cancellationToken);
-                hits = (await _svc.SearchAsync(query, clamped, prefix, filePattern, cancellationToken))
+                hits = (await _svc.SearchAsync(query, clamped, prefix, filePattern, contains, cancellationToken))
                     .Select(h => new ScopedCodebaseHit(_svc.ProjectRoot, h.Path, h.StartLine, h.EndLine, h.Content, h.Score))
                     .ToList();
             }
@@ -125,7 +130,7 @@ public sealed class CodebaseSearchTool
                 searchedRoots = roots;
                 if (parsed != "content")
                     return await FilesResponseAsync(query, clamped, matchKind, roots, sw, cancellationToken);
-                hits = await _svc.SearchAllAsync(query, clamped, roots, prefix, filePattern, cancellationToken);
+                hits = await _svc.SearchAllAsync(query, clamped, roots, prefix, filePattern, contains, cancellationToken);
             }
             // filePattern rides down into SQL, so the limit is already taken
             // from the filtered set — trimming here again would only hide rows.

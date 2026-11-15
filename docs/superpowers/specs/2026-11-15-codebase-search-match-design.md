@@ -98,9 +98,35 @@ temp workspace): `match=file` finds by name, `match=path` finds by folder,
 returns the hint, files mode returns `Mode="files"` with `ChunkCount` on
 rows, audit entry recorded with file count.
 
+## Amendment 2026-11-15: `matchPath` — content mode narrowed by path substring
+
+Motivation: short concept queries under the global default return noisy hits;
+`pathPrefix` exists but is anchored at the start of the path (`LIKE
+'prefix%'`), so a folder segment in the middle (`utils`) can narrow nothing.
+The user's words: results should be limited to the matching path.
+
+Decision: a new optional `matchPath` parameter on `codebase_search` (and the
+in-process agent tool, for parity). The query stays a content FTS; hits are
+filtered to files whose workspace-relative path contains the text,
+case-insensitive, anywhere in the path. Semantics, end to end:
+
+- `matchPath` is applied in SQL (`LIKE '%needle%'` with `ESCAPE`), inside the
+  same statement as the rank sort, so the LIMIT and the count behind
+  `TotalHits` both see the filtered set, exactly like `pathPrefix`.
+- It applies to content mode only; files mode (`match=path|file`) ignores it,
+  as the description documents.
+- Absent or whitespace means no filter. `%`/`_` in the needle are escaped,
+  matching the `filePattern` precedent.
+- Empty-query behaviour, audit, and everything else from the base design are
+  unchanged.
+- `pathPrefix` (anchored prefix) stays; `matchPath` is the substring variant.
+- `ServerInstructions.cs` "Codebase:" names it. New tests pin substring-
+  anywhere narrowing, case-insensitivity, blank-as-absent, LIKE-wildcard
+  escaping, federated explicit roots, and that files mode ignores it.
+
 ## Non-goals
 
 No dashboard changes (the feature exists there). No recent-files/top mode in
 the tool. No synthesized line ranges or snippets for file rows. Multiple
 needles / or-fallback for the match mode is the user's deferred idea,
-tracked in memory — not part of this design.
+tracked in memory - not part of this design.

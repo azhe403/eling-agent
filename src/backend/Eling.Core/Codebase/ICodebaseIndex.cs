@@ -11,8 +11,8 @@ public interface ICodebaseIndex
     /// True when the index is empty afterwards.
     /// </summary>
     Task<bool> ClearAsync(CancellationToken ct = default);
-    Task<IReadOnlyList<CodebaseHit>> SearchPorterAsync(string ftsQuery, int limit, string? pathPrefix = null, string? filePattern = null, CancellationToken ct = default);
-    Task<IReadOnlyList<CodebaseHit>> SearchTrigramAsync(string ftsQuery, int limit, string? pathPrefix = null, string? filePattern = null, CancellationToken ct = default);
+    Task<IReadOnlyList<CodebaseHit>> SearchPorterAsync(string ftsQuery, int limit, string? pathPrefix = null, string? filePattern = null, string? pathContains = null, CancellationToken ct = default);
+    Task<IReadOnlyList<CodebaseHit>> SearchTrigramAsync(string ftsQuery, int limit, string? pathPrefix = null, string? filePattern = null, string? pathContains = null, CancellationToken ct = default);
     Task<CodebaseStats> GetStatsAsync(CancellationToken ct = default);
     Task<IReadOnlyList<string>> ListPathsAsync(CancellationToken ct = default);
     Task<IReadOnlyList<CodebaseFileEntry>> ListRecentFilesAsync(int limit, CancellationToken ct = default);

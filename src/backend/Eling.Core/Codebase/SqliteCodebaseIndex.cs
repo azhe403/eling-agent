@@ -301,11 +301,11 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
         }
     }
 
-    public async Task<IReadOnlyList<CodebaseHit>> SearchPorterAsync(string ftsQuery, int limit, string? pathPrefix = null, string? filePattern = null, CancellationToken ct = default)
-        => await SearchFtsAsync("codebase_fts_porter", ftsQuery, limit, pathPrefix, filePattern, ct);
+    public async Task<IReadOnlyList<CodebaseHit>> SearchPorterAsync(string ftsQuery, int limit, string? pathPrefix = null, string? filePattern = null, string? pathContains = null, CancellationToken ct = default)
+        => await SearchFtsAsync("codebase_fts_porter", ftsQuery, limit, pathPrefix, filePattern, pathContains, ct);
 
-    public async Task<IReadOnlyList<CodebaseHit>> SearchTrigramAsync(string ftsQuery, int limit, string? pathPrefix = null, string? filePattern = null, CancellationToken ct = default)
-        => await SearchFtsAsync("codebase_fts_trigram", ftsQuery, limit, pathPrefix, filePattern, ct);
+    public async Task<IReadOnlyList<CodebaseHit>> SearchTrigramAsync(string ftsQuery, int limit, string? pathPrefix = null, string? filePattern = null, string? pathContains = null, CancellationToken ct = default)
+        => await SearchFtsAsync("codebase_fts_trigram", ftsQuery, limit, pathPrefix, filePattern, pathContains, ct);
 
     /// <summary>
     /// Empties the index, leaving an empty but valid database behind.
@@ -532,12 +532,12 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
     }
 
     /// <summary>
-    /// Runs one FTS pass. <paramref name="pathPrefix"/> and
-    /// <paramref name="filePattern"/> are applied in SQL, inside the same
+    /// Runs one FTS pass. <paramref name="pathPrefix"/>, <paramref name="filePattern"/>
+    /// and <paramref name="pathContains"/> are applied in SQL, inside the same
     /// statement as the rank sort, so the LIMIT is taken from the filtered set
     /// rather than from a larger set that is trimmed afterwards.
     /// </summary>
-    private async Task<IReadOnlyList<CodebaseHit>> SearchFtsAsync(string table, string ftsQuery, int limit, string? pathPrefix, string? filePattern, CancellationToken ct)
+    private async Task<IReadOnlyList<CodebaseHit>> SearchFtsAsync(string table, string ftsQuery, int limit, string? pathPrefix, string? filePattern, string? pathContains, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(ftsQuery)) return Array.Empty<CodebaseHit>();
         if (!File.Exists(_dbPath)) return Array.Empty<CodebaseHit>();
@@ -546,11 +546,17 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
             await using var c = await OpenAsync(ct);
             await using var cmd = c.CreateCommand();
 
-            var filters = new List<string>(2);
+            var filters = new List<string>(3);
             if (!string.IsNullOrWhiteSpace(pathPrefix))
             {
                 filters.Add("c.file_path LIKE $pf ESCAPE '\\'");
                 Add(cmd, "$pf", EscapeLike(pathPrefix.Trim()) + "%");
+            }
+
+            if (!string.IsNullOrWhiteSpace(pathContains))
+            {
+                filters.Add("c.file_path LIKE $pc ESCAPE '\\'");
+                Add(cmd, "$pc", "%" + EscapeLike(pathContains.Trim()) + "%");
             }
 
             var fileSql = BuildFilePatternSql(filePattern);
@@ -584,6 +590,10 @@ public sealed class SqliteCodebaseIndex : ICodebaseIndex, IDisposable
                 if (!string.IsNullOrWhiteSpace(pathPrefix))
                 {
                     Add(countCmd, "$pf", EscapeLike(pathPrefix.Trim()) + "%");
+                }
+                if (!string.IsNullOrWhiteSpace(pathContains))
+                {
+                    Add(countCmd, "$pc", "%" + EscapeLike(pathContains.Trim()) + "%");
                 }
                 if (fileSql is not null)
                 {

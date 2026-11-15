@@ -33,6 +33,7 @@ internal sealed class RecordingCodebaseIndex : ICodebaseIndex
         int limit,
         string? pathPrefix = null,
         string? filePattern = null,
+        string? pathContains = null,
         CancellationToken ct = default)
     {
         Calls.Add($"porter:{Operator(ftsQuery)}");
@@ -44,6 +45,7 @@ internal sealed class RecordingCodebaseIndex : ICodebaseIndex
         int limit,
         string? pathPrefix = null,
         string? filePattern = null,
+        string? pathContains = null,
         CancellationToken ct = default)
     {
         Calls.Add($"trigram:{Operator(ftsQuery)}");
