@@ -14,7 +14,7 @@ public sealed class CodebaseSearchAgentTool(CodebaseSearchTool tool) : IAgentToo
 
     public string Name => "codebase_search";
 
-    public string Description => "FIRST move for locating code — call this before grep/glob/shell search. Ranks the FTS index (Porter+trigram, BM25) and returns path + line range + snippet ready to inject. Pass match='file' or 'path' to find files by name/path.";
+    public string Description => "FIRST move for locating code - call this before grep/glob/shell search. Ranks the FTS index (Porter+trigram, BM25) and returns path + line range + snippet ready to inject. Pass match='file' or 'path' to find files by name/path; matchPath narrows content hits to a path substring.";
 
     public string ParametersJsonSchema => """
     {
@@ -27,7 +27,8 @@ public sealed class CodebaseSearchAgentTool(CodebaseSearchTool tool) : IAgentToo
         "filePattern": { "type": "string", "description": "Glob-ish file filter, e.g. *.cs or *.md." },
         "projectFilter": { "type": "string", "description": "Narrow search by workspace folder name." },
         "scope": { "type": "string", "description": "Scope: 'all' (default, every indexed workspace) or 'project' (this workspace only)." },
-        "match": { "type": "string", "description": "What the query is matched against: 'content' (default), 'path' (workspace-relative path), 'file' (file name only). 'path'/'file' return file rows." }
+        "match": { "type": "string", "enum": ["content", "path", "file"], "description": "What the query is matched against: 'content' (default), 'path' (workspace-relative path), 'file' (file name only). 'path'/'file' return file rows." },
+        "matchPath": { "type": "string", "description": "Narrow content-mode results to files whose workspace-relative path contains this text (case-insensitive substring, e.g. 'utils'). Content search only." }
       }
     }
     """;
@@ -44,8 +45,9 @@ public sealed class CodebaseSearchAgentTool(CodebaseSearchTool tool) : IAgentToo
         var projectFilter = root.TryGetProperty("projectFilter", out var pfElem) ? pfElem.GetString() : null;
         var scope = root.TryGetProperty("scope", out var sElem) ? sElem.GetString() ?? "all" : "all";
         var match = root.TryGetProperty("match", out var mElem) ? mElem.GetString() : null;
+        var matchPath = root.TryGetProperty("matchPath", out var mpElem) ? mpElem.GetString() : null;
 
-        var response = await tool.SearchAsync(query, limit, pathPrefix, filePattern, projectFilter, scope, match: match, cancellationToken: ct);
+        var response = await tool.SearchAsync(query, limit, pathPrefix, filePattern, projectFilter, scope, match: match, matchPath: matchPath, cancellationToken: ct);
         return JsonSerializer.Serialize(response, JsonOptions);
     }
 }
