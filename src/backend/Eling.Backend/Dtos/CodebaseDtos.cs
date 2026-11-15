@@ -21,15 +21,34 @@ public sealed record CodebaseSearchHit(
     string Content,
     double Score);
 
+/// <summary>
+/// One indexed file — the row shape the file scopes answer with. There is
+/// no line range or snippet: a file row answers "which files", not "where in
+/// them".
+/// </summary>
+public sealed record CodebaseSearchFile(
+    string ProjectRoot,
+    string Path,
+    int ChunkCount,
+    string LastIndexedAt);
+
 public sealed record CodebaseSearchStats(
     int TotalHits,
     long TookMs,
     bool Fresh,
     string? Hint);
 
+/// <summary>
+/// <paramref name="Mode"/> says what the query was matched against:
+/// <c>content</c> (the default — the FTS hit list is populated) or
+/// <c>files</c> (the path/file scopes — <paramref name="Files"/> is
+/// populated and <see cref="CodebaseSearchResponse.Hits"/> is empty).
+/// </summary>
 public sealed record CodebaseSearchResponse(
     IReadOnlyList<CodebaseSearchHit> Hits,
-    CodebaseSearchStats Stats);
+    CodebaseSearchStats Stats,
+    string Mode = "content",
+    IReadOnlyList<CodebaseSearchFile>? Files = null);
 
 /// <summary>
 /// One chunk of an indexed file, as the file viewer renders it.

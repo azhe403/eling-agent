@@ -15,6 +15,9 @@ namespace Eling.Backend.Mcp.Tools;
 /// default) federates over every indexed workspace, closed ones included
 /// (read-only, missing indexes skipped), and each hit carries its root so the
 /// caller can tell projects apart; "project" reads this workspace only.
+/// Files mode (`match='path'|'file'`) matches the query against the indexed
+/// file paths and answers with file rows (path, chunk count, last indexed)
+/// instead of content hits — no line ranges, no snippet.
 /// Never throws on a missing index — returns empty hits with a hint to run
 /// codebase_index.
 /// Each completed search records one <c>codebase_search</c> access entry with
@@ -41,7 +44,7 @@ public sealed class CodebaseSearchTool
         _logger = logger;
     }
 
-    [McpServerTool(Name = "codebase_search"), Description("FIRST move for locating code — call this before any host-native grep/glob/shell search, which cost more tokens and more round-trips for the same answer. Ranks the FTS index (Porter+trigram, BM25) and returns, per hit, path + line range + snippet ready to inject, so one call usually replaces grep -> list files -> read several files -> grep again. Searches GLOBALLY by default: every indexed workspace, closed ones included, so a hit from another project tells you which root it came from. Narrow the search instead of widening the term: pathPrefix/filePattern for a folder or file type inside a workspace, projectFilter for a workspace by folder name, scope 'project' for this workspace only, and projects for exact roots. Query the concept ('tool registration', 'server instructions'), not only the exact identifier; then read just the returned line ranges. Returns empty hits with a hint when no index exists — that is the only reason to fall back to native search.")]
+    [McpServerTool(Name = "codebase_search"), Description("FIRST move for locating code — call this before any host-native grep/glob/shell search, which cost more tokens and more round-trips for the same answer. Ranks the FTS index (Porter+trigram, BM25) and returns, per hit, path + line range + snippet ready to inject, so one call usually replaces grep -> list files -> read several files -> grep again. Searches GLOBALLY by default: every indexed workspace, closed ones included, so a hit from another project tells you which root it came from. Narrow the search instead of widening the term: pathPrefix/filePattern for a folder or file type inside a workspace, projectFilter for a workspace by folder name, scope 'project' for this workspace only, and projects for exact roots. match 'file' or 'path' to find files by name/path instead of contents (returns file rows, no line ranges; pathPrefix/filePattern apply to content only). Query the concept ('tool registration', 'server instructions'), not only the exact identifier; then read just the returned line ranges. Returns empty hits with a hint when no index exists — that is the only reason to fall back to native search.")]
     public async Task<CodebaseSearchResponse> SearchAsync(
         [Description("Search query: words or a short concept from the code, e.g. 'tool registration' or 'AddElingMcpTools'. FTS matches stems, so 'recall' also finds 'recalling'. Prefer concept terms over long verbatim strings.")] string query,
         [Description("Max hits (1-50, default 10).")] int limit = 10,
@@ -50,6 +53,7 @@ public sealed class CodebaseSearchTool
         [Description("Narrow the search by workspace folder name, e.g. 'eling-agent'. Case-insensitive substring of the root's last segment; use it to keep a global search to one or two workspaces without knowing their absolute paths.")] string? projectFilter = null,
         [Description("Scope: 'all' (default, every indexed workspace) or 'project' (this workspace only, do this to keep a search local).")] string scope = "all",
         [Description("Explicit workspace roots to search, e.g. [\"C:/Proj/A\"]. Overrides scope when non-empty.")] string[]? projects = null,
+        [Description("What the query is matched against: 'content' (default, FTS over file contents), 'path' (workspace-relative path, folders included), 'file' (file name only). 'path'/'file' return file rows, not line ranges; pathPrefix/filePattern apply to content only.")] string? match = null,
         CancellationToken cancellationToken = default)
     {
         var sw = Stopwatch.StartNew();
@@ -59,6 +63,18 @@ public sealed class CodebaseSearchTool
             sw.Stop();
             return new CodebaseSearchResponse([], new CodebaseSearchStats(0, sw.ElapsedMilliseconds, false, "Query is empty."));
         }
+        // What the query is matched against. Absent or blank means content —
+        // the original FTS behaviour — and anything outside the three values
+        // is reported, not guessed at.
+        var parsed = (match ?? "content").Trim().ToLowerInvariant();
+        if (parsed is not ("content" or "path" or "file"))
+        {
+            sw.Stop();
+            _logger?.LogWarning("Rejected codebase search match: {Match}", match);
+            await _audit.RecordSearchAsync(query, 0, _svc.ProjectRoot, (int)sw.ElapsedMilliseconds, AuditOutcome.Error);
+            return new CodebaseSearchResponse([], new CodebaseSearchStats(0, sw.ElapsedMilliseconds, false, $"Invalid match '{match}'. Valid: content, path, file."));
+        }
+        var matchKind = parsed == "path" ? CodebaseFileMatch.Path : CodebaseFileMatch.FileName;
 
         try
         {
@@ -72,6 +88,8 @@ public sealed class CodebaseSearchTool
             if (explicitRoots.Count > 0)
             {
                 searchedRoots = explicitRoots;
+                if (parsed != "content")
+                    return await FilesResponseAsync(query, clamped, matchKind, explicitRoots, sw, cancellationToken);
                 hits = await _svc.SearchAllAsync(query, clamped, explicitRoots, prefix, filePattern, cancellationToken);
             }
             else if (string.Equals(scope, "project", StringComparison.OrdinalIgnoreCase))
@@ -79,6 +97,8 @@ public sealed class CodebaseSearchTool
                 // The narrow case. Explicitly asked for, so the index of one
                 // workspace is read directly instead of being federated.
                 searchedRoots = null;
+                if (parsed != "content")
+                    return await FilesResponseAsync(query, clamped, matchKind, null, sw, cancellationToken);
                 hits = (await _svc.SearchAsync(query, clamped, prefix, filePattern, cancellationToken))
                     .Select(h => new ScopedCodebaseHit(_svc.ProjectRoot, h.Path, h.StartLine, h.EndLine, h.Content, h.Score))
                     .ToList();
@@ -103,6 +123,8 @@ public sealed class CodebaseSearchTool
                     return new CodebaseSearchResponse([], new CodebaseSearchStats(0, sw.ElapsedMilliseconds, false, reason));
                 }
                 searchedRoots = roots;
+                if (parsed != "content")
+                    return await FilesResponseAsync(query, clamped, matchKind, roots, sw, cancellationToken);
                 hits = await _svc.SearchAllAsync(query, clamped, roots, prefix, filePattern, cancellationToken);
             }
             // filePattern rides down into SQL, so the limit is already taken
@@ -192,6 +214,43 @@ public sealed class CodebaseSearchTool
                    .Contains(needle, StringComparison.OrdinalIgnoreCase)
             ? []
             : kept;
+    }
+
+    /// <summary>
+    /// The files-mode answer: run the file search instead of the FTS and
+    /// return file rows. The per-root totals come from the untrimmed match
+    /// set, so Stats.TotalHits does not move with the limit — the same
+    /// semantics the dashboard's totalHits has. Hits stays empty: a file
+    /// row is not a location in a file.
+    /// </summary>
+    private async Task<CodebaseSearchResponse> FilesResponseAsync(
+        string query,
+        int limit,
+        CodebaseFileMatch match,
+        IReadOnlyList<string>? roots,
+        Stopwatch sw,
+        CancellationToken cancellationToken)
+    {
+        var fileSearch = await _svc.SearchFilesWithTotalsAsync(query, limit, match, roots, cancellationToken);
+        var files = fileSearch.Files;
+        sw.Stop();
+        // An empty file list means "no match" only when an index actually
+        // exists to match against — same rule the content branch applies.
+        var fresh = HasIndexOnDisk(roots, _svc.ProjectRoot);
+        var hint = files.Count == 0
+            ? fresh
+                ? "No files matched the query and filters."
+                : "No index for this scope. Run codebase_index to build it."
+            : null;
+        await _audit.RecordSearchAsync(query, files.Count, _svc.ProjectRoot, (int)sw.ElapsedMilliseconds);
+        var rows = files
+            .Select(f => new CodebaseSearchFile(f.ProjectRoot, f.Path, f.ChunkCount, f.LastIndexedAt))
+            .ToList();
+        return new CodebaseSearchResponse(
+            [],
+            new CodebaseSearchStats(fileSearch.TotalByRoot.Values.Sum(), sw.ElapsedMilliseconds, fresh, hint),
+            "files",
+            rows);
     }
 
     /// <summary>
