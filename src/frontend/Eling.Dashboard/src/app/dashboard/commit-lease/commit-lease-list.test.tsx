@@ -115,10 +115,10 @@ describe("CommitLease cards", () => {
     expect(await screen.findByText(/Held 2m 30s/)).toBeTruthy()
   })
 
-  it("shows the configured total next to the remaining time on the TTL badge", async () => {
+  it("shows the configured total as a separate TTL badge on the card", async () => {
     render(<CommitLease />)
     // ttl_seconds: 3600 -> formatAge renders "1h 0m"
-    expect(await screen.findByText(/left of 1h 0m/)).toBeTruthy()
+    expect(await screen.findByText("TTL 1h 0m")).toBeTruthy()
   })
 
   it("renders the expired TTL in amber instead of a countdown", async () => {

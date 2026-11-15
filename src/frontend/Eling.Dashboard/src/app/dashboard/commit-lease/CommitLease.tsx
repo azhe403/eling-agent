@@ -424,14 +424,23 @@ export function CommitLease() {
                             0s · expired
                           </span>
                         ) : (
-                          <Badge
-                            variant="secondary"
-                            className="tabular-nums"
-                            title={`TTL remaining (${lease.ttl_seconds}s total)`}
-                          >
-                            {formatAge(liveTtlRemaining(lease))} left of {formatAge(lease.ttl_seconds)}
-                          </Badge>
-                        )}
+                           <>
+                             <Badge
+                               variant="secondary"
+                               className="tabular-nums"
+                               title={`TTL remaining (${lease.ttl_seconds}s total)`}
+                             >
+                               {formatAge(liveTtlRemaining(lease))} left
+                             </Badge>
+                             <Badge
+                               variant="outline"
+                               className="tabular-nums text-muted-foreground"
+                               title="Total TTL"
+                             >
+                               TTL {formatAge(lease.ttl_seconds)}
+                             </Badge>
+                           </>
+                         )}
                       </div>
                       <PathText prefix="📁" path={lease.checkout} className="text-xs" />
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -598,24 +607,36 @@ export function CommitLease() {
           </AlertDialogHeader>
           {forceTarget && (
             <div className="rounded-lg border bg-muted/40 p-3 text-xs">
-              <div className="font-semibold text-foreground">
-                Caller {shortCaller(forceTarget.caller_id)} · {workspaceName(forceTarget.checkout)}
-              </div>
-              <div className="mt-0.5 break-all font-mono text-muted-foreground" title={forceTarget.checkout}>
-                {forceTarget.checkout}
-              </div>
-              <div className="mt-0.5 break-all font-mono text-muted-foreground" title={forceTarget.caller_id}>
-                {forceTarget.caller_id}
-              </div>
-              {forceTarget.intent && (
-                <div className="mt-2 text-foreground">{forceTarget.intent}</div>
-              )}
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                <dt className="uppercase tracking-wide text-muted-foreground">Workspace</dt>
+                <dd className="break-all font-mono text-foreground" title={forceTarget.checkout}>{forceTarget.checkout}</dd>
+
+                <dt className="uppercase tracking-wide text-muted-foreground">Branch</dt>
+                <dd className="font-mono text-foreground">{forceTarget.branch ?? "-"}</dd>
+
+                <dt className="uppercase tracking-wide text-muted-foreground">Caller</dt>
+                <dd className="break-all font-mono text-foreground" title={forceTarget.caller_id}>{forceTarget.caller_id}</dd>
+
+                <dt className="uppercase tracking-wide text-muted-foreground">Lease</dt>
+                <dd className="break-all font-mono text-muted-foreground" title={forceTarget.lease_id}>{forceTarget.lease_id}</dd>
+
+                <dt className="uppercase tracking-wide text-muted-foreground">Intent</dt>
+                <dd className="text-foreground">{forceTarget.intent ?? "-"}</dd>
+
+                <dt className="uppercase tracking-wide text-muted-foreground">Age / left</dt>
+                <dd className="font-mono text-foreground">
+                  {formatAge(liveAge(forceTarget))} · {formatAge(liveTtlRemaining(forceTarget))} left · TTL {formatAge(forceTarget.ttl_seconds)}
+                </dd>
+              </dl>
               {forceTarget.paths && forceTarget.paths.length > 0 && (
-                <ul className="mt-2 list-inside list-disc text-muted-foreground">
-                  {forceTarget.paths.map((p) => (
-                    <li key={p} className="break-all font-mono">{p}</li>
-                  ))}
-                </ul>
+                <>
+                  <div className="mt-2 uppercase tracking-wide text-muted-foreground">Files ({forceTarget.paths.length})</div>
+                  <ul className="mt-1 list-inside list-disc text-foreground">
+                    {forceTarget.paths.map((p) => (
+                      <li key={p} className="break-all font-mono">{p}</li>
+                    ))}
+                  </ul>
+                </>
               )}
             </div>
           )}
