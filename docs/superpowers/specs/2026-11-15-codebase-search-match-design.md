@@ -1,6 +1,6 @@
-# codebase_search: `match` parameter — short design
+# codebase_search: `match` parameter - short design
 
-Date: 2026-11-15 · Status: proposed · Size: small
+Date: 2026-11-15 · Status: implemented (d9fcafd..43eb0c5; amendment implemented in the working tree) · Size: small
 
 ## Intent
 
@@ -98,12 +98,12 @@ temp workspace): `match=file` finds by name, `match=path` finds by folder,
 returns the hint, files mode returns `Mode="files"` with `ChunkCount` on
 rows, audit entry recorded with file count.
 
-## Amendment 2026-11-15: `matchPath` — content mode narrowed by path substring
+## Amendment 2026-11-15: `matchPath` - content mode narrowed by path substring
 
 Motivation: short concept queries under the global default return noisy hits;
 `pathPrefix` exists but is anchored at the start of the path (`LIKE
 'prefix%'`), so a folder segment in the middle (`utils`) can narrow nothing.
-The user's words: results should be limited to the matching path.
+The demand was a substring filter for results, not a different target.
 
 Decision: a new optional `matchPath` parameter on `codebase_search` (and the
 in-process agent tool, for parity). The query stays a content FTS; hits are
@@ -120,9 +120,25 @@ case-insensitive, anywhere in the path. Semantics, end to end:
 - Empty-query behaviour, audit, and everything else from the base design are
   unchanged.
 - `pathPrefix` (anchored prefix) stays; `matchPath` is the substring variant.
-- `ServerInstructions.cs` "Codebase:" names it. New tests pin substring-
-  anywhere narrowing, case-insensitivity, blank-as-absent, LIKE-wildcard
-  escaping, federated explicit roots, and that files mode ignores it.
+- `ServerInstructions.cs` "Codebase:" names it and tells every agent to
+  narrow before widening (matchPath / filePattern / pathPrefix /
+  match='file'|'path' - a broad all-workspace search is the fallback,
+  never the starting move). New tests pin substring-anywhere narrowing,
+  case-insensitivity, blank-as-absent, LIKE-wildcard escaping (both `_` and
+  `%`), federated explicit roots, and that files mode ignores it.
+
+Two decisions pinned during review (2026-11-15, after implementation), either
+change the contract for the edge cases:
+
+- A files-mode request (`match=path|file`) whose `projectFilter` excludes
+  every root answers in `Mode="files"` with `Files=[]` (hint names the
+  filter), not in content mode's shape — a request answered in a different
+  mode is the wrong envelope for the caller. Content-mode requests behave as
+  before (Mode="content", Files=null).
+- Content-mode `Stats.TotalHits` is limit-independent, not the page size:
+  federated runs sum each root's complete match count, the local run takes
+  the largest stamped match count on its hits (the same rule the dashboard
+  applies), so the total no longer moves with `limit`.
 
 ## Non-goals
 
