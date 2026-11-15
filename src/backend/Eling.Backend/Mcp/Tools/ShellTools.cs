@@ -5,6 +5,8 @@ using CliWrap;
 using Eling.Backend.Shell;
 using Eling.Core.Shell;
 using Microsoft.Extensions.Logging;
+using ModelContextProtocol;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 namespace Eling.Backend.Mcp.Tools;
@@ -76,7 +78,9 @@ public sealed class ShellTools
         [Description("Directory to run in. A relative path resolves against the launched workspace (the same directory the hosting agent session opened), not necessarily the filesystem memory-scope root. Absolute paths are used as given. Defaults to '.'.")] string workingDirectory = DefaultWorkingDirectory,
         [Description("Kill the entire process tree after this many milliseconds, clamped to [1000, 600000]. Omit to use the default timeout from the user's configuration.")] int? timeoutMs = null,
         [Description("Per-stream output cap in bytes, clamped to [1024, 1048576]. Omit to use the default from the user's configuration.")] int? maxOutputBytes = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        McpServer? server = null,
+        RequestContext<CallToolRequestParams>? context = null)
     {
         if (string.IsNullOrWhiteSpace(command))
         {
@@ -134,7 +138,8 @@ public sealed class ShellTools
             return Error($"workingDirectory is outside the workspace root ({workspaceRoot}) and not in an allowed directory: {directory}", "sandbox_violation");
         }
 
-        return await RunAsync(command, directory, effectiveTimeoutMs, effectiveMaxBytes, cancellationToken);
+        var progress = new ProgressReporter(server, context?.Params?.ProgressToken, _logger);
+        return await RunAsync(command, directory, effectiveTimeoutMs, effectiveMaxBytes, cancellationToken, progress);
     }
 
     /// <summary>
@@ -149,7 +154,8 @@ public sealed class ShellTools
         string directory,
         int timeoutMs,
         int maxOutputBytes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ProgressReporter? progress = null)
     {
         var timeout = Math.Clamp(timeoutMs, MinTimeoutMs, MaxTimeoutMs);
         var cap = Math.Clamp(maxOutputBytes, MinMaxOutputBytes, MaxMaxOutputBytes);
@@ -170,8 +176,8 @@ public sealed class ShellTools
             var result = await Cli.Wrap(ShellExecutable)
                 .WithArguments([ShellCommandSwitch, command])
                 .WithWorkingDirectory(directory)
-                .WithStandardOutputPipe(PipeTarget.ToDelegate(line => AppendLine(standardOutput, line)))
-                .WithStandardErrorPipe(PipeTarget.ToDelegate(line => AppendLine(standardError, line)))
+                .WithStandardOutputPipe(PipeTarget.ToDelegate(line => { AppendLine(standardOutput, line); progress?.Report(line); }))
+                .WithStandardErrorPipe(PipeTarget.ToDelegate(line => { AppendLine(standardError, line); progress?.Report(line); }))
                 .WithValidation(CommandResultValidation.None)
                 .ExecuteAsync(timeoutSource.Token);
 
@@ -200,6 +206,13 @@ public sealed class ShellTools
             stopwatch.Stop();
         }
 
+        if (progress is { Emitted: > 0 })
+        {
+            _logger?.LogInformation(
+                "shell_execute emitted {Count} progress notifications: {Command}",
+                progress.Emitted, command);
+        }
+
         _logger?.LogInformation(
             "shell_execute ran {Command} in {Directory} (exit {ExitCode}, {DurationMs} ms, timedOut: {TimedOut})",
             command, directory, exitCode, stopwatch.ElapsedMilliseconds, timedOut);
@@ -220,6 +233,67 @@ public sealed class ShellTools
 
     /// <summary>The argument the resolved shell needs in front of the command line.</summary>
     private static string ShellCommandSwitch => OperatingSystem.IsWindows() ? "/c" : "-c";
+
+    /// <summary>
+    /// Emits <c>notifications/progress</c> for each output line: the count keeps
+    /// increasing monotonically and the message is the latest line, capped to 160
+    /// chars. Throttled to a few notifications per second so a spammy command
+    /// cannot flood the channel; progress is best-effort and never affects the
+    /// command's own result. Only runs when the client supplied a progress token
+    /// (a spec requirement — the server must not invent one).
+    /// </summary>
+    private sealed class ProgressReporter(McpServer? server, ProgressToken? token, ILogger? logger)
+    {
+        private long _count;
+        private long _emitted;
+        private DateTime _lastEmitUtc = DateTime.MinValue;
+        private const int MaxMessageLength = 160;
+        private static readonly TimeSpan MinInterval = TimeSpan.FromMilliseconds(150);
+
+        public long Emitted => Interlocked.Read(ref _emitted);
+
+        public void Report(string line)
+        {
+            if (server is null || token is null)
+            {
+                return;
+            }
+
+            var n = Interlocked.Increment(ref _count);
+            var now = DateTime.UtcNow;
+            if ((now - _lastEmitUtc) < MinInterval)
+            {
+                // Keep the counter monotonic; just skip emission between windows.
+                return;
+            }
+            _lastEmitUtc = now;
+
+            var message = line.Length > MaxMessageLength ? line[..MaxMessageLength] : line;
+            _ = SendAsync(n, message);
+        }
+
+        private async Task SendAsync(long n, string message)
+        {
+            try
+            {
+                await server!.SendNotificationAsync("notifications/progress", new ProgressNotificationParams
+                {
+                    ProgressToken = token!.Value,
+                    Progress = new ProgressNotificationValue
+                    {
+                        Progress = n,
+                        Message = message
+                    }
+                });
+                Interlocked.Increment(ref _emitted);
+            }
+            catch (Exception ex)
+            {
+                // Progress is advisory: a dropped notification must never break the command.
+                logger?.LogDebug(ex, "shell_execute progress notification failed");
+            }
+        }
+    }
 
     /// <summary>
     /// Pipes deliver one line at a time without its terminator; put a newline
