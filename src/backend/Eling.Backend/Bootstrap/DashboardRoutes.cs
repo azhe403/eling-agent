@@ -179,9 +179,14 @@ public static class DashboardRoutes
     /// Writes one <c>text/event-stream</c> response: an initial
     /// <c>data: connected</c> frame so clients know the stream is live, every
     /// source item as a <c>data:</c> frame, and a comment ping every 15s to
-    /// keep proxies from closing an idle connection. Returns as soon as either
-    /// the source or the ping loop ends.
+    /// keep proxies from closing an idle connection. A single loop awaits
+    /// either the source or the ping timer, so every frame is pushed and
+    /// flushed in the order it happens instead of waiting behind the ping.
+    /// Returns when the source completes or the client disconnects.
     /// </summary>
+    /// <param name="source">The async source of items to forward.</param>
+    /// <param name="serialize">Turns an item into one <c>data:</c> frame.</param>
+    /// <param name="ct">Cancels the loop when the client disconnects.</param>
     private static async Task WriteSseAsync<T>(
         HttpContext context,
         IAsyncEnumerable<T> source,
@@ -196,25 +201,57 @@ public static class DashboardRoutes
         await context.Response.WriteAsync("data: connected\n\n", ct);
         await context.Response.Body.FlushAsync(ct);
 
+        // Single writer, see the method doc: one loop awaits either the source
+        // or the ping timer so frames flush in order at arrival time.
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
-        var subscribeTask = Task.Run(async () =>
-        {
-            await foreach (var item in source)
-            {
-                await context.Response.WriteAsync($"data: {serialize(item)}\n\n", ct);
-                await context.Response.Body.FlushAsync(ct);
-            }
-        }, ct);
+        await using var enumerator = source.GetAsyncEnumerator(ct);
+        var itemTask = enumerator.MoveNextAsync().AsTask();
+        var pingTask = timer.WaitForNextTickAsync(ct).AsTask();
 
-        var pingTask = Task.Run(async () =>
+        try
         {
-            while (await timer.WaitForNextTickAsync(ct))
+            while (!ct.IsCancellationRequested)
             {
-                await context.Response.WriteAsync(": ping\n\n", ct);
-                await context.Response.Body.FlushAsync(ct);
-            }
-        }, ct);
+                var completed = await Task.WhenAny(itemTask, pingTask);
+                if (completed == itemTask)
+                {
+                    bool advanced;
+                    try
+                    {
+                        advanced = await itemTask;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        break;
+                    }
 
-        await Task.WhenAny(subscribeTask, pingTask);
+                    if (!advanced) break;
+
+                    await context.Response.WriteAsync($"data: {serialize(enumerator.Current)}\n\n", ct);
+                    await context.Response.Body.FlushAsync(ct);
+                    itemTask = enumerator.MoveNextAsync().AsTask();
+                }
+                else
+                {
+                    // The client may go away between the ping firing and the write:
+                    // treat any failure here as the client leaving and stop quietly.
+                    try
+                    {
+                        await context.Response.WriteAsync(": ping\n\n", ct);
+                        await context.Response.Body.FlushAsync(ct);
+                    }
+                    catch (Exception) when (ct.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    pingTask = timer.WaitForNextTickAsync(ct).AsTask();
+                }
+            }
+        }
+        finally
+        {
+            await enumerator.DisposeAsync();
+        }
     }
 }
