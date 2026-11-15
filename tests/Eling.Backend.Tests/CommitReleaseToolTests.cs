@@ -43,7 +43,71 @@ public sealed class CommitReleaseToolTests : IDisposable
         using var store = NewStore();
         var cwd = Checkout("a");
         var lease = NewLeaseTool(store, cwd);
+        var leaseResult = await lease.LeaseAsync("ses_test_1_000000000000000000000", "main");
+        var leaseToken = JsonDocument.Parse(leaseResult).RootElement.GetProperty("lease_token").GetString();
+        var tool = NewTool(store);
+
+        var result = await tool.ReleaseAsync("ses_test_1_000000000000000000000", leaseToken);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("released").GetBoolean());
+        Assert.Empty(await store.ListActiveAsync(cwd, null));
+    }
+
+    [Fact]
+    public async Task Release_NewLeaseWithoutToken_ReturnsError_AndKeepsLease()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var lease = NewLeaseTool(store, cwd);
         await lease.LeaseAsync("ses_test_1_000000000000000000000", "main");
+        var tool = NewTool(store);
+
+        var result = await tool.ReleaseAsync("ses_test_1_000000000000000000000");
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.False(doc.RootElement.TryGetProperty("released", out var released) && released.GetBoolean());
+        Assert.Contains("lease_token", doc.RootElement.GetProperty("error").GetString());
+        Assert.Single(await store.ListActiveAsync(cwd, null));
+    }
+
+    [Fact]
+    public async Task Release_NewLeaseWithWrongToken_ReturnsError_AndKeepsLease()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var lease = NewLeaseTool(store, cwd);
+        await lease.LeaseAsync("ses_test_1_000000000000000000000", "main");
+        var tool = NewTool(store);
+
+        var result = await tool.ReleaseAsync("ses_test_1_000000000000000000000", "not-the-right-token-0000000000");
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.Contains("lease_token", doc.RootElement.GetProperty("error").GetString());
+        Assert.Single(await store.ListActiveAsync(cwd, null));
+    }
+
+    [Fact]
+    public async Task Release_LegacyLeaseWithoutToken_ReleasesWithoutToken()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var now = _clock.GetUtcNow();
+        await store.TryLeaseAsync(new CommitLeaseRecord
+        {
+            LeaseId = Ulid.NewUlid().ToString(),
+            CallerId = "ses_test_1_000000000000000000000",
+            Kind = CommitLeaseKind.Commit,
+            Checkout = cwd,
+            Branch = "main",
+            Since = now,
+            LastHeartbeat = now,
+            TtlSeconds = 300,
+            Paths = null,
+            Intent = null,
+            ReleasedAt = null,
+            ReleaseReason = null,
+        });
         var tool = NewTool(store);
 
         var result = await tool.ReleaseAsync("ses_test_1_000000000000000000000");
@@ -124,13 +188,13 @@ public sealed class CommitReleaseToolTests : IDisposable
         public Task<CommitLeaseRecord?> TryLeaseAsync(CommitLeaseRecord candidate, CancellationToken ct = default)
             => throw new InvalidOperationException("store is unavailable");
 
-        public Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, CancellationToken ct = default)
+        public Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, string? leaseToken = null, CancellationToken ct = default)
             => throw new InvalidOperationException("store is unavailable");
 
         public Task<bool> ForceReleaseAsync(string leaseId, CancellationToken ct = default)
             => throw new InvalidOperationException("store is unavailable");
 
-        public Task<bool> HeartbeatAsync(string leaseId, string callerId, CancellationToken ct = default)
+        public Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, CancellationToken ct = default)
             => throw new InvalidOperationException("store is unavailable");
 
         public Task<IReadOnlyList<CommitLeaseRecord>> ListActiveAcrossCheckoutsAsync(string? branch, CancellationToken ct = default)

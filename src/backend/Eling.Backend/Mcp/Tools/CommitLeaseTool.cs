@@ -43,9 +43,10 @@ namespace Eling.Backend.Mcp.Tools;
 /// <c>commit_wait</c>, then call this tool again).
 /// </para>
 /// <para>
-/// Re-claiming your own live lease is idempotent: it succeeds with the same
+/// Re-claiming your own live lease with the same (or no) intent is idempotent: it succeeds with the same
 /// lease_id rather than reporting a conflict, so a retried commit attempt is not
-/// blocked by its own slot. <c>staged_without_lease</c> is a warning, not a hard
+/// blocked by its own slot. A different intent against your own live lease returns
+/// an intent_mismatch error instead of silently handing back the old lease. <c>staged_without_lease</c> is a warning, not a hard
 /// error: it is true when files are staged while the caller holds no live commit
 /// lease of its own.
 /// </para>
@@ -83,7 +84,7 @@ public sealed class CommitLeaseTool
     // Parameter names below use snake_case deliberately: the MCP host passes
     // C# parameter names through to the wire schema unchanged, and the
     // commit_* tool surface is snake_case end to end.
-    [McpServerTool(Name = "commit_lease"), Description("Take the commit lease on this checkout and branch before staging or committing. The conflict check is folded in: verdict 'green' and acquired: true - stage. verdict 'red' and acquired: false - do not stage; a foreign live commit lease holds the slot. verdict 'red' on an acquired lease means foreign file leases collide with your paths - stage nothing until they clear. Returns { acquired, lease_id?, since?, verdict, staged_without_lease, conflicting_file_leases? }; when acquired: false, holder info is in { holder_caller_id, since, lease_age_seconds, intent }. Re-claiming your own live lease is idempotent (succeeds with the same lease_id). branch is optional and is discovered via git when omitted. Call commit_release once the commit lands - and just the same when the attempt fails.")]
+    [McpServerTool(Name = "commit_lease"), Description("Take the commit lease on this checkout and branch before staging or committing. The conflict check is folded in: verdict 'green' and acquired: true - stage. verdict 'red' and acquired: false - do not stage; a foreign live commit lease holds the slot. verdict 'red' on an acquired lease means foreign file leases collide with your paths - stage nothing until they clear. Returns { acquired, lease_id?, since?, verdict, staged_without_lease, conflicting_file_leases? }; when acquired: false, holder info is in { holder_caller_id, since, lease_age_seconds, intent }. Re-claiming your own live lease with the same (or no) intent is idempotent (succeeds with the same lease_id). A different intent against your own live lease returns an intent_mismatch error (lease unchanged). branch is optional and is discovered via git when omitted. The claim issues a lease_token that this session must present to commit_release to end the claim; if this session did not supply one, callers holding a lease will receive a missing_lease_token error from commit_release. Call commit_release once the commit lands - and just the same when the attempt fails.")]
     public async Task<string> LeaseAsync(
         [Description("The caller's stable identifier. Any non-blank string of at least 24 characters you choose - a slug, a UUID, or your host's session id; pass the same value on every call. If your identifier carries a date, put the date FIRST (e.g. 2026-11-15-...), never last, so plain lexical sorting matches chronological order. The format is not validated.")] string caller_id,
         [Description("Current branch of the checkout. Optional; discovered via git when omitted. Pass it to skip discovery (e.g. when git is unavailable).")] string? branch = null,
@@ -156,6 +157,14 @@ public sealed class CommitLeaseTool
             var stagedWithoutLease = (git?.HasStagedChanges ?? false) && ownCommitLease is null;
             var verdict = (holder is not null || conflictItems is not null) ? "red" : "green";
 
+            // 128-bit token that only the claiming session ever sees. It is
+            // required for release and heartbeat once the lease has it, so a
+            // sibling that learned this session's caller_id (list_active, SSE,
+            // dashboard, lease.json) cannot release the slot from under us.
+            // The store does NOT re-issue or re-show it if a sibling reads the
+            // file.
+            var leaseToken = Ulid.NewUlid().ToString();
+
             var candidate = new CommitLeaseRecord
             {
                 LeaseId = Ulid.NewUlid().ToString(),
@@ -167,20 +176,43 @@ public sealed class CommitLeaseTool
                 LastHeartbeat = now,
                 TtlSeconds = DefaultTtlSeconds,
                 Paths = NormalizePaths(paths),
-                Intent = CommitLeaseToolHelpers.NormalizeIntent(intent)
+                Intent = CommitLeaseToolHelpers.NormalizeIntent(intent),
+                LeaseToken = leaseToken,
             };
+
+            var requestIntent = CommitLeaseToolHelpers.NormalizeIntent(intent);
 
             // Idempotent re-entry, decided before the store gate: a live commit
             // lease of our own anywhere in the scope is the slot; return it
-            // rather than double-claim. The store's conflict check cannot see
-            // this scope (it is branch-scoped), and no caller ever wants two
-            // records for one session.
+            // rather than double-claim - but only when the caller asked for no
+            // intent or the same intent as the held lease. A different intent
+            // means the caller lost track of its own live lease; return the
+            // mismatch explicitly (with the held lease's info) instead of
+            // silently handing it back under an unrelated intent claim. The
+            // store's conflict check cannot see this scope (it is branch-scoped).
             if (ownCommitLease is not null)
             {
+                var heldIntent = CommitLeaseToolHelpers.NormalizeIntent(ownCommitLease.Intent);
+                if (requestIntent is not null && heldIntent is not null
+                    && !string.Equals(requestIntent, heldIntent, StringComparison.Ordinal))
+                {
+                    return CommitLeaseToolHelpers.Serialize(new CommitLeaseIntentMismatch
+                    {
+                        Acquired = false,
+                        Error = $"intent_mismatch: lease {ownCommitLease.LeaseId} is held by this session with intent '{heldIntent}'; release it or repeat the call with the same intent.",
+                        LeaseId = ownCommitLease.LeaseId,
+                        Since = ownCommitLease.Since,
+                        HeldIntent = heldIntent,
+                        RequestedIntent = requestIntent,
+                        StagedWithoutLease = stagedWithoutLease,
+                    });
+                }
+
                 return CommitLeaseToolHelpers.Serialize(new CommitLeaseSuccess
                 {
                     Acquired = true,
                     LeaseId = ownCommitLease.LeaseId,
+                    LeaseToken = ownCommitLease.LeaseToken,
                     Since = ownCommitLease.Since,
                     Verdict = verdict,
                     StagedWithoutLease = stagedWithoutLease,
@@ -214,6 +246,7 @@ public sealed class CommitLeaseTool
                 {
                     Acquired = true,
                     LeaseId = candidate.LeaseId,
+                    LeaseToken = candidate.LeaseToken,
                     Since = now,
                     Verdict = verdict,
                     StagedWithoutLease = stagedWithoutLease,
@@ -329,6 +362,9 @@ public sealed class CommitLeaseTool
         [JsonPropertyName("lease_id")]
         public required string LeaseId { get; init; }
 
+        [JsonPropertyName("lease_token")]
+        public string? LeaseToken { get; init; }
+
         [JsonPropertyName("since")]
         public required DateTimeOffset Since { get; init; }
 
@@ -340,6 +376,30 @@ public sealed class CommitLeaseTool
 
         [JsonPropertyName("conflicting_file_leases")]
         public required ConflictingFileLease[]? ConflictingFileLeases { get; init; }
+    }
+
+    private sealed record CommitLeaseIntentMismatch
+    {
+        [JsonPropertyName("acquired")]
+        public required bool Acquired { get; init; }
+
+        [JsonPropertyName("error")]
+        public required string Error { get; init; }
+
+        [JsonPropertyName("lease_id")]
+        public required string LeaseId { get; init; }
+
+        [JsonPropertyName("since")]
+        public required DateTimeOffset Since { get; init; }
+
+        [JsonPropertyName("held_intent")]
+        public required string? HeldIntent { get; init; }
+
+        [JsonPropertyName("requested_intent")]
+        public required string? RequestedIntent { get; init; }
+
+        [JsonPropertyName("staged_without_lease")]
+        public required bool StagedWithoutLease { get; init; }
     }
 
     private sealed record CommitLeaseHeld

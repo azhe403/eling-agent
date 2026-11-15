@@ -33,7 +33,7 @@ branch cannot sweep each other's uncommitted work into one commit. Companion to 
   planned paths), `intent` (one-line summary of the planned commit), `since`,
   `last_heartbeat`, `ttl_seconds` (default 300). Released leases additionally carry
   `released_at` and `release_reason` (`explicit` | `stale` | `post-commit`).
-- The identifier is `caller_id` end to end (renamed 2026-11-14 from `session_id`: agents mistook the name for a host-issued id — and all response/record wire fields followed: `holder_caller_id`, snapshot rows, the audit payload, the on-disk store, and the dashboard). It must be a non-blank string of at least 24 characters — any stable string the caller chooses (a slug, a UUID, or the host's session id), passed as the same value on every call; the format is not validated. Minimum lowered 2026-11-14 from 32: the 32-char floor rejected well-formed 30-character host ids. The on-disk store predates the rename: legacy `sessionId` keys are patched to `callerId` on load, so live leases survive the upgrade.
+- The identifier is `caller_id` end to end (renamed 2026-11-14 from `session_id`: agents mistook the name for a host-issued id — and all response/record wire fields followed: `holder_caller_id`, snapshot rows, the audit payload, the on-disk store, and the dashboard). It must be a non-blank string of at least 24 characters — any stable string the caller chooses (a slug, a UUID, or the host's session id), passed as the same value on every call; the format is not validated. Minimum lowered 2026-11-14 from 32: the 32-char floor rejected well-formed 30-character host ids. The on-disk store predates the rename: legacy `sessionId` keys are patched to `callerId` on load,  so live leases survive the upgrade. Since 2026-11-15 the store also carries an opaque LeaseToken issued per claim; release and heartbeat on a token-carrying lease require that token (legacy leases without one release/heartbeat without it). The token is returned once, to the caller, when the lease is taken; it is never broadcast and never exposed in the snapshot, the SSE frame, the audit trail, or the dashboard.
 - A lease is live while `now - last_heartbeat < ttl` (== ttl is stale); otherwise it drops from
   the active list.
 - One live commit lease per `checkout` + `branch` at a time. A second lessee soft-fails
@@ -46,7 +46,7 @@ branch cannot sweep each other's uncommitted work into one commit. Companion to 
   same `checkout` + `branch`; holder info in the response; do not stage. `acquired: true`
   with `verdict: red` → foreign file leases collide with the paths; you hold the slot but
   stage nothing until they clear. `staged_without_lease` is a warning, not a hard error.
-  Re-claiming your own live lease is idempotent (same lease_id returned). When `branch` is
+  Re-claiming your own live lease is idempotent (same lease_id returned) **only when the requested intent matches the held intent (or none was requested). A different intent against your own live lease returns an `intent_mismatch` error instead — the held lease is untouched**. When `branch` is
   omitted it is discovered via git; when the branch cannot be discovered the fail-safe scope
   is every branch of the checkout.
 - `commit_release(caller_id)` → explicit release; `session_close` releases everything

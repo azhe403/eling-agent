@@ -193,13 +193,13 @@ public sealed class CommitListActiveToolTests : IDisposable
         public Task<CommitLeaseRecord?> TryLeaseAsync(CommitLeaseRecord candidate, CancellationToken ct = default)
             => throw new InvalidOperationException("store is broken");
 
-        public Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, CancellationToken ct = default)
+        public Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, string? leaseToken = null, CancellationToken ct = default)
             => throw new InvalidOperationException("store is broken");
 
         public Task<bool> ForceReleaseAsync(string leaseId, CancellationToken ct = default)
             => throw new InvalidOperationException("store is broken");
 
-        public Task<bool> HeartbeatAsync(string leaseId, string callerId, CancellationToken ct = default)
+        public Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, CancellationToken ct = default)
             => throw new InvalidOperationException("store is broken");
 
         public Task<IReadOnlyList<CommitLeaseRecord>> ListActiveAcrossCheckoutsAsync(string? branch, CancellationToken ct = default)

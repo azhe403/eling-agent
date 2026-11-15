@@ -30,6 +30,15 @@ public sealed record CommitLeaseRecord
 
     public required string? Intent { get; init; }
 
+    /// <summary>
+    /// Secret issued by the server at claim time and returned to the claimant.
+    /// Required for release once set (new leases always carry one). Sibling
+    /// chats can read every public surface (list_active, SSE, dashboard) but
+    /// never see this token — so they cannot release a foreign lease, even
+    /// though they know the owner's caller id.
+    /// </summary>
+    public string? LeaseToken { get; init; }
+
     public DateTimeOffset? ReleasedAt { get; init; }
 
     public string? ReleaseReason { get; init; }

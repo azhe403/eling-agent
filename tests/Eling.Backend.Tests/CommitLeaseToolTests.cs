@@ -198,6 +198,94 @@ public sealed class CommitLeaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task OwnLease_Reentry_WithSameIntent_IsIdempotent()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        var first = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", intent: "land the fix");
+        var second = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", intent: "land the fix");
+
+        using var firstDoc = JsonDocument.Parse(first);
+        using var secondDoc = JsonDocument.Parse(second);
+        Assert.True(firstDoc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.True(secondDoc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal(firstDoc.RootElement.GetProperty("lease_id").GetString(), secondDoc.RootElement.GetProperty("lease_id").GetString());
+        Assert.Equal(firstDoc.RootElement.GetProperty("since").GetDateTimeOffset(), secondDoc.RootElement.GetProperty("since").GetDateTimeOffset());
+    }
+
+    [Fact]
+    public async Task OwnLease_Reentry_WithDifferentIntent_ReturnsIntentMismatch()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        var first = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", intent: "first task");
+        var second = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", intent: "second task");
+
+        using var firstDoc = JsonDocument.Parse(first);
+        using var secondDoc = JsonDocument.Parse(second);
+        Assert.True(firstDoc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.False(secondDoc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Contains("intent_mismatch", secondDoc.RootElement.GetProperty("error").GetString());
+        Assert.Equal(firstDoc.RootElement.GetProperty("lease_id").GetString(), secondDoc.RootElement.GetProperty("lease_id").GetString());
+        Assert.Equal("first task", secondDoc.RootElement.GetProperty("held_intent").GetString());
+        Assert.Equal("second task", secondDoc.RootElement.GetProperty("requested_intent").GetString());
+        // lease unchanged: still only one lease in the store
+        Assert.Single(await store.ListAllAsync());
+    }
+
+    [Fact]
+    public async Task OwnLease_Reentry_WithAbsentIntent_StillIdempotent()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        var first = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", intent: "first task");
+        var second = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main");
+
+        using var firstDoc = JsonDocument.Parse(first);
+        using var secondDoc = JsonDocument.Parse(second);
+        Assert.True(firstDoc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.True(secondDoc.RootElement.GetProperty("acquired").GetBoolean());
+        Assert.Equal(firstDoc.RootElement.GetProperty("lease_id").GetString(), secondDoc.RootElement.GetProperty("lease_id").GetString());
+    }
+
+    [Fact]
+    public async Task OwnLease_Reentry_NullPreviousIntent_SameIntentRequest_Acquires()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        // lease created without intent; second call with intent is treated as same-slot re-entry (held intent absent, no contradiction)
+        await tool.LeaseAsync("ses_test_1_000000000000000000000", "main");
+        var second = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", intent: "landing the fix");
+
+        using var doc = JsonDocument.Parse(second);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+    }
+
+    [Fact]
+    public async Task OwnLease_Reentry_WithDifferentIntent_AfterRelease_AcquiresFresh()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        var first = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", intent: "first task");
+        var leaseToken = JsonDocument.Parse(first).RootElement.GetProperty("lease_token").GetString();
+        await store.ReleaseAsync("ses_test_1_000000000000000000000", CommitLeaseKind.Commit, leaseToken);
+        var third = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", intent: "second task");
+
+        using var doc = JsonDocument.Parse(third);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+    }
+
+    [Fact]
     public async Task OwnLease_Reentry_IsIdempotent()
     {
         using var store = NewStore();

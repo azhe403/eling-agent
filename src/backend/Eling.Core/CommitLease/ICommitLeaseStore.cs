@@ -34,8 +34,15 @@ public interface ICommitLeaseStore
     /// filtered by <paramref name="kind"/>), moving them to the
     /// recently-released list with reason <c>explicit</c>. Returns true when
     /// at least one lease was removed.
+    /// <para>
+    /// If any of the owned leases carries a lease token issued at claim time,
+    /// <paramref name="leaseToken"/> must match ALL such tokens (one shared
+    /// token is issued per claim in this codebase; owned leases either all
+    /// carry it or none do). A missing or mismatched token leaves those
+    /// leases untouched and returns false.
+    /// </para>
     /// </summary>
-    Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, CancellationToken ct = default);
+    Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, string? leaseToken = null, CancellationToken ct = default);
 
     /// <summary>
     /// Removes the one live lease identified by <paramref name="leaseId"/>,
@@ -52,10 +59,11 @@ public interface ICommitLeaseStore
     /// <summary>
     /// Extends <see cref="CommitLeaseRecord.LastHeartbeat"/> to now, but only when
     /// the lease identified by <paramref name="leaseId"/> is owned by
-    /// <paramref name="callerId"/>. Returns false otherwise (and never
-    /// revives a stale lease that has already been swept).
+    /// <paramref name="callerId"/> and, if the stored lease carries a lease
+    /// token, <paramref name="leaseToken"/> matches it. Returns false
+    /// otherwise (and never revives a stale lease that has already been swept).
     /// </summary>
-    Task<bool> HeartbeatAsync(string leaseId, string callerId, CancellationToken ct = default);
+    Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, CancellationToken ct = default);
 
     /// <summary>
     /// Released leases for <paramref name="checkout"/>, newest first, capped

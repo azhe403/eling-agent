@@ -128,7 +128,7 @@ public sealed class JsonCommitLeaseStore : ICommitLeaseStore, IDisposable
         return conflict;
     }
 
-    public async Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, CancellationToken ct = default)
+    public async Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, string? leaseToken = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(callerId)) return false;
         var releasedAny = false;
@@ -142,6 +142,14 @@ public sealed class JsonCommitLeaseStore : ICommitLeaseStore, IDisposable
                 .Where(l => string.Equals(l.CallerId, callerId, StringComparison.Ordinal))
                 .Where(l => kind is null || l.Kind == kind)
                 .ToList();
+            // Only the token the store issued at claim time can release a lease it issued one for.
+            // A lease with no token (legacy record before lease tokens existed) releases freely.
+            var tokenRequired = owned.Any(l => !string.IsNullOrWhiteSpace(l.LeaseToken));
+            if (tokenRequired)
+            {
+                if (string.IsNullOrWhiteSpace(leaseToken)) return;
+                if (owned.Any(l => !string.IsNullOrWhiteSpace(l.LeaseToken) && !string.Equals(l.LeaseToken, leaseToken, StringComparison.Ordinal))) return;
+            }
             if (owned.Count > 0)
             {
                 foreach (var lease in owned)
@@ -189,7 +197,7 @@ public sealed class JsonCommitLeaseStore : ICommitLeaseStore, IDisposable
         return releasedTarget;
     }
 
-    public async Task<bool> HeartbeatAsync(string leaseId, string callerId, CancellationToken ct = default)
+    public async Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(leaseId) || string.IsNullOrWhiteSpace(callerId)) return false;
         var extended = false;
@@ -200,7 +208,10 @@ public sealed class JsonCommitLeaseStore : ICommitLeaseStore, IDisposable
             var now = _timeProvider.GetUtcNow();
             changed = SweepStaleLocked(data, now);
             var idx = data.Active.FindIndex(l => string.Equals(l.LeaseId, leaseId, StringComparison.Ordinal));
-            if (idx >= 0 && string.Equals(data.Active[idx].CallerId, callerId, StringComparison.Ordinal))
+            if (idx >= 0
+                && string.Equals(data.Active[idx].CallerId, callerId, StringComparison.Ordinal)
+                && (string.IsNullOrWhiteSpace(data.Active[idx].LeaseToken)
+                    || string.Equals(data.Active[idx].LeaseToken, leaseToken, StringComparison.Ordinal)))
             {
                 data.Active[idx] = data.Active[idx] with { LastHeartbeat = now };
                 extended = true;
