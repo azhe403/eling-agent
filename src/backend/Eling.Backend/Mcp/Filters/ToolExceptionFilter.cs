@@ -31,7 +31,16 @@ public static class ToolExceptionFilter
                 var logger = context.Services?.GetService<ILoggerFactory>()?.CreateLogger(typeof(ToolExceptionFilter))
                     ?? NullLogger.Instance;
 
-                logger.LogError(ex, "Tool '{ToolName}' threw an unhandled exception.", toolName);
+                if (ex is Eling.Core.Exceptions.InvalidProjectTargetException invalid)
+                {
+                    // Expected caller-input validation failure (unknown
+                    // ancestor scope): short warning, no stack trace.
+                    logger.LogWarning("Tool '{ToolName}' rejected: {Message}", toolName, invalid.Message);
+                }
+                else
+                {
+                    logger.LogError(ex, "Tool '{ToolName}' threw an unhandled exception.", toolName);
+                }
 
                 return new CallToolResult
                 {
