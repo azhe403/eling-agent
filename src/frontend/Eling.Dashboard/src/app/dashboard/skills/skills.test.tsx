@@ -72,13 +72,23 @@ const externalDetail = {
 
 const state = {
   trashed: new Set<string>(),
+  adopted: new Set<string>(),
   putBodies: [] as Array<Record<string, unknown>>,
   deleteCalls: [] as string[],
   restoreCalls: [] as string[],
+  adoptCalls: [] as string[],
+}
+
+function summaryFor<T extends { id: string; origin: string }>(base: T) {
+  return state.adopted.has(base.id) ? { ...base, origin: "eling" } : base
+}
+
+function detailFor<T extends { id: string; origin: string }>(base: T) {
+  return state.adopted.has(base.id) ? { ...base, origin: "eling" } : base
 }
 
 function listEnvelope(originParam: string | null, includeTrashed: boolean) {
-  let items = [elingSummary, externalSummary]
+  let items = [summaryFor(elingSummary), summaryFor(externalSummary)]
   if (originParam) items = items.filter((s) => s.origin === originParam)
   if (!includeTrashed) items = items.filter((s) => !state.trashed.has(s.id))
   return {
@@ -89,9 +99,11 @@ function listEnvelope(originParam: string | null, includeTrashed: boolean) {
 
 beforeEach(() => {
   state.trashed = new Set()
+  state.adopted = new Set()
   state.putBodies = []
   state.deleteCalls = []
   state.restoreCalls = []
+  state.adoptCalls = []
 
   vi.stubGlobal(
     "fetch",
@@ -108,7 +120,15 @@ beforeEach(() => {
         const id = decodeURIComponent(restoreMatch[1])
         state.restoreCalls.push(id)
         state.trashed.delete(id)
-        return env(id === ELING_ID ? elingDetail : externalDetail)
+        return env(id === ELING_ID ? elingDetail : detailFor(externalDetail))
+      }
+
+      const adoptMatch = url.match(/\/api\/skills\/([^/?]+)\/adopt/)
+      if (adoptMatch && method === "POST") {
+        const id = decodeURIComponent(adoptMatch[1])
+        state.adoptCalls.push(id)
+        state.adopted.add(id)
+        return env(id === ELING_ID ? elingDetail : detailFor(externalDetail))
       }
 
       const idMatch = url.match(/\/api\/skills\/([^/?]+)(?:\?.*)?$/)
@@ -118,7 +138,7 @@ beforeEach(() => {
           return errEnv(404, "skill_not_found", "No skill with that id exists.")
         }
         if (id === ELING_ID) return env(elingDetail)
-        if (id === EXTERNAL_ID) return env(externalDetail)
+        if (id === EXTERNAL_ID) return env(detailFor(externalDetail))
         return errEnv(404, "skill_not_found", "No skill with that id exists.")
       }
       if (idMatch && method === "PUT") {
@@ -184,6 +204,33 @@ describe("SkillsList", () => {
     expect(await screen.findByText(/managed by other tooling/i)).toBeTruthy()
     expect(screen.getByRole("button", { name: /^edit$/i })).toHaveProperty("disabled", true)
     expect(screen.getByRole("button", { name: /delete skill/i })).toHaveProperty("disabled", false)
+  })
+
+  it("external skill shows Adopt; confirming adopts in place and enables Edit", async () => {
+    render(<SkillsList />)
+    fireEvent.click(await screen.findByText("fixture-external-skill"))
+
+    // The primary action for an external skill is Adopt; Edit stays disabled.
+    expect(await screen.findByText(/managed by other tooling/i)).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Adopt skill" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /^edit$/i })).toHaveProperty("disabled", true)
+
+    fireEvent.click(screen.getByRole("button", { name: "Adopt skill" }))
+
+    // The confirm dialog names the skill; its path appears (panel header + dialog).
+    expect(await screen.findByText(/Ownership moves to Eling in place/i)).toBeTruthy()
+    expect(
+      (await screen.findAllByText("/catalog/skills/fixture-external-skill/SKILL.md")).length,
+    ).toBeGreaterThanOrEqual(2)
+
+    fireEvent.click(screen.getByRole("button", { name: /^adopt$/i }))
+
+    await waitFor(() => expect(state.adoptCalls).toEqual([EXTERNAL_ID]))
+    // The panel refreshed in place: Eling-managed view, Edit enabled, Adopt gone.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^edit$/i })).toHaveProperty("disabled", false),
+    )
+    expect(screen.queryByRole("button", { name: "Adopt skill" })).toBeNull()
   })
 
   it("delete external skill confirms with the external dialog and moves it to trash", async () => {

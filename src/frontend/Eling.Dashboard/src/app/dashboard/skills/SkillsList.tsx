@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Loader2,
+  PackageCheck,
   Plus,
   RefreshCcw,
   RefreshCw,
@@ -73,6 +74,7 @@ export function SkillsList() {
   const [createMode, setCreateMode] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<SkillListItem | null>(null)
   const deleteIsExternal = deleteTarget?.origin === "external"
+  const [adoptTarget, setAdoptTarget] = useState<SkillListItem | null>(null)
 
   // Error banner auto-dismisses so a stale failure never sticks around.
   useEffect(() => {
@@ -276,6 +278,25 @@ export function SkillsList() {
     [load],
   )
 
+  const handleAdopt = useCallback(async () => {
+    if (!adoptTarget) return
+    const target = adoptTarget
+    setAdoptTarget(null)
+    try {
+      // The response is the adopted skill (origin flipped to eling); adopting
+      // is permanent, so the panel immediately re-renders as Eling-managed.
+      const adopted = await apiFetch<Skill>(
+        `/api/skills/${encodeURIComponent(target.id)}/adopt`,
+        { method: "POST" },
+      )
+      setDetailState({ id: adopted.id, skill: adopted, error: null })
+      setNotice(`"${target.name}" is now Eling-managed.`)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Adopt failed")
+    }
+  }, [adoptTarget, load])
+
   const handleRescan = useCallback(async () => {
     setRescanning(true)
     setError(null)
@@ -317,6 +338,10 @@ export function SkillsList() {
       onDelete={(id) => {
         const target = skills.find((s) => s.id === id) ?? null
         setDeleteTarget(target)
+      }}
+      onAdopt={(id) => {
+        const target = skills.find((s) => s.id === id) ?? null
+        setAdoptTarget(target)
       }}
       onRestore={(id) => void handleRestore(id)}
     />
@@ -479,6 +504,7 @@ export function SkillsList() {
                     trashMode={trashMode}
                     onSelect={handleSelect}
                     onDelete={(s) => setDeleteTarget(s)}
+                    onAdopt={(s) => setAdoptTarget(s)}
                   />
                 ))}
               </div>
@@ -524,6 +550,35 @@ export function SkillsList() {
             >
               <Trash2 className="size-4" />
               Move to Trash
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={adoptTarget !== null} onOpenChange={(open) => !open && setAdoptTarget(null)}>
+        <AlertDialogContent className="w-[94vw] sm:max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Adopt {adoptTarget?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Ownership moves to Eling in place — the folder and SKILL.md stay exactly where
+              they are; only the frontmatter gains Eling keys (id, createdAt, updatedAt) and
+              the index row flips to Eling-managed. This is permanent and cannot be undone
+              from the UI. If the frontmatter cannot be parsed, the adoption is refused and
+              nothing is changed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {adoptTarget && (
+            <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">{adoptTarget.name}</span>
+              <span className="mx-2">·</span>
+              <span className="break-all font-mono">{adoptTarget.path}</span>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void handleAdopt()}>
+              <PackageCheck className="size-4" />
+              Adopt
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

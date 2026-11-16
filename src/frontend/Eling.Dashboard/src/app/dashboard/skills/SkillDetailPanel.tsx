@@ -6,6 +6,7 @@ import {
   Copy,
   ExternalLink,
   Loader2,
+  PackageCheck,
   Pencil,
   RotateCcw,
   Trash2,
@@ -44,6 +45,7 @@ export type SkillDetailPanelProps = {
   onCreate: (data: SkillFormData) => Promise<void>
   onDelete: (id: string) => void
   onRestore: (id: string) => void
+  onAdopt: (id: string) => void
 }
 
 function parseTags(input: string): string[] {
@@ -66,6 +68,7 @@ export function SkillDetailPanel({
   onCreate,
   onDelete,
   onRestore,
+  onAdopt,
 }: SkillDetailPanelProps) {
   // The parent keys this panel on (createMode | skill id), so entering
   // create mode or switching skills remounts with fresh form state — no
@@ -85,6 +88,9 @@ export function SkillDetailPanel({
   // Delete is the one mutation open to external skills: the folder moves to
   // trash untouched and can be restored — never edited.
   const canDelete = !createMode && !trashMode && (skill !== null || summary !== null)
+  // Adopt is the one-way ownership flip open to external skills: permanent,
+  // in place, content preserved. Only offered for external skills in view mode.
+  const canAdopt = !createMode && !trashMode && isExternal && (skill !== null || summary !== null)
   const canRestore = !createMode && trashMode
 
   // Escape closes the panel in view mode only — in (create|edit) forms the
@@ -226,6 +232,18 @@ export function SkillDetailPanel({
             </>
           ) : (
             <>
+              {canAdopt && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => summary && onAdopt(summary.id)}
+                  aria-label="Adopt skill"
+                  title="Adopt this skill into Eling management (permanent, in place)"
+                >
+                  <PackageCheck className="size-4" />
+                  Adopt
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -250,7 +268,7 @@ export function SkillDetailPanel({
                 disabled={!canEdit}
                 title={
                   isExternal
-                    ? "External skills are read-only for Eling"
+                    ? "External skills are read-only for Eling — adopt them first"
                     : "Edit this skill"
                 }
               >
@@ -371,7 +389,8 @@ export function SkillDetailPanel({
                 <ExternalLink className="mt-0.5 size-3.5 shrink-0" />
                 <span>
                   External (managed by other tooling) — Eling never edits this
-                  folder; Delete moves it to trash (restorable).
+                  folder; Delete moves it to trash (restorable). Adopt takes
+                  ownership in place, permanently.
                 </span>
               </div>
             )}

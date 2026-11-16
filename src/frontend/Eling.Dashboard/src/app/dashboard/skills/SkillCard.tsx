@@ -1,6 +1,6 @@
 "use client"
 
-import { Trash2 } from "lucide-react"
+import { PackageCheck, Trash2 } from "lucide-react"
 
 import { utcToLocal } from "@/lib/date-utils"
 import type { SkillListItem } from "@/lib/types"
@@ -12,6 +12,8 @@ export type SkillCardProps = {
   trashMode: boolean
   onSelect: (skill: SkillListItem) => void
   onDelete?: (skill: SkillListItem) => void
+  /** Quick action shown for external skills only; opens the adopt confirm dialog. */
+  onAdopt?: (skill: SkillListItem) => void
 }
 
 export function originBadgeClass(origin: string): string {
@@ -20,7 +22,7 @@ export function originBadgeClass(origin: string): string {
     : "bg-blue-500/10 text-blue-600 dark:text-blue-400"
 }
 
-export function SkillCard({ skill, selected, trashMode, onSelect, onDelete }: SkillCardProps) {
+export function SkillCard({ skill, selected, trashMode, onSelect, onDelete, onAdopt }: SkillCardProps) {
   return (
     <button
       type="button"
@@ -54,6 +56,28 @@ export function SkillCard({ skill, selected, trashMode, onSelect, onDelete }: Sk
           <span className="text-[11px] text-muted-foreground">
             Updated: {utcToLocal(skill.updatedAt)}
           </span>
+          {!trashMode && onAdopt && skill.origin === "external" && (
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label={`Adopt ${skill.name}`}
+              title="Adopt — take ownership in place (permanent)"
+              onClick={(e) => {
+                e.stopPropagation()
+                onAdopt(skill)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onAdopt(skill)
+                }
+              }}
+              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <PackageCheck className="size-3.5" />
+            </span>
+          )}
           {!trashMode && onDelete && (
             <span
               role="button"
