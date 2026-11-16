@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import {
   Check,
   Copy,
@@ -22,9 +22,6 @@ import { utcToLocal } from "@/lib/date-utils"
 import type { Skill, SkillFormData, SkillListItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { originBadgeClass } from "./SkillCard"
-
-/** ~40 lines / ~4000 characters, whichever the body hits first. */
-const EXCERPT_LIMIT = 4000
 
 export type SkillDetailPanelProps = {
   /** "aside" docks right of the grid (wide screens); "stacked" renders under it. */
@@ -103,12 +100,6 @@ export function SkillDetailPanel({
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [onClose, mode])
 
-  const excerpt = useMemo(() => {
-    const text = skill?.body ?? ""
-    if (text.length <= EXCERPT_LIMIT) return { text, truncated: false }
-    return { text: text.slice(0, EXCERPT_LIMIT), truncated: true }
-  }, [skill?.body])
-
   const copy = (text: string, field: string) => {
     navigator.clipboard?.writeText(text).catch(() => {
       // Clipboard can be blocked; the copy is a convenience, never an error.
@@ -170,14 +161,22 @@ export function SkillDetailPanel({
   const relatedMemories = skill?.relatedMemories ?? []
   const relatedSnippets = skill?.relatedSnippets ?? []
 
+  const isEditor = mode === "edit"
+
   const containerClasses =
     variant === "aside"
-      ? "sticky top-16 hidden max-h-[calc(100dvh-4rem)] w-[44%] shrink-0 flex-col self-start overflow-y-auto border-l bg-background xl:flex"
-      : "flex w-full flex-col rounded-xl border bg-background xl:hidden"
+      ? cn(
+          "sticky top-16 hidden flex-1 min-w-[380px] shrink-0 flex-col border-l bg-background xl:flex",
+          // Editor = full-height editor surface; view mode hugs content.
+          isEditor
+            ? "h-[calc(100dvh-4rem)] overflow-hidden"
+            : "max-h-[calc(100dvh-4rem)] overflow-y-auto self-start"
+        )
+      : "flex w-full min-w-0 flex-col rounded-xl border bg-background xl:hidden"
 
   return (
     <aside aria-label="Skill detail" className={cn("flex-col", containerClasses)}>
-      <div className="flex min-h-0 flex-col gap-3 p-4">
+      <div className={cn("flex min-h-0 flex-col gap-3 p-4", isEditor && "h-full flex-1")}>
         {/* Header: name + origin badge + close */}
         <div className="flex items-start justify-between gap-2 border-b border-border/40 pb-3">
           <div className="min-w-0">
@@ -224,7 +223,8 @@ export function SkillDetailPanel({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => summary && onRestore(summary.id)}
+                className="h-9 gap-2 px-3 text-xs"
+                  onClick={() => summary && onRestore(summary.id)}
               >
                 <RotateCcw className="size-4" />
                 Restore
@@ -239,15 +239,16 @@ export function SkillDetailPanel({
                   onClick={() => summary && onAdopt(summary.id)}
                   aria-label="Adopt skill"
                   title="Adopt this skill into Eling management (permanent, in place)"
+                  className="h-9 gap-2 px-3 text-xs font-semibold"
                 >
                   <PackageCheck className="size-4" />
                   Adopt
                 </Button>
               )}
               <Button
-                variant="ghost"
-                size="icon"
-                className="size-8 text-muted-foreground hover:text-destructive"
+                variant="outline"
+                size="sm"
+                className="h-9 gap-2 px-3 text-xs text-muted-foreground hover:text-destructive"
                 onClick={() => summary && onDelete(summary.id)}
                 disabled={!canDelete}
                 aria-label="Delete skill"
@@ -260,10 +261,12 @@ export function SkillDetailPanel({
                 }
               >
                 <Trash2 className="size-4" />
+              Delete
               </Button>
               <Button
                 variant="outline"
                 size="sm"
+                className="h-9 gap-2 px-3 text-xs"
                 onClick={enterEdit}
                 disabled={!canEdit}
                 title={
@@ -281,7 +284,7 @@ export function SkillDetailPanel({
         )}
 
         {mode === "edit" ? (
-          <div className="flex flex-col gap-3">
+          <div className="flex min-h-0 flex-1 flex-col gap-3">
             {saveError && (
               <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-xs text-destructive">
                 {saveError}
@@ -320,14 +323,14 @@ export function SkillDetailPanel({
                 placeholder="comma, separated, tags"
               />
             </div>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex min-h-0 flex-1 flex-col gap-1.5">
               <Label htmlFor="skill-body">SKILL.md body</Label>
               <textarea
                 id="skill-body"
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 spellCheck={false}
-                className="min-h-48 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs leading-relaxed shadow-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+                className="h-full min-h-48 w-full resize-none rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs leading-relaxed shadow-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
                 placeholder={"# Skill\n\nWhat the agent should do…"}
               />
             </div>
@@ -384,8 +387,22 @@ export function SkillDetailPanel({
               </div>
             </dl>
 
+            {/* Tag chips */}
+            {displayTags.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                {displayTags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-md bg-secondary px-2 py-0.5 text-secondary-foreground"
+                  >
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            )}
+
             {isExternal && (
-              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[10px] leading-snug text-amber-700 dark:text-amber-400">
                 <ExternalLink className="mt-0.5 size-3.5 shrink-0" />
                 <span>
                   External (managed by other tooling) — Eling never edits this
@@ -419,12 +436,13 @@ export function SkillDetailPanel({
                           key={`mem-${ref.id}`}
                           className="flex items-center justify-between gap-2 rounded-md bg-muted/40 px-2 py-1 text-[11px]"
                         >
-                          <span
-                            className="min-w-0 truncate font-mono"
-                            title={ref.id}
+                          <a
+                            href={`/dashboard/memories?q=${encodeURIComponent(ref.id)}`}
+                            className="min-w-0 truncate font-mono text-foreground underline-offset-2 hover:text-primary hover:underline"
+                            title={`Open memories search for ${ref.id}`}
                           >
                             {ref.id}
-                          </span>
+                          </a>
                           <span className="shrink-0 text-muted-foreground">
                             {ref.scope ? `${ref.scope} · ` : ""}
                             {ref.relation}
@@ -451,6 +469,19 @@ export function SkillDetailPanel({
                           >
                             {ref.id}
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => copy(ref.id, `snippet-${ref.id}`)}
+                            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                            aria-label={`Copy snippet id ${ref.id}`}
+                            title="Copy snippet id"
+                          >
+                            {copiedField === `snippet-${ref.id}` ? (
+                              <Check className="size-3.5 text-green-500" />
+                            ) : (
+                              <Copy className="size-3.5" />
+                            )}
+                          </button>
                           <span className="shrink-0 text-muted-foreground">
                             {ref.relation}
                           </span>
@@ -459,23 +490,6 @@ export function SkillDetailPanel({
                     </ul>
                   </div>
                 )}
-
-                {/* SKILL.md excerpt (preformatted, truncated) */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      SKILL.md excerpt
-                    </div>
-                    {excerpt.truncated && (
-                      <span className="text-[10px] text-muted-foreground">
-                        truncated — first {EXCERPT_LIMIT} chars
-                      </span>
-                    )}
-                  </div>
-                  <pre className="max-h-56 overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
-                    {excerpt.text}
-                  </pre>
-                </div>
 
                 {/* Full body */}
                 <div className="flex flex-col gap-1.5">
@@ -488,20 +502,6 @@ export function SkillDetailPanel({
                 </div>
               </>
             ) : null}
-
-            {/* Tag chips */}
-            {displayTags.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                {displayTags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-md bg-secondary px-2 py-0.5 text-secondary-foreground"
-                  >
-                    #{tag}
-                  </span>
-                ))}
-              </div>
-            )}
 
           </>
         )}

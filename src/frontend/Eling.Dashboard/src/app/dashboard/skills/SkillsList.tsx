@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
+  ChevronDown,
+  ChevronUp,
   Loader2,
   PackageCheck,
   Plus,
@@ -21,12 +23,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { LoadingBar } from "@/components/ui/loading-bar"
 import { Switch } from "@/components/ui/switch"
 import { useMediaQuery } from "@/hooks/use-media-query"
+import { usePersistedState, useResumePageParams } from "@/lib/persisted-state"
 import { XL_BREAKPOINT } from "@/lib/constants"
 import { apiFetch, ApiError } from "@/lib/api"
 import type {
@@ -42,12 +51,15 @@ import { SkillDetailPanel } from "./SkillDetailPanel"
 const ORIGINS = ["all", "eling", "external"] as const
 type OriginFilter = (typeof ORIGINS)[number]
 
+/** One folder the catalog scan could not index (REST rescan payload). */
+type SkillRescanFailure = { path: string; reason: string }
+
 export function SkillsList() {
   const wide = useMediaQuery(`(min-width: ${XL_BREAKPOINT}px)`)
 
   const [skills, setSkills] = useState<SkillListItem[]>([])
-  // `total` counts the whole catalog (incl. trashed); `matching` is what
-  // survives the q/tag/origin filters — both reported by the backend.
+  // `total` is the request's selection (includeTrashed honored, origin ignored);
+  // `matching` is what survives the q/tag/origin filters — both reported by the backend.
   const [total, setTotal] = useState(0)
   const [matching, setMatching] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -55,14 +67,69 @@ export function SkillsList() {
   // Short-lived info line (rescan report, restore confirmation); auto-dismisses.
   const [notice, setNotice] = useState<string | null>(null)
   const [rescanning, setRescanning] = useState(false)
+  // Failure details from the last rescan, when it reported failures > 0.
+  // Stays visible until the next rescan so it can be acted on.
+  const [rescanFailures, setRescanFailures] = useState<SkillRescanFailure[] | null>(null)
+  const [failuresTruncated, setFailuresTruncated] = useState(false)
+  const [failuresExpanded, setFailuresExpanded] = useState(true)
 
-  const [query, setQuery] = useState("")
-  const [debouncedQuery, setDebouncedQuery] = useState("")
-  const [origin, setOrigin] = useState<OriginFilter>("all")
-  const [tag, setTag] = useState<string | null>(null)
-  const [trashMode, setTrashMode] = useState(false)
+  // Query/scope state is URL+localStorage-backed (reload/back/forward/shared
+  // links land on the same view; a bare visit resumes the last position).
+  const [query, setQuery] = usePersistedState<string>({
+    page: "skills",
+    param: "q",
+    defaultValue: "",
+  })
+  // Free-text search: the input owns the draft; only a debounced commit
+  // reaches the persisted query (URL + localStorage) — keystrokes stay snappy.
+  const [draftQuery, setDraftQuery] = useState(query)
+  const [origin, setOrigin] = usePersistedState<OriginFilter>({
+    page: "skills",
+    param: "origin",
+    defaultValue: "all",
+    allowed: ORIGINS,
+  })
+  const [sort, setSort] = usePersistedState<"name" | "updated">({
+    page: "skills",
+    param: "sort",
+    defaultValue: "name",
+    allowed: ["name", "updated"],
+  })
+  const [trashModeParam, setTrashModeParam] = usePersistedState<"0" | "1">({
+    page: "skills",
+    param: "trash",
+    defaultValue: "0",
+    allowed: ["0", "1"],
+  })
+  const trashMode = trashModeParam === "1"
+  const setTrashMode = (checked: boolean) => setTrashModeParam(checked ? "1" : "0")
+  const [tagParam, setTagParam] = usePersistedState<string>({
+    page: "skills",
+    param: "tag",
+    defaultValue: "",
+  })
+  const tag = tagParam === "" ? null : tagParam
+  const setTag = (t: string | null) => setTagParam(t ?? "")
+  // Detail panel: the selected skill name is remembered (URL + localStorage)
+  // so revisiting the page reopens it; "" = panel closed.
+  const [selectedName, setSelectedName] = usePersistedState<string>({
+    page: "skills",
+    param: "skill",
+    defaultValue: "",
+  })
+  useResumePageParams("skills", [
+    { param: "q", defaultValue: "" },
+    { param: "origin", defaultValue: "all" },
+    { param: "sort", defaultValue: "name" },
+    { param: "trash", defaultValue: "0" },
+    { param: "tag", defaultValue: "" },
+    { param: "skill", defaultValue: "" },
+  ])
 
-  const [selected, setSelected] = useState<SkillListItem | null>(null)
+  const selected = useMemo(
+    () => (selectedName === "" ? null : (skills.find((s) => s.name === selectedName) ?? null)),
+    [skills, selectedName],
+  )
   // Detail is keyed by skill id so a stale entry from a previous selection
   // can never be mistaken for the current one — no effect reset needed.
   const [detailState, setDetailState] = useState<{
@@ -88,38 +155,70 @@ export function SkillsList() {
     return () => clearTimeout(t)
   }, [notice])
 
-  // The search box types faster than a request should go out: 400ms of quiet
-  // before the query reaches the backend, which owns filtering and counting.
+  // Keep the input in step with the persisted query (e.g. clause resumed
+  // on mount into the URL after a bare visit). Derivation happens during
+  // render; no effect needed.
+  const [prevQuery, setPrevQuery] = useState(query)
+  if (prevQuery !== query) {
+    setPrevQuery(query)
+    setDraftQuery(query)
+  }
+
+  // Debounced commit of the search draft into the persisted query.
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(query), 400)
+    const timer = setTimeout(() => setQuery(draftQuery), 400)
     return () => clearTimeout(timer)
-  }, [query])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftQuery])
 
   const load = useCallback(async () => {
     try {
       const params = new URLSearchParams()
       params.set("pageSize", "100")
-      params.set("sort", "name")
-      if (debouncedQuery.trim()) params.set("q", debouncedQuery.trim())
+      params.set("sort", sort)
+      if (query.trim()) params.set("q", query.trim())
       if (tag) params.set("tag", tag)
       if (origin !== "all") params.set("origin", origin)
       if (trashMode) params.set("includeTrashed", "true")
-      const data = await apiFetch<SkillsListResponse>(`/api/skills?${params}`, {
-        cache: "no-store",
-        headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
-      })
-      const items = Array.isArray(data?.items) ? data.items : []
-      const meta = data?.metadata
+      // The list shows everything that matches: /api/skills caps pageSize at
+      // 100, so fetch every page until the backend's `matching` is reached.
+      // No catalog state change happens in the fetch path; both origin
+      // types are fetched.
+      let items: SkillListItem[] = []
+      let total = 0
+      let matching = 0
+      for (let page = 1; ; page++) {
+        params.set("page", String(page))
+        const data = await apiFetch<SkillsListResponse>(`/api/skills?${params}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+        })
+        const pageItems = Array.isArray(data?.items) ? data.items : []
+        const meta = data?.metadata
+        const totalNow = typeof meta?.total === "number" ? meta.total : pageItems.length
+        const matchingNow = typeof meta?.matching === "number" ? meta.matching : pageItems.length
+        if (page === 1) {
+          total = totalNow
+          matching = matchingNow
+        }
+        items = items.concat(pageItems)
+        // Stop when a page is short (end of results) or everything the
+        // backend counted as matching has been fetched. `page` hard-caps the
+        // loop for safety.
+        if (pageItems.length < 100 || items.length >= matchingNow || page >= 20) {
+          break
+        }
+      }
       setSkills(items)
-      setTotal(typeof meta?.total === "number" ? meta.total : items.length)
-      setMatching(typeof meta?.matching === "number" ? meta.matching : items.length)
+      setTotal(total)
+      setMatching(matching)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load skills")
     } finally {
       setLoading(false)
     }
-  }, [debouncedQuery, origin, tag, trashMode])
+  }, [query, origin, tag, trashMode, sort])
 
   // Every revalidation goes through one local async runner (the Memories page
   // pattern): the effect body itself touches no setState synchronously.
@@ -174,10 +273,7 @@ export function SkillsList() {
 
   // The selection resolves against the latest list: once a skill vanishes
   // (delete), the panel closes on its own and no effect has to force it.
-  const selectedListItem = useMemo(
-    () => (selected ? (skills.find((s) => s.id === selected.id) ?? null) : null),
-    [skills, selected],
-  )
+  const selectedListItem = selected
   const detail = selectedId && detailState?.id === selectedId ? detailState.skill : null
   const detailError = selectedId && detailState?.id === selectedId ? detailState.error : null
   const detailReady = selectedId !== null && detailState?.id === selectedId
@@ -191,11 +287,11 @@ export function SkillsList() {
 
   const handleSelect = (card: SkillListItem) => {
     setCreateMode(false)
-    setSelected((current) => (current?.id === card.id ? null : card))
+    setSelectedName(selectedName === card.name ? "" : card.name)
   }
 
   const handleNewSkill = () => {
-    setSelected(null)
+    setSelectedName("")
     setCreateMode(true)
   }
 
@@ -230,15 +326,10 @@ export function SkillsList() {
         }),
       })
       setCreateMode(false)
-      setSelected({
-        id: created.id,
-        name: created.name,
-        description: created.description,
-        path: created.path,
-        origin: created.origin,
-        tags: created.tags,
-        updatedAt: created.updatedAt,
-      })
+      setSelectedName(created.name)
+      // Make the new skill visible regardless of the current origin filter —
+      // a freshly created Eling skill would be hidden under "External".
+      setOrigin("all")
       setDetailState({ id: created.id, skill: created, error: null })
       await load()
     },
@@ -254,7 +345,7 @@ export function SkillsList() {
         `/api/skills/${encodeURIComponent(target.id)}`,
         { method: "DELETE" },
       )
-      setSelected((current) => (current?.id === target.id ? null : current))
+      setSelectedName(selectedName === target.name ? "" : selectedName)
       setNotice(`"${target.name}" moved to the trash.`)
       await load()
     } catch (e) {
@@ -268,7 +359,7 @@ export function SkillsList() {
         await apiFetch<Skill>(`/api/skills/${encodeURIComponent(id)}/restore`, {
           method: "POST",
         })
-        setSelected(null)
+        setSelectedName("")
         setNotice("Skill restored to the active catalog.")
         await load()
       } catch (e) {
@@ -300,6 +391,8 @@ export function SkillsList() {
   const handleRescan = useCallback(async () => {
     setRescanning(true)
     setError(null)
+    setRescanFailures(null)
+    setFailuresTruncated(false)
     try {
       const report = await apiFetch<{
         discovered?: number
@@ -307,13 +400,22 @@ export function SkillsList() {
         missing?: number
         renamed?: number
         failed?: number
+        failures?: SkillRescanFailure[]
+        failuresTruncated?: boolean
       }>("/api/skills/rescan", { method: "POST" })
+      const failedCount = report?.failed ?? 0
+      const failures = Array.isArray(report?.failures) ? report.failures : []
+      setRescanFailures(failedCount > 0 && failures.length > 0 ? failures : null)
+      setFailuresTruncated(report?.failuresTruncated === true)
+      setFailuresExpanded(true)
       setNotice(
         `Rescan complete — discovered ${report?.discovered ?? 0}, external ${report?.external ?? 0}, missing ${report?.missing ?? 0}, renamed ${report?.renamed ?? 0}, failed ${report?.failed ?? 0}.`,
       )
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Rescan failed")
+      setRescanFailures(null)
+      setFailuresTruncated(false)
     } finally {
       setRescanning(false)
     }
@@ -330,7 +432,7 @@ export function SkillsList() {
       createMode={createMode}
       trashMode={trashMode}
       onClose={() => {
-        setSelected(null)
+        setSelectedName("")
         setCreateMode(false)
       }}
       onSaveEdit={handleSaveEdit}
@@ -347,8 +449,13 @@ export function SkillsList() {
     />
   )
 
+  const panelOpen = wide && (selected !== null || createMode)
+  const mainColClass = panelOpen
+    ? "flex h-full min-h-0 w-[420px] shrink-0 flex-col gap-4 overflow-y-auto p-4 pt-0"
+    : "flex h-full min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-0"
+
   return (
-    <div className="flex w-full flex-col">
+    <div className="flex h-[100dvh] w-full flex-col overflow-hidden">
       <DashboardHeader label="Skills">
         <span className="hidden sm:inline-block text-xs text-muted-foreground font-medium">
           {matching} of {total}
@@ -382,14 +489,14 @@ export function SkillsList() {
           <span className="hidden sm:inline-block">Refresh</span>
         </Button>
 
-        <Button size="sm" onClick={handleNewSkill}>
+        <Button size="sm" onClick={handleNewSkill} title="New Skill" aria-label="New Skill">
           <Plus className="size-4" />
-          <span>New Skill</span>
+          <span className="hidden sm:inline-block">New Skill</span>
         </Button>
       </DashboardHeader>
 
-      <div className="flex min-h-0 w-full flex-1">
-        <div className="flex min-w-0 flex-1 flex-col gap-4 p-4 pt-4">
+      <div className="flex min-h-0 w-full flex-1 overflow-hidden">
+      <div className={mainColClass}>
           {error && (
             <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
               {error}
@@ -400,15 +507,58 @@ export function SkillsList() {
               {notice}
             </div>
           )}
+          {rescanFailures && rescanFailures.length > 0 && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 text-xs">
+              <button
+                type="button"
+                onClick={() => setFailuresExpanded((v) => !v)}
+                aria-expanded={failuresExpanded}
+                aria-label={failuresExpanded ? "Collapse failed folders" : "Expand failed folders"}
+                className="flex w-full items-center justify-between gap-2 px-4 py-2 text-left"
+              >
+                <span className="font-medium text-amber-700 dark:text-amber-400">
+                  {rescanFailures.length} {rescanFailures.length === 1 ? "folder" : "folders"} failed to index
+                </span>
+                {failuresExpanded ? (
+                  <ChevronUp className="size-4 shrink-0 text-amber-700 dark:text-amber-400" />
+                ) : (
+                  <ChevronDown className="size-4 shrink-0 text-amber-700 dark:text-amber-400" />
+                )}
+              </button>
+              {failuresExpanded && (
+                <ul className="flex max-h-40 flex-col gap-1 overflow-y-auto border-t border-amber-500/20 px-4 py-2">
+                  {rescanFailures.map((failure, index) => (
+                    <li
+                      key={`${failure.path}-${index}`}
+                      className="flex items-baseline gap-2 text-[11px] leading-snug"
+                    >
+                      <span
+                        className="min-w-0 break-all font-mono text-foreground"
+                        title={failure.path}
+                      >
+                        {failure.path}
+                      </span>
+                      <span className="shrink-0 text-muted-foreground">— {failure.reason}</span>
+                    </li>
+                  ))}
+                  {failuresTruncated && (
+                    <li className="pt-1 text-[10px] text-muted-foreground">
+                      Showing the first {rescanFailures.length} failures only.
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
+          )}
 
           {/* Toolbar: search + origin filter + trash toggle */}
-          <div className="sticky top-16 z-10 flex flex-col gap-2 bg-background pb-2 pt-1">
-            <div className="flex items-center gap-2">
+          <div className="sticky top-0 z-10 flex flex-col gap-2 bg-background pb-2 pt-4">
+            <div className="flex flex-wrap items-center gap-2">
               <Input
                 placeholder="Search name, description or body..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="min-w-0 flex-1"
+                value={draftQuery}
+                onChange={(e) => setDraftQuery(e.target.value)}
+                className={`min-w-[180px] flex-1 ${panelOpen ? "basis-full" : "max-lg:basis-full"}`}
                 aria-label="Search skills"
               />
               <div
@@ -435,7 +585,39 @@ export function SkillsList() {
                   </button>
                 ))}
               </div>
-              <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+              <div
+                className="flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 p-1"
+                role="group"
+                aria-label="Sort order"
+              >
+                {(
+                  [
+                    ["name", "Name"],
+                    ["updated", "Updated"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    onClick={() => {
+                      setLoading(true)
+                      // The list has no page state — every change refetches
+                      // from page 1.
+                      setSort(value)
+                    }}
+                    aria-pressed={sort === value}
+                    className={
+                      sort === value
+                        ? "rounded-md bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm"
+                        : "rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <label
+                className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
+              >
                 <Switch
                   size="sm"
                   checked={trashMode}
@@ -456,7 +638,7 @@ export function SkillsList() {
                     key={t}
                     onClick={() => {
                       setLoading(true)
-                      setTag((current) => (current === t ? null : t))
+                      setTag(tag === t ? null : t)
                     }}
                     aria-pressed={tag === t}
                     className={
@@ -495,7 +677,7 @@ export function SkillsList() {
                     : "No skills found."}
               </div>
             ) : skills.length > 0 ? (
-              <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
+              <div className={panelOpen ? "grid grid-cols-1 gap-2.5" : "grid grid-cols-1 gap-2.5 lg:grid-cols-2"}>
                 {skills.map((skill) => (
                   <SkillCard
                     key={skill.id}
@@ -511,8 +693,31 @@ export function SkillsList() {
             ) : null}
           </div>
 
-          {/* Narrow screens: the panel stacks under the grid. */}
-          {!wide && (selectedListItem || createMode) && panel("stacked")}
+          {/* Narrow screens: the panel opens as a popup dialog over the grid. */}
+          {!wide && (selectedListItem || createMode) && (
+            <Dialog
+              open
+              onOpenChange={(open) => {
+                if (!open) {
+                  setSelectedName("")
+                  setCreateMode(false)
+                }
+              }}
+            >
+              <DialogContent
+                showCloseButton={false}
+                className="max-h-[85svh] w-[94vw] overflow-y-auto p-0 sm:max-w-2xl"
+              >
+                <DialogTitle className="sr-only">
+                  {createMode ? "New skill" : (selectedListItem?.name ?? "Skill detail")}
+                </DialogTitle>
+                <DialogDescription className="sr-only">
+                  {createMode ? "Create a new skill" : "Skill detail panel"}
+                </DialogDescription>
+                {panel("stacked")}
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
 
         {/* Wide screens: sticky master-detail panel on the right. */}
@@ -556,7 +761,7 @@ export function SkillsList() {
       </AlertDialog>
 
       <AlertDialog open={adoptTarget !== null} onOpenChange={(open) => !open && setAdoptTarget(null)}>
-        <AlertDialogContent className="w-[94vw] sm:max-w-lg">
+        <AlertDialogContent className="w-[94vw] sm:max-w-2xl">
           <AlertDialogHeader>
             <AlertDialogTitle>Adopt {adoptTarget?.name}?</AlertDialogTitle>
             <AlertDialogDescription>

@@ -12,6 +12,17 @@ vi.mock("@/components/dashboard-header", () => ({
   ),
 }))
 
+// SkillsList reads filter state through next/navigation (URL-backed
+// persistence); stub the router surface deterministically.
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => "/dashboard/skills",
+  useRouter: () => ({
+    replace: vi.fn(),
+    push: vi.fn(),
+  }),
+}))
+
 /**
  * Wire fixtures use neutral names only — no real skill names — and an
  * in-memory catalog the stub can trash, restore and filter so the trash flow
@@ -77,6 +88,15 @@ const state = {
   deleteCalls: [] as string[],
   restoreCalls: [] as string[],
   adoptCalls: [] as string[],
+  rescanReport: {
+    discovered: 0,
+    external: 0,
+    missing: 0,
+    renamed: 0,
+    failed: 0,
+    failures: [] as Array<{ path: string; reason: string }>,
+    failuresTruncated: false,
+  },
 }
 
 function summaryFor<T extends { id: string; origin: string }>(base: T) {
@@ -98,12 +118,25 @@ function listEnvelope(originParam: string | null, includeTrashed: boolean) {
 }
 
 beforeEach(() => {
+  // The page restores its last position from localStorage (URL param >
+  // saved position > default). Tests must not leak a previously selected
+  // skill into the next mount.
+  localStorage.clear()
   state.trashed = new Set()
   state.adopted = new Set()
   state.putBodies = []
   state.deleteCalls = []
   state.restoreCalls = []
   state.adoptCalls = []
+  state.rescanReport = {
+    discovered: 0,
+    external: 0,
+    missing: 0,
+    renamed: 0,
+    failed: 0,
+    failures: [],
+    failuresTruncated: false,
+  }
 
   vi.stubGlobal(
     "fetch",
@@ -112,7 +145,7 @@ beforeEach(() => {
       const method = (init?.method ?? "GET").toUpperCase()
 
       if (url.includes("/api/skills/rescan") && method === "POST") {
-        return env({ discovered: 0, external: 0, missing: 0, renamed: 0, failed: 0 })
+        return env(state.rescanReport)
       }
 
       const restoreMatch = url.match(/\/api\/skills\/([^/?]+)\/restore/)
@@ -186,6 +219,35 @@ afterEach(() => {
 })
 
 describe("SkillsList", () => {
+  it("rescan reporting failures shows an expandable list of path — reason", async () => {
+    state.rescanReport = {
+      discovered: 0,
+      external: 1,
+      missing: 0,
+      renamed: 0,
+      failed: 1,
+      failures: [
+        { path: "/catalog/skills/broken-fixture", reason: "frontmatter YAML invalid" },
+      ],
+      failuresTruncated: false,
+    }
+
+    render(<SkillsList />)
+    fireEvent.click(screen.getByRole("button", { name: /rescan catalog/i }))
+
+    // The rescan banner keeps its stable text and reports the failure count.
+    expect(await screen.findByText(/Rescan complete — .* failed 1\./)).toBeTruthy()
+
+    // The expandable list under the banner shows mono path + dim reason.
+    expect(await screen.findByText("1 folder failed to index")).toBeTruthy()
+    expect(screen.getByText("/catalog/skills/broken-fixture")).toBeTruthy()
+    expect(screen.getByText(/frontmatter YAML invalid/)).toBeTruthy()
+
+    // Collapsing hides the rows again.
+    fireEvent.click(screen.getByRole("button", { name: /collapse failed folders/i }))
+    expect(screen.queryByText(/frontmatter YAML invalid/)).toBeNull()
+  })
+
   it("renders skill cards from the envelope and filters by origin", async () => {
     render(<SkillsList />)
     expect(await screen.findByText("fixture-eling-skill")).toBeTruthy()

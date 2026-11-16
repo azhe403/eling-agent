@@ -30,12 +30,13 @@ export function SkillCard({ skill, selected, trashMode, onSelect, onDelete, onAd
       aria-pressed={selected}
       aria-label={`View skill ${skill.name}`}
       className={cn(
-        "group flex flex-col gap-2.5 rounded-xl border bg-card p-4 text-left transition-colors",
+        "group flex h-full flex-col gap-2 rounded-xl border bg-card p-4 text-left transition-colors",
         "hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         selected && "border-foreground/30 ring-1 ring-foreground/30",
       )}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* Top row: origin badge + actions */}
+      <div className="flex items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <span
             className={`rounded-md px-2 py-0.5 font-medium ${originBadgeClass(skill.origin)}`}
@@ -52,10 +53,7 @@ export function SkillCard({ skill, selected, trashMode, onSelect, onDelete, onAd
             </span>
           )}
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <span className="text-[10px] text-muted-foreground">
-            Updated: {utcToLocal(skill.updatedAt)}
-          </span>
+        <div className="flex shrink-0 items-center gap-1.5">
           {!trashMode && onAdopt && skill.origin === "external" && (
             <span
               role="button"
@@ -73,9 +71,9 @@ export function SkillCard({ skill, selected, trashMode, onSelect, onDelete, onAd
                   onAdopt(skill)
                 }
               }}
-              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="rounded-md bg-primary/10 p-2 text-primary transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <PackageCheck className="size-3.5" />
+              <PackageCheck className="size-5" />
             </span>
           )}
           {!trashMode && onDelete && (
@@ -99,7 +97,7 @@ export function SkillCard({ skill, selected, trashMode, onSelect, onDelete, onAd
                   onDelete(skill)
                 }
               }}
-              className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="rounded-md border border-destructive/20 bg-destructive/10 p-2 text-destructive transition-colors hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Trash2 className="size-5" />
             </span>
@@ -107,23 +105,27 @@ export function SkillCard({ skill, selected, trashMode, onSelect, onDelete, onAd
         </div>
       </div>
 
+      {/* Name + description */}
       <div className="text-sm font-semibold leading-snug">{skill.name}</div>
       <p className="w-full text-sm leading-relaxed text-muted-foreground line-clamp-2">
         {skill.description}
       </p>
 
-      {skill.tags.length > 0 && (
+      {/* Footer: tags left, updated right, pinned to the bottom of the card */}
+      <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-2 text-[10px] text-muted-foreground">
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
-          {skill.tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded-md bg-secondary px-2 py-0.5 text-secondary-foreground"
-            >
-              #{tag}
-            </span>
-          ))}
+          {skill.tags.length > 0 &&
+            skill.tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-md bg-secondary px-2 py-0.5 text-secondary-foreground"
+              >
+                #{tag}
+              </span>
+            ))}
         </div>
-      )}
+        <span className="shrink-0">Updated: {utcToLocal(skill.updatedAt)}</span>
+      </div>
     </button>
   )
 }
