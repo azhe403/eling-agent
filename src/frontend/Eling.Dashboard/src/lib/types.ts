@@ -61,3 +61,59 @@ export const statusBadge: Record<string, string> = {
   Superseded: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   Archived: "bg-gray-500/10 text-gray-500",
 }
+
+// Wire shapes for the skill catalog (GET /api/skills[...]). The backend DTOs
+// pin camelCase names via JsonPropertyName, so this mirrors the wire exactly.
+// The list answers with compact items (no body, no related refs); the single
+// GET adds those. `origin` stays a plain string on the wire - new origins
+// must not fail type-checking, only the badge lookup needs a fallback.
+export type SkillOrigin = "eling" | "external"
+
+export type SkillRelatedRef = {
+  id: string
+  scope?: string
+  relation: string
+}
+
+export type SkillListItem = {
+  id: string
+  name: string
+  description: string
+  path: string
+  origin: SkillOrigin | string
+  tags: string[]
+  updatedAt: string
+}
+
+export type Skill = {
+  id: string
+  name: string
+  description: string
+  body: string
+  path: string
+  origin: SkillOrigin | string
+  tags: string[]
+  relatedMemories: SkillRelatedRef[]
+  relatedSnippets: SkillRelatedRef[]
+  createdAt: string
+  updatedAt: string
+}
+
+export type SkillsListMetadata = {
+  total: number
+  matching: number
+  limit?: number | null
+  offset?: number | null
+}
+
+export type SkillsListResponse = {
+  items: SkillListItem[]
+  metadata: SkillsListMetadata
+}
+
+export type SkillFormData = {
+  name: string
+  description: string
+  tags: string[]
+  body: string
+}

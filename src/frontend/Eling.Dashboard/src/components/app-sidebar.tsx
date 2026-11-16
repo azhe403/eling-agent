@@ -12,6 +12,7 @@ import {
   FolderGit2,
   ScrollText,
   Wrench,
+  Sparkles,
   FileText,
   Settings,
   SquareTerminal,
@@ -83,6 +84,11 @@ const navMain = [
     title: "Tools",
     url: "/dashboard/tools",
     icon: <Wrench className="size-4" />,
+  },
+  {
+    title: "Skills",
+    url: "/dashboard/skills",
+    icon: <Sparkles className="size-4" />,
   },
   {
     title: "Shell",
