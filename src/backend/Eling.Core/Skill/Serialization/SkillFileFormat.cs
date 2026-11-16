@@ -217,7 +217,9 @@ internal static class SkillFileFormat
             references.Source);
     }
 
-    private sealed record SkillDocument(string Yaml, string Body);
+    private sealed record SkillDocument(
+        string Yaml,
+        string Body);
 
     private sealed record ReferencesAndSource(
         List<RelatedReference> RelatedMemories,
