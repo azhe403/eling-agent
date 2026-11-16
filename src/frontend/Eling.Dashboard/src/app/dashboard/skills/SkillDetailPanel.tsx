@@ -37,7 +37,7 @@ export type SkillDetailPanelProps = {
   detailError: string | null
   /** Create mode: empty form, POSTs a new eling skill on save. */
   createMode: boolean
-  /** Trash view: eling skills offer Restore instead of Edit/Delete. */
+  /** Trash view: skills offer Restore instead of Edit/Delete. */
   trashMode: boolean
   onClose: () => void
   onSaveEdit: (id: string, data: SkillFormData) => Promise<void>
@@ -82,8 +82,10 @@ export function SkillDetailPanel({
   const skill: Skill | null = detail
   const isExternal = (skill?.origin ?? summary?.origin) === "external"
   const canEdit = !createMode && !trashMode && !isExternal && skill !== null
-  const canDelete = canEdit
-  const canRestore = !createMode && trashMode && !isExternal
+  // Delete is the one mutation open to external skills: the folder moves to
+  // trash untouched and can be restored — never edited.
+  const canDelete = !createMode && !trashMode && (skill !== null || summary !== null)
+  const canRestore = !createMode && trashMode
 
   // Escape closes the panel in view mode only — in (create|edit) forms the
   // user's typed work must not vanish on an accidental Escape.
@@ -313,8 +315,8 @@ export function SkillDetailPanel({
               <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
                 <ExternalLink className="mt-0.5 size-3.5 shrink-0" />
                 <span>
-                  External (read-only) — managed by other tooling; Eling never
-                  writes this folder.
+                  External (managed by other tooling) — Eling never edits this
+                  folder; Delete moves it to trash (restorable).
                 </span>
               </div>
             )}
@@ -454,7 +456,7 @@ export function SkillDetailPanel({
                     aria-label="Delete skill"
                     title={
                       isExternal
-                        ? "External skills are read-only for Eling"
+                        ? "Move to trash (restorable — the folder is not edited)"
                         : trashMode
                           ? "Unavailable in trash view"
                           : "Move to trash"

@@ -176,14 +176,51 @@ describe("SkillsList", () => {
     expect(screen.getByText("fixture-external-skill")).toBeTruthy()
   })
 
-  it("opens the detail panel on card click and disables edit/delete for external skills", async () => {
+  it("opens the detail panel on card click; external skills allow delete but not edit", async () => {
     render(<SkillsList />)
     fireEvent.click(await screen.findByText("fixture-external-skill"))
 
-    // Detail fetch lands → read-only hint appears, actions stay disabled.
+    // Detail fetch lands → read-only hint appears; edit stays disabled, delete is enabled.
     expect(await screen.findByText(/managed by other tooling/i)).toBeTruthy()
     expect(screen.getByRole("button", { name: /^edit$/i })).toHaveProperty("disabled", true)
-    expect(screen.getByRole("button", { name: /delete skill/i })).toHaveProperty("disabled", true)
+    expect(screen.getByRole("button", { name: /delete skill/i })).toHaveProperty("disabled", false)
+  })
+
+  it("delete external skill confirms with the external dialog and moves it to trash", async () => {
+    render(<SkillsList />)
+    fireEvent.click(await screen.findByText("fixture-external-skill"))
+    await screen.findAllByText(/fixture body for the externally managed skill/i)
+
+    fireEvent.click(await screen.findByRole("button", { name: /delete skill/i }))
+
+    // The confirm dialog names the skill and the external trash path.
+    expect(await screen.findByText("Delete External Skill?")).toBeTruthy()
+    expect(screen.getByText(/managed by external tooling/i)).toBeTruthy()
+    expect(screen.getByText(/\.trash\/skills\/fixture-external-skill\//)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: /move to trash/i }))
+
+    await waitFor(() => expect(state.deleteCalls).toEqual([EXTERNAL_ID]))
+    await waitFor(() => expect(screen.queryByText("fixture-external-skill")).toBeNull())
+  })
+
+  it("restores a trashed external skill from trash view", async () => {
+    render(<SkillsList />)
+    fireEvent.click(await screen.findByText("fixture-external-skill"))
+    await screen.findAllByText(/fixture body for the externally managed skill/i)
+
+    fireEvent.click(await screen.findByRole("button", { name: /delete skill/i }))
+    fireEvent.click(await screen.findByRole("button", { name: /move to trash/i }))
+    await waitFor(() => expect(state.deleteCalls).toEqual([EXTERNAL_ID]))
+
+    // Trash view re-includes the trashed external row; Restore is offered.
+    fireEvent.click(screen.getByRole("switch", { name: /show trashed/i }))
+    expect(await screen.findByText("fixture-external-skill")).toBeTruthy()
+
+    fireEvent.click(screen.getByText("fixture-external-skill"))
+    fireEvent.click(await screen.findByRole("button", { name: /restore/i }))
+
+    await waitFor(() => expect(state.restoreCalls).toEqual([EXTERNAL_ID]))
   })
 
   it("save calls PUT /api/skills/{id} and returns to view mode", async () => {

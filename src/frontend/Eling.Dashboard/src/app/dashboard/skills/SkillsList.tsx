@@ -72,6 +72,7 @@ export function SkillsList() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [createMode, setCreateMode] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<SkillListItem | null>(null)
+  const deleteIsExternal = deleteTarget?.origin === "external"
 
   // Error banner auto-dismisses so a stale failure never sticks around.
   useEffect(() => {
@@ -495,18 +496,23 @@ export function SkillsList() {
         <AlertDialogContent className="w-[94vw] sm:max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-destructive">
-              Move Skill to Trash?
+              {deleteIsExternal ? "Delete External Skill?" : "Move Skill to Trash?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This moves the skill folder to the catalog trash. You can restore
-              it from trash view at any time.
+              {deleteIsExternal
+                ? `This folder is managed by external tooling and is not created by Eling. It will be moved to the trash folder (~/.agents/.trash/skills/${deleteTarget?.name}/) and can be restored.`
+                : "This moves the skill folder to the catalog trash. You can restore it from trash view at any time."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteTarget && (
             <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-muted-foreground">
               <span className="font-medium text-foreground">{deleteTarget.name}</span>
               <span className="mx-2">·</span>
-              <span className="font-mono">{deleteTarget.id}</span>
+              {deleteIsExternal ? (
+                <span className="break-all font-mono">{deleteTarget.path}</span>
+              ) : (
+                <span className="font-mono">{deleteTarget.id}</span>
+              )}
             </div>
           )}
           <AlertDialogFooter>
