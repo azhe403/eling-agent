@@ -52,8 +52,8 @@ export function SkillCard({ skill, selected, trashMode, onSelect, onDelete, onAd
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-muted-foreground">
+        <div className="flex flex-col items-end gap-1">
+          <span className="text-[10px] text-muted-foreground">
             Updated: {utcToLocal(skill.updatedAt)}
           </span>
           {!trashMode && onAdopt && skill.origin === "external" && (
@@ -99,9 +99,9 @@ export function SkillCard({ skill, selected, trashMode, onSelect, onDelete, onAd
                   onDelete(skill)
                 }
               }}
-              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <Trash2 className="size-3.5" />
+              <Trash2 className="size-5" />
             </span>
           )}
         </div>
