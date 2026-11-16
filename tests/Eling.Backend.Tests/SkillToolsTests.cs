@@ -275,28 +275,30 @@ public sealed class SkillToolsTests : IDisposable
 
         var page2 = await readTool.ListAsync(page: 2, pageSize: 10);
 
-        Assert.Equal(25, page2.Total);
-        Assert.Equal(25, page2.Matching);
+        Assert.Equal(25, page2.Metadata.Total);
+        Assert.Equal(25, page2.Metadata.Matching);
         Assert.Equal(10, page2.Items.Count);
+        Assert.Equal(10, page2.Metadata.Limit);
+        Assert.Equal(10, page2.Metadata.Offset);
         Assert.Equal(
             Enumerable.Range(11, 10).Select(i => $"bulk-{i:D2}").ToList(),
             page2.Items.Select(i => i.Name).ToList());
 
         var tagged = await readTool.ListAsync(tag: "special");
 
-        Assert.Equal(25, tagged.Total);
-        Assert.Equal(3, tagged.Matching);
+        Assert.Equal(25, tagged.Metadata.Total);
+        Assert.Equal(3, tagged.Metadata.Matching);
         Assert.Equal(3, tagged.Items.Count);
 
         await writeTool.DeleteAsync("bulk-13");
 
         var afterDelete = await readTool.ListAsync(page: 1, pageSize: 10);
-        Assert.Equal(25, afterDelete.Total);
-        Assert.Equal(24, afterDelete.Matching);
+        Assert.Equal(25, afterDelete.Metadata.Total);
+        Assert.Equal(24, afterDelete.Metadata.Matching);
 
         var withTrash = await readTool.ListAsync(includeTrashed: true, page: 1, pageSize: 30);
-        Assert.Equal(25, withTrash.Total);
-        Assert.Equal(25, withTrash.Matching);
+        Assert.Equal(25, withTrash.Metadata.Total);
+        Assert.Equal(25, withTrash.Metadata.Matching);
     }
 
     private static async Task<CallToolResult> ThroughFilterAsync(string toolName, Func<Task<object?>> invoke)

@@ -150,7 +150,7 @@ public sealed class SkillReadTool
         }
     }
 
-    [McpServerTool(Name = "skill_list"), Description("List the skill catalog with pagination and optional filters. Returns { items, total, matching }: items is the requested page (compact entries with id, name, description, absolute SKILL.md path, origin, tags, and updatedAt); total is the size of the whole catalog including trashed rows; matching is how many rows passed the tag/origin filter before the page window was applied. Use to browse the catalog or to find a skill by tag; use skill_search to find one by keyword instead. Filter by origin to see only 'eling' or 'external' skills; set includeTrashed to also list skills currently in the trash (their path points at the former active location). Sorts by name (default) or updated_at (most recently updated first).")]
+    [McpServerTool(Name = "skill_list"), Description("List the skill catalog with pagination and optional filters. Returns { items, metadata: { total, matching, limit, offset } }: items is the requested page (compact entries with id, name, description, absolute SKILL.md path, origin, tags, and updatedAt); metadata.total is the size of the whole catalog including trashed rows; metadata.matching is how many rows passed the tag/origin filter before the page window was applied. Use to browse the catalog or to find a skill by tag; use skill_search to find one by keyword instead. Filter by origin to see only 'eling' or 'external' skills; set includeTrashed to also list skills currently in the trash (their path points at the former active location). Sorts by name (default) or updated_at (most recently updated first).")]
     public async Task<SkillListDto> ListAsync(
         [Description("Optional tag filter: only skills carrying this tag are listed (case-insensitive).")] string? tag = null,
         [Description("Optional origin filter: 'eling' (Eling-managed) or 'external' (externally-supplied). Omit to list both.")] string? origin = null,
@@ -201,7 +201,7 @@ public sealed class SkillReadTool
             _logger?.LogInformation(
                 "skill_list page {Page} returned {Count} of {Matching} matching skills (total {Total})",
                 page, items.Count, matching.Count, everything.Total);
-            return SkillListDto.From(items, everything.Total, matching.Count);
+            return SkillListDto.From(items, everything.Total, matching.Count, pageSize, (int)offset);
         }
         catch (Exception ex)
         {

@@ -31,6 +31,10 @@ public static class TestAppBuilder
         // DB file there (the name is a hash of this throwaway temp path), so the
         // user's global store fills with eling-tests-* indexes.
         Environment.SetEnvironmentVariable("ELING_DATA_DIR", Path.Combine(tempDir, "data"));
+        // Isolate the skill catalog too: skills are machine-global under
+        // ~/.agents by default, so an unset override would let every test host
+        // read and write the real catalog (including its trash).
+        Environment.SetEnvironmentVariable(Eling.Core.Scope.SkillCatalogPaths.SkillsDirEnvironmentVariable, Path.Combine(tempDir, "agents"));
         var context = new ProjectContext(
             chain,
             userScope,

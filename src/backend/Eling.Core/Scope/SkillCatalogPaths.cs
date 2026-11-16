@@ -12,13 +12,27 @@ public static class SkillCatalogPaths
     public const string AgentsDirName = ".agents";
     public const string SkillsSubdir = "skills";
     public const string TrashDirName = ".trash";
+    /// <summary>Environment override for the catalog root; test hosts set it to a scratch directory so they never touch the real catalog.</summary>
+    public const string SkillsDirEnvironmentVariable = "ELING_SKILLS_DIR";
     // Not a const: Path.DirectorySeparatorChar is not a compile-time constant.
     public static readonly string TrashSubdir = TrashDirName + Path.DirectorySeparatorChar + SkillsSubdir;
     public const string IndexFileName = "skill-index.db";
 
-    /// <summary>The catalog root: <c>~/.agents</c>. Skills live in <c>skills/</c> beneath it.</summary>
-    public static string CatalogDirectory =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), AgentsDirName);
+    /// <summary>The catalog root: <c>~/.agents</c>, or the directory
+    /// named by <see cref="SkillsDirEnvironmentVariable"/> when set (test hosts use a scratch directory).</summary>
+    public static string CatalogDirectory
+    {
+        get
+        {
+            var overridePath = Environment.GetEnvironmentVariable(SkillsDirEnvironmentVariable);
+            if (!string.IsNullOrWhiteSpace(overridePath))
+            {
+                return Path.GetFullPath(overridePath);
+            }
+
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), AgentsDirName);
+        }
+    }
 
     /// <summary>The skills folder: <c>~/.agents/skills</c>.</summary>
     public static string SkillsDirectory => Path.Combine(CatalogDirectory, SkillsSubdir);

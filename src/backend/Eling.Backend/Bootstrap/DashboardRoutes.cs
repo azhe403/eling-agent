@@ -67,6 +67,7 @@ public static class DashboardRoutes
         app.MapCommitLeaseEndpoints();
         app.MapCoordinatorEndpoints();
         app.MapMemoryRoutes();
+        app.MapSkillRoutes();
         app.MapScopedMemoryRoutes();
         app.MapStatsRoutes();
         app.MapMemoryMaintenanceEndpoints();
