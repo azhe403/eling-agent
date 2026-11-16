@@ -240,15 +240,98 @@ public sealed class SkillServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Delete_refuses_external()
+    public async Task Delete_external_moves_to_trash_and_marks_index()
     {
         var index = new SqliteSkillIndex(_dbPath);
+        var externalFolder = SkillFolder("ext-skill");
+        Directory.CreateDirectory(externalFolder);
+        await File.WriteAllTextAsync(
+            Path.Combine(externalFolder, "SKILL.md"),
+            "# foreign skill, no eling frontmatter\n");
         await index.AdoptExternalScanResultAsync(
             new Skill.Skill("ext-skill", "external desc", "external body", origin: SkillOrigin.External));
         var service = NewService(index);
 
-        await Assert.ThrowsAsync<SkillReadOnlyException>(() => service.DeleteAsync("ext-skill"));
+        await service.DeleteAsync("ext-skill");
+
+        Assert.False(Directory.Exists(SkillFolder("ext-skill")));
+        Assert.True(Directory.Exists(TrashFolder("ext-skill")));
+        Assert.Null(await service.GetByNameAsync("ext-skill"));
+
+        var active = await service.ListAsync(includeTrashed: false, origin: null);
+        Assert.Empty(active.Items);
+        var everything = await service.ListAsync(includeTrashed: true, origin: null);
+        var trashed = Assert.Single(everything.Items);
+        Assert.Equal("ext-skill", trashed.Name);
+        Assert.Equal(SkillOrigin.External, trashed.Origin);
+        Assert.Empty(await service.SearchAsync("external"));
+    }
+
+    [Fact]
+    public async Task Restore_external_roundtrip_reactivates_index_row()
+    {
+        var index = new SqliteSkillIndex(_dbPath);
+        var externalFolder = SkillFolder("ext-skill");
+        Directory.CreateDirectory(externalFolder);
+        await File.WriteAllTextAsync(
+            Path.Combine(externalFolder, "SKILL.md"),
+            "# foreign skill, no eling frontmatter\n");
+        await index.AdoptExternalScanResultAsync(
+            new Skill.Skill("ext-skill", "external desc", "external body", origin: SkillOrigin.External));
+        var service = NewService(index);
+        var adopted = await service.GetByNameAsync("ext-skill");
+
+        await service.DeleteAsync("ext-skill");
+        await service.RestoreAsync("ext-skill");
+
+        Assert.True(Directory.Exists(SkillFolder("ext-skill")));
+        Assert.False(Directory.Exists(TrashFolder("ext-skill")));
+
+        var restored = await service.GetByNameAsync("ext-skill");
+        Assert.NotNull(restored);
+        Assert.Equal(SkillOrigin.External, restored!.Origin);
+        Assert.Equal(adopted!.Id, restored.Id);
+
+        var (items, _, matching) = await service.ListAsync(includeTrashed: false, origin: null);
+        Assert.Equal(1, matching);
+        Assert.Single(items);
+    }
+
+    [Fact]
+    public async Task Trashed_external_name_stays_blocked_for_reuse()
+    {
+        var index = new SqliteSkillIndex(_dbPath);
+        var externalFolder = SkillFolder("ext-skill");
+        Directory.CreateDirectory(externalFolder);
+        await File.WriteAllTextAsync(
+            Path.Combine(externalFolder, "SKILL.md"),
+            "# foreign skill, no eling frontmatter\n");
+        await index.AdoptExternalScanResultAsync(
+            new Skill.Skill("ext-skill", "external desc", "external body", origin: SkillOrigin.External));
+        var service = NewService(index);
+        await service.DeleteAsync("ext-skill");
+
+        // The name stays occupied while trashed: a save under it is refused
+        // (the trashed row is externally owned) rather than clobbering it.
+        await Assert.ThrowsAsync<SkillReadOnlyException>(() => service.SaveAsync(NewInput("ext-skill")));
         await Assert.ThrowsAsync<SkillNotFoundException>(() => service.EnsureElingOwnedAsync("absent-skill"));
+    }
+
+    [Fact]
+    public async Task Edit_external_still_throws_after_delete_allowed()
+    {
+        var index = new SqliteSkillIndex(_dbPath);
+        var externalFolder = SkillFolder("ext-skill");
+        Directory.CreateDirectory(externalFolder);
+        await File.WriteAllTextAsync(
+            Path.Combine(externalFolder, "SKILL.md"),
+            "# foreign skill, no eling frontmatter\n");
+        await index.AdoptExternalScanResultAsync(
+            new Skill.Skill("ext-skill", "external desc", "external body", origin: SkillOrigin.External));
+        var service = NewService(index);
+
+        await Assert.ThrowsAsync<SkillReadOnlyException>(() => service.RenameAsync("ext-skill", "renamed-skill"));
+        await Assert.ThrowsAsync<SkillReadOnlyException>(() => service.SaveAsync(NewInput("ext-skill")));
     }
 
     [Fact]

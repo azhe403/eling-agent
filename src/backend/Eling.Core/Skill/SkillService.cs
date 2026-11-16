@@ -6,9 +6,12 @@ namespace Eling.Core.Skill;
 /// <summary>
 /// Default <see cref="ISkillService"/>. Coordinates the file store
 /// (<see cref="ISkillStorage"/>) and the FTS index (<see cref="ISkillIndex"/>)
-/// under one ownership rule: every mutating path goes through
+/// under one ownership rule: every content-mutating path goes through
 /// <see cref="EnsureElingOwnedAsync"/> (or an equivalent origin check on the
-/// target name) first — external skills are read-only forever.
+/// target name) first — external skills are never written, renamed or
+/// overwritten. Delete-to-trash is the sole exception: an external skill may
+/// be moved to the trash by explicit user action (restorable), never otherwise
+/// mutated.
 /// </summary>
 /// <remarks>
 /// Orchestration order: validate input → collision guard (index lookup by
@@ -246,7 +249,14 @@ public sealed class SkillService : ISkillService
     {
         ValidateNameOrThrow(name, nameof(name));
 
-        await EnsureElingOwnedAsync(name);
+        // Delete is the one mutating path open to external skills: moving the
+        // folder to the trash touches none of its content and is restorable.
+        // The existence check still applies; the origin gate does not.
+        var row = await _index.GetByNameAsync(name);
+        if (row is null)
+        {
+            throw new SkillNotFoundException($"No skill named '{name}' exists in the skill catalog.");
+        }
 
         try
         {
@@ -275,11 +285,6 @@ public sealed class SkillService : ISkillService
         ValidateNameOrThrow(name, nameof(name));
 
         var row = await _index.GetByNameAsync(name);
-        if (row is { Origin: SkillOrigin.External })
-        {
-            throw new SkillReadOnlyException(
-                $"Skill '{name}' is externally supplied (owned by its creator's tooling); Eling never mutates external skills.");
-        }
 
         try
         {
@@ -294,6 +299,17 @@ public sealed class SkillService : ISkillService
         catch (SkillStorageException ex)
         {
             throw new SkillNotFoundException($"No trashed skill named '{name}' exists to restore.", ex);
+        }
+
+        if (row is { Origin: SkillOrigin.External })
+        {
+            // External files are never parsed or rewritten by Eling, so there
+            // is nothing to re-read or re-index here — the row that was marked
+            // trashed at delete time is re-activated as-is. A catalog rescan
+            // refreshes its content snapshot if the folder changed meanwhile.
+            await _index.MarkTrashedAsync(name, trashed: false);
+            await NotifyAsync("restored");
+            return;
         }
 
         Skill restored;
@@ -371,7 +387,7 @@ public sealed class SkillService : ISkillService
         if (row.Origin == SkillOrigin.External)
         {
             throw new SkillReadOnlyException(
-                $"Skill '{name}' is externally supplied (owned by its creator's tooling); Eling never mutates external skills.");
+                $"Skill '{name}' is externally supplied (owned by its creator's tooling); Eling never edits or renames external skills.");
         }
     }
 

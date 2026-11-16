@@ -3,9 +3,10 @@ namespace Eling.Core.Skill;
 /// <summary>
 /// Application-level orchestration for the machine-global skill catalog
 /// (spec §4): validation, ownership enforcement, storage + index coordination.
-/// Every mutating path enforces <see cref="EnsureElingOwnedAsync"/> — external
-/// skills are read-only forever. Reads are origin-agnostic and serve both
-/// Eling-managed and externally-supplied skills.
+/// Content-mutating paths (save, rename) refuse external skills — they are
+/// never written, renamed or overwritten. Delete-to-trash is the sole
+/// exception and is open to both origins (restorable). Reads are
+/// origin-agnostic and serve both Eling-managed and externally-supplied skills.
 /// </summary>
 /// <remarks>
 /// Read fidelity: reads are served from the index mirror, where
@@ -74,9 +75,11 @@ public interface ISkillService
         bool includeTrashed, string? origin, int page = 1, int pageSize = 20, string sort = "name");
 
     /// <summary>
-    /// Moves an Eling-managed skill to the catalog-local trash and marks the
-    /// index row trashed (kept in the index, excluded from list/search by
-    /// default). Refuses external skills (<see cref="SkillReadOnlyException"/>).
+    /// Moves a skill to the catalog-local trash and marks the index row
+    /// trashed (kept in the index, excluded from list/search by default).
+    /// Works for both origins — external skills are moved, never edited, and
+    /// the move is restorable via <see cref="RestoreAsync"/>. Throws
+    /// <see cref="SkillNotFoundException"/> when the name is unknown.
     /// </summary>
     Task DeleteAsync(string name);
 
@@ -84,8 +87,9 @@ public interface ISkillService
     /// Restores a trashed skill to the active catalog and re-indexes it,
     /// clearing the trash marker. Works even when the index row is missing
     /// (e.g. after <see cref="RebuildIndexAsync"/> dropped it) — the folder is
-    /// the authority for the restore. Refuses when the name is externally
-    /// owned (<see cref="SkillReadOnlyException"/>); throws
+    /// the authority for the restore. Eling-origin rows are re-indexed from
+    /// disk; external rows are re-activated from the preserved index mirror
+    /// (their files are never parsed or rewritten). Throws
     /// <see cref="SkillNotFoundException"/> when no trashed folder exists.
     /// </summary>
     Task RestoreAsync(string name);
@@ -111,7 +115,8 @@ public interface ISkillService
     /// Throws <see cref="SkillNotFoundException"/> when the name is absent from
     /// the index, <see cref="SkillReadOnlyException"/> when it is owned by an
     /// external tool, and returns normally for Eling-managed skills. Called
-    /// before every mutating operation.
+    /// before every content-mutating operation (save, rename); delete-to-trash
+    /// is deliberately not gated on it.
     /// </summary>
     Task EnsureElingOwnedAsync(string name);
 }
