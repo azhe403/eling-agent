@@ -129,4 +129,67 @@ public sealed class SkillTests
         Assert.Equal(10, metadata.Limit);
         Assert.Equal(20, metadata.Offset);
     }
+
+    [Fact]
+    public void Tags_setter_renormalizes()
+    {
+        var s = new Skill.Skill("my-skill", "desc", "body");
+        s.Tags = new[] { " Blazor ", "BLAZOR", "forms", "a-b" };
+        Assert.Equal(new[] { "blazor", "forms", "a-b" }, s.Tags);
+    }
+
+    [Fact]
+    public void Mutation_setters_bump_UpdatedAt()
+    {
+        var past = DateTimeOffset.UtcNow.AddHours(-2);
+
+        var byDescription = new Skill.Skill("my-skill", "desc", "body", createdAt: past, updatedAt: past);
+        byDescription.Description = "new desc";
+        Assert.True(byDescription.UpdatedAt > past);
+
+        var byBody = new Skill.Skill("my-skill", "desc", "body", createdAt: past, updatedAt: past);
+        byBody.Body = "new body";
+        Assert.True(byBody.UpdatedAt > past);
+
+        var byTags = new Skill.Skill("my-skill", "desc", "body", createdAt: past, updatedAt: past);
+        byTags.Tags = new[] { "forms" };
+        Assert.True(byTags.UpdatedAt > past);
+
+        var bySource = new Skill.Skill("my-skill", "desc", "body", createdAt: past, updatedAt: past);
+        bySource.Source = new SkillSource("https://example.invalid/upstream", Tracked: true);
+        Assert.True(bySource.UpdatedAt > past);
+
+        var byRelations = new Skill.Skill("my-skill", "desc", "body", createdAt: past, updatedAt: past);
+        byRelations.RelatedMemories = new[] { new RelatedReference("01m2s5a8sc8v6q2eeqneq3js6c", "global", "reference") };
+        Assert.True(byRelations.UpdatedAt > past);
+    }
+
+    [Fact]
+    public void Setters_enforce_constructor_invariants()
+    {
+        var s = new Skill.Skill("my-skill", "desc", "body");
+        Assert.Throws<ArgumentException>(() => s.Description = "");
+        Assert.Throws<ArgumentException>(
+            () => s.Description = new string('d', Skill.Skill.MaxDescriptionLength + 1));
+        Assert.Throws<ArgumentException>(() => s.Body = "   ");
+        Assert.Throws<ArgumentNullException>(() => s.Body = null!);
+    }
+
+    [Fact]
+    public void Touch_bumps_UpdatedAt()
+    {
+        var past = DateTimeOffset.UtcNow.AddHours(-1);
+        var s = new Skill.Skill("my-skill", "desc", "body", createdAt: past, updatedAt: past);
+        s.Touch();
+        Assert.True(s.UpdatedAt > past);
+    }
+
+    [Fact]
+    public void Origin_setter_does_not_bump_UpdatedAt()
+    {
+        var past = DateTimeOffset.UtcNow.AddHours(-1);
+        var s = new Skill.Skill("my-skill", "desc", "body", createdAt: past, updatedAt: past);
+        s.Origin = SkillOrigin.External;
+        Assert.Equal(past, s.UpdatedAt);
+    }
 }

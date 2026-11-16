@@ -16,6 +16,17 @@ public sealed record SkillSource(string? Upstream, bool Tracked = false);
 /// under the catalog root. <see cref="Origin"/> is an ownership marker stored
 /// in the index only; it is never written to frontmatter.
 /// </summary>
+/// <remarks>
+/// Mutation contract: assigning any content member (<see cref="Description"/>,
+/// <see cref="Body"/>, <see cref="Tags"/>, <see cref="RelatedMemories"/>,
+/// <see cref="RelatedSnippets"/>, <see cref="Source"/>) re-validates and
+/// re-normalizes the value and bumps <see cref="UpdatedAt"/> through
+/// <see cref="Touch"/>. <see cref="Name"/> is immutable — a rename is the
+/// Task-2 reconstruct flow (<c>new Skill(..., id: ..., createdAt: ...)</c>),
+/// not a property set. <see cref="Origin"/> is index-owned ownership metadata
+/// and deliberately does not bump <see cref="UpdatedAt"/>; rescanning external
+/// skills must not dirty their content timestamps.
+/// </remarks>
 public class Skill
 {
     public const int MaxNameLength = 128;
@@ -29,15 +40,54 @@ public class Skill
 
     public SkillId Id { get; }
     public string Name { get; }
-    public string Description { get; set; }
-    public string Body { get; set; }
-    public IReadOnlyCollection<string> Tags { get; set; }
-    public IReadOnlyCollection<RelatedReference> RelatedMemories { get; set; }
-    public IReadOnlyCollection<RelatedReference> RelatedSnippets { get; set; }
-    public SkillSource? Source { get; set; }
+
+    private string _description;
+    public string Description
+    {
+        get => _description;
+        set { ValidateDescription(value); _description = value; Touch(); }
+    }
+
+    private string _body;
+    public string Body
+    {
+        get => _body;
+        set { ValidateBody(value); _body = value; Touch(); }
+    }
+
+    private IReadOnlyCollection<string> _tags;
+    public IReadOnlyCollection<string> Tags
+    {
+        get => _tags;
+        set { _tags = NormalizeTags(value); Touch(); }
+    }
+
+    private IReadOnlyCollection<RelatedReference> _relatedMemories;
+    public IReadOnlyCollection<RelatedReference> RelatedMemories
+    {
+        get => _relatedMemories;
+        set { _relatedMemories = CopyReferences(value); Touch(); }
+    }
+
+    private IReadOnlyCollection<RelatedReference> _relatedSnippets;
+    public IReadOnlyCollection<RelatedReference> RelatedSnippets
+    {
+        get => _relatedSnippets;
+        set { _relatedSnippets = CopyReferences(value); Touch(); }
+    }
+
+    private SkillSource? _source;
+    public SkillSource? Source
+    {
+        get => _source;
+        set { _source = value; Touch(); }
+    }
+
+    /// <summary>Index-owned ownership metadata; setting it does not bump <see cref="UpdatedAt"/>.</summary>
     public SkillOrigin Origin { get; set; }
+
     public DateTimeOffset CreatedAt { get; }
-    public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
 
     public Skill(
         string name,
@@ -60,6 +110,32 @@ public class Skill
                 nameof(name));
         }
 
+        ValidateDescription(description);
+        ValidateBody(body);
+
+        Id = id ?? SkillId.NewId();
+        Name = name;
+        // Body is stored verbatim; only emptiness is validated.
+        _description = description;
+        _body = body;
+        _tags = NormalizeTags(tags);
+        _relatedMemories = CopyReferences(relatedMemories);
+        _relatedSnippets = CopyReferences(relatedSnippets);
+        _source = source;
+        Origin = origin;
+        CreatedAt = createdAt ?? DateTimeOffset.UtcNow;
+        UpdatedAt = updatedAt ?? CreatedAt;
+    }
+
+    /// <summary>
+    /// Bumps <see cref="UpdatedAt"/> to now. Called by every content mutation
+    /// setter; call it directly when a change does not flow through one of
+    /// those setters (e.g. a bulk rewrite applied after construction).
+    /// </summary>
+    public void Touch() => UpdatedAt = DateTimeOffset.UtcNow;
+
+    private static void ValidateDescription(string description)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(description);
         if (description.Length > MaxDescriptionLength)
         {
@@ -67,22 +143,12 @@ public class Skill
                 $"Skill description must be at most {MaxDescriptionLength} characters.",
                 nameof(description));
         }
-
-        ArgumentException.ThrowIfNullOrWhiteSpace(body);
-
-        Id = id ?? SkillId.NewId();
-        Name = name;
-        Description = description;
-        // Body is stored verbatim; only emptiness is validated.
-        Body = body;
-        Tags = NormalizeTags(tags);
-        RelatedMemories = relatedMemories?.ToList().AsReadOnly() ?? (IReadOnlyCollection<RelatedReference>)Array.Empty<RelatedReference>();
-        RelatedSnippets = relatedSnippets?.ToList().AsReadOnly() ?? (IReadOnlyCollection<RelatedReference>)Array.Empty<RelatedReference>();
-        Source = source;
-        Origin = origin;
-        CreatedAt = createdAt ?? DateTimeOffset.UtcNow;
-        UpdatedAt = updatedAt ?? CreatedAt;
     }
+
+    private static void ValidateBody(string body) => ArgumentException.ThrowIfNullOrWhiteSpace(body);
+
+    private static IReadOnlyCollection<RelatedReference> CopyReferences(IEnumerable<RelatedReference>? references) =>
+        references?.ToList().AsReadOnly() ?? (IReadOnlyCollection<RelatedReference>)Array.Empty<RelatedReference>();
 
     /// <summary>
     /// True when <paramref name="name"/> is lowercase kebab-case
