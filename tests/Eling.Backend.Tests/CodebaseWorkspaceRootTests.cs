@@ -116,6 +116,8 @@ public sealed class CodebaseWorkspaceRootTests : IDisposable
     [InlineData("bin/Debug/app.dll", true)]
     [InlineData("src/bin/x.cs", true)]
     [InlineData(".git/objects/ab", true)]
+    [InlineData(".agents/skills/foo/SKILL.md", true)]
+    [InlineData("src/.agents/nested/f.md", true)]
     [InlineData("node_modules/pkg/f.js", true)]
     [InlineData("../outside.cs", true)]
     [InlineData("", true)]

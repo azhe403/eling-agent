@@ -91,6 +91,9 @@ public sealed class CodebaseExclusionTests : IDisposable
         Assert.True(ElingPaths.IsCodebaseExcluded(session, excludeRoots: null, userHome: home));
         Assert.True(ElingPaths.IsCodebaseExcluded(Path.Combine(home, ".config", "opencode"), excludeRoots: null, userHome: home));
         Assert.True(ElingPaths.IsCodebaseExcluded(Path.Combine(home, ".config", "opencode", "skills"), excludeRoots: null, userHome: home));
+        Assert.True(ElingPaths.IsCodebaseExcluded(Path.Combine(home, ".agents", "skills"), excludeRoots: null, userHome: home));
+        Assert.True(ElingPaths.IsCodebaseExcluded(Path.Combine(home, ".agents", "skills", "some-skill"), excludeRoots: null, userHome: home));
+        Assert.False(ElingPaths.IsCodebaseExcluded(Path.Combine(home, ".agents"), excludeRoots: null, userHome: home));
         Assert.False(ElingPaths.IsCodebaseExcluded(Path.Combine(home, "work"), excludeRoots: null, userHome: home));
     }
 

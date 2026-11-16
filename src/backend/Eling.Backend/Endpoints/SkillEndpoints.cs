@@ -133,7 +133,7 @@ public static class SkillEndpoints
         }
 
         var materialized = filtered.ToList();
-        var offset = (pageNumber - 1) * size;
+        var offset = (int)Math.Min((long)(pageNumber - 1) * size, int.MaxValue);
         var items = materialized
             .Skip(offset)
             .Take(size)
@@ -169,6 +169,14 @@ public static class SkillEndpoints
             return TypedResults.BadRequest("Name is required.");
         }
 
+        // Validate before ANY path is computed from the name — the folder path
+        // below trusts it.
+        if (!Skill.ValidateName(request.Name))
+        {
+            return TypedResults.BadRequest(
+                $"Name must be lowercase kebab-case (^[a-z0-9]+(-[a-z0-9]+)*$) and at most {Skill.MaxNameLength} characters.");
+        }
+
         if (string.IsNullOrWhiteSpace(request.Description))
         {
             return TypedResults.BadRequest("Description is required.");
@@ -183,7 +191,7 @@ public static class SkillEndpoints
         {
             var siblingFiles = SkillTools.PrepareSiblingFiles(
                 request.SiblingFiles?.ToArray(),
-                SkillTools.SkillFolderPath(null, request.Name));
+                SkillCatalogPaths.SkillFolder(request.Name));
             var relatedMemories = SkillTools.ValidateRelatedReferences(
                 request.RelatedMemories?.ToArray(), snippets: false);
             var relatedSnippets = SkillTools.ValidateRelatedReferences(
