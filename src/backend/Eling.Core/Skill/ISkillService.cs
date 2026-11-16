@@ -60,17 +60,21 @@ public interface ISkillService
     /// <summary>
     /// BM25 search over name/description/body (both origins). Trashed rows are
     /// always excluded. <paramref name="origin"/> filters by wire name
-    /// ("eling"/"external", case-insensitive).
+    /// ("eling"/"external", case-insensitive). <paramref name="tag"/> filters
+    /// by tag in the index query itself (trimmed, case-insensitive) rather
+    /// than post-filtering hydrated rows.
     /// </summary>
-    Task<IReadOnlyCollection<SkillSearchResult>> SearchAsync(string query, string? origin = null, int limit = 10);
+    Task<IReadOnlyCollection<SkillSearchResult>> SearchAsync(string query, string? origin = null, int limit = 10, string? tag = null);
 
     /// <summary>
     /// Lists skills ordered by <paramref name="sort"/> ("name" or
     /// "updated_at") with paging applied. Returns a <see cref="SkillListResult"/>:
     /// the page window <see cref="SkillListResult.Items"/>, the size of the
-    /// whole catalog including trashed rows (<see cref="SkillListResult.Total"/>),
-    /// and the count matching the requested filter before the window was
-    /// applied (<see cref="SkillListResult.Matching"/>).
+    /// request's selection — the includeTrashed flag is honored, the origin
+    /// filter is ignored (<see cref="SkillListResult.Total"/>), and the count
+    /// matching the requested filter before the window was applied
+    /// (<see cref="SkillListResult.Matching"/>). With no filters applied,
+    /// Total == Matching.
     /// </summary>
     Task<SkillListResult> ListAsync(
         bool includeTrashed, string? origin, int page = 1, int pageSize = 20, string sort = "name");
@@ -86,11 +90,10 @@ public interface ISkillService
 
     /// <summary>
     /// Restores a trashed skill to the active catalog and re-indexes it,
-    /// clearing the trash marker. Works even when the index row is missing
-    /// (e.g. after <see cref="RebuildIndexAsync"/> dropped it) — the folder is
-    /// the authority for the restore. Eling-origin rows are re-indexed from
-    /// disk; external rows are re-activated from the preserved index mirror
-    /// (their files are never parsed or rewritten). Throws
+    /// clearing the trash marker. Works even after <see cref="RebuildIndexAsync"/>
+    /// dropped the row (the folder is the authority for the restore). Eling-origin
+    /// rows are re-indexed from disk; external rows are re-activated from the
+    /// preserved index mirror (their files are never parsed or rewritten). Throws
     /// <see cref="SkillNotFoundException"/> when no trashed folder exists.
     /// </summary>
     Task RestoreAsync(string name);
@@ -103,12 +106,11 @@ public interface ISkillService
     /// <remarks>
     /// <see cref="ISkillIndex.RebuildAsync"/> drops every row and re-inserts;
     /// the trash marker is not part of <see cref="Skill"/>, so trashed rows
-    /// are dropped entirely (their folders stay in the trash). Trashed skills
-    /// therefore disappear from list/search until restored; <see cref="RestoreAsync"/>
-    /// re-indexes from disk and clears the marker, which is the ordering this
-    /// method relies on. The implementation re-indexes externally-owned rows
-    /// whose folder still exists so recall/search keeps covering both origins
-    /// between a rebuild and the next catalog scan.
+    /// are carried verbatim (body_path and trashed_at preserved). Active
+    /// external rows whose folder still exists also survive verbatim, matched
+    /// against their stored body_path rather than a display name — that is
+    /// the only difference an external row sees. A name reclaimed by a stored
+    /// Eling folder wins; the index mirror may lag until the next rescan.
     /// </remarks>
     Task RebuildIndexAsync();
 

@@ -16,8 +16,6 @@ namespace Eling.Backend.Mcp.Tools;
 [McpServerToolType]
 public sealed class SkillReadTool
 {
-    private const int TagFilterFetchLimit = 256;
-
     private readonly ISkillService _skills;
     private readonly string? _catalogRoot;
     private readonly ILogger<SkillReadTool>? _logger;
@@ -71,7 +69,7 @@ public sealed class SkillReadTool
     [McpServerTool(Name = "skill_search"), Description("Search the skill catalog with full-text search over skill name, description, and body. Returns ranked hits (BM25, higher score = better match) with name, description, absolute SKILL.md path, origin, and score — enough to decide whether to read the full skill, without inlining every body. Covers BOTH origins: 'eling' skills (managed by Eling) and 'external' skills (supplied by other tooling, read-only to Eling). Use when looking for a skill for a task; follow up with skill_get or read the SKILL.md path to load the full instructions. Filter by origin to see only one side; filter by tag to narrow to a topic. Trashed skills are never returned.")]
     public async Task<IReadOnlyList<SkillSearchResultDto>> SearchAsync(
         [Description("The search query — keywords to match against skill name, description, and body. Multi-word queries are AND-combined with a broader OR fallback.")] string query,
-        [Description("Optional tag filter; only skills carrying this tag are returned (case-insensitive), applied after the FTS ranking.")] string? tag = null,
+        [Description("Optional tag filter; only skills carrying this tag are returned (case-insensitive), applied inside the index query.")] string? tag = null,
         [Description("Optional origin filter: 'eling' (Eling-managed) or 'external' (externally-supplied). Omit to search both.")] string? origin = null,
         [Description("Maximum number of hits to return. Defaults to 10.")] int limit = 10)
     {
@@ -90,40 +88,23 @@ public sealed class SkillReadTool
             var trimmedOrigin = NormalizeOriginOrThrow(origin);
             var trimmedTag = string.IsNullOrWhiteSpace(tag) ? null : tag.Trim().ToLowerInvariant();
 
-            // The tag filter is applied after the FTS pass, so an unfiltered
-            // limit would starve tag-filtered searches; over-fetch when one is set.
-            var fetchLimit = trimmedTag is null ? limit : Math.Max(limit, TagFilterFetchLimit);
-            var hits = await _skills.SearchAsync(query.Trim(), trimmedOrigin, fetchLimit);
+            // The index query applies the tag filter in SQL, so no over-fetch
+            // is needed and the whole active-catalog hydration that used to
+            // feed the by-id map is gone. Hits are served from the index as-is:
+            // index freshness is accepted by design — a row whose folder
+            // vanished out of band is retired by the next rescan/startup scan,
+            // and index-only rows (externally adopted out of band) keep
+            // surfacing exactly as before. No disk probes on the hot path.
+            var hits = await _skills.SearchAsync(query.Trim(), trimmedOrigin, limit, trimmedTag);
             if (hits.Count == 0)
             {
                 return [];
             }
 
-            // Hits carry ids only; hydrate from a single full active-catalog
-            // listing instead of one scan per hit.
-            var inventory = await _skills.ListAsync(
-                includeTrashed: false, origin: null, page: 1, pageSize: int.MaxValue, sort: "name");
-            var byId = new Dictionary<SkillId, Skill>();
-            foreach (var skill in inventory.Items)
-            {
-                byId[skill.Id] = skill;
-            }
-
             var results = new List<SkillSearchResultDto>(Math.Min(hits.Count, limit));
             foreach (var hit in hits)
             {
-                if (!byId.TryGetValue(hit.Id, out var skill))
-                {
-                    continue;
-                }
-
-                if (trimmedTag is not null
-                    && !skill.Tags.Contains(trimmedTag, StringComparer.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                results.Add(SkillSearchResultDto.From(skill, hit));
+                results.Add(SkillSearchResultDto.From(hit));
                 if (results.Count >= limit)
                 {
                     break;
@@ -150,7 +131,7 @@ public sealed class SkillReadTool
         }
     }
 
-    [McpServerTool(Name = "skill_list"), Description("List the skill catalog with pagination and optional filters. Returns { items, metadata: { total, matching, limit, offset } }: items is the requested page (compact entries with id, name, description, absolute SKILL.md path, origin, tags, and updatedAt); metadata.total is the size of the whole catalog including trashed rows; metadata.matching is how many rows passed the tag/origin filter before the page window was applied. Use to browse the catalog or to find a skill by tag; use skill_search to find one by keyword instead. Filter by origin to see only 'eling' or 'external' skills; set includeTrashed to also list skills currently in the trash (their path points at the former active location). Sorts by name (default) or updated_at (most recently updated first).")]
+    [McpServerTool(Name = "skill_list"), Description("List the skill catalog with pagination and optional filters. Returns { items, metadata: { total, matching, limit, offset } }: items is the requested page (compact entries with id, name, description, absolute SKILL.md path, origin, tags, and updatedAt); metadata.total is the size of the request's selection (includeTrashed honored), ignoring the origin filter; metadata.matching is how many rows passed the tag/origin filter before the page window was applied - when no filters are applied they are equal. Use to browse the catalog or to find a skill by tag; use skill_search to find one by keyword instead. Filter by origin to see only 'eling' or 'external' skills; set includeTrashed to also list skills currently in the trash (their path points at the former active location). Sorts by name (default) or updated_at (most recently updated first).")]
     public async Task<SkillListDto> ListAsync(
         [Description("Optional tag filter: only skills carrying this tag are listed (case-insensitive).")] string? tag = null,
         [Description("Optional origin filter: 'eling' (Eling-managed) or 'external' (externally-supplied). Omit to list both.")] string? origin = null,

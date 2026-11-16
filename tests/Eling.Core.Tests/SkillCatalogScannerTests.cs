@@ -115,6 +115,56 @@ public sealed class SkillCatalogScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task Scan_collects_failure_reasons()
+    {
+        Directory.CreateDirectory(SkillFolder("broken-yaml"));
+        await File.WriteAllTextAsync(
+            SkillFile("broken-yaml"),
+            "---\ndescription: \"unterminated\n---\nbody text\n");
+
+        // Not a valid kebab-case folder name.
+        Directory.CreateDirectory(SkillFolder("Bad_Name"));
+
+        // Folder without SKILL.md.
+        Directory.CreateDirectory(SkillFolder("no-file-skill"));
+
+        var report = await NewScanner().ScanAsync();
+
+        Assert.Equal(3, report.Failed);
+        Assert.NotNull(report.Failures);
+        Assert.Equal(3, report.Failures!.Count);
+        Assert.Equal(report.Failed, report.Failures.Count);
+
+        var byName = report.Failures.ToDictionary(f => f.Name!, StringComparer.Ordinal);
+        Assert.Equal("frontmatter YAML invalid", byName["broken-yaml"].Reason);
+        Assert.StartsWith("kebab-case violation", byName["Bad_Name"].Reason, StringComparison.Ordinal);
+        Assert.Equal("SKILL.md is missing", byName["no-file-skill"].Reason);
+        Assert.All(report.Failures, f => Assert.True(Path.IsPathRooted(f.Path)));
+    }
+
+    [Fact]
+    public async Task Scan_collects_parse_error_message_for_eling_claims()
+    {
+        // A ULID 'id' with otherwise valid YAML makes the file Eling-looking but
+        // unparseable (no description): the failure entry must carry the actual
+        // parse error message, not the generic "YAML invalid" probe shortcut,
+        // and never externalize the file.
+        Directory.CreateDirectory(SkillFolder("claims-eling"));
+        await File.WriteAllTextAsync(
+            SkillFile("claims-eling"),
+            $"---\nid: {System.Ulid.NewUlid().ToString().ToLowerInvariant()}\nname: claims-eling\n---\nbody\n");
+
+        var report = await NewScanner().ScanAsync();
+
+        Assert.Equal(1, report.Failed);
+        var failure = Assert.Single(report.Failures!);
+        Assert.Equal("claims-eling", failure.Name);
+        Assert.False(string.IsNullOrWhiteSpace(failure.Reason));
+        Assert.NotEqual("frontmatter YAML invalid", failure.Reason);
+        Assert.StartsWith(Path.Combine(SkillsDir, "claims-eling"), failure.Path, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Scan_skips_malformed_frontmatter()
     {
         Directory.CreateDirectory(SkillFolder("broken-skill"));

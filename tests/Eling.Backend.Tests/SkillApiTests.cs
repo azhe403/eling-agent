@@ -138,6 +138,32 @@ public class SkillApiTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task GetApiSkills_Total_Matches_Served_Selection()
+    {
+        var client = EnsureClient();
+        await PostSkillAsync(client, new { name = "keep-skill", description = "kept", body = "# keep\n\nK." });
+        var doomed = await PostSkillAsync(client, new { name = "doomed-skill", description = "doomed", body = "# doomed\n\nD." });
+        var doomedId = doomed.GetProperty("id").GetString()!;
+
+        var deleteResponse = await client.DeleteAsync($"/api/skills/{doomedId}");
+        Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
+
+        // No filters: total == matching == the rows the client can page through.
+        var response = await client.GetAsync("/api/skills");
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal(1, body.GetProperty("items").GetArrayLength());
+        Assert.Equal(1, body.GetProperty("metadata").GetProperty("total").GetInt32());
+        Assert.Equal(1, body.GetProperty("metadata").GetProperty("matching").GetInt32());
+
+        // Trash mode widens the selection by exactly the trashed row.
+        var withTrash = await client.GetAsync("/api/skills?includeTrashed=true");
+        var trashBody = await withTrash.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal(2, trashBody.GetProperty("items").GetArrayLength());
+        Assert.Equal(2, trashBody.GetProperty("metadata").GetProperty("total").GetInt32());
+        Assert.Equal(2, trashBody.GetProperty("metadata").GetProperty("matching").GetInt32());
+    }
+
+    [Fact]
     public async Task PostSkill_CreatesAndGetsBack()
     {
         var client = EnsureClient();
@@ -317,6 +343,40 @@ public class SkillApiTests : IAsyncLifetime, IDisposable
             .Select(i => i.GetProperty("name").GetString())
             .ToList();
         Assert.Contains("rescan-external", names);
+    }
+
+    [Fact]
+    public async Task PostRescan_Returns_Failure_Details()
+    {
+        var client = EnsureClient();
+        var folder = Path.Combine(SkillsDirectory, "broken-yaml");
+        Directory.CreateDirectory(folder);
+        await File.WriteAllTextAsync(
+            Path.Combine(folder, "SKILL.md"),
+            "---\ndescription: \"unterminated\n---\nbody text\n");
+
+        var rescanResponse = await client.PostAsync("/api/skills/rescan", null);
+        Assert.Equal(HttpStatusCode.OK, rescanResponse.StatusCode);
+
+        var report = await rescanResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal(1, report.GetProperty("failed").GetInt32());
+
+        var failures = report.GetProperty("failures");
+        Assert.Equal(1, failures.GetArrayLength());
+        var failure = failures[0];
+        Assert.Equal(Path.GetFullPath(folder), failure.GetProperty("path").GetString());
+        var reason = failure.GetProperty("reason").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(reason));
+        Assert.Contains("YAML", reason, StringComparison.OrdinalIgnoreCase);
+        Assert.False(report.GetProperty("failuresTruncated").GetBoolean());
+
+        // A clean catalog stays clean: no failures array content, flag clear.
+        Directory.Delete(folder, recursive: true);
+        var cleanRescan = await client.PostAsync("/api/skills/rescan", null);
+        var cleanReport = await cleanRescan.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal(0, cleanReport.GetProperty("failed").GetInt32());
+        Assert.Equal(0, cleanReport.GetProperty("failures").GetArrayLength());
+        Assert.False(cleanReport.GetProperty("failuresTruncated").GetBoolean());
     }
 
     [Fact]

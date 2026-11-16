@@ -3,9 +3,9 @@ namespace Eling.Core.Scope;
 /// <summary>
 /// Single home for every path constant the skill subsystem uses: the
 /// machine-global catalog rooted at <c>~/.agents</c>, its trash, and the
-/// dedicated index database under the Eling runtime directory. Nothing
-/// outside this class may spell these paths. Pure: computes paths only,
-/// never touches disk.
+/// dedicated index database (a sibling of <c>memory.db</c> under the data
+/// root). Nothing outside this class may spell these paths. Pure: computes
+/// paths only, never touches disk.
 /// </summary>
 public static class SkillCatalogPaths
 {
@@ -41,13 +41,14 @@ public static class SkillCatalogPaths
     public static string TrashDirectory => Path.Combine(CatalogDirectory, TrashSubdir);
 
     /// <summary>
-    /// The dedicated skill index database: <c>&lt;dataRoot&gt;/runtime/skill-index.db</c>.
-    /// Kept separate from the memories/snippets index so the skill subsystem owns
-    /// its own schema and migration lifecycle. Honors the same
-    /// <c>ELING_DATA_DIR</c>/<c>XDG_DATA_HOME</c> overrides as the rest of Eling.
+    /// The dedicated skill index database: <c>&lt;dataRoot&gt;/skill-index.db</c>,
+    /// alongside <c>memory.db</c>. Kept separate from the memories/snippets
+    /// index so the skill subsystem owns its own schema and migration
+    /// lifecycle. Honors the same <c>ELING_DATA_DIR</c>/<c>XDG_DATA_HOME</c>
+    /// overrides as the rest of Eling.
     /// </summary>
     public static string IndexFilePath =>
-        Path.Combine(ElingPaths.ResolveRuntimeDir(null, null, null), IndexFileName);
+        Path.Combine(ElingPaths.ResolveDataDir(null, null, null), IndexFileName);
 
     /// <summary>
     /// The folder for <paramref name="name"/>: <c>~/.agents/skills/&lt;name&gt;</c>.

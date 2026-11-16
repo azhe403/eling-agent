@@ -390,12 +390,91 @@ public sealed class SkillToolsTests : IDisposable
         await writeTool.DeleteAsync("bulk-13");
 
         var afterDelete = await readTool.ListAsync(page: 1, pageSize: 10);
-        Assert.Equal(25, afterDelete.Metadata.Total);
+        Assert.Equal(24, afterDelete.Metadata.Total);
         Assert.Equal(24, afterDelete.Metadata.Matching);
 
         var withTrash = await readTool.ListAsync(includeTrashed: true, page: 1, pageSize: 30);
         Assert.Equal(25, withTrash.Metadata.Total);
         Assert.Equal(25, withTrash.Metadata.Matching);
+    }
+
+    /// <summary>
+    /// Decorator that counts <see cref="ISkillService.ListAsync"/> calls; every
+    /// other member delegates to the wrapped service. Used to prove the
+    /// skill_search path never hydrates the full catalog.
+    /// </summary>
+    private sealed class CountingSkillService : ISkillService
+    {
+        private readonly ISkillService _inner;
+
+        public CountingSkillService(ISkillService inner) => _inner = inner;
+
+        public int ListCalls { get; private set; }
+
+        public Task<Skill> SaveAsync(SkillSaveInput input) => _inner.SaveAsync(input);
+        public Task<Skill> RenameAsync(string oldName, string newName) => _inner.RenameAsync(oldName, newName);
+        public Task<Skill?> GetByNameAsync(string name) => _inner.GetByNameAsync(name);
+        public Task<Skill?> GetByIdAsync(SkillId id) => _inner.GetByIdAsync(id);
+        public Task<IReadOnlyCollection<SkillSearchResult>> SearchAsync(string query, string? origin = null, int limit = 10, string? tag = null) =>
+            _inner.SearchAsync(query, origin, limit, tag);
+        public Task<SkillListResult> ListAsync(bool includeTrashed, string? origin, int page = 1, int pageSize = 20, string sort = "name")
+        {
+            ListCalls++;
+            return _inner.ListAsync(includeTrashed, origin, page, pageSize, sort);
+        }
+        public Task DeleteAsync(string name) => _inner.DeleteAsync(name);
+        public Task RestoreAsync(string name) => _inner.RestoreAsync(name);
+        public Task RebuildIndexAsync() => _inner.RebuildIndexAsync();
+        public Task<AdoptResult> AdoptAsync(string name, CancellationToken ct = default) => _inner.AdoptAsync(name, ct);
+        public Task EnsureElingOwnedAsync(string name) => _inner.EnsureElingOwnedAsync(name);
+    }
+
+    [Fact]
+    public async Task skill_search_does_not_hydrate_the_catalog()
+    {
+        var inner = NewService();
+        var service = new CountingSkillService(inner);
+        var writeTool = NewWriteTool(inner);
+        var readTool = NewReadTool(service);
+
+        await writeTool.SaveAsync("blazor-forms", "Build blazor forms", "blazor forms body", tags: ["blazor"]);
+        await writeTool.SaveAsync("blazor-validation", "Validate blazor input", "blazor validation body");
+
+        var hits = await readTool.SearchAsync("blazor");
+
+        Assert.Equal(0, service.ListCalls);
+        Assert.Equal(2, hits.Count);
+        Assert.All(hits, hit =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(hit.Name));
+            Assert.False(string.IsNullOrWhiteSpace(hit.Description));
+            Assert.EndsWith("SKILL.md", hit.Path);
+            Assert.True(hit.Score >= 0);
+        });
+        Assert.Equal(hits.OrderByDescending(h => h.Score).Select(h => h.Score).ToList(),
+            hits.Select(h => h.Score).ToList());
+    }
+
+    [Fact]
+    public async Task skill_search_tag_filter_is_pushed_into_the_index_query()
+    {
+        var inner = NewService();
+        var service = new CountingSkillService(inner);
+        var writeTool = NewWriteTool(inner);
+        var readTool = NewReadTool(service);
+
+        // Untagged row ranks at least as well as the tagged one; only a
+        // SQL-level tag filter returns exactly the tagged hit.
+        await writeTool.SaveAsync("shared-alpha", "shared term untagged", "sharedterm body");
+        await writeTool.SaveAsync("shared-special", "shared term tagged", "sharedterm body", tags: ["special"]);
+
+        var hits = await readTool.SearchAsync("sharedterm", tag: "special");
+
+        Assert.Equal(0, service.ListCalls);
+        var hit = Assert.Single(hits);
+        Assert.Equal("shared-special", hit.Name);
+        Assert.Equal("shared term tagged", hit.Description);
+        Assert.EndsWith(Path.Combine("skills", "shared-special", "SKILL.md"), hit.Path);
     }
 
     private static async Task<CallToolResult> ThroughFilterAsync(string toolName, Func<Task<object?>> invoke)

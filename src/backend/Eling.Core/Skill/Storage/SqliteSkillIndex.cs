@@ -99,10 +99,10 @@ public sealed class SqliteSkillIndex : ISkillIndex
         await UpsertAsync(skill, origin: SkillOrigin.Eling);
     }
 
-    public Task AdoptExternalScanResultAsync(Skill skill)
+    public Task AdoptExternalScanResultAsync(Skill skill, string? bodyPath = null)
     {
         ArgumentNullException.ThrowIfNull(skill);
-        return UpsertAsync(skill, origin: SkillOrigin.External);
+        return UpsertAsync(skill, origin: SkillOrigin.External, bodyPath);
     }
 
     public async Task RemoveAsync(string name)
@@ -129,13 +129,21 @@ public sealed class SqliteSkillIndex : ISkillIndex
         await transaction.CommitAsync();
     }
 
-    public async Task RebuildAsync(IEnumerable<Skill> skills)
+    public async Task RebuildAsync(IEnumerable<Skill> skills, IReadOnlySet<string>? carryExternalNames = null)
     {
         ArgumentNullException.ThrowIfNull(skills);
         var items = skills.ToList();
 
         await using var connection = await OpenConnectionAsync();
         await using SqliteTransaction transaction = (SqliteTransaction)await connection.BeginTransactionAsync();
+
+        // Capture rows to carry verbatim before wiping: trashed rows (a name
+        // still held by a trashed skill is not un-blocked by a rebuild) and,
+        // when the caller verified them, active external rows whose folder is
+        // not kebab-case — their paths live only in body_path, so they cannot
+        // be re-derived from the display name. A name reclaimed by a kept
+        // skill wins over everything.
+        var carry = await ReadCarryRowsAsync(connection, transaction, carryExternalNames);
 
         await using (var command = connection.CreateCommand())
         {
@@ -156,6 +164,28 @@ public sealed class SqliteSkillIndex : ISkillIndex
         foreach (var skill in items)
         {
             await InsertSkillAsync(connection, transaction, skill, origin: skill.Origin, createdAt: null, trashedAt: null);
+        }
+
+        if (carry.Count > 0)
+        {
+            var keptNames = new HashSet<string>(items.Select(s => s.Name), StringComparer.Ordinal);
+
+            foreach (var row in carry)
+            {
+                if (keptNames.Contains(row.Skill.Name))
+                {
+                    continue;
+                }
+
+                await InsertSkillAsync(
+                    connection,
+                    transaction,
+                    row.Skill,
+                    origin: row.Skill.Origin,
+                    createdAt: row.Skill.CreatedAt,
+                    trashedAt: row.TrashedAt,
+                    bodyPath: row.BodyPath);
+            }
         }
 
         await transaction.CommitAsync();
@@ -182,7 +212,7 @@ public sealed class SqliteSkillIndex : ISkillIndex
     }
 
     public async Task<IReadOnlyCollection<SkillSearchResult>> SearchAsync(
-        string query, string? origin = null, int limit = 10, bool includeTrashed = false)
+        string query, string? origin = null, int limit = 10, bool includeTrashed = false, string? tag = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
         if (limit < 1)
@@ -191,6 +221,7 @@ public sealed class SqliteSkillIndex : ISkillIndex
         }
 
         var originWire = ParseOriginFilter(origin);
+        var tagWire = string.IsNullOrWhiteSpace(tag) ? null : tag.Trim().ToLowerInvariant();
         var tokens = ExtractTokens(query);
         if (tokens.Length == 0)
         {
@@ -200,7 +231,7 @@ public sealed class SqliteSkillIndex : ISkillIndex
         // Phase 1: AND on porter. Default precision.
         var andQuery = BuildPorterQuery(tokens, and: true);
         var hits = andQuery.Length > 0
-            ? await SearchPorterAsync(andQuery, originWire, limit, includeTrashed)
+            ? await SearchPorterAsync(andQuery, originWire, limit, includeTrashed, tagWire)
             : Array.Empty<SkillSearchResult>();
         if (hits.Count >= AndToOrThreshold)
         {
@@ -212,7 +243,7 @@ public sealed class SqliteSkillIndex : ISkillIndex
         // skills lead.
         var orQuery = BuildPorterQuery(tokens, and: false);
         return orQuery.Length > 0
-            ? await SearchPorterAsync(orQuery, originWire, limit, includeTrashed)
+            ? await SearchPorterAsync(orQuery, originWire, limit, includeTrashed, tagWire)
             : Array.Empty<SkillSearchResult>();
     }
 
@@ -309,7 +340,23 @@ public sealed class SqliteSkillIndex : ISkillIndex
         return (long)(await command.ExecuteScalarAsync())! > 0;
     }
 
-    private async Task UpsertAsync(Skill skill, SkillOrigin origin)
+    public async Task<IReadOnlyDictionary<string, string>> ListPathsAsync()
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name, body_path FROM skills;";
+
+        var paths = new Dictionary<string, string>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            paths[reader.GetString(0)] = reader.GetString(1);
+        }
+
+        return paths;
+    }
+
+    private async Task UpsertAsync(Skill skill, SkillOrigin origin, string? bodyPath = null)
     {
         await using var connection = await OpenConnectionAsync();
         await using SqliteTransaction transaction = (SqliteTransaction)await connection.BeginTransactionAsync();
@@ -322,8 +369,14 @@ public sealed class SqliteSkillIndex : ISkillIndex
             .Where(r => string.Equals(r.Id, skill.Id.Value, StringComparison.Ordinal))
             .Select(r => (ExistingRow?)r)
             .FirstOrDefault();
-        var createdAt = idRow?.CreatedAt is { } created ? DateTimeOffset.Parse(created) : (DateTimeOffset?)null;
-        var trashedAt = idRow?.TrashedAt;
+        var nameRow = existing
+            .Where(r => string.Equals(r.Name, skill.Name, StringComparison.Ordinal))
+            .Select(r => (ExistingRow?)r)
+            .FirstOrDefault();
+        var createdAt = (idRow?.CreatedAt ?? nameRow?.CreatedAt) is { } created ? DateTimeOffset.Parse(created) : (DateTimeOffset?)null;
+        // A trashed row matched only by name keeps its id (it is the row being upserted) -
+        // the trash marker must survive external re-adoption too, never just fresh rows.
+        var trashedAt = idRow?.TrashedAt ?? nameRow?.TrashedAt;
 
         foreach (var row in existing)
         {
@@ -340,7 +393,7 @@ public sealed class SqliteSkillIndex : ISkillIndex
             await command.ExecuteNonQueryAsync();
         }
 
-        await InsertSkillAsync(connection, transaction, skill, origin, createdAt, trashedAt);
+        await InsertSkillAsync(connection, transaction, skill, origin, createdAt, trashedAt, bodyPath);
         await transaction.CommitAsync();
     }
 
@@ -350,9 +403,10 @@ public sealed class SqliteSkillIndex : ISkillIndex
         Skill skill,
         SkillOrigin origin,
         DateTimeOffset? createdAt,
-        string? trashedAt)
+        string? trashedAt,
+        string? bodyPath = null)
     {
-        var bodyPath = $"skills/{skill.Name}/SKILL.md";
+        bodyPath ??= $"skills/{skill.Name}/SKILL.md";
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
@@ -504,7 +558,7 @@ public sealed class SqliteSkillIndex : ISkillIndex
     }
 
     private async Task<IReadOnlyCollection<SkillSearchResult>> SearchPorterAsync(
-        string ftsQuery, string? originWire, int limit, bool includeTrashed)
+        string ftsQuery, string? originWire, int limit, bool includeTrashed, string? tagWire)
     {
         var where = new List<string> { "skills_fts MATCH $query" };
         if (!includeTrashed)
@@ -515,6 +569,13 @@ public sealed class SqliteSkillIndex : ISkillIndex
         if (originWire is not null)
         {
             where.Add("s.origin = $origin");
+        }
+
+        if (tagWire is not null)
+        {
+            // The tag filter lives in the same statement (not a post-filter over
+            // hydrated rows), so LIMIT applies after filtering.
+            where.Add("EXISTS (SELECT 1 FROM skill_tags t WHERE t.skill_id = s.id AND t.tag = $tag)");
         }
 
         await using var connection = await OpenConnectionAsync();
@@ -531,6 +592,11 @@ public sealed class SqliteSkillIndex : ISkillIndex
         if (originWire is not null)
         {
             AddParameter(command, "$origin", originWire);
+        }
+
+        if (tagWire is not null)
+        {
+            AddParameter(command, "$tag", tagWire);
         }
 
         AddParameter(command, "$limit", limit);
@@ -736,6 +802,70 @@ public sealed class SqliteSkillIndex : ISkillIndex
         parameter.ParameterName = name;
         parameter.Value = value ?? DBNull.Value;
         command.Parameters.Add(parameter);
+    }
+
+    private sealed record TrashRow(
+        Skill Skill,
+        string? BodyPath,
+        string? TrashedAt);
+
+    private sealed record TrashCandidate(
+        SkillRow Row,
+        string? BodyPath,
+        string? TrashedAt);
+
+    private static TrashCandidate ReadCarryRow(DbDataReader reader)
+        => new(new SkillRow(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetString(3),
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.GetString(6)),
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            reader.IsDBNull(8) ? null : reader.GetString(8));
+
+    private async Task<IReadOnlyList<TrashRow>> ReadCarryRowsAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        IReadOnlySet<string>? carryExternalNames)
+    {
+        // Relaxed external rows (non-kebab folder names) are reachable only
+        // via body_path, which the rebuild cannot re-derive from the display
+        // name; carry the caller-verified set verbatim.
+        var sql = "SELECT id, name, description, body, origin, created_at, updated_at, body_path, trashed_at FROM skills WHERE trashed_at IS NOT NULL";
+        if (carryExternalNames is { Count: > 0 })
+        {
+            var list = string.Join(",", carryExternalNames.Select(n => "'" + n.Replace("'", "''") + "'"));
+            sql += $" OR (origin = 'external' AND trashed_at IS NULL AND name IN ({list}))";
+        }
+
+        sql += " ORDER BY name;";
+
+        var rows = new List<TrashCandidate>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = sql;
+
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                rows.Add(ReadCarryRow(reader));
+            }
+        }
+
+        var results = new List<TrashRow>(rows.Count);
+        foreach (var candidate in rows)
+        {
+            results.Add(new TrashRow(
+                await HydrateAsync(connection, candidate.Row),
+                candidate.BodyPath,
+                candidate.TrashedAt));
+        }
+
+        return results;
     }
 
     private readonly record struct SkillRow(

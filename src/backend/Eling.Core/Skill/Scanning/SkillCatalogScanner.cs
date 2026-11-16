@@ -78,10 +78,16 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
         var failed = 0;
         var renamed = 0;
         var renamedFrom = new HashSet<string>(StringComparer.Ordinal);
+        var failures = new List<SkillScanFailure>();
 
         if (Directory.Exists(_skillsDir))
         {
-            foreach (var folder in Directory.EnumerateDirectories(_skillsDir))
+            // Deterministic order: alphabetical scan, so name claims are stable
+            // across runs. Eling rows & external rows keep their precedence
+            // rules; a folder that fails kebab-case can be indexed only when
+            // its frontmatter carries a valid kebab-case `name` (the display
+            // name) and that name is free.
+            foreach (var folder in Directory.EnumerateDirectories(_skillsDir).OrderBy(d => d, StringComparer.Ordinal))
             {
                 var folderName = Path.GetFileName(folder);
 
@@ -91,11 +97,28 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
                     continue;
                 }
 
+                // The display name is the name the index and the UI use. For
+                // kebab-valid folders it is the folder name (unchanged); for
+                // non-kebab folders (sync flatten artifacts) it comes from the
+                // frontmatter `name`, and the index row's body_path must keep
+                // the real filesystem location under this folder.
+                var displayName = folderName;
+                string? externalBodyPath = null;
                 if (!Skill.ValidateName(folderName))
                 {
-                    _logger?.LogWarning("Skipping folder {Folder}: not a valid kebab-case skill name.", folder);
-                    failed++;
-                    continue;
+                    var relaxed = await TryRelaxFolderNameAsync(folder, folderName, elingOccupied, failures);
+                    if (relaxed is null)
+                    {
+                        failed++;
+                        continue;
+                    }
+
+                    displayName = relaxed.Name;
+                    externalBodyPath = relaxed.BodyPath;
+                    _logger?.LogInformation(
+                        "Indexing non-kebab-case folder {Folder} under frontmatter name '{Name}'.",
+                        folder,
+                        displayName);
                 }
 
                 var file = Path.Combine(folder, FileSystemSkillStorage.SkillFileName);
@@ -103,6 +126,7 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
                 {
                     _logger?.LogWarning("Skipping skill folder {Folder}: SKILL.md is missing.", folder);
                     failed++;
+                    failures.Add(new SkillScanFailure(folder, displayName, "SKILL.md is missing"));
                     continue;
                 }
 
@@ -115,23 +139,24 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
                 {
                     _logger?.LogWarning(ex, "Skipping skill folder {Folder}: SKILL.md is unreadable.", folder);
                     failed++;
+                    failures.Add(new SkillScanFailure(folder, displayName, $"SKILL.md is unreadable: {ex.Message}"));
                     continue;
                 }
 
                 Skill? eling;
                 try
                 {
-                    eling = SkillFileFormat.ParseSkill(raw, folderName);
+                    eling = SkillFileFormat.ParseSkill(raw, displayName);
                 }
                 catch (SkillFrontMatterException ex)
                 {
-                    var outcome = IndexNonEling(folderName, raw, byName, elingOccupied, ex);
+                    var outcome = IndexNonEling(displayName, raw, byName, elingOccupied, ex);
                     switch (outcome)
                     {
                         case ExternalAdoption adoption:
                             try
                             {
-                                await _index.AdoptExternalScanResultAsync(adoption.Skill);
+                                await _index.AdoptExternalScanResultAsync(adoption.Skill, externalBodyPath ?? $"skills/{folderName}/SKILL.md");
                                 if (adoption.IsNew)
                                 {
                                     external++;
@@ -139,13 +164,15 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
                             }
                             catch (ArgumentException adoptError)
                             {
-                                _logger?.LogWarning(adoptError, "Skipping skill folder {Folder}: {Message}", Path.Combine(_skillsDir, folderName), adoptError.Message);
+                                _logger?.LogWarning(adoptError, "Skipping skill folder {Folder}: {Message}", folder, adoptError.Message);
                                 failed++;
+                                failures.Add(new SkillScanFailure(folder, displayName, adoptError.Message));
                             }
 
                             break;
-                        case FailedAdoption:
+                        case FailedAdoption failure:
                             failed++;
+                            failures.Add(new SkillScanFailure(folder, displayName, failure.Reason));
                             break;
                     }
 
@@ -173,6 +200,7 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
                     // missed them; treat as unindexable, never abort the scan.
                     _logger?.LogWarning(ex, "Skipping skill folder {Folder}: {Message}", folder, ex.Message);
                     failed++;
+                    failures.Add(new SkillScanFailure(folder, displayName, ex.Message));
                 }
             }
         }
@@ -184,6 +212,10 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
         var missing = 0;
         if (Directory.Exists(_skillsDir))
         {
+            // A row is missing only when the filesystem path stored for it
+            // (body_path) is gone. [..]
+            var paths = await _index.ListPathsAsync();
+            var catalogRootAbs = Path.GetFullPath(CatalogRoot);
             foreach (var row in active)
             {
                 if (renamedFrom.Contains(row.Name))
@@ -193,10 +225,14 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
                     continue;
                 }
 
-                var file = Path.Combine(_skillsDir, row.Name, FileSystemSkillStorage.SkillFileName);
-                if (File.Exists(file))
+                if (paths.TryGetValue(row.Name, out var bodyPath))
                 {
-                    continue;
+                    var absolute = Path.GetFullPath(
+                        Path.Combine(catalogRootAbs, bodyPath.Replace('/', Path.DirectorySeparatorChar)));
+                    if (File.Exists(absolute))
+                    {
+                        continue;
+                    }
                 }
 
                 _logger?.LogWarning(
@@ -206,11 +242,87 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
             }
         }
 
-        return new ScanReport(discovered, external, missing, failed, renamed);
+        return new ScanReport(discovered, external, missing, failed, renamed, failures);
+    }
+
+    /// <summary>Display name and index-relative body path of a relaxed folder.</summary>
+    private sealed record RelaxedFolder(
+        string Name,
+        string BodyPath);
+
+    /// <summary>
+    /// Non-kebab-case folders (e.g. a sync tool flattened a source path into
+    /// one directory with double underscores) cannot be indexed by folder name.
+    /// They can still be indexed as EXTERNAL when their SKILL.md frontmatter
+    /// carries a valid kebab-case <c>name</c> — the relaxed entry displays that
+    /// name, never the raw folder name, and the index row keeps the real
+    /// filesystem location in <c>body_path</c>. Refusal (parse failure,
+    /// missing/invalid frontmatter <c>name</c>, an Eling-occupied display name,
+    /// or an id-bearing file that looks like an Eling file gone stale) records a
+    /// failure with the reason.
+    /// </summary>
+    private async Task<RelaxedFolder?> TryRelaxFolderNameAsync(
+        string folder,
+        string folderName,
+        IReadOnlySet<string> elingOccupied,
+        List<SkillScanFailure> failures)
+    {
+        var file = Path.Combine(folder, FileSystemSkillStorage.SkillFileName);
+        if (!File.Exists(file))
+        {
+            _logger?.LogWarning("Skipping skill folder {Folder}: SKILL.md is missing.", folder);
+            failures.Add(new SkillScanFailure(
+                folder,
+                folderName,
+                $"kebab-case violation: '{folderName}' is not a valid kebab-case skill name, and its SKILL.md is missing"));
+            return null;
+        }
+
+        string raw;
+        try
+        {
+            raw = await File.ReadAllTextAsync(file);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            failures.Add(new SkillScanFailure(folder, folderName, $"SKILL.md is unreadable: {ex.Message}"));
+            return null;
+        }
+
+        var probe = FrontMatterProbe.Read(raw);
+
+        if (probe.YamlInvalid)
+        {
+            failures.Add(new SkillScanFailure(folder, folderName, "frontmatter YAML invalid"));
+            return null;
+        }
+        if (probe.HasUlidId)
+        {
+            failures.Add(new SkillScanFailure(folder, folderName, "name occupied by an Eling-managed skill (id present in frontmatter)"));
+            return null;
+        }
+
+        var name = probe.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name) || !Skill.ValidateName(name))
+        {
+            failures.Add(new SkillScanFailure(
+                folder,
+                folderName,
+                $"kebab-case violation: '{folderName}' is not a valid kebab-case skill name, and its frontmatter 'name' is missing or invalid"));
+            return null;
+        }
+
+        if (elingOccupied.Contains(name))
+        {
+            failures.Add(new SkillScanFailure(folder, folderName, $"name occupied by an Eling-managed skill ('{name}')"));
+            return null;
+        }
+
+        return new RelaxedFolder(name, $"skills/{folderName}/SKILL.md");
     }
 
     private AdoptionOutcome IndexNonEling(
-        string folderName,
+        string name,
         string raw,
         IReadOnlyDictionary<string, Skill> byName,
         IReadOnlySet<string> elingOccupied,
@@ -224,19 +336,25 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
         // ANY Eling row under this name — active or trashed — means the folder
         // is ours (or was); externalizing would make it permanently read-only
         // and the external upsert would wipe the (possibly trashed) Eling row.
-        var occupiesElingName = elingOccupied.Contains(folderName);
+        var occupiesElingName = elingOccupied.Contains(name);
 
         if (probe.YamlInvalid || claimsElingIdentity || occupiesElingName)
         {
+            var reason = probe.YamlInvalid
+                ? "frontmatter YAML invalid"
+                : occupiesElingName
+                    ? "name occupied by an Eling-managed skill"
+                    : parseError.Message;
+
             _logger?.LogWarning(
                 parseError,
                 "Skipping skill folder {Folder}: SKILL.md is not valid Eling frontmatter and cannot be treated as external content.",
-                Path.Combine(_skillsDir, folderName));
-            return FailedAdoption.Instance;
+                Path.Combine(_skillsDir, name));
+            return new FailedAdoption(reason);
         }
 
         // Externally-supplied skill: index it, but never write back to the file.
-        byName.TryGetValue(folderName, out var prior);
+        byName.TryGetValue(name, out var prior);
         var reuse = prior is { Origin: SkillOrigin.External } ? prior : null;
 
         var body = probe.Body;
@@ -249,8 +367,8 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
         {
             _logger?.LogWarning(
                 "Skipping skill folder {Folder}: SKILL.md has no body to index.",
-                Path.Combine(_skillsDir, folderName));
-            return FailedAdoption.Instance;
+                Path.Combine(_skillsDir, name));
+            return new FailedAdoption("SKILL.md has no body to index");
         }
 
         var description = probe.Description;
@@ -263,8 +381,8 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
         {
             _logger?.LogWarning(
                 "Skipping skill folder {Folder}: no description available in frontmatter or body.",
-                Path.Combine(_skillsDir, folderName));
-            return FailedAdoption.Instance;
+                Path.Combine(_skillsDir, name));
+            return new FailedAdoption("no description available in frontmatter or body");
         }
 
         if (description.Length > MaxDescriptionLength)
@@ -280,7 +398,7 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
         try
         {
             skill = new Skill(
-                folderName,
+                name,
                 description,
                 body,
                 probe.Tags,
@@ -294,8 +412,8 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
         }
         catch (ArgumentException ex)
         {
-            _logger?.LogWarning(ex, "Skipping skill folder {Folder}: {Message}", Path.Combine(_skillsDir, folderName), ex.Message);
-            return FailedAdoption.Instance;
+            _logger?.LogWarning(ex, "Skipping skill folder {Folder}: {Message}", Path.Combine(_skillsDir, name), ex.Message);
+            return new FailedAdoption(ex.Message);
         }
 
         return new ExternalAdoption(skill, IsNew: reuse is null);
@@ -326,10 +444,7 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
         Skill Skill,
         bool IsNew) : AdoptionOutcome;
 
-    private sealed record FailedAdoption : AdoptionOutcome
-    {
-        public static readonly FailedAdoption Instance = new();
-    }
+    private sealed record FailedAdoption(string Reason) : AdoptionOutcome;
 
     /// <summary>
     /// Best-effort structural read of a SKILL.md that is not valid Eling
@@ -339,6 +454,7 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
     private sealed record FrontMatterProbe(
         bool YamlInvalid,
         bool HasUlidId,
+        string? Name,
         string? Description,
         IReadOnlyCollection<string>? Tags,
         DateTimeOffset? CreatedAt,
@@ -353,7 +469,7 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
             if (!normalized.StartsWith(Delimiter + "\n", StringComparison.Ordinal))
             {
                 // No frontmatter at all: treat the whole file as the body.
-                return new FrontMatterProbe(false, false, null, null, null, null, normalized);
+                return new FrontMatterProbe(false, false, null, null, null, null, null, normalized);
             }
 
             var yamlStart = Delimiter.Length + 1;
@@ -374,7 +490,7 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
             {
                 // Opened a frontmatter block but never closed it: unreadable,
                 // never externalizable.
-                return new FrontMatterProbe(true, false, null, null, null, null, normalized);
+                return new FrontMatterProbe(true, false, null, null, null, null, null, normalized);
             }
 
             Dictionary<string, object?>? map;
@@ -387,17 +503,18 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
             }
             catch (Exception)
             {
-                return new FrontMatterProbe(true, false, null, null, null, null, body);
+                return new FrontMatterProbe(true, false, null, null, null, null, null, body);
             }
 
             if (map is null)
             {
-                return new FrontMatterProbe(false, false, null, null, null, null, body);
+                return new FrontMatterProbe(false, false, null, null, null, null, null, body);
             }
 
             return new FrontMatterProbe(
                 YamlInvalid: false,
                 HasUlidId: SkillId.TryParse(Scalar(map, "id"), out _),
+                Name: Scalar(map, "name"),
                 Description: Scalar(map, "description"),
                 Tags: ReadTags(map),
                 CreatedAt: ReadTimestamp(map, "createdAt"),
@@ -412,7 +529,9 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
                 return null;
             }
 
-            return value is IDictionary or IEnumerable ? null : value.ToString();
+            // A string is an IEnumerable<char> — it is a scalar, not a
+            // collection; only sequences/mappings are rejected.
+            return value is string s ? s : value is IDictionary or IEnumerable ? null : value.ToString();
         }
 
         private static IReadOnlyCollection<string>? ReadTags(IReadOnlyDictionary<string, object?> map)

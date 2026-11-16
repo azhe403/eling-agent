@@ -234,6 +234,33 @@ public sealed class SqliteSkillIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task Skill_SkillIndex_Search_filters_by_tag_in_sql()
+    {
+        var index = NewIndex();
+        await index.IndexAsync(NewSkill("shared-untagged", "shared term one", "sharedterm body"));
+        var tagged = new Skill.Skill(
+            "shared-tagged", "shared term two", "sharedterm more body",
+            ["special"], null, null, null, null, SkillOrigin.Eling);
+        await index.IndexAsync(tagged);
+
+        var unfiltered = await index.SearchAsync("sharedterm");
+        Assert.Equal(2, unfiltered.Count);
+
+        var filtered = await index.SearchAsync("sharedterm", tag: "special");
+        var hit = Assert.Single(filtered);
+        Assert.Equal("shared-tagged", hit.Name);
+
+        // Case-insensitive, like the storage normalization.
+        var upper = await index.SearchAsync("sharedterm", tag: "SPECIAL");
+        Assert.Single(upper);
+
+        // SQL-level filtering applies LIMIT after the filter: a single slot
+        // still yields the tagged hit even if it ranks below the untagged one.
+        var limited = await index.SearchAsync("sharedterm", limit: 1, tag: "special");
+        Assert.Equal("shared-tagged", Assert.Single(limited).Name);
+    }
+
+    [Fact]
     public async Task Skill_SkillIndex_Schema_idempotent()
     {
         var first = NewIndex();

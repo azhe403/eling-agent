@@ -192,7 +192,7 @@ public sealed class SkillService : ISkillService
         return active.FirstOrDefault(s => s.Id == id);
     }
 
-    public async Task<IReadOnlyCollection<SkillSearchResult>> SearchAsync(string query, string? origin = null, int limit = 10)
+    public async Task<IReadOnlyCollection<SkillSearchResult>> SearchAsync(string query, string? origin = null, int limit = 10, string? tag = null)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -206,7 +206,7 @@ public sealed class SkillService : ISkillService
 
         try
         {
-            return await _index.SearchAsync(query, origin, limit);
+            return await _index.SearchAsync(query, origin, limit, tag: tag);
         }
         catch (ArgumentException ex)
         {
@@ -237,10 +237,11 @@ public sealed class SkillService : ISkillService
             throw new SkillValidationException(ex.Message, ex);
         }
 
-        // Total = the whole catalog incl. trashed rows, ignoring the origin
-        // filter (the "selection" the page is drawn from); Matching = rows
-        // passing the request's filter, before the window is applied.
-        var total = (await _index.ListAsync(includeTrashed: true, origin: null)).Count;
+        // Total = the size of the request's selection (the includeTrashed flag
+        // is part of it) before the origin filter is applied; Matching = rows
+        // passing the request's origin filter, before the window is applied.
+        // With filters absent, Total == Matching == the selection size.
+        var total = (await _index.ListAsync(includeTrashed, origin: null)).Count;
         var offset = (page - 1) * pageSize;
         List<Skill> items = matching.Skip(offset).Take(pageSize).ToList();
         return new SkillListResult(items, total, matching.Count);
@@ -465,20 +466,23 @@ public sealed class SkillService : ISkillService
 
     public async Task RebuildIndexAsync()
     {
-        // RebuildAsync wipes the index wholesale: rows for trashed folders are
-        // dropped (trashed skills are not in the active storage list and the
-        // trash marker is not part of the aggregate). Trashed skills therefore
-        // disappear from list/search until restored — RestoreAsync re-indexes
-        // from disk and clears the marker, which is the ordering restore relies
-        // on. Externally-owned rows whose folder still exists are carried over
-        // so recall/search keeps covering both origins between a rebuild and
-        // the next catalog scan; when storage and the index disagree on who
-        // owns a name, the Eling-written folder (storage) wins and the stale
-        // index row is dropped by the rebuild.
+        // RebuildAsync wipes the index wholesale but carries over: the
+        // trashed rows it preserves verbatim, and active external rows whose
+        // file still exists under catalog root (for relaxed folders the path
+        // lives only in body_path, so it is probed there rather than through
+        // the display name). Eling rows are re-created from storage, which is
+        // authoritative; a storage folder always wins over a stale index row
+        // of the same name.
         var storageSkills = await _storage.ListAllAsync();
         var storageNames = new HashSet<string>(storageSkills.Select(s => s.Name), StringComparer.Ordinal);
 
-        var kept = new List<Skill>(storageSkills);
+        // Externally-owned rows whose folder still exists are carried over
+        // with their stored body_path so search/list continuity holds across
+        // a rebuild; display-name probes are useless for relaxed folders, so
+        // the carried path is checked against the catalog root instead.
+        var carryExternal = new HashSet<string>(StringComparer.Ordinal);
+        var paths = await _index.ListPathsAsync();
+        var root = Path.GetFullPath(_storage.CatalogRoot);
         foreach (var row in await _index.ListAsync(includeTrashed: true, origin: null))
         {
             if (storageNames.Contains(row.Name))
@@ -486,13 +490,20 @@ public sealed class SkillService : ISkillService
                 continue;
             }
 
-            if (row.Origin == SkillOrigin.External && await _storage.ExistsAsync(row.Name))
+            if (row.Origin == SkillOrigin.External
+                && paths.TryGetValue(row.Name, out var bodyPath))
             {
-                kept.Add(row);
+                var absolute = Path.GetFullPath(
+                    Path.Combine(root, bodyPath.Replace('/', Path.DirectorySeparatorChar)));
+                if (File.Exists(absolute))
+                {
+                    carryExternal.Add(row.Name);
+                }
             }
         }
 
-        await _index.RebuildAsync(kept);
+        var kept = new List<Skill>(storageSkills);
+        await _index.RebuildAsync(kept, carryExternalNames: carryExternal);
         await NotifyAsync("rebuilt");
     }
 

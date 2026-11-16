@@ -183,6 +183,10 @@ public class InMemorySkillStorage : ISkillStorage
         return Task.CompletedTask;
     }
 
+    // The in-memory double has no on-disk catalog root; the path is a stable
+    // synthetic location used only for error messages and tests.
+    public string CatalogRoot => "~/.agents";
+
     public string FilePath(string name)
     {
         SkillGuards.ValidateNameOrThrow(name, nameof(name));

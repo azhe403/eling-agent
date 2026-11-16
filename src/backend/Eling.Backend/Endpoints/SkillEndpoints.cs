@@ -373,13 +373,23 @@ public static class SkillEndpoints
     private static async Task<IResult> RescanCatalogAsync(ISkillCatalogScanner scanner)
     {
         var report = await scanner.ScanAsync();
+        var failures = report.Failures ?? Array.Empty<SkillScanFailure>();
+        // Cap the wire payload: the failures list travels in the rescan
+        // response envelope; 20 entries is plenty to act on, and the count
+        // above already quantifies the damage.
+        const int failuresCap = 20;
         return TypedResults.Ok(new
         {
             discovered = report.Discovered,
             external = report.External,
             missing = report.Missing,
             failed = report.Failed,
-            renamed = report.Renamed
+            renamed = report.Renamed,
+            failures = failures
+                .Take(failuresCap)
+                .Select(f => new { path = f.Path, reason = f.Reason })
+                .ToList(),
+            failuresTruncated = failures.Count > failuresCap
         });
     }
 

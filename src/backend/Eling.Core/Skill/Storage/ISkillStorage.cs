@@ -71,4 +71,12 @@ public interface ISkillStorage
 
     /// <summary>The absolute SKILL.md path for <paramref name="name"/> as this storage sees it.</summary>
     string FilePath(string name);
+
+    /// <summary>
+    /// Absolute path of the catalog root this storage is rooted at. Skills a
+    /// caller cannot reach through the strict rules above still need a base
+    /// directory when resolving <c>body_path</c> entries carried by the index
+    /// (relaxed external rows whose folder name is not a valid skill name).
+    /// </summary>
+    string CatalogRoot { get; }
 }

@@ -28,11 +28,16 @@ public sealed class SkillSearchResultDto
     [JsonPropertyName("score")]
     public double Score { get; set; }
 
-    public static SkillSearchResultDto From(Skill skill, SkillSearchResult hit) => new()
+    /// <summary>
+    /// Builds the DTO straight from the index hit — no catalog hydration
+    /// required. The hit carries id, name, description, absolute path, origin
+    /// and score (denormalized by the search query).
+    /// </summary>
+    public static SkillSearchResultDto From(SkillSearchResult hit) => new()
     {
-        Id = skill.Id.Value,
-        Name = skill.Name,
-        Description = skill.Description,
+        Id = hit.Id.Value,
+        Name = hit.Name,
+        Description = hit.Description,
         Path = hit.Path,
         Origin = hit.Origin.WireName,
         Score = hit.Rank

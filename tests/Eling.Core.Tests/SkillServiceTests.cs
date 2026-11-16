@@ -347,6 +347,55 @@ public sealed class SkillServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task List_total_is_selection_size_matching_is_post_filter()
+    {
+        // Mixture: 3 active eling skills, 1 of which is trashed; 1 missing-folder
+        // row (folder deleted out of band — the index row remains); 1 external row
+        // adopted without a folder (index mirror only).
+        var index = new SqliteSkillIndex(_dbPath);
+        var service = NewService(index);
+        await service.SaveAsync(NewInput("alpha-skill"));
+        await service.SaveAsync(NewInput("beta-skill"));
+        await service.SaveAsync(NewInput("gamma-skill"));
+        await service.SaveAsync(NewInput("missing-skill"));
+        Directory.Delete(SkillFolder("missing-skill"), recursive: true);
+        await index.AdoptExternalScanResultAsync(
+            new Skill.Skill("external-skill", "external desc", "external body", origin: SkillOrigin.External));
+        await service.DeleteAsync("beta-skill");
+
+        // Default (active-only) selection: 3 eling + external - trashed = 4 rows.
+        var active = await service.ListAsync(includeTrashed: false, origin: null);
+        Assert.Equal(4, active.Total);
+        Assert.Equal(4, active.Matching);
+        Assert.Equal(4, active.Items.Count);
+
+        // Trash mode widens the selection by exactly the trashed row.
+        var withTrash = await service.ListAsync(includeTrashed: true, origin: null);
+        Assert.Equal(5, withTrash.Total);
+        Assert.Equal(5, withTrash.Matching);
+
+        // Origin filter narrows Matching only; Total stays the selection size.
+        var elingOnly = await service.ListAsync(includeTrashed: false, origin: "eling");
+        Assert.Equal(4, elingOnly.Total);
+        Assert.Equal(3, elingOnly.Matching);
+
+        var externalOnly = await service.ListAsync(includeTrashed: false, origin: "external");
+        Assert.Equal(4, externalOnly.Total);
+        Assert.Equal(1, externalOnly.Matching);
+
+        // Paging still windows the selection; Total/Matching do not shrink.
+        var page2 = await service.ListAsync(includeTrashed: false, origin: null, page: 2, pageSize: 3);
+        Assert.Equal(4, page2.Total);
+        Assert.Equal(4, page2.Matching);
+        Assert.Single(page2.Items);
+
+        // Trash mode with the origin filter: selection includes trashed rows.
+        var elingTrashed = await service.ListAsync(includeTrashed: true, origin: "eling");
+        Assert.Equal(5, elingTrashed.Total);
+        Assert.Equal(4, elingTrashed.Matching);
+    }
+
+    [Fact]
     public async Task List_paginates_and_reports_total_and_matching()
     {
         var service = NewService();
@@ -364,7 +413,7 @@ public sealed class SkillServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RebuildIndex_preserves_external_rows_and_drops_trashed()
+    public async Task RebuildIndex_preserves_external_rows_and_trashed()
     {
         var index = new SqliteSkillIndex(_dbPath);
         var externalFolder = SkillFolder("ext-keep");
@@ -379,11 +428,16 @@ public sealed class SkillServiceTests : IDisposable
 
         await service.RebuildIndexAsync();
 
-        // Trashed skills are dropped from the index by rebuild (the trash marker is
-        // not part of the aggregate); restore still works and re-activates the row.
+        // Trashed skills survive a rebuild: their names stay occupied and the
+        // trashed marker is preserved, per the trash-uniqueness rule. The
+        // re-activated content is restored only via RestoreAsync.
         var everything = await service.ListAsync(includeTrashed: true, origin: null);
-        Assert.Single(everything.Items);
-        Assert.Equal("ext-keep", everything.Items[0].Name);
+        Assert.Equal(2, everything.Items.Count);
+        Assert.Contains(everything.Items, s => s.Name == "ext-keep");
+        Assert.Contains(everything.Items, s => s.Name == "my-skill");
+
+        // The trashed skill is still excluded from the active view.
+        Assert.Null(await service.GetByNameAsync("my-skill"));
 
         var external = await service.GetByNameAsync("ext-keep");
         Assert.NotNull(external);

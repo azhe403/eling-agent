@@ -121,7 +121,11 @@ public sealed class SkillTests
             Path.Combine(".trash", "skills"),
             SkillCatalogPaths.TrashDirectory);
         Assert.Equal("skill-index.db", Path.GetFileName(SkillCatalogPaths.IndexFilePath));
-        Assert.Equal("runtime", Path.GetFileName(Path.GetDirectoryName(SkillCatalogPaths.IndexFilePath)));
+        // The dedicated skill index is a sibling of memory.db in the data root,
+        // alongside it — not inside the regenerable runtime/ directory.
+        Assert.Equal(
+            Path.GetFileName(ElingPaths.ResolveDataDir(null, null, null)),
+            Path.GetFileName(Path.GetDirectoryName(SkillCatalogPaths.IndexFilePath)));
         Assert.Equal(
             Path.Combine(SkillCatalogPaths.CatalogDirectory, "skills", "my-skill"),
             SkillCatalogPaths.SkillFolder("my-skill"));
