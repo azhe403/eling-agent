@@ -61,6 +61,11 @@ const navMain = [
     icon: <MemoryStick className="size-4" />,
   },
   {
+    title: "Skills",
+    url: "/dashboard/skills",
+    icon: <Sparkles className="size-4" />,
+  },
+  {
     title: "Audit Trail",
     url: "/dashboard/audit-trail",
     icon: <ScrollText className="size-4" />,
@@ -84,11 +89,6 @@ const navMain = [
     title: "Tools",
     url: "/dashboard/tools",
     icon: <Wrench className="size-4" />,
-  },
-  {
-    title: "Skills",
-    url: "/dashboard/skills",
-    icon: <Sparkles className="size-4" />,
   },
   {
     title: "Shell",
