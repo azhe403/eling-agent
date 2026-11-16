@@ -19,6 +19,9 @@ using Eling.Core.Memory.Serialization;
 using Eling.Core.Memory.Storage;
 using Eling.Core.Recall;
 using Eling.Core.Scope;
+using Eling.Core.Skill;
+using Eling.Core.Skill.Scanning;
+using Eling.Core.Skill.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -50,6 +53,9 @@ public static class McpServiceExtensions
         // Global storage under UserScope (real global scope, no project runtime required)
         services.AddKeyedSingleton<IMemoryStorage>("global", (sp, key) => new FileSystemMemoryStorage(userScope.GlobalDataDirectory));
         services.AddKeyedSingleton<IMemoryIndex>("global", (sp, key) => CreateMemoryIndex(userScope.GlobalDataDirectory, sp.GetService<ILoggerFactory>()));
+
+        // Skill subsystem: machine-global catalog, dedicated index.
+        AddSkillServices(services);
 
         // Scope policy & merger — application layer owns scope decisions
         services.AddSingleton<IMemoryScopePolicy, MemoryScopePolicy>();
@@ -123,6 +129,9 @@ public static class McpServiceExtensions
         // Global storage under UserScope (real global scope, no project runtime required)
         services.AddKeyedSingleton<IMemoryStorage>("global", (sp, key) => new FileSystemMemoryStorage(userScope.GlobalDataDirectory));
         services.AddKeyedSingleton<IMemoryIndex>("global", (sp, key) => CreateMemoryIndex(userScope.GlobalDataDirectory, sp.GetService<ILoggerFactory>()));
+
+        // Skill subsystem: machine-global catalog, dedicated index.
+        AddSkillServices(services);
 
         // Scope policy & merger — application layer owns scope decisions
         services.AddSingleton<IMemoryScopePolicy, MemoryScopePolicy>();
@@ -234,6 +243,30 @@ public static class McpServiceExtensions
         UpdateServices.Add(services, userScope);
 
         return services;
+    }
+
+    /// <summary>
+    /// Registers the machine-global skill subsystem in one place for both
+    /// overloads: a dedicated SQLite index (separate from the memories/snippets
+    /// index), file storage over the universal catalog (<c>~/.agents/skills</c>),
+    /// the application service, the catalog scanner, and the startup hosted
+    /// service that fires the scan without blocking boot. Tools cover both
+    /// origins on reads and stay read-only for external skills on writes.
+    /// </summary>
+    private static void AddSkillServices(IServiceCollection services)
+    {
+        services.AddSingleton<ISkillIndex>(_ => new SqliteSkillIndex(SkillCatalogPaths.IndexFilePath));
+        services.AddSingleton<ISkillStorage>(sp => new FileSystemSkillStorage(
+            SkillCatalogPaths.CatalogDirectory,
+            sp.GetService<ILogger<FileSystemSkillStorage>>()));
+        services.AddSingleton<ISkillService, SkillService>();
+        services.AddSingleton<ISkillCatalogScanner>(sp => new SkillCatalogScanner(
+            sp.GetRequiredService<ISkillIndex>(),
+            SkillCatalogPaths.CatalogDirectory,
+            sp.GetService<ILogger<SkillCatalogScanner>>()));
+        // Fire-and-forget reconciliation at host start; never blocks boot and
+        // never takes the host down on a scan failure (see the service).
+        services.AddHostedService<Eling.Backend.Bootstrap.SkillCatalogScanHostedService>();
     }
 
     private static void AddShellConfigStore(IServiceCollection services, UserScope userScope)

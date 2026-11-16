@@ -12,6 +12,7 @@ public static class ToolCatalog
     public const string FilesystemGroup = "filesystem";
     public const string DiagnosticsGroup = "diagnostics";
     public const string DatabaseGroup = "database";
+    public const string SkillsGroup = "skills";
 
     public static readonly IReadOnlyList<ToolDefinition> All = new List<ToolDefinition>
     {
@@ -62,6 +63,12 @@ public static class ToolCatalog
         new("db_query", DatabaseGroup, "Run a read-only SQL query (SELECT, EXPLAIN, PRAGMA, SHOW, DESCRIBE/DESC, and WITH CTEs) against a registered database connection."),
         new("redis_scan", DatabaseGroup, "Browse a Redis connection as a lazy key tree, one page at a time."),
         new("redis_inspect", DatabaseGroup, "Inspect a single Redis key: type, TTL, length, encoding, and a capped value preview."),
+        new("skill_save", SkillsGroup, "Save a skill to the global catalog (create or update by name)."),
+        new("skill_get", SkillsGroup, "Retrieve a skill by its ULID or name."),
+        new("skill_search", SkillsGroup, "Search skills by keyword across both origins (Eling-managed and external)."),
+        new("skill_list", SkillsGroup, "List the skill catalog, paginated, with tag/origin filters."),
+        new("skill_delete", SkillsGroup, "Move an Eling-managed skill to the catalog trash."),
+        new("skill_restore", SkillsGroup, "Restore a trashed skill back into the active catalog."),
     }.AsReadOnly();
 
     public static bool Exists(string toolName)
