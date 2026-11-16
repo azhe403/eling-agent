@@ -111,8 +111,8 @@ internal static class SkillFileFormat
         ArgumentNullException.ThrowIfNull(raw);
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedName);
 
-        var (yaml, body) = SplitDocument(raw);
-        var frontMatter = DeserializeFrontMatter(yaml);
+        var document = SplitDocument(raw);
+        var frontMatter = DeserializeFrontMatter(document.Yaml);
 
         if (frontMatter is null)
         {
@@ -133,18 +133,18 @@ internal static class SkillFileFormat
 
         var updatedAt = frontMatter.UpdatedAt == default ? frontMatter.CreatedAt : frontMatter.UpdatedAt;
 
-        var (relatedMemories, relatedSnippets, source) = ParseReferencesAndSource(frontMatter);
+        var references = ParseReferencesAndSource(frontMatter);
 
         try
         {
             return new Skill(
                 name,
                 frontMatter.Description,
-                body,
+                document.Body,
                 frontMatter.Tags,
-                relatedMemories,
-                relatedSnippets,
-                source,
+                references.RelatedMemories,
+                references.RelatedSnippets,
+                references.Source,
                 id,
                 SkillOrigin.Eling,
                 frontMatter.CreatedAt,
@@ -175,8 +175,8 @@ internal static class SkillFileFormat
         ArgumentNullException.ThrowIfNull(raw);
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedName);
 
-        var (yaml, body) = SplitDocument(raw);
-        var frontMatter = DeserializeFrontMatter(yaml);
+        var document = SplitDocument(raw);
+        var frontMatter = DeserializeFrontMatter(document.Yaml);
 
         if (frontMatter is null)
         {
@@ -200,17 +200,31 @@ internal static class SkillFileFormat
                 $"Frontmatter 'description' is {frontMatter.Description.Length} characters; the maximum is {Skill.MaxDescriptionLength}.");
         }
 
-        if (string.IsNullOrWhiteSpace(body))
+        if (string.IsNullOrWhiteSpace(document.Body))
         {
             throw new SkillFrontMatterException("SKILL.md has no body; Eling requires a non-empty body to adopt it.");
         }
 
-        var (relatedMemories, relatedSnippets, source) = ParseReferencesAndSource(frontMatter);
+        var references = ParseReferencesAndSource(frontMatter);
 
-        return new AdoptionRead(name, frontMatter.Description, body, frontMatter.Tags, relatedMemories, relatedSnippets, source);
+        return new AdoptionRead(
+            name,
+            frontMatter.Description,
+            document.Body,
+            frontMatter.Tags,
+            references.RelatedMemories,
+            references.RelatedSnippets,
+            references.Source);
     }
 
-    private static (string Yaml, string Body) SplitDocument(string raw)
+    private sealed record SkillDocument(string Yaml, string Body);
+
+    private sealed record ReferencesAndSource(
+        List<RelatedReference> RelatedMemories,
+        List<RelatedReference> RelatedSnippets,
+        SkillSource? Source);
+
+    private static SkillDocument SplitDocument(string raw)
     {
         var normalized = raw.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
@@ -239,7 +253,7 @@ internal static class SkillFileFormat
             throw new SkillFrontMatterException("Not a SKILL.md document: missing closing '---' delimiter.");
         }
 
-        return (yaml, body);
+        return new SkillDocument(yaml, body);
     }
 
     private static SkillFrontMatter? DeserializeFrontMatter(string yaml)
@@ -271,8 +285,7 @@ internal static class SkillFileFormat
         return name!;
     }
 
-    private static (List<RelatedReference> RelatedMemories, List<RelatedReference> RelatedSnippets, SkillSource? Source)
-        ParseReferencesAndSource(SkillFrontMatter frontMatter)
+    private static ReferencesAndSource ParseReferencesAndSource(SkillFrontMatter frontMatter)
     {
         var relatedMemories = new List<RelatedReference>();
         var index = 0;
@@ -308,7 +321,7 @@ internal static class SkillFileFormat
             ? null
             : new SkillSource(frontMatter.Source.Upstream, frontMatter.Source.Tracked);
 
-        return (relatedMemories, relatedSnippets, source);
+        return new ReferencesAndSource(relatedMemories, relatedSnippets, source);
     }
 
     private static RelatedReference ToReference(string? id, string? scope, string? relation, string where, bool requireScope)
