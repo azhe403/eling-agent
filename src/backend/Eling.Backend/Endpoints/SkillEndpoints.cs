@@ -12,8 +12,9 @@ namespace Eling.Backend.Endpoints;
 /// <summary>
 /// REST surface for the skill catalog (spec §7). Machine-global like the
 /// catalog itself — one group, no scope tiers, no sync/adopt/import
-/// endpoints by design. External skills are read-only on every mutating
-/// path; reads are origin-agnostic. The envelope is applied by
+/// endpoints by design. External skills refuse content mutations (save,
+/// rename); delete-to-trash and restore work for both origins. Reads are
+/// origin-agnostic. The envelope is applied by
 /// <see cref="ApiEnvelopeMiddleware"/>; <c>/{id}</c> routes are active-catalog
 /// only (a trashed skill answers 404) except restore, which resolves the
 /// trashed row so a deleted skill can come back.
@@ -291,14 +292,6 @@ public static class SkillEndpoints
             return NotFoundSkill(httpContext, $"No skill with id '{id}' exists.");
         }
 
-        if (existing.Origin == SkillOrigin.External)
-        {
-            return ConflictSkill(
-                httpContext,
-                "skill_read_only",
-                $"Skill '{existing.Name}' is externally supplied (owned by its creator's tooling); Eling never trashes external skills.");
-        }
-
         try
         {
             await service.DeleteAsync(existing.Name);
@@ -324,14 +317,6 @@ public static class SkillEndpoints
         if (resolved is null)
         {
             return NotFoundSkill(httpContext, $"No skill with id '{id}' exists.");
-        }
-
-        if (resolved.Origin == SkillOrigin.External)
-        {
-            return ConflictSkill(
-                httpContext,
-                "skill_read_only",
-                $"Skill '{resolved.Name}' is externally supplied (owned by its creator's tooling); Eling never mutates external skills.");
         }
 
         try

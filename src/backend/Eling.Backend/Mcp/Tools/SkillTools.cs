@@ -194,7 +194,7 @@ internal static class SkillTools
     public static Exception MapException(Exception ex) => ex switch
     {
         SkillReadOnlyException e => new SkillReadOnlyException(
-            $"External skills are externally managed and read-only to Eling: {e.Message}", e),
+            $"External skills are externally managed; Eling never writes or renames them: {e.Message}", e),
         SkillNotFoundException e => new SkillNotFoundException($"Skill not found: {e.Message}", e),
         SkillConflictException e => new SkillConflictException($"Skill name conflict: {e.Message}", e),
         SkillValidationException e => new SkillValidationException($"Invalid skill input: {e.Message}", e),

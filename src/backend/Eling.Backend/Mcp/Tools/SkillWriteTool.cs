@@ -9,8 +9,10 @@ namespace Eling.Backend.Mcp.Tools;
 /// <summary>
 /// MCP tools for the write side of the skill catalog: save (create-or-update
 /// by name), delete (move to trash), restore. All machine-global; there is
-/// no scope parameter. External skills are permanently read-only to every
-/// mutating path — the service enforces it, the tools only surface it.
+/// no scope parameter. Content mutations (save) on external skills are
+/// refused — the service enforces it, the tools only surface it. Delete and
+/// restore work for both origins: an external skill is moved to the trash,
+/// never edited.
 /// </summary>
 [McpServerToolType]
 public sealed class SkillWriteTool
@@ -92,7 +94,7 @@ public sealed class SkillWriteTool
         }
     }
 
-    [McpServerTool(Name = "skill_delete"), Description("Move an Eling-managed skill to the catalog trash (~/.agents/.trash/skills/{name}). Nothing is permanently deleted; the skill can be brought back with skill_restore. Use when the user asks to delete, retire, or remove a skill from the catalog. Deleting fails when the skill does not exist or is externally supplied — external skills are owned by their creator's tooling and are never mutated by Eling. A trashed name stays blocked for re-creation until it is restored or purged.")]
+    [McpServerTool(Name = "skill_delete"), Description("Move a skill to the catalog trash (~/.agents/.trash/skills/{name}). Nothing is permanently deleted; the skill can be brought back with skill_restore. Use when the user asks to delete, retire, or remove a skill from the catalog. Works for both eling-managed and externally-supplied skills: an external skill's folder is moved to the trash untouched — never edited, renamed or merged — and can be restored the same way. Deleting fails when the skill does not exist, or when the trash destination is occupied by an earlier-trashed skill of the same name. Editing or renaming an external skill remains forbidden. A trashed name stays blocked for re-creation until it is restored or purged.")]
     public async Task<SkillTrashedResponse> DeleteAsync(
         [Description("The name of the skill to move to the trash. Must be a lowercase kebab-case skill name.")] string name)
     {
@@ -119,7 +121,7 @@ public sealed class SkillWriteTool
         }
     }
 
-    [McpServerTool(Name = "skill_restore"), Description("Restore a skill from the catalog trash (~/.agents/.trash/skills/{name}) back into the active catalog (~/.agents/skills/{name}) and re-index it. Use when the user wants back a skill that was trashed with skill_delete. Fails when no trashed folder exists for the name, or when the name is held by an externally-supplied skill — external skills are owned by their creator's tooling and are never mutated by Eling.")]
+    [McpServerTool(Name = "skill_restore"), Description("Restore a skill from the catalog trash (~/.agents/.trash/skills/{name}) back into the active catalog (~/.agents/skills/{name}) and re-index it. Use when the user wants back a skill that was trashed with skill_delete. Works for both eling-managed and externally-supplied skills — an externally-supplied skill is moved back untouched and its index row is re-activated. Fails when no trashed folder exists for the name.")]
     public async Task<SkillDto> RestoreAsync(
         [Description("The name of the trashed skill to restore. Must be a lowercase kebab-case skill name.")] string name)
     {

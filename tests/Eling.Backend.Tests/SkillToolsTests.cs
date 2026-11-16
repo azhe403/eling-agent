@@ -245,19 +245,34 @@ public sealed class SkillToolsTests : IDisposable
     }
 
     [Fact]
-    public async Task skill_delete_refuses_external_skill()
+    public async Task skill_delete_then_restore_external_skill()
     {
         var index = new SqliteSkillIndex(_dbPath);
+        var externalFolder = Path.Combine(_root, "skills", "ext-skill");
+        Directory.CreateDirectory(externalFolder);
+        await File.WriteAllTextAsync(
+            Path.Combine(externalFolder, "SKILL.md"),
+            "# foreign skill, no eling frontmatter\n");
         await index.AdoptExternalScanResultAsync(
-            new Skill("my-skill", "external desc", "external body", origin: SkillOrigin.External));
-        var writeTool = NewWriteTool(NewService(index));
+            new Skill("ext-skill", "external desc", "external body", origin: SkillOrigin.External));
+        var service = NewService(index);
+        var writeTool = NewWriteTool(service);
+        var readTool = NewReadTool(service);
 
-        var result = await ThroughFilterAsync(
-            "skill_delete",
-            async () => (object?)await writeTool.DeleteAsync("my-skill"));
+        var deleted = await writeTool.DeleteAsync("ext-skill");
+        Assert.True(deleted.Trashed);
+        Assert.False(Directory.Exists(externalFolder));
+        Assert.True(Directory.Exists(Path.Combine(_root, ".trash", "skills", "ext-skill")));
+        Assert.Null(await readTool.GetAsync("ext-skill"));
 
-        Assert.True(result.IsError);
-        Assert.Contains("external", FirstBlock(result).Text, StringComparison.OrdinalIgnoreCase);
+        var restored = await writeTool.RestoreAsync("ext-skill");
+        Assert.Equal("ext-skill", restored.Name);
+        Assert.Equal("external", restored.Origin);
+        Assert.True(Directory.Exists(externalFolder));
+
+        var fetched = await readTool.GetAsync("ext-skill");
+        Assert.NotNull(fetched);
+        Assert.Equal("external", fetched!.Origin);
     }
 
     [Fact]

@@ -224,6 +224,46 @@ public class SkillApiTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task DeleteSkill_External_MovesToTrashThenRestoreBringsItBack()
+    {
+        var client = EnsureClient();
+        await SeedForeignSkillAsync("foreign-delete");
+        var rescan = await client.PostAsync("/api/skills/rescan", null);
+        Assert.Equal(HttpStatusCode.OK, rescan.StatusCode);
+
+        var listResponse = await client.GetAsync("/api/skills?origin=external");
+        var list = await listResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var externalItem = list.GetProperty("items").EnumerateArray()
+            .Single(i => i.GetProperty("name").GetString() == "foreign-delete");
+        var id = externalItem.GetProperty("id").GetString()!;
+
+        var deleteResponse = await client.DeleteAsync($"/api/skills/{id}");
+        Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
+        var trashed = await deleteResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.True(trashed.GetProperty("trashed").GetBoolean());
+
+        // Gone from the active catalog, visible in trash mode (origin-agnostic).
+        var activeList = await client.GetAsync("/api/skills?origin=external");
+        var activeItems = (await activeList.Content.ReadFromJsonAsync<JsonElement>(JsonOptions))
+            .GetProperty("items").EnumerateArray().ToList();
+        Assert.DoesNotContain(activeItems, i => i.GetProperty("name").GetString() == "foreign-delete");
+
+        var trashList = await client.GetAsync("/api/skills?origin=external&includeTrashed=true");
+        var trashItems = (await trashList.Content.ReadFromJsonAsync<JsonElement>(JsonOptions))
+            .GetProperty("items").EnumerateArray().ToList();
+        Assert.Contains(trashItems, i => i.GetProperty("name").GetString() == "foreign-delete");
+
+        // POST restore resurrects the externally-supplied folder untouched.
+        var restoreResponse = await client.PostAsync($"/api/skills/{id}/restore", null);
+        Assert.Equal(HttpStatusCode.OK, restoreResponse.StatusCode);
+        var restored = await restoreResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal(id, restored.GetProperty("id").GetString());
+        Assert.Equal("foreign-delete", restored.GetProperty("name").GetString());
+        Assert.Equal("external", restored.GetProperty("origin").GetString());
+        Assert.True(File.Exists(Path.Combine(SkillsDirectory, "foreign-delete", "SKILL.md")));
+    }
+
+    [Fact]
     public async Task DeleteSkill_MovesToTrashThenRestoreBringsItBack()
     {
         var client = EnsureClient();
