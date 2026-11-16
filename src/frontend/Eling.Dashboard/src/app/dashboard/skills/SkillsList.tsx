@@ -478,6 +478,7 @@ export function SkillsList() {
                     selected={selected?.id === skill.id}
                     trashMode={trashMode}
                     onSelect={handleSelect}
+                    onDelete={(s) => setDeleteTarget(s)}
                   />
                 ))}
               </div>

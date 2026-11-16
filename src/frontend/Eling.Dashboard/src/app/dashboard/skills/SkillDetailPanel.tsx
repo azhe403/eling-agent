@@ -207,6 +207,61 @@ export function SkillDetailPanel({
           </Button>
         </div>
 
+        {/* Top action bar: delete/edit (view mode) or restore (trash mode). Hidden in edit/create mode — the form has its own Save/Cancel. */}
+        {mode !== "edit" && (
+          <div className="flex items-center justify-end gap-2 border-b border-border/40 pb-3">
+            {canRestore ? (
+            <>
+              <span className="mr-auto text-[11px] text-muted-foreground">
+                Trash view — restore moves the skill back to the catalog.
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => summary && onRestore(summary.id)}
+              >
+                <RotateCcw className="size-4" />
+                Restore
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 text-muted-foreground hover:text-destructive"
+                onClick={() => summary && onDelete(summary.id)}
+                disabled={!canDelete}
+                aria-label="Delete skill"
+                title={
+                  isExternal
+                    ? "Move to trash (restorable — the folder is not edited)"
+                    : trashMode
+                      ? "Unavailable in trash view"
+                      : "Move to trash"
+                }
+              >
+                <Trash2 className="size-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={enterEdit}
+                disabled={!canEdit}
+                title={
+                  isExternal
+                    ? "External skills are read-only for Eling"
+                    : "Edit this skill"
+                }
+              >
+                <Pencil className="size-4" />
+                Edit
+              </Button>
+            </>
+          )}
+          </div>
+        )}
+
         {mode === "edit" ? (
           <div className="flex flex-col gap-3">
             {saveError && (
@@ -429,58 +484,6 @@ export function SkillDetailPanel({
               </div>
             )}
 
-            {/* Footer actions */}
-            <div className="flex items-center justify-between gap-2 border-t border-border/40 pt-3">
-              {canRestore ? (
-                <>
-                  <span className="text-[11px] text-muted-foreground">
-                    Trash view — restore moves the skill back to the catalog.
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => summary && onRestore(summary.id)}
-                  >
-                    <RotateCcw className="size-4" />
-                    Restore
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-8 text-muted-foreground hover:text-destructive"
-                    onClick={() => summary && onDelete(summary.id)}
-                    disabled={!canDelete}
-                    aria-label="Delete skill"
-                    title={
-                      isExternal
-                        ? "Move to trash (restorable — the folder is not edited)"
-                        : trashMode
-                          ? "Unavailable in trash view"
-                          : "Move to trash"
-                    }
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={enterEdit}
-                    disabled={!canEdit}
-                    title={
-                      isExternal
-                        ? "External skills are read-only for Eling"
-                        : "Edit this skill"
-                    }
-                  >
-                    <Pencil className="size-4" />
-                    Edit
-                  </Button>
-                </>
-              )}
-            </div>
           </>
         )}
       </div>

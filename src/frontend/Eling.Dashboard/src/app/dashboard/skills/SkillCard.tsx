@@ -11,6 +11,7 @@ export type SkillCardProps = {
   selected: boolean
   trashMode: boolean
   onSelect: (skill: SkillListItem) => void
+  onDelete?: (skill: SkillListItem) => void
 }
 
 export function originBadgeClass(origin: string): string {
@@ -19,7 +20,7 @@ export function originBadgeClass(origin: string): string {
     : "bg-blue-500/10 text-blue-600 dark:text-blue-400"
 }
 
-export function SkillCard({ skill, selected, trashMode, onSelect }: SkillCardProps) {
+export function SkillCard({ skill, selected, trashMode, onSelect, onDelete }: SkillCardProps) {
   return (
     <button
       type="button"
@@ -49,9 +50,37 @@ export function SkillCard({ skill, selected, trashMode, onSelect }: SkillCardPro
             </span>
           )}
         </div>
-        <span className="text-[11px] text-muted-foreground">
-          Updated: {utcToLocal(skill.updatedAt)}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] text-muted-foreground">
+            Updated: {utcToLocal(skill.updatedAt)}
+          </span>
+          {!trashMode && onDelete && (
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label={`Delete ${skill.name}`}
+              title={
+                skill.origin === "external"
+                  ? "Move to trash (restorable — the folder is not edited)"
+                  : "Move to trash"
+              }
+              onClick={(e) => {
+                e.stopPropagation()
+                onDelete(skill)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onDelete(skill)
+                }
+              }}
+              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Trash2 className="size-3.5" />
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="text-sm font-semibold leading-snug">{skill.name}</div>
