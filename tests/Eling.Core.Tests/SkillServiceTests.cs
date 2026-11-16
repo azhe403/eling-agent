@@ -301,13 +301,15 @@ public sealed class SkillServiceTests : IDisposable
                 Directory.Delete(_root, recursive: true);
             }
         }
-        catch (IOException)
+        catch (IOException ex)
         {
             // Best effort: a lingering temp catalog must not fail the test run on Windows file locks.
+            _ = ex.Message;
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
             // Same.
+            _ = ex.Message;
         }
 
         foreach (var candidate in new[] { _dbPath, _dbPath + "-wal", _dbPath + "-shm" })
@@ -319,13 +321,15 @@ public sealed class SkillServiceTests : IDisposable
                     File.Delete(candidate);
                 }
             }
-            catch (IOException)
+            catch (IOException ex)
             {
                 // Best effort, same rationale as the catalog cleanup above.
+                _ = ex.Message;
             }
-            catch (UnauthorizedAccessException)
+            catch (UnauthorizedAccessException ex)
             {
                 // Same.
+                _ = ex.Message;
             }
         }
     }

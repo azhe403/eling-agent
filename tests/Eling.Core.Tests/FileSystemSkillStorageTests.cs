@@ -502,13 +502,15 @@ public sealed class FileSystemSkillStorageTests : IDisposable
             {
                 Directory.Delete(_root, recursive: true);
             }
-            catch (IOException)
+            catch (IOException ex)
             {
                 // Best effort: a lingering temp catalog must not fail the test run on Windows file locks.
+                _ = ex.Message;
             }
-            catch (UnauthorizedAccessException)
+            catch (UnauthorizedAccessException ex)
             {
                 // Same.
+                _ = ex.Message;
             }
         }
     }

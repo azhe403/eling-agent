@@ -1,21 +1,4 @@
-using Eling.Core.Skill.Storage;
-
 namespace Eling.Core.Skill;
-
-/// <summary>
-/// Create-or-update-by-name payload for <see cref="ISkillService.SaveAsync"/>.
-/// The input is the complete new content of the skill; fields the input cannot
-/// express (<see cref="Skill.Source"/>) are preserved from the existing file on
-/// update. Sibling files are written verbatim into the folder.
-/// </summary>
-public sealed record SkillSaveInput(
-    string Name,
-    string Description,
-    string Body,
-    IReadOnlyCollection<string>? Tags = null,
-    IReadOnlyCollection<RelatedReference>? RelatedMemories = null,
-    IReadOnlyCollection<RelatedReference>? RelatedSnippets = null,
-    IReadOnlyList<SkillSiblingFile>? SiblingFiles = null);
 
 /// <summary>
 /// Application-level orchestration for the machine-global skill catalog
@@ -81,11 +64,13 @@ public interface ISkillService
 
     /// <summary>
     /// Lists skills ordered by <paramref name="sort"/> ("name" or
-    /// "updated_at") with paging applied. Returns the page window, the size of
-    /// the whole catalog (<c>Total</c>, including trashed rows) and the count
-    /// matching the requested filter (<c>Matching</c>).
+    /// "updated_at") with paging applied. Returns a <see cref="SkillListResult"/>:
+    /// the page window <see cref="SkillListResult.Items"/>, the size of the
+    /// whole catalog including trashed rows (<see cref="SkillListResult.Total"/>),
+    /// and the count matching the requested filter before the window was
+    /// applied (<see cref="SkillListResult.Matching"/>).
     /// </summary>
-    Task<(IReadOnlyList<Skill> Items, int Total, int Matching)> ListAsync(
+    Task<SkillListResult> ListAsync(
         bool includeTrashed, string? origin, int page = 1, int pageSize = 20, string sort = "name");
 
     /// <summary>

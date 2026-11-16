@@ -307,7 +307,9 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
 
     private abstract record AdoptionOutcome;
 
-    private sealed record ExternalAdoption(Skill Skill, bool IsNew) : AdoptionOutcome;
+    private sealed record ExternalAdoption(
+        Skill Skill,
+        bool IsNew) : AdoptionOutcome;
 
     private sealed record FailedAdoption : AdoptionOutcome
     {

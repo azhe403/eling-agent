@@ -166,7 +166,7 @@ public sealed class SqliteSkillIndex : ISkillIndex
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
         await using var connection = await OpenConnectionAsync();
-        (string Id, string Name, string Description, string Body, string Origin, string CreatedAt, string UpdatedAt)? row;
+        SkillRow? row;
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = """
@@ -240,7 +240,7 @@ public sealed class SqliteSkillIndex : ISkillIndex
         var whereClause = where.Count > 0 ? " WHERE " + string.Join(" AND ", where) : string.Empty;
 
         await using var connection = await OpenConnectionAsync();
-        var rows = new List<(string Id, string Name, string Description, string Body, string Origin, string CreatedAt, string UpdatedAt)>();
+        var rows = new List<SkillRow>();
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = $"""
@@ -593,13 +593,13 @@ public sealed class SqliteSkillIndex : ISkillIndex
         };
     }
 
-    private static (string Id, string Name, string Description, string Body, string Origin, string CreatedAt, string UpdatedAt) ReadSkillRow(DbDataReader reader) =>
-        (reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-         reader.GetString(4), reader.GetString(5), reader.GetString(6));
+    private static SkillRow ReadSkillRow(DbDataReader reader) =>
+        new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+            reader.GetString(4), reader.GetString(5), reader.GetString(6));
 
     private async Task<Skill> HydrateAsync(
         DbConnection connection,
-        (string Id, string Name, string Description, string Body, string Origin, string CreatedAt, string UpdatedAt) row)
+        SkillRow row)
     {
         var tags = new List<string>();
         await using (var command = connection.CreateCommand())
@@ -735,6 +735,15 @@ public sealed class SqliteSkillIndex : ISkillIndex
         parameter.Value = value ?? DBNull.Value;
         command.Parameters.Add(parameter);
     }
+
+    private readonly record struct SkillRow(
+        string Id,
+        string Name,
+        string Description,
+        string Body,
+        string Origin,
+        string CreatedAt,
+        string UpdatedAt);
 
     private readonly record struct ExistingRow(
         long RowId,

@@ -260,9 +260,10 @@ public sealed class SqliteSkillIndexTests : IDisposable
                 var path = _dbPath + suffix;
                 if (File.Exists(path)) File.Delete(path);
             }
-            catch (IOException)
+            catch (IOException ex)
             {
                 // Best effort cleanup of a temp file; never fail a test over it.
+                _ = ex.Message;
             }
         }
     }

@@ -1,4 +1,5 @@
 using Eling.Core.Skill.Storage;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Core.Skill;
 
@@ -21,12 +22,14 @@ public sealed class SkillService : ISkillService
     private readonly ISkillStorage _storage;
     private readonly ISkillIndex _index;
     private readonly ISkillChangeNotifier _notifier;
+    private readonly ILogger<SkillService>? _logger;
 
-    public SkillService(ISkillStorage storage, ISkillIndex index, ISkillChangeNotifier? notifier = null)
+    public SkillService(ISkillStorage storage, ISkillIndex index, ISkillChangeNotifier? notifier = null, ILogger<SkillService>? logger = null)
     {
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
         _index = index ?? throw new ArgumentNullException(nameof(index));
         _notifier = notifier ?? NullSkillChangeNotifier.Instance;
+        _logger = logger;
     }
 
     public async Task<Skill> SaveAsync(SkillSaveInput input)
@@ -196,7 +199,7 @@ public sealed class SkillService : ISkillService
         }
     }
 
-    public async Task<(IReadOnlyList<Skill> Items, int Total, int Matching)> ListAsync(
+    public async Task<SkillListResult> ListAsync(
         bool includeTrashed, string? origin, int page = 1, int pageSize = 20, string sort = "name")
     {
         if (page < 1)
@@ -225,7 +228,7 @@ public sealed class SkillService : ISkillService
         var total = (await _index.ListAsync(includeTrashed: true, origin: null)).Count;
         var offset = (page - 1) * pageSize;
         List<Skill> items = matching.Skip(offset).Take(pageSize).ToList();
-        return (items, total, matching.Count);
+        return new SkillListResult(items, total, matching.Count);
     }
 
     public async Task DeleteAsync(string name)
@@ -358,10 +361,11 @@ public sealed class SkillService : ISkillService
                 return stored;
             }
         }
-        catch (SkillStorageException)
+        catch (SkillStorageException ex)
         {
-            // Drifted file: fall back to the index mirror — a failed read must
+            // Drifted file: fall back to the index mirror - a failed read must
             // not turn an update into data loss.
+            _logger?.LogWarning(ex, "Skill file unparsable while reading '{Name}'; falling back to the index mirror.", name);
         }
 
         return await _index.GetByNameAsync(name);
@@ -430,11 +434,12 @@ public sealed class SkillService : ISkillService
         {
             await _notifier.NotifyAsync(reason);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // Notifications are best-effort and fire after the mutation has
             // landed; a refresh failure must not turn a successful write into
             // an error.
+            _logger?.LogWarning(ex, "Skill change notification '{Reason}' failed; the mutation itself landed.", reason);
         }
     }
 }

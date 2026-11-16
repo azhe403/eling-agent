@@ -3,13 +3,6 @@ using System.Text.RegularExpressions;
 namespace Eling.Core.Skill;
 
 /// <summary>
-/// Optional upstream provenance of a skill ("where this came from"). Metadata
-/// only — Eling never acts on it. Not serialized to frontmatter beyond the
-/// canonical <c>source: { upstream, tracked }</c> shape.
-/// </summary>
-public sealed record SkillSource(string? Upstream, bool Tracked = false);
-
-/// <summary>
 /// The skill aggregate. Machine-global only — there are no scope tiers for
 /// skills. <see cref="Id"/> is a ULID assigned at creation; <see cref="Name"/>
 /// is the human-facing kebab-case identity and doubles as the folder name

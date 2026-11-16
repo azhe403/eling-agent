@@ -212,9 +212,10 @@ public sealed class SkillCatalogScannerTests : IDisposable
                     File.Delete(_dbPath + suffix);
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // best effort temp cleanup
+                _ = ex.Message;
             }
         }
     }
@@ -228,9 +229,10 @@ public sealed class SkillCatalogScannerTests : IDisposable
                 Directory.Delete(path, recursive: true);
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // best effort temp cleanup
+            _ = ex.Message;
         }
     }
 }
