@@ -319,6 +319,138 @@ public class SkillApiTests : IAsyncLifetime, IDisposable
         Assert.Contains("rescan-external", names);
     }
 
+    [Fact]
+    public async Task PostAdopt_ExternalSkill_ReturnsOkAndFlipsOrigin()
+    {
+        var client = EnsureClient();
+        await SeedAdoptableForeignSkillAsync("adopt-me");
+        var rescan = await client.PostAsync("/api/skills/rescan", null);
+        Assert.Equal(HttpStatusCode.OK, rescan.StatusCode);
+
+        var listResponse = await client.GetAsync("/api/skills?origin=external");
+        var list = await listResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var externalItem = list.GetProperty("items").EnumerateArray()
+            .Single(i => i.GetProperty("name").GetString() == "adopt-me");
+        var id = externalItem.GetProperty("id").GetString()!;
+
+        // Content mutations stay forbidden before adoption.
+        var putBefore = await client.PutAsJsonAsync($"/api/skills/{id}", new { description = "hijacked" });
+        Assert.Equal(HttpStatusCode.Conflict, putBefore.StatusCode);
+
+        var adoptResponse = await client.PostAsync($"/api/skills/{id}/adopt", null);
+        Assert.Equal(HttpStatusCode.OK, adoptResponse.StatusCode);
+        var adopted = await adoptResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal(id, adopted.GetProperty("id").GetString());
+        Assert.Equal("adopt-me", adopted.GetProperty("name").GetString());
+        Assert.Equal("eling", adopted.GetProperty("origin").GetString());
+        Assert.Equal("kept description", adopted.GetProperty("description").GetString());
+        Assert.Contains("verbatim body", adopted.GetProperty("body").GetString());
+
+        // The file keeps its content and gained the Eling frontmatter keys.
+        var raw = await File.ReadAllTextAsync(Path.Combine(SkillsDirectory, "adopt-me", "SKILL.md"));
+        Assert.Contains("createdAt:", raw);
+        Assert.Contains("updatedAt:", raw);
+        Assert.Contains("kept description", raw);
+        Assert.Contains("verbatim body", raw);
+
+        // After adoption the skill is fully Eling-managed: PUT works.
+        var putAfter = await client.PutAsJsonAsync($"/api/skills/{id}", new { description = "now editable" });
+        Assert.Equal(HttpStatusCode.OK, putAfter.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostAdopt_UnparseableForeignSkill_Returns400AndTouchesNothing()
+    {
+        var client = EnsureClient();
+        await SeedForeignSkillAsync("adopt-broken");
+        var rescan = await client.PostAsync("/api/skills/rescan", null);
+        Assert.Equal(HttpStatusCode.OK, rescan.StatusCode);
+
+        var listResponse = await client.GetAsync("/api/skills?origin=external");
+        var list = await listResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var externalItem = list.GetProperty("items").EnumerateArray()
+            .Single(i => i.GetProperty("name").GetString() == "adopt-broken");
+        var id = externalItem.GetProperty("id").GetString()!;
+        var file = Path.Combine(SkillsDirectory, "adopt-broken", "SKILL.md");
+        var before = await File.ReadAllTextAsync(file);
+
+        var adoptResponse = await client.PostAsync($"/api/skills/{id}/adopt", null);
+        Assert.Equal(HttpStatusCode.BadRequest, adoptResponse.StatusCode);
+        Assert.Equal(before, await File.ReadAllTextAsync(file));
+
+        // Still external in the catalog.
+        var afterList = await client.GetAsync("/api/skills?origin=external");
+        var after = await afterList.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Contains(after.GetProperty("items").EnumerateArray(),
+            i => i.GetProperty("name").GetString() == "adopt-broken");
+    }
+
+    [Fact]
+    public async Task PostAdopt_UnknownId_Returns404()
+    {
+        var client = EnsureClient();
+        var unknown = Ulid.NewUlid().ToString();
+
+        var adoptResponse = await client.PostAsync($"/api/skills/{unknown}/adopt", null);
+        Assert.Equal(HttpStatusCode.NotFound, adoptResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostAdopt_ElingSkill_Returns409()
+    {
+        var client = EnsureClient();
+        var created = await PostSkillAsync(client, new
+        {
+            name = "adopt-eling",
+            description = "already managed",
+            body = "# adopt-eling\n\nE."
+        });
+        var id = created.GetProperty("id").GetString()!;
+
+        var adoptResponse = await client.PostAsync($"/api/skills/{id}/adopt", null);
+        Assert.Equal(HttpStatusCode.Conflict, adoptResponse.StatusCode);
+        var failure = await adoptResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal("skill_conflict", failure.GetProperty("code").GetString());
+        Assert.Contains("already Eling-managed", failure.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task PostAdopt_TrashedExternalSkill_Returns400()
+    {
+        var client = EnsureClient();
+        await SeedAdoptableForeignSkillAsync("adopt-trashed");
+        var rescan = await client.PostAsync("/api/skills/rescan", null);
+        Assert.Equal(HttpStatusCode.OK, rescan.StatusCode);
+
+        var listResponse = await client.GetAsync("/api/skills?origin=external");
+        var list = await listResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var externalItem = list.GetProperty("items").EnumerateArray()
+            .Single(i => i.GetProperty("name").GetString() == "adopt-trashed");
+        var id = externalItem.GetProperty("id").GetString()!;
+
+        var deleteResponse = await client.DeleteAsync($"/api/skills/{id}");
+        Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
+        var trashFile = Path.Combine(CatalogRoot, ".trash", "skills", "adopt-trashed", "SKILL.md");
+        var before = await File.ReadAllTextAsync(trashFile);
+
+        var adoptResponse = await client.PostAsync($"/api/skills/{id}/adopt", null);
+        Assert.Equal(HttpStatusCode.BadRequest, adoptResponse.StatusCode);
+        Assert.Equal(before, await File.ReadAllTextAsync(trashFile));
+    }
+
+    /// <summary>
+    /// Drops a foreign folder whose frontmatter IS adoptable (valid YAML, a
+    /// name matching the folder, a description) — the shape skill_adopt accepts.
+    /// </summary>
+    private static async Task SeedAdoptableForeignSkillAsync(string name)
+    {
+        var folder = Path.Combine(SkillsDirectory, name);
+        Directory.CreateDirectory(folder);
+        await File.WriteAllTextAsync(
+            Path.Combine(folder, "SKILL.md"),
+            $"---\nname: {name}\ndescription: kept description\ntags:\n  - seeded\n---\n# {name}\n\nverbatim body\n");
+    }
+
     /// <summary>
     /// Drops a foreign (non-Eling, no frontmatter) SKILL.md folder into the
     /// isolated catalog — the exact shape the scanner indexes as external.

@@ -276,6 +276,88 @@ public sealed class SkillToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task skill_adopt_converts_external_skill_in_place()
+    {
+        var index = new SqliteSkillIndex(_dbPath);
+        var externalFolder = Path.Combine(_root, "skills", "ext-adopt");
+        Directory.CreateDirectory(externalFolder);
+        await File.WriteAllTextAsync(
+            Path.Combine(externalFolder, "SKILL.md"),
+            "---\ndescription: External toolkit\n---\n# ext-adopt\n\nBody verbatim.\n");
+        await index.AdoptExternalScanResultAsync(
+            new Skill("ext-adopt", "external desc", "external body", origin: SkillOrigin.External));
+        var service = NewService(index);
+        var writeTool = NewWriteTool(service);
+        var readTool = NewReadTool(service);
+
+        var adopted = await writeTool.AdoptAsync("ext-adopt");
+
+        Assert.Equal("ext-adopt", adopted.Name);
+        Assert.Equal("eling", adopted.Origin);
+        Assert.Equal(Path.Combine(externalFolder, "SKILL.md"), adopted.Path);
+
+        var externalRow = await index.GetByNameAsync("ext-adopt");
+        Assert.Equal(SkillOrigin.Eling, externalRow!.Origin);
+
+        var fetched = await readTool.GetAsync("ext-adopt");
+        Assert.NotNull(fetched);
+        Assert.Equal("eling", fetched!.Origin);
+    }
+
+    [Fact]
+    public async Task skill_adopt_unparseable_frontmatter_is_an_error_and_file_unchanged()
+    {
+        var index = new SqliteSkillIndex(_dbPath);
+        var document = "---\ndescription: [unclosed\n---\n# body\n";
+        var externalFolder = Path.Combine(_root, "skills", "ext-broken");
+        Directory.CreateDirectory(externalFolder);
+        await File.WriteAllTextAsync(Path.Combine(externalFolder, "SKILL.md"), document);
+        await index.AdoptExternalScanResultAsync(
+            new Skill("ext-broken", "external desc", "external body", origin: SkillOrigin.External));
+        var service = NewService(index);
+        var writeTool = NewWriteTool(service);
+
+        var result = await ThroughFilterAsync(
+            "skill_adopt",
+            async () => (object?)await writeTool.AdoptAsync("ext-broken"));
+
+        Assert.True(result.IsError);
+        Assert.Contains("frontmatter", FirstBlock(result).Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(document, await File.ReadAllTextAsync(Path.Combine(externalFolder, "SKILL.md")));
+        Assert.Equal(SkillOrigin.External, (await index.GetByNameAsync("ext-broken"))!.Origin);
+    }
+
+    [Fact]
+    public async Task skill_adopt_already_eling_is_an_error()
+    {
+        var service = NewService();
+        var writeTool = NewWriteTool(service);
+
+        await writeTool.SaveAsync("my-skill", "does useful things", "# body");
+
+        var result = await ThroughFilterAsync(
+            "skill_adopt",
+            async () => (object?)await writeTool.AdoptAsync("my-skill"));
+
+        Assert.True(result.IsError);
+        Assert.Contains("already", FirstBlock(result).Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task skill_adopt_unknown_name_is_an_error()
+    {
+        var service = NewService();
+        var writeTool = NewWriteTool(service);
+
+        var result = await ThroughFilterAsync(
+            "skill_adopt",
+            async () => (object?)await writeTool.AdoptAsync("nope-skill"));
+
+        Assert.True(result.IsError);
+        Assert.Contains("not found", FirstBlock(result).Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task skill_list_paginates_and_filters()
     {
         var service = NewService();

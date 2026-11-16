@@ -11,9 +11,9 @@ namespace Eling.Backend.Endpoints;
 
 /// <summary>
 /// REST surface for the skill catalog (spec §7). Machine-global like the
-/// catalog itself — one group, no scope tiers, no sync/adopt/import
-/// endpoints by design. External skills refuse content mutations (save,
-/// rename); delete-to-trash and restore work for both origins. Reads are
+/// catalog itself — one group, no scope tiers. External skills refuse
+/// content mutations (save, rename); delete-to-trash and the explicit
+/// user-called adopt route work for external skills. Reads are
 /// origin-agnostic. The envelope is applied by
 /// <see cref="ApiEnvelopeMiddleware"/>; <c>/{id}</c> routes are active-catalog
 /// only (a trashed skill answers 404) except restore, which resolves the
@@ -46,6 +46,9 @@ public static class SkillEndpoints
 
         // POST /api/skills/{id}/restore
         group.MapPost("/{id}/restore", RestoreSkillAsync);
+
+        // POST /api/skills/{id}/adopt
+        group.MapPost("/{id}/adopt", AdoptSkillAsync);
 
         // POST /api/skills/rescan
         group.MapPost("/rescan", RescanCatalogAsync);
@@ -332,6 +335,39 @@ public static class SkillEndpoints
         return restored is null
             ? NotFoundSkill(httpContext, $"Skill with id '{id}' vanished after restore.")
             : TypedResults.Ok(SkillDto.From(restored, SkillPath(restored.Name)));
+    }
+
+    private static async Task<IResult> AdoptSkillAsync(
+        ISkillService service, HttpContext httpContext, string id)
+    {
+        if (!SkillId.TryParse(id, out var skillId))
+        {
+            return NotFoundSkill(httpContext, $"Skill id '{id}' is not valid.");
+        }
+
+        // The active catalog is the adoption surface; a trashed skill answers
+        // 400 with an instruction to restore it first (restore + adopt are
+        // deliberately separate, explicit user actions).
+        var existing = await service.GetByIdAsync(skillId);
+        if (existing is null)
+        {
+            var trashed = await ResolveIncludingTrashedAsync(service, skillId);
+            return trashed is null
+                ? NotFoundSkill(httpContext, $"No skill with id '{id}' exists.")
+                : TypedResults.BadRequest($"Skill '{trashed.Name}' is in the trash; restore it before adopting.");
+        }
+
+        try
+        {
+            var adopted = await service.AdoptAsync(existing.Name);
+            var current = await service.GetByNameAsync(adopted.Name)
+                ?? throw new SkillNotFoundException($"Skill '{adopted.Name}' vanished after adoption.");
+            return TypedResults.Ok(SkillDto.From(current, SkillPath(current.Name)));
+        }
+        catch (Exception ex) when (IsMappedSkillException(ex))
+        {
+            return MapSkillException(httpContext, ex);
+        }
     }
 
     private static async Task<IResult> RescanCatalogAsync(ISkillCatalogScanner scanner)

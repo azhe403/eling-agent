@@ -8,11 +8,13 @@ namespace Eling.Backend.Mcp.Tools;
 
 /// <summary>
 /// MCP tools for the write side of the skill catalog: save (create-or-update
-/// by name), delete (move to trash), restore. All machine-global; there is
-/// no scope parameter. Content mutations (save) on external skills are
-/// refused — the service enforces it, the tools only surface it. Delete and
-/// restore work for both origins: an external skill is moved to the trash,
-/// never edited.
+/// by name), delete (move to trash), restore, adopt (explicit user-requested
+/// conversion of an external skill to Eling-managed, in place). All
+/// machine-global; there is no scope parameter. Content mutations (save) on
+/// external skills are refused — the service enforces it, the tools only
+/// surface it. Delete and restore work for both origins: an external skill is
+/// moved to the trash, never edited. Adopt is the one path that re-claims an
+/// external skill.
 /// </summary>
 [McpServerToolType]
 public sealed class SkillWriteTool
@@ -115,6 +117,35 @@ public sealed class SkillWriteTool
             else
             {
                 _logger?.LogWarning(ex, "skill_delete rejected (name={Name}): {Message}", name, ex.Message);
+            }
+
+            throw mapped;
+        }
+    }
+
+    [McpServerTool(Name = "skill_adopt"), Description("Convert an externally-supplied skill (origin external) to an Eling-managed one, in place: the folder and SKILL.md stay where they are, only the frontmatter gains Eling keys (id, createdAt, updatedAt) and the index row flips to origin 'eling'. This is an explicit, permanent user-requested adoption — call it only when the user asks to adopt, convert or take over ownership of a skill. Refuses unparseable frontmatter (no partial adoption; the error names the parse failure — fix the frontmatter YAML first), refuses an already-Eling-managed skill, a trashed skill, and an unknown name. The adopted skill becomes a full Eling-managed skill: skill_save and skill_rename work on it and it can never be externally owned again.")]
+    public async Task<SkillDto> AdoptAsync(
+        [Description("The name of the externally-supplied skill to adopt. Must be a lowercase kebab-case skill name.")] string name)
+    {
+        try
+        {
+            var trimmedName = ValidateNameOrThrow(name);
+            var adopted = await _skills.AdoptAsync(trimmedName);
+            var skill = await _skills.GetByNameAsync(trimmedName)
+                ?? throw new SkillNotFoundException($"Skill '{trimmedName}' vanished after adoption.");
+            _logger?.LogInformation("Adopted skill '{Name}' (id {Id}) to Eling management", skill.Name, skill.Id);
+            return SkillDto.From(skill, SkillTools.MarkdownPath(_catalogRoot, skill.Name));
+        }
+        catch (Exception ex)
+        {
+            var mapped = SkillTools.MapException(ex);
+            if (ReferenceEquals(mapped, ex))
+            {
+                _logger?.LogError(ex, "skill_adopt threw an exception (name={Name})", name);
+            }
+            else
+            {
+                _logger?.LogWarning(ex, "skill_adopt rejected (name={Name}): {Message}", name, ex.Message);
             }
 
             throw mapped;

@@ -69,6 +69,7 @@ public static class ToolCatalog
         new("skill_list", SkillsGroup, "List the skill catalog, paginated, with tag/origin filters."),
         new("skill_delete", SkillsGroup, "Move a skill to the catalog trash (works for external skills too; restorable)."),
         new("skill_restore", SkillsGroup, "Restore a trashed skill back into the active catalog."),
+        new("skill_adopt", SkillsGroup, "Adopt an externally-supplied skill in place, making it Eling-managed (explicit, permanent)."),
     }.AsReadOnly();
 
     public static bool Exists(string toolName)
