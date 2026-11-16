@@ -121,7 +121,7 @@ public interface ISkillService
     /// to <see cref="SkillOrigin.Eling"/> keeping its identity. The ULID is
     /// reused from the index row when present. Refuses — without touching
     /// anything — when the name is unknown (<see cref="SkillNotFoundException"/>),
-    /// the skill is already Eling-managed (<see cref="SkillConflictException"/>),
+    /// the skill is already Eling-managed (<see cref="Storage.SkillConflictException"/>),
     /// the skill is trashed (<see cref="SkillValidationException"/>), the
     /// frontmatter does not parse (<see cref="SkillValidationException"/> with
     /// the parse failure and the instruction to fix the YAML first), or the
