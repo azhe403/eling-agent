@@ -180,23 +180,12 @@ public sealed class RecallService : IRecallService
                     var hits = await _skills.SearchAsync(skillQuery, origin: null, limit: StandingBaselineLimit);
                     if (hits.Count > 0)
                     {
-                        // Hits carry ids only; hydrate name/description from a
-                        // single active-catalog listing instead of one scan per hit.
-                        var inventory = await _skills.ListAsync(
-                            includeTrashed: false, origin: null, page: 1, pageSize: int.MaxValue, sort: "name");
-                        var byId = new Dictionary<SkillId, Skill.Skill>();
-                        foreach (var skill in inventory.Items)
-                        {
-                            byId[skill.Id] = skill;
-                        }
-
+                        // Hits carry name/description/origin/path — no catalog
+                        // hydration pass needed for the standing-baseline block.
                         foreach (var hit in hits)
                         {
                             if (skills.Count >= StandingBaselineLimit) break;
-                            if (byId.TryGetValue(hit.Id, out var skill))
-                            {
-                                skills.Add(new SkillRecallHit(skill.Name, skill.Description, hit.Origin, hit.Path));
-                            }
+                            skills.Add(new SkillRecallHit(hit.Name, hit.Description, hit.Origin, hit.Path));
                         }
                     }
                 }

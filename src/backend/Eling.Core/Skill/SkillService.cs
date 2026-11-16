@@ -78,6 +78,12 @@ public sealed class SkillService : ISkillService
             throw new SkillValidationException(ex.Message, ex);
         }
 
+        // A live save must leave the row untrashed: the index upsert preserves
+        // the trashed_at marker of any row that already held the id (reachable
+        // once the trash folder was deleted out of band). Clear it explicitly —
+        // a no-op when the row was never trashed. Mirrors RestoreAsync's clear.
+        await _index.MarkTrashedAsync(skill.Name, trashed: false);
+
         await NotifyAsync("saved");
         return skill;
     }
@@ -132,6 +138,11 @@ public sealed class SkillService : ISkillService
         {
             throw new SkillValidationException(ex.Message, ex);
         }
+
+        // Same clear as the save path: a renamed row inherits the preserved
+        // trashed_at marker of the pre-rename row — a live rename must not
+        // resurrect it.
+        await _index.MarkTrashedAsync(newName, trashed: false);
 
         await NotifyAsync("renamed");
         return renamed;
@@ -285,8 +296,19 @@ public sealed class SkillService : ISkillService
             throw new SkillNotFoundException($"No trashed skill named '{name}' exists to restore.", ex);
         }
 
-        var restored = await _storage.GetByNameAsync(name)
-            ?? throw new SkillStorageException($"Skill '{name}' vanished after restore.");
+        Skill restored;
+        try
+        {
+            restored = await _storage.GetByNameAsync(name)
+                ?? throw new SkillStorageException($"Skill '{name}' vanished after restore.");
+        }
+        catch (SkillStorageException ex)
+        {
+            // The folder moved back but cannot be re-read/parsed — surface it
+            // through the mapped validation channel instead of an unmapped 500.
+            throw new SkillValidationException($"Skill '{name}' could not be re-read after restore: {ex.Message}", ex);
+        }
+
         try
         {
             // IndexAsync re-applies the preserved trashed_at of any row that
@@ -312,7 +334,9 @@ public sealed class SkillService : ISkillService
         // from disk and clears the marker, which is the ordering restore relies
         // on. Externally-owned rows whose folder still exists are carried over
         // so recall/search keeps covering both origins between a rebuild and
-        // the next catalog scan; storage (200-Eling-skills) wins any name clash.
+        // the next catalog scan; when storage and the index disagree on who
+        // owns a name, the Eling-written folder (storage) wins and the stale
+        // index row is dropped by the rebuild.
         var storageSkills = await _storage.ListAllAsync();
         var storageNames = new HashSet<string>(storageSkills.Select(s => s.Name), StringComparer.Ordinal);
 

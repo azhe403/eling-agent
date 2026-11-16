@@ -334,6 +334,9 @@ public static class ElingPaths
         yield return Path.Combine(home, ".config", "openchamber", "chats");
         yield return Path.Combine(home, ".config", "opencode");
         yield return Path.Combine(home, ".config", "openchamber");
+        // The machine-global skill catalog is the source of skill data; it must
+        // not be double-indexed as plain code (spec §8 "Tag").
+        yield return Path.Combine(home, ".agents", "skills");
         foreach (var prefix in TransientWorkspacePrefixes)
         {
             yield return Path.Combine(Path.GetTempPath(), prefix);

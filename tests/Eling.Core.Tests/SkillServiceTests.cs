@@ -182,6 +182,43 @@ public sealed class SkillServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Save_after_trash_folder_deleted_out_of_band_clears_trashed_marker()
+    {
+        var service = NewService();
+        await service.SaveAsync(NewInput("drift-skill"));
+        await service.DeleteAsync("drift-skill");
+
+        // The trash folder is deleted out of band, so the normal save-guard
+        // (trash occupies the name) does not fire; without the explicit clear,
+        // the preserved trashed_at would resurrect the marker on a live save.
+        Directory.Delete(TrashFolder("drift-skill"), recursive: true);
+
+        await service.SaveAsync(NewInput("drift-skill"));
+
+        var (items, _, _) = await service.ListAsync(includeTrashed: false, origin: null);
+        Assert.Single(items);
+        Assert.Equal("drift-skill", items.Single().Name);
+    }
+
+    [Fact]
+    public async Task Rename_after_trash_folder_restored_out_of_band_clears_trashed_marker()
+    {
+        var service = NewService();
+        var created = await service.SaveAsync(NewInput("ren-me"));
+        await service.DeleteAsync("ren-me");
+
+        // Trash folder put back to the active catalog out of band; the index
+        // still carries the trashed_at marker (no restore call happened).
+        Directory.Move(TrashFolder("ren-me"), SkillFolder("ren-me"));
+
+        await service.RenameAsync("ren-me", "renamed-skill");
+
+        var (items, _, _) = await service.ListAsync(includeTrashed: false, origin: null);
+        Assert.Equal("renamed-skill", items.Single().Name);
+        Assert.Equal(created.Id, items.Single().Id);
+    }
+
+    [Fact]
     public async Task Restore_restores_from_trash()
     {
         var service = NewService();

@@ -48,8 +48,8 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
     public async Task<ScanReport> ScanAsync()
     {
         // Pre-scan snapshot of the active index. Drives rename detection (by
-        // id), external id reuse (by name) and the externalize-over-ours
-        // guard. Trashed rows are deliberately excluded.
+        // id), external id reuse (by name) and the Eling-name occupation check.
+        // Trashed rows are deliberately excluded from the active set.
         var active = await _index.ListAsync(includeTrashed: false, origin: null);
         var byId = new Dictionary<string, Skill>(active.Count, StringComparer.Ordinal);
         var byName = new Dictionary<string, Skill>(active.Count, StringComparer.Ordinal);
@@ -57,6 +57,20 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
         {
             byId[row.Id.Value] = row;
             byName[row.Name] = row;
+        }
+
+        // Occupation check for foreign folders is seeded from the FULL index
+        // (includeTrashed): any Eling row holding a name — active or trashed —
+        // means the folder is ours or was ours, so a same-named foreign folder
+        // is a failed adoption, never an external re-key that would delete the
+        // trashed Eling row.
+        var elingOccupied = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var row in await _index.ListAsync(includeTrashed: true, origin: null))
+        {
+            if (row.Origin == SkillOrigin.Eling)
+            {
+                elingOccupied.Add(row.Name);
+            }
         }
 
         var discovered = 0;
@@ -111,7 +125,7 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
                 }
                 catch (SkillFrontMatterException ex)
                 {
-                    var outcome = IndexNonEling(folderName, raw, byName, ex);
+                    var outcome = IndexNonEling(folderName, raw, byName, elingOccupied, ex);
                     switch (outcome)
                     {
                         case ExternalAdoption adoption:
@@ -199,6 +213,7 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
         string folderName,
         string raw,
         IReadOnlyDictionary<string, Skill> byName,
+        IReadOnlySet<string> elingOccupied,
         SkillFrontMatterException parseError)
     {
         var probe = FrontMatterProbe.Read(raw);
@@ -206,10 +221,10 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
         // A ULID 'id' means somebody meant this to be one of ours: a broken
         // Eling file must never be reclassified as read-only external content.
         var claimsElingIdentity = probe.HasUlidId;
-        // An active Eling row under this name means the folder is ours and
-        // drifted; externalizing would make it permanently read-only.
-        var occupiesElingName = byName.TryGetValue(folderName, out var occupant)
-            && occupant.Origin == SkillOrigin.Eling;
+        // ANY Eling row under this name — active or trashed — means the folder
+        // is ours (or was); externalizing would make it permanently read-only
+        // and the external upsert would wipe the (possibly trashed) Eling row.
+        var occupiesElingName = elingOccupied.Contains(folderName);
 
         if (probe.YamlInvalid || claimsElingIdentity || occupiesElingName)
         {

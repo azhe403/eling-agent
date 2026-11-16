@@ -8,7 +8,7 @@ namespace Eling.Core.Codebase;
 
 public sealed class CodebaseIndexService
 {
-    private static readonly string[] SkipDirs = [".git", ".eling", "bin", "obj", "node_modules", ".next", "dist", "build", "out", ".turbo", ".vercel", ".artifacts", ".bin-opencode", ".opencode", ".openchamber"];
+    private static readonly string[] SkipDirs = [".git", ".eling", ".agents", "bin", "obj", "node_modules", ".next", "dist", "build", "out", ".turbo", ".vercel", ".artifacts", ".bin-opencode", ".opencode", ".openchamber"];
     private const long MaxBytes = 512 * 1024;
 
     private readonly string _projectRoot;

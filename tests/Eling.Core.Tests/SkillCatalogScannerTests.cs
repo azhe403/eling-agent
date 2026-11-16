@@ -185,6 +185,31 @@ public sealed class SkillCatalogScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task Scan_trashed_eling_name_blocks_foreign_folder_adoption()
+    {
+        var index = NewIndex();
+        var service = NewService(index);
+        var saved = await service.SaveAsync(NewInput("shared-name"));
+        await service.DeleteAsync("shared-name");
+
+        // Foreign tooling drops a same-named folder into the active catalog.
+        Directory.CreateDirectory(SkillFolder("shared-name"));
+        await File.WriteAllTextAsync(SkillFile("shared-name"), ExternalDoc("shared-name"));
+
+        var report = await NewScanner(index).ScanAsync();
+
+        Assert.Equal(1, report.Failed);
+        Assert.Equal(0, report.External);
+
+        // The trashed Eling row is preserved — not re-keyed or replaced by an
+        // external adoption.
+        var row = await index.GetByNameAsync("shared-name");
+        Assert.NotNull(row);
+        Assert.Equal(SkillOrigin.Eling, row!.Origin);
+        Assert.Equal(saved.Id, row.Id);
+    }
+
+    [Fact]
     public async Task Scan_keeps_trashed_rows_untouched()
     {
         var index = NewIndex();

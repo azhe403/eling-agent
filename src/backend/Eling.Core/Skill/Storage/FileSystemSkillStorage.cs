@@ -37,6 +37,35 @@ public class FileSystemSkillStorage : ISkillStorage
         _skillsDir = Path.Combine(_catalogRoot, SkillCatalogPaths.SkillsSubdir);
         _trashRoot = Path.Combine(_catalogRoot, SkillCatalogPaths.TrashDirName, SkillCatalogPaths.SkillsSubdir);
         _logger = logger;
+        WarnIfOrphanedBackupFolders();
+    }
+
+    /// <summary>
+    /// Orphaned <c>.bak-*</c> siblings from interrupted writes (crash between
+    /// the destination move and the backup cleanup) accumulate forever if left
+    /// unreported. Log them so an operator notices; never auto-delete — a
+    /// backup folder is the only copy of a skill the user may need.
+    /// </summary>
+    private void WarnIfOrphanedBackupFolders()
+    {
+        try
+        {
+            if (!Directory.Exists(_skillsDir))
+            {
+                return;
+            }
+
+            foreach (var backup in Directory.EnumerateDirectories(_skillsDir, BackupFolderPrefix + "*"))
+            {
+                _logger?.LogWarning(
+                    "Orphaned skill backup folder {BackupFolder} from an interrupted write; left in place. Remove it manually once verified.",
+                    backup);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Could not scan {SkillsDirectory} for orphaned backup folders.", _skillsDir);
+        }
     }
 
     /// <summary>The catalog root this instance writes to (absolute path).</summary>

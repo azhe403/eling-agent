@@ -31,5 +31,6 @@ public readonly record struct SkillId
         return true;
     }
 
-    public override string ToString() => Value;
+    // default(SkillId).Value is null; ToString must not null-ref.
+    public override string ToString() => Value ?? string.Empty;
 }

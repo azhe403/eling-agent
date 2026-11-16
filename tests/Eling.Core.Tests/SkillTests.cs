@@ -42,6 +42,14 @@ public sealed class SkillTests
     }
 
     [Fact]
+    public void Tags_normalize_rejects_tokens_without_letter_or_digit()
+    {
+        var tags = Skill.Skill.NormalizeTags(new[] { "--", "-a-", "ok-tag", "___" });
+
+        Assert.Equal(new[] { "-a-", "ok-tag" }, tags);
+    }
+
+    [Fact]
     public void Tags_normalize_null_returns_empty() =>
         Assert.Empty(Skill.Skill.NormalizeTags(null));
 
@@ -94,6 +102,15 @@ public sealed class SkillTests
         Assert.Equal(id.Value, SkillId.Parse(id.Value).Value);
         Assert.False(SkillId.TryParse("not-a-ulid", out _));
         Assert.Throws<ArgumentException>(() => SkillId.Parse("not-a-ulid"));
+    }
+
+    [Fact]
+    public void SkillId_default_ToString_is_empty()
+    {
+        var id = default(SkillId);
+
+        Assert.Equal(string.Empty, id.ToString());
+        Assert.Null(id.Value);
     }
 
     [Fact]

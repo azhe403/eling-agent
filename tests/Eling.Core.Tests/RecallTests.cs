@@ -16,7 +16,10 @@ namespace Eling.Core.Tests;
 /// </summary>
 public sealed class RecallTests : IDisposable
 {
-    private const string ChildRoot = @"C:\work\acme\integrations\payments";
+    // Non-rooted placeholder: never a real machine path. ProjectScope
+    // fullpaths it against the test's CWD, so on any machine this resolves
+    // under wherever the test run happens — which is fine, it is a label.
+    private const string ChildRoot = "work/acme/integrations/payments";
 
     private readonly string _root = Path.Combine(
         Path.GetTempPath(), "eling-recall-skills-" + Guid.NewGuid().ToString("N"));

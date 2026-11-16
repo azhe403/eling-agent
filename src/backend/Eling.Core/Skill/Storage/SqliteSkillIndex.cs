@@ -520,7 +520,7 @@ public sealed class SqliteSkillIndex : ISkillIndex
         await using var connection = await OpenConnectionAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT s.id, bm25(skills_fts) AS rank, s.origin, s.body_path, s.updated_at
+            SELECT s.id, bm25(skills_fts) AS rank, s.origin, s.body_path, s.updated_at, s.name, s.description
             FROM skills_fts
             JOIN skills s ON s.rowid = skills_fts.rowid
             WHERE {string.Join(" AND ", where)}
@@ -547,7 +547,9 @@ public sealed class SqliteSkillIndex : ISkillIndex
                 rank,
                 origin,
                 ToAbsolutePath(reader.GetString(3)),
-                DateTimeOffset.Parse(reader.GetString(4))));
+                DateTimeOffset.Parse(reader.GetString(4)),
+                reader.GetString(5),
+                reader.GetString(6)));
         }
 
         return results;

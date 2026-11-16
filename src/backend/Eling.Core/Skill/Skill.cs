@@ -158,8 +158,9 @@ public class Skill
     /// Normalize a tag list for indexability: split on common separators
     /// (whitespace, underscore, dot, slash, backslash, pipe) — hyphen is kept
     /// so names like "my-tag" survive as one tag — lower-case, trim, drop
-    /// tokens shorter than 2 characters and remove duplicates. Used by the
-    /// constructor, the indexer, and the search-side re-normalizer.
+    /// tokens shorter than 2 characters or carrying no letter/digit, and
+    /// remove duplicates. Used by the constructor, the indexer, and the
+    /// search-side re-normalizer.
     /// </summary>
     public static IReadOnlyCollection<string> NormalizeTags(IEnumerable<string>? tags)
     {
@@ -181,7 +182,7 @@ public class Skill
             foreach (var part in parts)
             {
                 var token = part.Trim();
-                if (token.Length < 2)
+                if (token.Length < 2 || !token.Any(char.IsLetterOrDigit))
                 {
                     continue;
                 }
