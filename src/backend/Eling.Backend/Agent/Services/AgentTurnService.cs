@@ -3,6 +3,7 @@ using Eling.Backend.Dtos;
 using Eling.Backend.Mcp;
 using Eling.Core.Codebase;
 using Eling.Core.Recall;
+using Eling.Core.Skill;
 using Microsoft.Extensions.Logging;
 using System.Text;
 
@@ -76,6 +77,14 @@ public sealed class AgentTurnService(
                     foreach (var m in recallResult.StandingMemories)
                     {
                         sb.AppendLine($"- [{m.Memory.Type}] {Truncate(m.Memory.Content, 200)}");
+                    }
+                }
+                if (recallResult.Skills is { Count: > 0 })
+                {
+                    sb.AppendLine("=== AUTO-RECALLED SKILLS ===");
+                    foreach (var s in recallResult.Skills)
+                    {
+                        sb.AppendLine($"- [{s.Name}] {s.Description} ({s.Path}, origin:{s.Origin.WireName})");
                     }
                 }
                 if (recallResult.RecentMemories.Count > 0)

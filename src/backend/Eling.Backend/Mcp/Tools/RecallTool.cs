@@ -95,8 +95,8 @@ public sealed class RecallTool
 
             var result = await _recall.RecallAsync(ctx, recallLimit, recentLimit, scope, cancellationToken);
             _logger?.LogInformation(
-                "recall returned {RecallCount} recalled, {StandingCount} standing, {OverflowCount} overflow, {RecentCount} recent, {IntentionCount} intention(s) (scope={Scope})",
-                result.RecallMemories.Count, result.StandingMemories?.Count ?? 0, result.OverflowMemories?.Count ?? 0, result.RecentMemories.Count, result.Intentions.Count, scope);
+                "recall returned {RecallCount} recalled, {StandingCount} standing, {OverflowCount} overflow, {RecentCount} recent, {SkillCount} skill(s), {IntentionCount} intention(s) (scope={Scope})",
+                result.RecallMemories.Count, result.StandingMemories?.Count ?? 0, result.OverflowMemories?.Count ?? 0, result.RecentMemories.Count, result.Skills?.Count ?? 0, result.Intentions.Count, scope);
 
             var posture = await ProjectScopePosture.EvaluateAsync(_cwd, _userHomeDirectory, _policyStore);
 
@@ -105,6 +105,7 @@ public sealed class RecallTool
                 RecallMemories = result.RecallMemories.Select(RecallMemory.From).ToList().AsReadOnly(),
                 RecentMemories = result.RecentMemories.Select(RecallMemory.From).ToList().AsReadOnly(),
                 StandingMemories = result.StandingMemories?.Select(RecallMemory.From).ToList().AsReadOnly() ?? [],
+                Skills = result.Skills?.Select(SkillReferenceDto.From).ToList().AsReadOnly() ?? [],
                 Intentions = result.Intentions.Select(RecallIntention.From).ToList().AsReadOnly(),
                 Stats = RecallStatsDto.From(result.Stats),
                 ProjectScope = new RecallProjectScopeDto

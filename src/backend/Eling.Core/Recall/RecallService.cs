@@ -1,5 +1,6 @@
 using Eling.Core.Memory;
 using Eling.Core.Memory.Serialization;
+using Eling.Core.Skill;
 using Microsoft.Extensions.Logging;
 
 namespace Eling.Core.Recall;
@@ -11,22 +12,34 @@ namespace Eling.Core.Recall;
 /// <c>session_start</c> implementation, which discarded the topics parameter
 /// and only ever returned recent memories. This implementation actually
 /// performs a search across <see cref="IScopedMemoryService"/> using the
-/// joined topics as the query, so recall is no longer a no-op.
+/// joined topics as the query, so recall is no longer a no-op. When an
+/// <see cref="ISkillService"/> is provided it also surfaces the skills
+/// relevant to the topics - origin-agnostic, capped, and referenced by
+/// path only, never inlined.
 /// </summary>
 public sealed class RecallService : IRecallService
 {
     private readonly IScopedMemoryService _scoped;
     private readonly IIntentionStorage _intentions;
     private readonly ILogger<RecallService>? _logger;
+    private readonly ISkillService? _skills;
 
+    /// <param name="skills">
+    /// Optional skill catalog. When provided, recall runs an FTS pass over
+    /// the machine-global catalog (both origins) and references the hits by
+    /// path - bodies are never inlined. When omitted (memory-only harnesses),
+    /// recall behaves exactly as before and <c>Skills</c> is <c>null</c>.
+    /// </param>
     public RecallService(
         IScopedMemoryService scoped,
         IIntentionStorage intentions,
-        ILogger<RecallService>? logger = null)
+        ILogger<RecallService>? logger = null,
+        ISkillService? skills = null)
     {
         _scoped = scoped;
         _intentions = intentions;
         _logger = logger;
+        _skills = skills;
     }
 
     public async Task<RecallResult> RecallAsync(
@@ -152,6 +165,50 @@ public sealed class RecallService : IRecallService
             }
         }
 
+        // Skills: an FTS pass over the machine-global catalog, origin-agnostic,
+        // capped at the standing-baseline limit. Hits are referenced by path
+        // only - the body is never inlined (context inflation). A missing or
+        // failing skill service degrades recall to memory-only, never to an error.
+        var skills = new List<SkillRecallHit>();
+        if (_skills is not null && topics.Count > 0)
+        {
+            var skillQuery = string.Join(' ', topics.Where(t => !string.IsNullOrWhiteSpace(t)));
+            if (!string.IsNullOrWhiteSpace(skillQuery))
+            {
+                try
+                {
+                    var hits = await _skills.SearchAsync(skillQuery, origin: null, limit: StandingBaselineLimit);
+                    if (hits.Count > 0)
+                    {
+                        // Hits carry ids only; hydrate name/description from a
+                        // single active-catalog listing instead of one scan per hit.
+                        var inventory = await _skills.ListAsync(
+                            includeTrashed: false, origin: null, page: 1, pageSize: int.MaxValue, sort: "name");
+                        var byId = new Dictionary<SkillId, Skill.Skill>();
+                        foreach (var skill in inventory.Items)
+                        {
+                            byId[skill.Id] = skill;
+                        }
+
+                        foreach (var hit in hits)
+                        {
+                            if (skills.Count >= StandingBaselineLimit) break;
+                            if (byId.TryGetValue(hit.Id, out var skill))
+                            {
+                                skills.Add(new SkillRecallHit(skill.Name, skill.Description, hit.Origin, hit.Path));
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // The catalog is a convenience layer for recall, not a
+                    // dependency: log and continue memory-only.
+                    _logger?.LogWarning(ex, "skill search during recall failed; continuing without skills");
+                }
+            }
+        }
+
         // Active enumeration is needed three ways — recent, the standing
         // baseline, and the active stat — so fetch it once.
         var activeMemories = await _scoped.ListAsync(scope, MemoryStatus.Active);
@@ -193,10 +250,10 @@ public sealed class RecallService : IRecallService
             RecallCount: recall.Count,
             RecentCount: recent.Count);
 
-        return new RecallResult(recall, recent, intentionResults, stats, standing, overflow.Count > 0 ? overflow : null);
+        return new RecallResult(recall, recent, intentionResults, stats, standing, overflow.Count > 0 ? overflow : null, skills.Count > 0 ? skills : null);
     }
 
-    /// <summary>Cap on the standing baseline so a broad payload never swamps the topic hits.</summary>
+    /// <summary>Cap on the standing baseline and the referenced-skills block so a broad payload never swamps the topic hits.</summary>
     private const int StandingBaselineLimit = 5;
 
     /// <summary>

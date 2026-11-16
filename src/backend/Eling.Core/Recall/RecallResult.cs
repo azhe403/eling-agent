@@ -13,7 +13,10 @@ namespace Eling.Core.Recall;
 /// consistent in every conversation, returned even when the topic call is
 /// narrow or matches nothing. <see cref="OverflowMemories"/> holds the relevant
 /// hits beyond <c>recallLimit</c> that would otherwise be dropped; they are
-/// meant to be summarized, not skipped.
+/// meant to be summarized, not skipped. <see cref="Skills"/> lists the
+/// skills relevant to the supplied topics, referenced by path only - the
+/// body is never inlined; <c>null</c> when the skill catalog is not
+/// configured (memory-only harnesses).
 /// </summary>
 public sealed record RecallResult(
     IReadOnlyList<RecallHit> RecallMemories,
@@ -21,4 +24,5 @@ public sealed record RecallResult(
     IReadOnlyList<RecallIntentionResult> Intentions,
     RecallStats Stats,
     IReadOnlyList<RecallHit>? StandingMemories = null,
-    IReadOnlyList<RecallHit>? OverflowMemories = null);
+    IReadOnlyList<RecallHit>? OverflowMemories = null,
+    IReadOnlyList<SkillRecallHit>? Skills = null);

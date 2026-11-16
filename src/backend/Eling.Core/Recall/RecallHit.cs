@@ -1,4 +1,5 @@
 using Eling.Core.Memory;
+using Eling.Core.Skill;
 
 namespace Eling.Core.Recall;
 
@@ -19,3 +20,16 @@ public sealed record RecallHit(
     string? QueryMode = null,
     MemoryScopeKind Scope = MemoryScopeKind.Project,
     string? ProjectRoot = null);
+
+/// <summary>
+/// A skill referenced by recall output: name, one-line description,
+/// origin ("eling"/"external"), and the absolute SKILL.md path. Bodies
+/// are never inlined - loading the skill is a separate step (read the
+/// path), matching the snippet philosophy: recall surfaces what exists
+/// and where, never the content itself.
+/// </summary>
+public sealed record SkillRecallHit(
+    string Name,
+    string Description,
+    SkillOrigin Origin,
+    string Path);

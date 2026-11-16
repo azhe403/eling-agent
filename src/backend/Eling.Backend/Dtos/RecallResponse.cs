@@ -29,6 +29,14 @@ public sealed class RecallResponse
     [JsonPropertyName("standingMemories")]
     public IReadOnlyCollection<RecallMemory> StandingMemories { get; set; } = [];
 
+    /// <summary>
+    /// Skills relevant to the supplied topics (both origins), referenced
+    /// by path only - bodies are never inlined. Empty when no topic
+    /// matched the catalog or the skill catalog is not configured.
+    /// </summary>
+    [JsonPropertyName("skills")]
+    public IReadOnlyCollection<SkillReferenceDto> Skills { get; set; } = [];
+
     [JsonPropertyName("intentions")]
     public IReadOnlyCollection<RecallIntention> Intentions { get; set; } = [];
 
