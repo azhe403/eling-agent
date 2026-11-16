@@ -111,6 +111,107 @@ internal static class SkillFileFormat
         ArgumentNullException.ThrowIfNull(raw);
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedName);
 
+        var (yaml, body) = SplitDocument(raw);
+        var frontMatter = DeserializeFrontMatter(yaml);
+
+        if (frontMatter is null)
+        {
+            throw new SkillFrontMatterException("Frontmatter block is empty.");
+        }
+
+        if (!SkillId.TryParse(frontMatter.Id, out var id))
+        {
+            throw new SkillFrontMatterException($"Frontmatter 'id' value '{frontMatter.Id}' is not a ULID.");
+        }
+
+        var name = ValidateFrontMatterName(frontMatter.Name, expectedName);
+
+        if (frontMatter.CreatedAt == default)
+        {
+            throw new SkillFrontMatterException("Frontmatter 'createdAt' is missing or unparsable.");
+        }
+
+        var updatedAt = frontMatter.UpdatedAt == default ? frontMatter.CreatedAt : frontMatter.UpdatedAt;
+
+        var (relatedMemories, relatedSnippets, source) = ParseReferencesAndSource(frontMatter);
+
+        try
+        {
+            return new Skill(
+                name,
+                frontMatter.Description,
+                body,
+                frontMatter.Tags,
+                relatedMemories,
+                relatedSnippets,
+                source,
+                id,
+                SkillOrigin.Eling,
+                frontMatter.CreatedAt,
+                updatedAt);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new SkillFrontMatterException($"Frontmatter violates the skill invariants: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Tolerant read of a SKILL.md that is about to be ADOPTED: the same YAML
+    /// frontmatter reader as <see cref="ParseSkill"/>, but the Eling-owned keys
+    /// that adoption rewrites anyway (<c>id</c>, <c>createdAt</c>,
+    /// <c>updatedAt</c>) are not required — an externally-supplied file is not
+    /// expected to carry them. Everything else is validated with the same
+    /// rules the strict reader applies: the YAML must parse, the optional
+    /// <c>name</c> must be valid and agree with <paramref name="expectedName"/>
+    /// (absent means the folder name is written in), and the
+    /// <c>description</c> must be non-empty and within the aggregate limit.
+    /// The body is returned verbatim (line-ending normalized once, as everywhere
+    /// else in the pipeline).
+    /// </summary>
+    /// <exception cref="SkillFrontMatterException">Anything unreadable, inconsistent or vocabulary-violating.</exception>
+    public static AdoptionRead ParseForAdoption(string raw, string expectedName)
+    {
+        ArgumentNullException.ThrowIfNull(raw);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedName);
+
+        var (yaml, body) = SplitDocument(raw);
+        var frontMatter = DeserializeFrontMatter(yaml);
+
+        if (frontMatter is null)
+        {
+            throw new SkillFrontMatterException("Frontmatter block is empty.");
+        }
+
+        // An absent name is an "added" key (the folder defines identity); a
+        // present-but-invalid or mismatched value is a hard refusal.
+        var name = string.IsNullOrWhiteSpace(frontMatter.Name)
+            ? expectedName
+            : ValidateFrontMatterName(frontMatter.Name, expectedName);
+
+        if (string.IsNullOrWhiteSpace(frontMatter.Description))
+        {
+            throw new SkillFrontMatterException("Frontmatter 'description' is missing or empty.");
+        }
+
+        if (frontMatter.Description.Length > Skill.MaxDescriptionLength)
+        {
+            throw new SkillFrontMatterException(
+                $"Frontmatter 'description' is {frontMatter.Description.Length} characters; the maximum is {Skill.MaxDescriptionLength}.");
+        }
+
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            throw new SkillFrontMatterException("SKILL.md has no body; Eling requires a non-empty body to adopt it.");
+        }
+
+        var (relatedMemories, relatedSnippets, source) = ParseReferencesAndSource(frontMatter);
+
+        return new AdoptionRead(name, frontMatter.Description, body, frontMatter.Tags, relatedMemories, relatedSnippets, source);
+    }
+
+    private static (string Yaml, string Body) SplitDocument(string raw)
+    {
         var normalized = raw.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
         if (!normalized.StartsWith($"{Delimiter}\n", StringComparison.Ordinal))
@@ -138,45 +239,41 @@ internal static class SkillFileFormat
             throw new SkillFrontMatterException("Not a SKILL.md document: missing closing '---' delimiter.");
         }
 
-        SkillFrontMatter? frontMatter;
+        return (yaml, body);
+    }
+
+    private static SkillFrontMatter? DeserializeFrontMatter(string yaml)
+    {
         try
         {
-            frontMatter = Deserializer.Deserialize<SkillFrontMatter>(yaml);
+            return Deserializer.Deserialize<SkillFrontMatter>(yaml);
         }
         catch (Exception ex) when (ex is not SkillFrontMatterException)
         {
             throw new SkillFrontMatterException($"Invalid YAML frontmatter: {ex.Message}", ex);
         }
+    }
 
-        if (frontMatter is null)
-        {
-            throw new SkillFrontMatterException("Frontmatter block is empty.");
-        }
-
-        if (!SkillId.TryParse(frontMatter.Id, out var id))
-        {
-            throw new SkillFrontMatterException($"Frontmatter 'id' value '{frontMatter.Id}' is not a ULID.");
-        }
-
-        if (!Skill.ValidateName(frontMatter.Name))
+    private static string ValidateFrontMatterName(string? name, string expectedName)
+    {
+        if (!Skill.ValidateName(name))
         {
             throw new SkillFrontMatterException(
-                $"Frontmatter 'name' value '{frontMatter.Name}' is not a valid kebab-case skill name.");
+                $"Frontmatter 'name' value '{name}' is not a valid kebab-case skill name.");
         }
 
-        if (!string.Equals(frontMatter.Name, expectedName, StringComparison.Ordinal))
+        if (!string.Equals(name, expectedName, StringComparison.Ordinal))
         {
             throw new SkillFrontMatterException(
-                $"Frontmatter name '{frontMatter.Name}' does not match folder name '{expectedName}'; the folder and the file have drifted apart.");
+                $"Frontmatter name '{name}' does not match folder name '{expectedName}'; the folder and the file have drifted apart.");
         }
 
-        if (frontMatter.CreatedAt == default)
-        {
-            throw new SkillFrontMatterException("Frontmatter 'createdAt' is missing or unparsable.");
-        }
+        return name!;
+    }
 
-        var updatedAt = frontMatter.UpdatedAt == default ? frontMatter.CreatedAt : frontMatter.UpdatedAt;
-
+    private static (List<RelatedReference> RelatedMemories, List<RelatedReference> RelatedSnippets, SkillSource? Source)
+        ParseReferencesAndSource(SkillFrontMatter frontMatter)
+    {
         var relatedMemories = new List<RelatedReference>();
         var index = 0;
         foreach (var item in frontMatter.RelatedMemories ?? [])
@@ -211,25 +308,7 @@ internal static class SkillFileFormat
             ? null
             : new SkillSource(frontMatter.Source.Upstream, frontMatter.Source.Tracked);
 
-        try
-        {
-            return new Skill(
-                frontMatter.Name,
-                frontMatter.Description,
-                body,
-                frontMatter.Tags,
-                relatedMemories,
-                relatedSnippets,
-                source,
-                id,
-                SkillOrigin.Eling,
-                frontMatter.CreatedAt,
-                updatedAt);
-        }
-        catch (ArgumentException ex)
-        {
-            throw new SkillFrontMatterException($"Frontmatter violates the skill invariants: {ex.Message}", ex);
-        }
+        return (relatedMemories, relatedSnippets, source);
     }
 
     private static RelatedReference ToReference(string? id, string? scope, string? relation, string where, bool requireScope)

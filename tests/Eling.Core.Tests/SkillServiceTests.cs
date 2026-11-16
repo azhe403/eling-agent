@@ -412,6 +412,191 @@ public sealed class SkillServiceTests : IDisposable
         Assert.Null(await service.GetByNameAsync("never-saved"));
     }
 
+    [Fact]
+    public async Task Adopt_external_skill_rewrites_file_and_flips_index()
+    {
+        var index = new SqliteSkillIndex(_dbPath);
+        var document =
+            "---\nname: ext-skill\ndescription: external desc\ntags:\n  - Alpha\n  - beta beta\nsource:\n  upstream: example.test/upstream\n  tracked: true\n---\n# ext-skill\n\nBody verbatim.\n";
+        await SeedExternalAsync(index, "ext-skill", document);
+        var externalRow = await index.GetByNameAsync("ext-skill");
+        Assert.NotNull(externalRow);
+        Assert.Equal(SkillOrigin.External, externalRow!.Origin);
+
+        var service = NewService(index);
+        var result = await service.AdoptAsync("ext-skill");
+
+        Assert.Equal(externalRow.Id, result.Id);
+        Assert.Equal("ext-skill", result.Name);
+        Assert.Equal(SkillOrigin.Eling, result.Origin);
+        Assert.True(result.WasExternal);
+        Assert.Equal(SkillFile("ext-skill"), result.Path);
+
+        var raw = await File.ReadAllTextAsync(SkillFile("ext-skill"));
+        Assert.Contains("Body verbatim.", raw);
+        Assert.Contains("createdAt:", raw);
+        Assert.Contains("updatedAt:", raw);
+        Assert.Contains(externalRow.Id.Value, raw);
+
+        // The rewritten file round-trips through the strict parser (it is a full eling skill now).
+        var stored = await new FileSystemSkillStorage(_root).GetByNameAsync("ext-skill");
+        Assert.NotNull(stored);
+        Assert.Equal(externalRow.Id, stored!.Id);
+        Assert.Equal("ext-skill", stored.Name);
+        Assert.Equal("external desc", stored.Description);
+        Assert.Equal("# ext-skill\n\nBody verbatim.\n", stored.Body);
+        Assert.Equal("example.test/upstream", stored.Source?.Upstream);
+        Assert.True(stored.Source?.Tracked);
+        Assert.Contains("alpha", stored.Tags);
+        Assert.Contains("beta", stored.Tags);
+
+        // The index row flipped origin, keeping its identity.
+        var row = await index.GetByNameAsync("ext-skill");
+        Assert.Equal(externalRow.Id, row!.Id);
+        Assert.Equal(SkillOrigin.Eling, row.Origin);
+        var externalOnly = await index.ListAsync(includeTrashed: false, origin: "external");
+        Assert.Empty(externalOnly);
+    }
+
+    [Fact]
+    public async Task Adopt_unparseable_frontmatter_refuses_and_leaves_everything_unchanged()
+    {
+        var index = new SqliteSkillIndex(_dbPath);
+        var document = "---\ndescription: [unclosed\n---\n# body\n";
+        await SeedExternalAsync(index, "broken-skill", document);
+        var service = NewService(index);
+
+        var ex = await Assert.ThrowsAsync<SkillValidationException>(() => service.AdoptAsync("broken-skill"));
+        Assert.Contains("frontmatter", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Fix the frontmatter YAML first", ex.Message);
+
+        // File byte-identical, row still external.
+        Assert.Equal(document, await File.ReadAllTextAsync(SkillFile("broken-skill")));
+        var row = await index.GetByNameAsync("broken-skill");
+        Assert.Equal(SkillOrigin.External, row!.Origin);
+    }
+
+    [Fact]
+    public async Task Adopt_missing_description_refuses_and_leaves_file_unchanged()
+    {
+        var index = new SqliteSkillIndex(_dbPath);
+        var document = "---\nname: ext-desc\n---\n# body\n";
+        await SeedExternalAsync(index, "ext-desc", document);
+        var service = NewService(index);
+
+        await Assert.ThrowsAsync<SkillValidationException>(() => service.AdoptAsync("ext-desc"));
+        Assert.Equal(document, await File.ReadAllTextAsync(SkillFile("ext-desc")));
+        Assert.Equal(SkillOrigin.External, (await index.GetByNameAsync("ext-desc"))!.Origin);
+    }
+
+    [Fact]
+    public async Task Adopt_frontmatter_name_mismatch_refuses_and_leaves_file_unchanged()
+    {
+        var index = new SqliteSkillIndex(_dbPath);
+        var document = "---\nname: other-name\ndescription: desc\n---\n# body\n";
+        await SeedExternalAsync(index, "ext-mismatch", document);
+        var service = NewService(index);
+
+        await Assert.ThrowsAsync<SkillValidationException>(() => service.AdoptAsync("ext-mismatch"));
+        Assert.Equal(document, await File.ReadAllTextAsync(SkillFile("ext-mismatch")));
+        Assert.Equal(SkillOrigin.External, (await index.GetByNameAsync("ext-mismatch"))!.Origin);
+    }
+
+    [Fact]
+    public async Task Adopt_eling_skill_throws_conflict()
+    {
+        var service = NewService();
+        await service.SaveAsync(NewInput("my-skill"));
+
+        var ex = await Assert.ThrowsAsync<SkillConflictException>(() => service.AdoptAsync("my-skill"));
+        Assert.Contains("already Eling-managed", ex.Message);
+    }
+
+    [Fact]
+    public async Task Adopt_unknown_name_throws_notfound()
+    {
+        var service = NewService();
+
+        await Assert.ThrowsAsync<SkillNotFoundException>(() => service.AdoptAsync("nope-skill"));
+    }
+
+    [Fact]
+    public async Task Adopt_trashed_skill_refuses_and_leaves_trash_untouched()
+    {
+        var index = new SqliteSkillIndex(_dbPath);
+        var document = "---\ndescription: external desc\n---\n# body\n";
+        await SeedExternalAsync(index, "ext-trashed", document);
+        var service = NewService(index);
+        await service.DeleteAsync("ext-trashed");
+
+        var trashFile = Path.Combine(TrashFolder("ext-trashed"), "SKILL.md");
+        var before = await File.ReadAllTextAsync(trashFile);
+
+        await Assert.ThrowsAsync<SkillValidationException>(() => service.AdoptAsync("ext-trashed"));
+        Assert.Equal(before, await File.ReadAllTextAsync(trashFile));
+        Assert.Equal(SkillOrigin.External, (await index.GetByNameAsync("ext-trashed"))!.Origin);
+    }
+
+    [Fact]
+    public async Task Adopt_without_index_row_inserts_new_eling_row()
+    {
+        // Legacy state: a folder that was never indexed (e.g. the catalog was
+        // never scanned). Adoption succeeds and inserts the row as eling.
+        var document = "---\ndescription: legacy desc\n---\n# legacy\n\nBody.\n";
+        Directory.CreateDirectory(SkillFolder("legacy-skill"));
+        await File.WriteAllTextAsync(SkillFile("legacy-skill"), document);
+
+        var service = NewService();
+        var result = await service.AdoptAsync("legacy-skill");
+
+        Assert.Equal(SkillOrigin.Eling, result.Origin);
+        var row = await service.GetByNameAsync("legacy-skill");
+        Assert.Equal(SkillOrigin.Eling, row!.Origin);
+        Assert.Contains("createdAt:", await File.ReadAllTextAsync(SkillFile("legacy-skill")));
+    }
+
+    [Fact]
+    public async Task Adopt_preserves_body_byte_for_byte()
+    {
+        var index = new SqliteSkillIndex(_dbPath);
+        var body = "# Title\n\nstep 1  \nstep 2\n\n```\ncode { }\n```\n";
+        var document = "---\ndescription: desc\n---\n" + body;
+        await SeedExternalAsync(index, "body-skill", document);
+
+        var service = NewService(index);
+        await service.AdoptAsync("body-skill");
+
+        var raw = await File.ReadAllTextAsync(SkillFile("body-skill"));
+        Assert.EndsWith(body, raw);
+        var stored = await new FileSystemSkillStorage(_root).GetByNameAsync("body-skill");
+        Assert.Equal(body, stored!.Body);
+    }
+
+    [Fact]
+    public async Task Adopt_then_save_is_allowed()
+    {
+        var index = new SqliteSkillIndex(_dbPath);
+        var document = "---\ndescription: external desc\n---\n# body\n";
+        await SeedExternalAsync(index, "ext-adoptable", document);
+
+        var service = NewService(index);
+        await service.AdoptAsync("ext-adoptable");
+
+        // After adoption the skill is a full eling skill: save is allowed.
+        var updated = await service.SaveAsync(NewInput("ext-adoptable", "now editable", "# rewritten\n"));
+        Assert.Equal(SkillOrigin.Eling, updated.Origin);
+        var stored = await service.GetByNameAsync("ext-adoptable");
+        Assert.Equal("now editable", stored!.Description);
+    }
+
+    private async Task SeedExternalAsync(ISkillIndex index, string name, string document)
+    {
+        Directory.CreateDirectory(SkillFolder(name));
+        await File.WriteAllTextAsync(SkillFile(name), document);
+        await index.AdoptExternalScanResultAsync(
+            new Skill.Skill(name, "external desc", "external body", origin: SkillOrigin.External));
+    }
+
     public void Dispose()
     {
         try

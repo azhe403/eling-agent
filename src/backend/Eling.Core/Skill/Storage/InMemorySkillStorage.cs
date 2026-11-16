@@ -1,3 +1,5 @@
+using Eling.Core.Skill.Serialization;
+
 namespace Eling.Core.Skill.Storage;
 
 /// <summary>
@@ -150,5 +152,40 @@ public class InMemorySkillStorage : ISkillStorage
     {
         SkillGuards.ValidateNameOrThrow(name, nameof(name));
         return Task.FromResult(_active.ContainsKey(name));
+    }
+
+    public Task<string?> ReadRawAsync(string name)
+    {
+        SkillGuards.ValidateNameOrThrow(name, nameof(name));
+        // The in-memory double has no raw bytes; it synthesizes the canonical
+        // document so the adoption path can round-trip a known-good skill.
+        return Task.FromResult(
+            _active.TryGetValue(name, out var skill) ? SkillFileFormat.WriteDocument(skill) : null);
+    }
+
+    public Task RewriteAsync(Skill skill)
+    {
+        ArgumentNullException.ThrowIfNull(skill);
+        SkillGuards.ValidateNameOrThrow(skill.Name, nameof(skill));
+
+        if (skill.Origin == SkillOrigin.External)
+        {
+            throw new SkillStorageException(
+                $"Skill '{skill.Name}' is externally originated; Eling never writes external skills.");
+        }
+
+        if (!_active.ContainsKey(skill.Name))
+        {
+            throw new SkillStorageException($"No skill named '{skill.Name}' exists to rewrite.");
+        }
+
+        _active[skill.Name] = skill;
+        return Task.CompletedTask;
+    }
+
+    public string FilePath(string name)
+    {
+        SkillGuards.ValidateNameOrThrow(name, nameof(name));
+        return $"memory://skills/{name}/SKILL.md";
     }
 }

@@ -1,3 +1,4 @@
+using Eling.Core.Skill.Serialization;
 using Eling.Core.Skill.Storage;
 using Microsoft.Extensions.Logging;
 
@@ -9,9 +10,9 @@ namespace Eling.Core.Skill;
 /// under one ownership rule: every content-mutating path goes through
 /// <see cref="EnsureElingOwnedAsync"/> (or an equivalent origin check on the
 /// target name) first — external skills are never written, renamed or
-/// overwritten. Delete-to-trash is the sole exception: an external skill may
-/// be moved to the trash by explicit user action (restorable), never otherwise
-/// mutated.
+/// overwritten. Two carve-outs exist, both explicit user actions:
+/// delete-to-trash (restorable) and user-called adoption
+/// (<see cref="AdoptAsync"/>, flips ownership in place).
 /// </summary>
 /// <remarks>
 /// Orchestration order: validate input → collision guard (index lookup by
@@ -278,6 +279,127 @@ public sealed class SkillService : ISkillService
         // exclude it by default until restored.
         await _index.MarkTrashedAsync(name, trashed: true);
         await NotifyAsync("deleted");
+    }
+
+    public async Task<AdoptResult> AdoptAsync(string name, CancellationToken ct = default)
+    {
+        ValidateNameOrThrow(name, nameof(name));
+        ct.ThrowIfCancellationRequested();
+
+        // GetByNameAsync returns trashed rows too; only the active set counts
+        // as "exists". A row that is not active is trashed — adoption of a
+        // trashed skill is refused before anything is read or written.
+        var row = await _index.GetByNameAsync(name);
+        if (row is not null)
+        {
+            var active = await _index.ListAsync(includeTrashed: false, origin: null);
+            if (active.All(s => !string.Equals(s.Name, name, StringComparison.Ordinal)))
+            {
+                throw new SkillValidationException(
+                    $"Skill '{name}' is in the trash; restore it before adopting.");
+            }
+        }
+
+        if (row is { Origin: SkillOrigin.Eling })
+        {
+            throw new SkillConflictException(
+                $"Skill '{name}' is already Eling-managed; there is nothing to adopt.");
+        }
+
+        // Read and parse BEFORE anything is written; any failure here leaves
+        // the file and the index exactly as they were.
+        string? raw;
+        try
+        {
+            raw = await _storage.ReadRawAsync(name);
+        }
+        catch (SkillStorageException ex)
+        {
+            throw new SkillValidationException(
+                $"Skill '{name}' could not be read for adoption: {ex.Message}", ex);
+        }
+
+        if (raw is null)
+        {
+            throw new SkillNotFoundException($"No skill named '{name}' exists in the skill catalog.");
+        }
+
+        AdoptionRead parsed;
+        try
+        {
+            parsed = SkillFileFormat.ParseForAdoption(raw, name);
+        }
+        catch (SkillFrontMatterException ex)
+        {
+            throw new SkillValidationException(
+                $"Skill '{name}' has unparseable frontmatter: {ex.Message} Fix the frontmatter YAML first, then adopt again.",
+                ex);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        Skill adopted;
+        try
+        {
+            adopted = new Skill(
+                parsed.Name,
+                parsed.Description,
+                parsed.Body,
+                parsed.Tags,
+                parsed.RelatedMemories,
+                parsed.RelatedSnippets,
+                parsed.Source,
+                id: row?.Id,
+                origin: SkillOrigin.Eling,
+                createdAt: now,
+                updatedAt: now);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new SkillValidationException(ex.Message, ex);
+        }
+
+        try
+        {
+            // Atomic in-place rewrite of SKILL.md; the folder and every
+            // sibling file are untouched.
+            await _storage.RewriteAsync(adopted);
+        }
+        catch (SkillStorageException ex)
+        {
+            if (!await _storage.ExistsAsync(name))
+            {
+                throw new SkillNotFoundException($"No skill named '{name}' exists in the skill catalog.", ex);
+            }
+
+            throw;
+        }
+
+        try
+        {
+            // The upsert reuses the row's identity: same ULID in, one row out,
+            // origin flipped to eling. A row that never existed is inserted.
+            await _index.IndexAsync(adopted);
+        }
+        catch (ArgumentException ex)
+        {
+            // The file is already adopted at this point; surface the indexing
+            // failure loudly instead of silently leaving a stale row.
+            throw new SkillValidationException(
+                $"Skill '{name}' was adopted (file rewritten) but re-indexing failed: {ex.Message}", ex);
+        }
+
+        // A live adoption must not resurrect a stale trashed_at marker —
+        // mirror the save path. The row is active here, so this is a no-op
+        // unless an earlier out-of-band drift left the marker set.
+        await _index.MarkTrashedAsync(adopted.Name, trashed: false);
+
+        await NotifyAsync("adopted");
+        return new AdoptResult(
+            adopted.Id,
+            adopted.Name,
+            _storage.FilePath(adopted.Name),
+            adopted.Origin,
+            WasExternal: true);
     }
 
     public async Task RestoreAsync(string name)

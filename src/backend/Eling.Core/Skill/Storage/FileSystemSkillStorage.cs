@@ -363,6 +363,78 @@ public class FileSystemSkillStorage : ISkillStorage
         return Task.FromResult(File.Exists(Path.Combine(ActiveFolder(name), SkillFileName)));
     }
 
+    public async Task<string?> ReadRawAsync(string name)
+    {
+        SkillGuards.ValidateNameOrThrow(name, nameof(name));
+
+        var file = Path.Combine(ActiveFolder(name), SkillFileName);
+        if (!File.Exists(file))
+        {
+            return null;
+        }
+
+        try
+        {
+            return await File.ReadAllTextAsync(file);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new SkillStorageException($"Failed to read '{file}': {ex.Message}", ex);
+        }
+    }
+
+    public async Task RewriteAsync(Skill skill)
+    {
+        ArgumentNullException.ThrowIfNull(skill);
+        SkillGuards.ValidateNameOrThrow(skill.Name, nameof(skill));
+        // Vocabulary/invariant failures must happen before any IO so no temp file is left behind.
+        SkillFileFormat.ValidateForWrite(skill);
+
+        if (skill.Origin == SkillOrigin.External)
+        {
+            throw new SkillStorageException(
+                $"Skill '{skill.Name}' is externally originated; Eling never writes external skills.");
+        }
+
+        var folder = ActiveFolder(skill.Name);
+        var file = Path.Combine(folder, SkillFileName);
+        if (!File.Exists(file))
+        {
+            throw new SkillStorageException($"No skill named '{skill.Name}' exists to rewrite.");
+        }
+
+        var tempFile = Path.Combine(folder, $".SKILL-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await File.WriteAllTextAsync(tempFile, SkillFileFormat.WriteDocument(skill));
+            File.Move(tempFile, file, overwrite: true);
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                if (File.Exists(tempFile))
+                {
+                    File.Delete(tempFile);
+                }
+            }
+            catch (Exception cleanupEx)
+            {
+                _logger?.LogWarning(cleanupEx, "Rewrite: could not remove temp file {TempFile}.", tempFile);
+            }
+
+            throw ex is SkillStorageException or ArgumentException
+                ? ex
+                : new SkillStorageException($"Failed to rewrite skill '{skill.Name}': {ex.Message}", ex);
+        }
+    }
+
+    public string FilePath(string name)
+    {
+        SkillGuards.ValidateNameOrThrow(name, nameof(name));
+        return Path.Combine(ActiveFolder(name), SkillFileName);
+    }
+
     private async Task<Skill> LoadFromFileAsync(string file, string expectedName)
     {
         string raw;

@@ -50,4 +50,25 @@ public interface ISkillStorage
 
     /// <summary>True when an active skill folder with a SKILL.md exists under <paramref name="name"/>.</summary>
     Task<bool> ExistsAsync(string name);
+
+    /// <summary>
+    /// Reads the raw SKILL.md text (no parsing, no normalization beyond what
+    /// exists on disk), or <c>null</c> when the folder/SKILL.md is missing.
+    /// Used by the adoption path, which must inspect the file before deciding
+    /// whether it may be rewritten. IO failures surface as
+    /// <see cref="SkillStorageException"/>.
+    /// </summary>
+    Task<string?> ReadRawAsync(string name);
+
+    /// <summary>
+    /// Rewrites the SKILL.md of an existing skill <b>in place</b>: the folder
+    /// and every sibling file stay untouched; only SKILL.md is replaced, via a
+    /// temp sibling file moved over the original (same volume, atomic). The
+    /// original is never deleted or truncated before the replacement is fully
+    /// written; on any failure the untouched original remains.
+    /// </summary>
+    Task RewriteAsync(Skill skill);
+
+    /// <summary>The absolute SKILL.md path for <paramref name="name"/> as this storage sees it.</summary>
+    string FilePath(string name);
 }

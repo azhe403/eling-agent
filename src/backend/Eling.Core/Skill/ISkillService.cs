@@ -4,9 +4,10 @@ namespace Eling.Core.Skill;
 /// Application-level orchestration for the machine-global skill catalog
 /// (spec §4): validation, ownership enforcement, storage + index coordination.
 /// Content-mutating paths (save, rename) refuse external skills — they are
-/// never written, renamed or overwritten. Delete-to-trash is the sole
-/// exception and is open to both origins (restorable). Reads are
-/// origin-agnostic and serve both Eling-managed and externally-supplied skills.
+/// never written, renamed or overwritten. Delete-to-trash (restorable) and
+/// the explicit user-called adoption (<see cref="AdoptAsync"/>) are the two
+/// exceptions; reads are origin-agnostic and serve both Eling-managed and
+/// externally-supplied skills.
 /// </summary>
 /// <remarks>
 /// Read fidelity: reads are served from the index mirror, where
@@ -110,6 +111,25 @@ public interface ISkillService
     /// between a rebuild and the next catalog scan.
     /// </remarks>
     Task RebuildIndexAsync();
+
+    /// <summary>
+    /// Explicit, user-requested <b>adoption</b>: converts an externally-owned
+    /// skill to an Eling-managed one, in place. The folder and every sibling
+    /// file stay untouched; only SKILL.md's frontmatter is rewritten (keys
+    /// updated/added: <c>id</c>, <c>createdAt</c>, <c>updatedAt</c>; everything
+    /// else preserved verbatim, body byte-for-byte), and the index row flips
+    /// to <see cref="SkillOrigin.Eling"/> keeping its identity. The ULID is
+    /// reused from the index row when present. Refuses — without touching
+    /// anything — when the name is unknown (<see cref="SkillNotFoundException"/>),
+    /// the skill is already Eling-managed (<see cref="SkillConflictException"/>),
+    /// the skill is trashed (<see cref="SkillValidationException"/>), the
+    /// frontmatter does not parse (<see cref="SkillValidationException"/> with
+    /// the parse failure and the instruction to fix the YAML first), or the
+    /// frontmatter <c>name</c> disagrees with the folder name. When no index
+    /// row exists but the folder is present (legacy state), a new row is
+    /// inserted as <see cref="SkillOrigin.Eling"/>.
+    /// </summary>
+    Task<AdoptResult> AdoptAsync(string name, CancellationToken ct = default);
 
     /// <summary>
     /// Throws <see cref="SkillNotFoundException"/> when the name is absent from
