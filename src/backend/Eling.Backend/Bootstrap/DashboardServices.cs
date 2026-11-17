@@ -19,6 +19,7 @@ using Eling.Core.Memory;
 using Eling.Core.Projects;
 using Eling.Core.Scope;
 using Eling.Core.Skill;
+using Eling.Core.Skill.Scanning;
 using Eling.Core.Workspaces;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -203,6 +204,14 @@ public static class DashboardServices
                 CentralAgentDirectory.Resolve(),
                 sp.GetRequiredService<MemoryChangeBroadcaster>(),
                 sp.GetRequiredService<ILogger<DatabaseRegistryWatcher>>()));
+
+            // Machine-global catalog: any process (or external tool) can write it, so
+            // the owner reconciles the index on a 1 s dirty drain and pushes "skills".
+            services.AddSingleton(sp => new SkillCatalogDirWatcher(
+                sp.GetRequiredService<ISkillCatalogScanner>(),
+                sp.GetRequiredService<MemoryChangeBroadcaster>(),
+                SkillCatalogPaths.SkillsDirectory,
+                logger: sp.GetService<ILogger<SkillCatalogDirWatcher>>()));
 
             // Mirrors what AppServices.Create and the MCP host do when the
             // dashboard port is known: anything in this process that injects
