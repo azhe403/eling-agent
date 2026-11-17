@@ -10,6 +10,8 @@
 /** The table name a Redis tab carries. It is a label, not a table. */
 export const REDIS_TAB_TABLE = "Redis keys"
 
+import type { BrowseFilter, BrowseSort } from "./filter-model"
+
 export type DbTab = {
   connId: string
   table: string
@@ -24,6 +26,12 @@ export type DbTab = {
   browseLimit?: number
   /** The 1-based page of the Data tab. Session view state, like browseLimit. */
   browsePage?: number
+  /** The committed conditions of the Data tab. Session view state, like browseLimit. */
+  browseFilters?: BrowseFilter[]
+  /** The committed sort columns of the Data tab. Session view state, like browseLimit. */
+  browseSort?: BrowseSort[]
+  /** The committed raw manual WHERE fragment, ANDed verbatim. Session view state. */
+  manualCondition?: string
 }
 
 /**
@@ -49,11 +57,19 @@ export const tabKey = (tab: DbTab): string =>
 export const redisTabKey = (tab: DbTab): string => `${tab.connId}:${tab.redisDb ?? 0}`
 
 /**
- * The persisted form of a tab: identity only. `browseLimit` and `browsePage`
- * are session view state - saving them would resurrect a page 9 of an empty
- * table and a stale limit after a reload, so they never reach localStorage.
+ * The persisted form of a tab: identity only. `browseLimit`, `browsePage`,
+ * `browseFilters`, `browseSort` and `manualCondition` are session view state -
+ * saving them would resurrect a page 9 of a filtered table and a stale filter
+ * after a reload, so they never reach localStorage.
  */
 export const persistableTab = (tab: DbTab): DbTab => {
-  const { browseLimit: _browseLimit, browsePage: _browsePage, ...rest } = tab
+  const {
+    browseLimit: _browseLimit,
+    browsePage: _browsePage,
+    browseFilters: _browseFilters,
+    browseSort: _browseSort,
+    manualCondition: _manualCondition,
+    ...rest
+  } = tab
   return rest
 }

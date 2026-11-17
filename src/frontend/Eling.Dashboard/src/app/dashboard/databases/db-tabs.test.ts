@@ -58,8 +58,17 @@ describe("tabKey", () => {
   })
 })
 describe("persistableTab", () => {
-  it("drops browseLimit and browsePage but keeps identity fields", () => {
-    const t = { connId: "c1", table: "orders", database: "db", browseLimit: 500, browsePage: 3 }
+  it("drops browseLimit, browsePage, browseFilters, browseSort and manualCondition but keeps identity fields", () => {
+    const t = {
+      connId: "c1",
+      table: "orders",
+      database: "db",
+      browseLimit: 500,
+      browsePage: 3,
+      browseFilters: [{ column: "name", op: "contains" as const, value: "a", enabled: true, logic: "first" as const }],
+      browseSort: [{ column: "updated_at", order: "desc" as const }],
+      manualCondition: "is_active = 1",
+    }
     expect(persistableTab(t)).toEqual({ connId: "c1", table: "orders", database: "db" })
   })
   it("keeps redis identity fields", () => {
