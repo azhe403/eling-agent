@@ -155,6 +155,7 @@ public sealed class SkillCatalogDirWatcher : IDisposable
         catch (OperationCanceledException)
         {
             // Dispose cancelled the loop; the watcher stops with it.
+            _logger.LogDebug("Skill catalog drain loop stopped (cancelled).");
         }
         catch (Exception ex)
         {

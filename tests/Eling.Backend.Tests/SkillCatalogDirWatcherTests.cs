@@ -46,8 +46,15 @@ public sealed class SkillCatalogDirWatcherTests : IAsyncLifetime
         {
             if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
         }
-        catch (IOException) { /* locked temp catalog must not fail the run */ }
-        catch (UnauthorizedAccessException) { }
+        catch (IOException ex)
+        {
+            // A locked temp catalog must not fail the run.
+            System.Diagnostics.Debug.WriteLine($"skill-dir-watch test cleanup: {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"skill-dir-watch test cleanup: {ex.Message}");
+        }
 
         foreach (var suffix in new[] { "", "-wal", "-shm" })
         {
@@ -55,8 +62,14 @@ public sealed class SkillCatalogDirWatcherTests : IAsyncLifetime
             {
                 File.Delete(_dbPath + suffix);
             }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            catch (IOException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"skill-dir-watch test db cleanup: {ex.Message}");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"skill-dir-watch test db cleanup: {ex.Message}");
+            }
         }
 
         return Task.CompletedTask;
@@ -138,6 +151,7 @@ public sealed class SkillCatalogDirWatcherTests : IAsyncLifetime
         catch (OperationCanceledException)
         {
             // Timeout: return whatever arrived so the caller can assert on it.
+            System.Diagnostics.Debug.WriteLine("skill-dir-watch test receive: timed out waiting for frames.");
         }
 
         return frames;
