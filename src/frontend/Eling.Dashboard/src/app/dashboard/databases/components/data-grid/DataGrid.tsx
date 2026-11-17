@@ -246,6 +246,7 @@ export const DataGrid = ({
                 sort: committedSort,
                 manualCondition: manualCondition ?? "",
               }}
+              committedSort={committedSort}
               onApply={(next) => onApplyBrowse?.(next)}
               onClose={() => setFilterOpen(false)}
             />

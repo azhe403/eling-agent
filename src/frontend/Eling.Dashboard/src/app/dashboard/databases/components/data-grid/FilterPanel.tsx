@@ -18,8 +18,10 @@ export interface FilterPanelProps {
   columns: string[]
   /** Column name → declared data type (e.g. "tinyint(1)"). Empty when the schema is unknown. */
   columnTypes: Record<string, string>
-  /** The tab's committed state; drafts start from it on every mount. */
+  /** The tab's committed state; drafts start from it on mount. */
   initial: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string }
+  /** The tab's committed sort, live. The panel's sort rows follow it until the reader edits them. */
+  committedSort: BrowseSort[]
   /** Commit the current draft (grid refetches, page resets to 1). */
   onApply: (next: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string }) => void
   /** Close the panel without applying - unsaved drafts are discarded. */
@@ -31,12 +33,25 @@ const selectClass = "h-8 w-full text-xs"
 /**
  * The condition builder for the Data tab. Draft state is local and the
  * parent mounts this only while the panel is open, so closing discards
- * unsaved edits - applying is explicit (Apply or Ctrl+Enter).
+ * unsaved edits - applying is explicit (Apply or Ctrl+Enter). The sort rows
+ * are the exception to pure draft semantics: they render straight from the
+ * tab's committed sort until the reader edits them here, so an out-of-band
+ * header sort is never silently overwritten by Apply.
  */
-export const FilterPanel = ({ columns, columnTypes, initial, onApply, onClose }: FilterPanelProps) => {
+export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onApply, onClose }: FilterPanelProps) => {
   const [filters, setFilters] = useState<BrowseFilter[]>(initial.filters)
-  const [sort, setSort] = useState<BrowseSort[]>(initial.sort)
+  const [draftSort, setDraftSort] = useState<BrowseSort[]>(initial.sort)
+  const [sortDirty, setSortDirty] = useState(false)
   const [manualCondition, setManualCondition] = useState(initial.manualCondition)
+
+  // One source of truth for the sort rows: committed until the reader edits
+  // them here, the reader's draft afterwards. Header changes ride through on
+  // the former path, never on the latter.
+  const sort = sortDirty ? draftSort : committedSort
+  const editSort = (updater: (current: BrowseSort[]) => BrowseSort[]) => {
+    setSortDirty(true)
+    setDraftSort((prev) => updater(sortDirty ? prev : committedSort))
+  }
 
   const defaultColumn = useMemo(() => columns[0] ?? "", [columns])
 
@@ -46,7 +61,7 @@ export const FilterPanel = ({ columns, columnTypes, initial, onApply, onClose }:
     setFilters((f) => [...f, { column: defaultColumn, op: "eq", value: "", enabled: true, logic: f.length === 0 ? "first" : "and" }])
 
   const addSort = () =>
-    setSort((s) => {
+    editSort((s) => {
       const used = new Set(s.map((x) => x.column))
       const free = columns.find((c) => !used.has(c))
       return free ? [...s, { column: free, order: "asc" as const }] : s
@@ -56,7 +71,7 @@ export const FilterPanel = ({ columns, columnTypes, initial, onApply, onClose }:
     setFilters((f) => f.map((item, j) => (j === i ? { ...item, ...patch } : item)))
 
   const patchSort = (i: number, patch: Partial<BrowseSort>) =>
-    setSort((s) => s.map((item, j) => (j === i ? { ...item, ...patch } : item)))
+    editSort((s) => s.map((item, j) => (j === i ? { ...item, ...patch } : item)))
 
   const setAllEnabled = (enabled: boolean) =>
     setFilters((f) => f.map((item) => ({ ...item, enabled })))
@@ -208,7 +223,7 @@ export const FilterPanel = ({ columns, columnTypes, initial, onApply, onClose }:
               <button
                 type="button"
                 className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                onClick={() => setSort((prev) => prev.filter((_, j) => j !== i))}
+                onClick={() => editSort((prev) => prev.filter((_, j) => j !== i))}
                 aria-label="Remove sort"
               >
                 <X className="size-4" />
@@ -245,7 +260,8 @@ export const FilterPanel = ({ columns, columnTypes, initial, onApply, onClose }:
             className="cursor-pointer"
             onClick={() => {
               setFilters([])
-              setSort([])
+              setDraftSort([])
+              setSortDirty(false)
               setManualCondition("")
               onApply({ filters: [], sort: [], manualCondition: "" })
             }}
