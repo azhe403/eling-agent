@@ -29,7 +29,8 @@ public sealed class DatabaseReadService : IDatabaseReadService
         string sql,
         int maxRows,
         CancellationToken cancellationToken = default,
-        bool preferCache = true)
+        bool preferCache = true,
+        IReadOnlyList<SqlParam>? parameters = null)
     {
         ArgumentNullException.ThrowIfNull(connection);
         if (string.IsNullOrWhiteSpace(sql))
@@ -43,9 +44,14 @@ public sealed class DatabaseReadService : IDatabaseReadService
         // SQLite is local: a live read is as fast as the cache lookup
         // plus the cache file read, and a snapshot is staler than either.
         // It stays live-first.
+        // The SQL text alone is no longer the key when the statement carries
+        // bound parameters - the same placeholder text with two filter values
+        // is two different queries. Keyed on the values, so two snapshot
+        // files never answer for each other's parameters.
+        var key = QueryCacheKey.For(sql, parameters);
         var useCache = preferCache && connection.Provider != DatabaseProvider.Sqlite;
         if (useCache
-            && _cache.TryGetQuery(connection.Id, database, maxRows, sql, out var snapshot, out var snapshotAt)
+            && _cache.TryGetQuery(connection.Id, database, maxRows, key, out var snapshot, out var snapshotAt)
             && snapshot is not null)
         {
             return snapshot with
@@ -60,17 +66,17 @@ public sealed class DatabaseReadService : IDatabaseReadService
         try
         {
             var adapter = DatabaseAdapterFactory.CreateAdapter(target);
-            var result = await adapter.QueryAsync(sql, maxRows, cancellationToken);
+            var result = await adapter.QueryAsync(sql, maxRows, cancellationToken, parameters);
             if (connection.Provider != DatabaseProvider.Sqlite)
             {
-                _cache.SetQuery(connection.Id, database, maxRows, sql, result);
+                _cache.SetQuery(connection.Id, database, maxRows, key, result);
             }
             return result with { FromCache = false };
         }
         catch (DatabaseUnavailableException ex)
         {
             sw.Stop();
-            if (_cache.TryGetQuery(connection.Id, database, maxRows, sql, out var cached, out var cachedAt)
+            if (_cache.TryGetQuery(connection.Id, database, maxRows, key, out var cached, out var cachedAt)
                 && cached is not null)
             {
                 _logger?.LogWarning(ex, "Database unavailable; serving cached query result for {Id}", connection.Id);

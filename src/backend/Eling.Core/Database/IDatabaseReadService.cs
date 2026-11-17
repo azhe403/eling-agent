@@ -13,7 +13,8 @@ public interface IDatabaseReadService
         string sql,
         int maxRows,
         CancellationToken cancellationToken = default,
-        bool preferCache = true);
+        bool preferCache = true,
+        IReadOnlyList<SqlParam>? parameters = null);
 
     Task<DatabaseSchemaInfo> GetSchemaAsync(
         DatabaseConnection connection,

@@ -68,13 +68,20 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
         }
     }
 
-    public async Task<QueryResult> QueryAsync(string sql, int maxRows, CancellationToken ct = default)
+    public async Task<QueryResult> QueryAsync(string sql, int maxRows, CancellationToken ct = default, IReadOnlyList<SqlParam>? parameters = null)
     {
         await using var conn = new MySqlConnection(ConnectionString);
         try { await conn.OpenAsync(ct); } catch (Exception ex) { throw new DatabaseUnavailableException(Categorize(ex), ex); }
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.CommandTimeout = 30;
+        if (parameters is not null)
+        {
+            foreach (var p in parameters)
+            {
+                cmd.Parameters.AddWithValue(p.Name, p.Value ?? DBNull.Value);
+            }
+        }
         await using var reader = await cmd.ExecuteReaderAsync(ct);
 
         var columns = new List<string>();

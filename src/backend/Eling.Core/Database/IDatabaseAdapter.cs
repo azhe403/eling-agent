@@ -3,7 +3,7 @@ namespace Eling.Core.Database;
 public interface IDatabaseAdapter
 {
     Task<ConnectionTestResult> TestAsync(CancellationToken ct = default);
-    Task<QueryResult> QueryAsync(string sql, int maxRows, CancellationToken ct = default);
+    Task<QueryResult> QueryAsync(string sql, int maxRows, CancellationToken ct = default, IReadOnlyList<SqlParam>? parameters = null);
     Task<int> ExecuteAsync(string sql, CancellationToken ct = default);
 
     /// <summary>
