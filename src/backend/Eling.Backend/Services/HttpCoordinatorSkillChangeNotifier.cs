@@ -44,6 +44,10 @@ public sealed class HttpCoordinatorSkillChangeNotifier : ISkillChangeNotifier
                 $"http://127.0.0.1:{_port}/api/coordinator/notify-change",
                 content: new StringContent(JsonSerializer.Serialize(SkillTopic), Encoding.UTF8, "application/json"),
                 ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger?.LogDebug("Skill change notification to dashboard owner on port {Port} returned {StatusCode}; ignoring.", _port, (int)response.StatusCode);
+            }
         }
         catch (Exception ex)
         {

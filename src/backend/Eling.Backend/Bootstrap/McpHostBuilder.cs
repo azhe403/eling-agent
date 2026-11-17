@@ -144,7 +144,7 @@ public static class McpHostBuilder
             // Skill mutations from this (possibly peer) process: same cross-process
             // story as memory writes — the POST relays "skills" to the port owner.
             services.AddSingleton<ISkillChangeNotifier>(
-                _ => new HttpCoordinatorSkillChangeNotifier(effectivePort));
+                sp => new HttpCoordinatorSkillChangeNotifier(effectivePort, sp.GetService<ILogger<HttpCoordinatorSkillChangeNotifier>>()));
             // The shared instance both hosts consume (AppServices): one lease
             // store per process, pointed at the machine-global commit-leases.json.
             services.AddSingleton(shared.CommitLeaseStore);

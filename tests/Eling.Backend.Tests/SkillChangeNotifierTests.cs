@@ -26,6 +26,8 @@ public sealed class SkillChangeNotifierTests : IAsyncLifetime
     {
         if (Directory.Exists(_catalogRoot)) Directory.Delete(_catalogRoot, recursive: true);
         if (File.Exists(_dbPath)) File.Delete(_dbPath);
+        if (File.Exists(_dbPath + "-wal")) File.Delete(_dbPath + "-wal");
+        if (File.Exists(_dbPath + "-shm")) File.Delete(_dbPath + "-shm");
         return Task.CompletedTask;
     }
 
@@ -61,9 +63,17 @@ public sealed class SkillChangeNotifierTests : IAsyncLifetime
 
     private static async Task<string> ReceiveFirstAsync(MemoryChangeBroadcaster broadcaster, CancellationToken ct)
     {
-        await foreach (var item in broadcaster.SubscribeAsync(ct))
+        try
         {
-            return item;
+            await foreach (var item in broadcaster.SubscribeAsync(ct))
+            {
+                return item;
+            }
+        }
+        catch (OperationCanceledException ex)
+        {
+            // The CTS is the test's timeout guard: surface it as TimeoutException.
+            throw new TimeoutException("No skills broadcast arrived within the timeout.", ex);
         }
 
         throw new TimeoutException("No skills broadcast arrived within the timeout.");
