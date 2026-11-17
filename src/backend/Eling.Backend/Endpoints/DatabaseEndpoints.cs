@@ -620,6 +620,7 @@ public static class DatabaseEndpoints
                 }
 
                 sw.Stop();
+                var truncated = (long)(page - 1) * limit + rows.Rows.Count < total;
                 await auditLogger.RecordAsync(new AuditEvent
                 {
                     Trail = AuditTrail.Access,
@@ -636,7 +637,7 @@ public static class DatabaseEndpoints
                 return Results.Ok(new BrowseResponse(
                     rows.Columns,
                     rows.Rows,
-                    Truncated: false,
+                    truncated,
                     total,
                     fromCache,
                     cachedAt));

@@ -155,6 +155,86 @@ public sealed class BrowseQueryBuilderTests
     }
 
     [Fact]
+    public void Build_StartsWith_EscapesAndEmitsPercentSuffix()
+    {
+        var plan = Build([F("name", "startsWith", "a_50%")]);
+
+        Assert.Contains("\"name\" LIKE @p0 ESCAPE '!'", plan.Rows.Sql);
+        Assert.Equal("a!_50!%%", plan.Rows.Parameters[0].Value);
+    }
+
+    [Fact]
+    public void Build_EndsWith_EscapesAndEmitsPercentPrefix()
+    {
+        var plan = Build([F("name", "endsWith", "50%")]);
+
+        Assert.Contains("\"name\" LIKE @p0 ESCAPE '!'", plan.Rows.Sql);
+        Assert.Equal("%50!%", plan.Rows.Parameters[0].Value);
+    }
+
+    [Fact]
+    public void Build_NotContains_NegatesLike()
+    {
+        var plan = Build([F("name", "notContains", "a")]);
+
+        Assert.Contains("NOT (\"name\" LIKE @p0 ESCAPE '!')", plan.Rows.Sql);
+    }
+
+    [Fact]
+    public void Build_Neq_BindsNumber()
+    {
+        var plan = Build([F("decimal_col", "neq", "12.5")]);
+
+        Assert.Contains("\"decimal_col\" <> @p0", plan.Rows.Sql);
+        Assert.Equal(12.5m, plan.Rows.Parameters[0].Value);
+    }
+
+    [Fact]
+    public void Build_EmptyStringEq_Binds()
+    {
+        var plan = Build([F("code", "eq", "")]);
+
+        Assert.Equal("", plan.Rows.Parameters[0].Value);
+    }
+
+    [Fact]
+    public void Build_PointColumn_TreatsAsText()
+    {
+        var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["location"] = "POINT",
+        };
+        var plan = Build([F("location", "eq", "abc")], columnTypes: types);
+
+        Assert.Equal("abc", plan.Rows.Parameters[0].Value);
+    }
+
+    [Fact]
+    public void Build_BoolColumn_MapsTrue()
+    {
+        var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ok"] = "boolean",
+        };
+        var plan = Build([F("ok", "eq", "true")], columnTypes: types);
+
+        Assert.Equal(1, plan.Rows.Parameters[0].Value);
+    }
+
+    [Fact]
+    public void Build_ThousandsSeparator_Throws()
+    {
+        var ex = Assert.Throws<BrowseQueryException>(() => Build([F("decimal_col", "eq", "1,234")]));
+        Assert.Contains("decimal_col", ex.Message);
+    }
+
+    [Fact]
+    public void Build_PageOverflow_DoesNotWrapArithmetic()
+    {
+        Assert.EndsWith("OFFSET 2147483646000", Build([], page: int.MaxValue, limit: 1000).Rows.Sql);
+    }
+
+    [Fact]
     public void Build_IsNull_And_IsNotNull_BindNoParameters()
     {
         var plan = Build([

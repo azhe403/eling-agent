@@ -325,6 +325,20 @@ public sealed class DatabaseBrowseEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Browse_LimitOneShortOfTotal_ReportsTruncated()
+    {
+        var id = await SeedSqliteAsync();
+
+        var response = await PostBrowse(id, new { table = "mst_test", limit = 1 });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(doc.RootElement.GetProperty("truncated").GetBoolean());
+        Assert.Equal(4, doc.RootElement.GetProperty("total").GetInt64());
+        Assert.Single(doc.RootElement.GetProperty("rows").EnumerateArray());
+    }
+
+    [Fact]
     public async Task Browse_RedisConnection_Answers400()
     {
         var connection = DatabaseConnection.Create(

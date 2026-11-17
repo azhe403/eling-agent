@@ -44,7 +44,18 @@ public sealed class QueryCacheKeyTests
     {
         var key = QueryCacheKey.For("q", [new SqlParam("@p0", "a"), new SqlParam("@p1", 2)]);
 
-        Assert.Contains("@p0=s:a", key);
-        Assert.Contains("@p1=i:2", key);
+        Assert.Contains("@p0=s:1:a", key);
+        Assert.Contains("@p1=i:1:2", key);
+    }
+
+    [Fact]
+    public void QueryCacheKey_PrefixSeparatorsInValues_CannotCollide()
+    {
+        // A value carrying separators and length-like text yields a key no
+        // other value can forge: the length prefix pins the representation.
+        var a = QueryCacheKey.For("q", [new SqlParam("@p0", "=s:1:a\u001f@p1=i:1:2")]);
+        var b = QueryCacheKey.For("q", [new SqlParam("@p0", "a"), new SqlParam("@p1", "2")]);
+
+        Assert.NotEqual(a, b);
     }
 }

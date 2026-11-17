@@ -10,8 +10,10 @@ namespace Eling.Core.Database;
 /// rows. With no parameters the key is the SQL text unchanged, so today's
 /// snapshots keep working.
 ///
-/// Format: <c>sql + "\n--p:" + name=tag:value</c>, joined with unit separator.
-/// The tag distinguishes SQLite's type-sensitive compares ('1' vs 1).
+/// Format: <c>sql + "\n--p:" + name=tag:length:value</c> per segment, joined
+/// by unit separator. The length prefix makes the encoding injective: values
+/// and separators can never collide across segments. The tag distinguishes
+/// SQLite's type-sensitive compares ('1' vs 1).
 /// </summary>
 public static class QueryCacheKey
 {
@@ -28,8 +30,9 @@ public static class QueryCacheKey
         {
             if (i > 0) sb.Append('\u001f');
             var p = parameters[i];
+            var repr = Convert.ToString(p.Value, CultureInfo.InvariantCulture) ?? string.Empty;
             sb.Append(p.Name).Append('=').Append(Tag(p.Value)).Append(':')
-              .Append(Convert.ToString(p.Value, CultureInfo.InvariantCulture));
+              .Append(repr.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(repr);
         }
         return sb.ToString();
 

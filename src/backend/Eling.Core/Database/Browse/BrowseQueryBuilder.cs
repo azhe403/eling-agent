@@ -43,7 +43,7 @@ public static class BrowseQueryBuilder
     {
         page = Math.Max(1, page);
         limit = Math.Clamp(limit, 1, 1000);
-        var offset = (page - 1) * limit;
+        long offset = ((long)page - 1) * limit;
 
         var types = new Dictionary<string, string>(columnTypes, StringComparer.OrdinalIgnoreCase);
         string Quote(string name) => SqlIdentifiers.Quote(provider, name);
@@ -104,7 +104,7 @@ public static class BrowseQueryBuilder
             switch (op)
             {
                 case "eq": clauseSql.Add($"{col} = {name}"); clauseText.Add($"{filter.Column} = {literal}"); break;
-                case "neq": clauseSql.Add($"{col} <> {name}"); clauseText.Add($"{filter.Column} != {literal}"); break;
+                case "neq": clauseSql.Add($"{col} <> {name}"); clauseText.Add($"{filter.Column} <> {literal}"); break;
                 case "gt": clauseSql.Add($"{col} > {name}"); clauseText.Add($"{filter.Column} > {literal}"); break;
                 case "gte": clauseSql.Add($"{col} >= {name}"); clauseText.Add($"{filter.Column} >= {literal}"); break;
                 case "lt": clauseSql.Add($"{col} < {name}"); clauseText.Add($"{filter.Column} < {literal}"); break;
@@ -227,29 +227,42 @@ public static class BrowseQueryBuilder
             };
         }
 
+        // No thousands separator: '1,234' binds as 1234 otherwise, silently.
+        const NumberStyles NumericStyle = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint;
+
+        static string FamilyOf(string? dataType)
+        {
+            var t = (dataType ?? "").ToLowerInvariant().Trim();
+            var cut = t.IndexOfAny([' ', '(']);
+            t = cut < 0 ? t : t[..cut];
+            return t switch
+            {
+                "tinyint" or "bool" or "boolean" or "bit" => "boolean",
+                "int" or "integer" or "smallint" or "mediumint" or "bigint"
+                    or "decimal" or "numeric" or "float" or "double" or "real" => "numeric",
+                "date" or "datetime" or "timestamp" or "time" or "year" => "datetime",
+                _ => "text",
+            };
+        }
+
         object CoerceValue(string column, string? raw, string? columnType)
         {
             var value = raw ?? "";
-            var lower = columnType ?? "";
+            var family = FamilyOf(columnType);
 
             // tinyint never parses as "text" - bool-first keeps is_active = 'true' legal.
-            if (lower.StartsWith("tinyint", StringComparison.Ordinal))
+            if (family == "boolean")
             {
                 var b = value.Trim();
                 if (b.Equals("true", StringComparison.OrdinalIgnoreCase) || b.Equals("1", StringComparison.Ordinal)) return 1;
                 if (b.Equals("false", StringComparison.OrdinalIgnoreCase) || b.Equals("0", StringComparison.Ordinal)) return 0;
-                if (decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var d)) return d;
+                if (decimal.TryParse(value, NumericStyle, CultureInfo.InvariantCulture, out var d)) return d;
                 throw new BrowseQueryException($"column '{column}' is numeric; '{value}' is not a number");
             }
 
-            if (lower.Contains("int", StringComparison.Ordinal)
-                || lower.Contains("decimal", StringComparison.Ordinal)
-                || lower.Contains("numeric", StringComparison.Ordinal)
-                || lower.Contains("float", StringComparison.Ordinal)
-                || lower.Contains("double", StringComparison.Ordinal)
-                || lower.Contains("real", StringComparison.Ordinal))
+            if (family == "numeric")
             {
-                if (decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var d)) return d;
+                if (decimal.TryParse(value, NumericStyle, CultureInfo.InvariantCulture, out var d)) return d;
                 throw new BrowseQueryException($"column '{column}' is numeric; '{value}' is not a number");
             }
 
