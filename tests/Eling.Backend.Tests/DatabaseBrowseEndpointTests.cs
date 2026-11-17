@@ -311,6 +311,20 @@ public sealed class DatabaseBrowseEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Browse_DisabledRowWithUnknownColumn_AnswersOk()
+    {
+        var id = await SeedSqliteAsync();
+
+        var response = await PostBrowse(id, new
+        {
+            table = "mst_test",
+            filters = new[] { new { column = "nope", op = "eq", value = "x", enabled = false, logic = "first" } },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Browse_RedisConnection_Answers400()
     {
         var connection = DatabaseConnection.Create(
@@ -452,7 +466,9 @@ public sealed class DatabaseBrowseEndpointTests : IAsyncLifetime
         }
         Assert.NotNull(entry);
         Assert.Equal(AuditTrail.Access, entry!.Trail);
+        Assert.Equal(AuditCategory.Database, entry.Category);
         Assert.Equal(AuditOutcome.Success, entry.Outcome);
         Assert.Equal(4, entry.ResultCount);
+        Assert.Contains("mst_test", entry.Query);
     }
 }

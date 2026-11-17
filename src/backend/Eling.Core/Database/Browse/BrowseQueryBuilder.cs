@@ -60,7 +60,13 @@ public static class BrowseQueryBuilder
 
         string? TypeOf(string column) => types.TryGetValue(column, out var t) ? t?.ToLowerInvariant() : null;
 
-        foreach (var f in filters) EnsureColumn(f.Column);
+        // A disabled row never participates - it must not demand validation
+        // for a column that may not exist any more.
+        foreach (var f in filters)
+        {
+            if (!f.Enabled) continue;
+            EnsureColumn(f.Column);
+        }
         foreach (var s in sort) EnsureColumn(s.Column);
 
         var parameters = new List<SqlParam>();

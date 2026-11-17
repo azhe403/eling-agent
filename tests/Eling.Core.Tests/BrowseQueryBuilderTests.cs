@@ -228,6 +228,14 @@ public sealed class BrowseQueryBuilderTests
     }
 
     [Fact]
+    public void Build_DisabledRowWithUnknownColumn_Succeeds()
+    {
+        var plan = Build([F("nope", "eq", "x", enabled: false)]);
+
+        Assert.DoesNotContain("nope", plan.Rows.Sql);
+    }
+
+    [Fact]
     public void Build_UnknownColumnWhenSchemaAvailable_Throws()
     {
         var ex = Assert.Throws<BrowseQueryException>(() => Build([F("nope", "eq", "x")]));

@@ -552,6 +552,7 @@ public static class DatabaseEndpoints
             }
             catch (BrowseQueryException ex)
             {
+                sw.Stop();
                 await auditLogger.RecordAsync(new AuditEvent
                 {
                     Trail = AuditTrail.Access,
@@ -564,6 +565,28 @@ public static class DatabaseEndpoints
                     DurationMs = (int)sw.ElapsedMilliseconds,
                 }, ct);
                 return Results.BadRequest(ex.Message);
+            }
+
+            // Defense in depth: the built statement must be read-only. The
+            // builder can only emit SELECTs; anything else means a builder
+            // defect, not caller input - 500, audited, never executed.
+            if (SqlSafety.Classify(plan.Rows.Sql).Verdict != SqlVerdict.ReadOnly
+                || SqlSafety.Classify(plan.Count.Sql).Verdict != SqlVerdict.ReadOnly)
+            {
+                sw.Stop();
+                logger.LogError("Browse statement for {Id} is not read-only; refusing to execute.", id);
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Access,
+                    Category = AuditCategory.Database,
+                    Action = DatabaseAuditActions.Browse,
+                    Actor = "dashboard",
+                    Target = id,
+                    Outcome = AuditOutcome.Error,
+                    Query = tableName,
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                }, ct);
+                return Results.Problem(statusCode: 500, title: "browse failed", detail: "the assembled browse statement is not read-only");
             }
 
             try
@@ -605,7 +628,7 @@ public static class DatabaseEndpoints
                     Actor = "dashboard",
                     Target = id,
                     Outcome = AuditOutcome.Success,
-                    Query = string.IsNullOrEmpty(plan.WhereText) ? tableName : plan.WhereText,
+                    Query = string.IsNullOrEmpty(plan.WhereText) ? tableName : tableName + " " + plan.WhereText,
                     ResultCount = (int)Math.Min(total, int.MaxValue),
                     DurationMs = (int)sw.ElapsedMilliseconds,
                     FromCache = fromCache,
