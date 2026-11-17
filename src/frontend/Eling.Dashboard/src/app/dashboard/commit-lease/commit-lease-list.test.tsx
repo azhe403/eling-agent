@@ -37,6 +37,7 @@ const expiredLease = {
 const nullReleasedLease = {
   lease_id: "lease-released-1",
   caller_id: "session-released-1",
+  branch: null,
   since: "2026-11-14T09:00:00Z",
   released_at: null,
   release_reason: null,
@@ -48,6 +49,7 @@ const nullReleasedLease = {
 const heldReleasedLease = {
   lease_id: "lease-held-1",
   caller_id: "session-held-1",
+  branch: "feat/held",
   since: "2026-11-14T09:10:00Z",
   released_at: "2026-11-14T09:12:30Z",
   release_reason: "explicit",
@@ -113,6 +115,11 @@ describe("CommitLease cards", () => {
     render(<CommitLease />)
     // 09:10:00Z -> 09:12:30Z = 150s -> formatAge renders "2m 30s"
     expect(await screen.findByText(/Held 2m 30s/)).toBeTruthy()
+  })
+
+  it("shows the branch on the released card", async () => {
+    render(<CommitLease />)
+    expect(await screen.findByText("feat/held")).toBeTruthy()
   })
 
   it("shows the configured total as a separate TTL badge on the card", async () => {

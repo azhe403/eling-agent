@@ -26,6 +26,7 @@ type LeaseDetailActive = {
 type LeaseDetailReleased = {
   lease_id: string
   caller_id: string
+  branch: string | null
   since: string
   released_at: string | null
   release_reason: string | null
@@ -85,6 +86,7 @@ export function LeaseDetailDialog({
           ["Lease ID", lease.lease_id],
           ["Caller ID", lease.caller_id],
           ["Workspace", lease.checkout],
+          ["Branch", (lease as LeaseDetailReleased).branch ?? "—"],
           ["Since", utcToLocal(lease.since) || lease.since],
           [
             "Released at",

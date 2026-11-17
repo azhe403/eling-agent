@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  GitBranch,
   HeartPulse,
   RefreshCw,
   Timer,
@@ -82,6 +83,7 @@ type CommitLeaseRow = {
 type CommitLeaseReleasedRow = {
   lease_id: string
   caller_id: string
+  branch: string | null
   since: string
   released_at: string | null
   release_reason: string | null
@@ -413,9 +415,6 @@ export function CommitLease() {
                         <span className="text-base font-semibold" title={lease.checkout}>
                           {workspaceName(lease.checkout)}
                         </span>
-                        <Badge variant="secondary" className="font-mono">
-                          {lease.branch ?? "—"}
-                        </Badge>
                         {liveTtlRemaining(lease) <= 0 ? (
                           <span
                             className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400"
@@ -441,6 +440,12 @@ export function CommitLease() {
                              </Badge>
                            </>
                          )}
+                      </div>
+                      <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                        <GitBranch className="size-3.5 shrink-0" aria-hidden />
+                        <span className="min-w-0 truncate font-mono text-xs" title={lease.branch ?? "—"}>
+                          {lease.branch ?? "—"}
+                        </span>
                       </div>
                       <PathText prefix="📁" path={lease.checkout} className="text-xs" />
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -541,6 +546,12 @@ export function CommitLease() {
                           </Badge>
                         )
                       })()}
+                    </div>
+                    <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                      <GitBranch className="size-3.5 shrink-0" aria-hidden />
+                      <span className="min-w-0 truncate font-mono text-xs" title={lease.branch ?? "—"}>
+                        {lease.branch ?? "—"}
+                      </span>
                     </div>
                     <PathText prefix="📁" path={lease.checkout} className="text-xs" />
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
