@@ -208,7 +208,9 @@ in `DatabaseDtos.cs`:
 ```
 
 `400` on: missing table; unknown op/sort-order value; unknown table or column (when schema
-readable); unparseable numeric/bool value; `page < 1` or `limit` out of 1..1000.
+readable); unparseable numeric/bool value. `page` and `limit` are **clamped**, never 400 -
+`page` >= 1 and `limit` 1..1000; an out-of-range page falls back to the same clamp the
+grid already performs.
 `502` on: DB unreachable **and** no cached snapshot for either statement. Redis
 connections get the same `RedisRequirement.NotSql` 400 as `/query`. The `/browse`
 route is a read - allowed on read-only connections, like `/query`.

@@ -2,6 +2,20 @@
 
 All notable changes to Eling are documented here. Follows [Keep a Changelog](https://keepachangelog.com/) and [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [Unreleased] - 2026-11-17
+
+### Added
+- **The databases Data tab can filter and sort its table (core + backend + dashboard)**: the DbGate-style condition builder from `mst_rate`'s world. A funnel button in the grid toolbar toggles a collapsible panel: enable/disabled condition rows (logic `First`/`And`/`Or`, left-associative fold), per-type operator lists (text / numeric / datetime / boolean — tinyint-family coerces `true`/`false`/`1`/`0` bool-first), sort rows (column + asc/desc, multiple), a raw **Manual query condition** ANDed verbatim, Add/Add-sort, Enable all/Disable all/Clear all/**Apply** (empty-string values are legal filter operands). Committed state lives on the tab as session view state (`browseLimit`/`browsePage` precedent) and never persists. `POST /api/databases/{id}/browse` assembles the SQL server-side — schema-validated identifiers (doubling-quoted, never interpolated), bound parameters, LIKE escaped with `!`, inlined clamped LIMIT/OFFSET - and answers rows + filtered `total` in one response, so paging clamps against the real filtered count; cached snapshots stay valid (parameter-aware cache key, unfiltered browse keys unchanged). The grid header cycles single-column sort (asc → desc → none); filtered columns carry a funnel marker; the funnel badge shows the committed active-condition count; Apply resets to page 1 and refetches. `/browse` is a documented exception to `docs/sorting-standard.md` (paged grid, not a list panel): it honours the standard's server-sort and `order` name, not its GET/load-storage persistence rules. Design: `docs/superpowers/specs/2026-11-16-databases-filter-sort-design.md`.
+- **Filter button (funnel) in the Data tab toolbar opens a collapsible filter panel (dashboard)**: condition rows (enable checkbox, First/And/Or logic, column dropdown filtered by declared type, operator dropdown, value input, remove), sort rows, manual raw condition ANDed verbatim, Add condition/Add sort, Enable all/Disable all/Clear all/**Apply** (Ctrl+Enter also applies), and a live funnel badge with the committed active-condition count. Unsaved drafts die on close; Apply refetches and resets to page 1.
+
+### Fixed
+- **SQLite would have served wrong numbers for every non-tinyint numeric filter (core)**: `Microsoft.Data.Sqlite` binds `decimal` parameters as TEXT, and SQL text compares greater than any real number — numeric filters on SQLite silently returned zero or all rows. Decimals now bind as REAL/double.
+- **The Data tab's Apply could silently drop the header's sort (dashboard)**: the panel's sort rows were a mount-time snapshot of the tab's sort, and Apply overwrote the tab with it, undoing whatever the grid header had since committed. Panel sort rows now render straight from the committed sort until the reader edits them in the panel.
+- **`/browse` validates disabled rows not at all** (a stale disabled row pointing at a since-dropped column no longer 400s the Apply), carries the table name into the audit trail's `db.browse` entries when a WHERE exists, clamps `page`/`limit` instead of refusing them, runs a SqlSafety read-only tripwire on the built statement, reports `truncated`, and accepts SQLite's `POINT`-type columns. `QueryCacheKey` is injective by construction (length-prefixed segments), so two filter values can never answer for each other's rows.
+
+### Verification
+- Core.Tests ~975/975 (browse builder, cache key); Backend.Tests hooks green on the change sets (1239/1239 at `1339b0b`); frontend vitest 219/219; `tsc --noEmit` and `eslint` clean on touched paths. Manual e2e on the dev `dev_reference.mst_rate` via 4417/4427 (contains/tinyint/AND/sort/-toggle-Apply-Clear-all). Known harness gaps: keyboard events could not be delivered to the page in the e2e session, so literal typing into the value field/manual condition is verified by unit tests and API probes only.
+
 ## [Unreleased] - 2026-11-16
 
 ### Added
