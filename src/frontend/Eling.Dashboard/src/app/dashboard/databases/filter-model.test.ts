@@ -5,7 +5,6 @@ import {
   cycleSort,
   toggleSortColumn,
   activeCount,
-  trimDraft,
   serializeBrowse,
   type BrowseFilter,
 } from "./filter-model"
@@ -27,7 +26,7 @@ describe("columnKind", () => {
   })
 
   it("maps numeric type families to numeric", () => {
-    for (const t of ["int", "bigint", "smallint", "tinyint(1)", "decimal(10,2)", "float", "double", "numeric(10,2)", "real"]) {
+    for (const t of ["int", "bigint", "smallint", "decimal(10,2)", "float", "double", "numeric(10,2)", "real"]) {
       expect(columnKind(t)).toBe("numeric")
     }
   })
@@ -41,6 +40,18 @@ describe("columnKind", () => {
   it("maps anything unknown to text", () => {
     expect(columnKind("blob")).toBe("text")
     expect(columnKind("")).toBe("text")
+  })
+
+  it("maps boolish type families to boolean", () => {
+    for (const t of ["tinyint(1)", "TINYINT", "bool", "boolean", "bit"]) {
+      expect(columnKind(t)).toBe("boolean")
+    }
+  })
+
+  it("token-matches the first word, not substrings", () => {
+    expect(columnKind("POINT")).toBe("text")
+    expect(columnKind("geometry_interval")).toBe("text")
+    expect(columnKind("DOUBLE PRECISION")).toBe("numeric")
   })
 })
 
@@ -65,6 +76,12 @@ describe("opsFor", () => {
     expect(ops.contains).toBe("Contains")
     expect(ops.isNull).toBe("Is null")
     expect(ops.isNotNull).toBe("Is not null")
+  })
+
+  it("gives boolean columns equality, null and not-equals only", () => {
+    const values = opsFor("boolean").map((o) => o.value)
+    expect(values).toEqual(["eq", "neq", "isNull", "isNotNull"])
+    expect(opsFor("boolean").map((o) => o.label)).toEqual(["Equals", "Not equals", "Is null", "Is not null"])
   })
 
   it("gives numeric columns comparison operators and no string operators", () => {
@@ -136,11 +153,7 @@ describe("activeCount", () => {
   })
 })
 
-describe("trimDraft", () => {
-  it("trims the edges and keeps interior spaces", () => {
-    expect(trimDraft("  single  rate  ")).toBe("single  rate")
-  })
-})
+
 
 describe("serializeBrowse", () => {
   it("emits the wire body with the contract keys in order", () => {

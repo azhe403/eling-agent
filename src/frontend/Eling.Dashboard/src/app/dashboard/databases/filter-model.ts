@@ -25,8 +25,8 @@ export type BrowseOp =
 /** `first` on the first enabled row; `and`/`or` everywhere after. */
 export type BrowseLogic = "first" | "and" | "or"
 
-/** The column families the operator list changes on. Unknown types are `text`. */
-export type ColumnKind = "text" | "numeric" | "datetime"
+/** Which operator list a column gets. Type resolution uses the first word only (e.g. "double precision" → "double"). */
+export type ColumnKind = "text" | "numeric" | "datetime" | "boolean"
 
 export interface BrowseFilter {
   column: string
@@ -51,13 +51,22 @@ export interface BrowseResponse {
   cachedAt?: string | null
 }
 
-const NUMERIC_RE = /int|decimal|numeric|float|double|real/i
+const firstWord = (dataType: string): string => {
+  const t = (dataType ?? "").toLowerCase().trim()
+  const cut = t.search(/[\s(]/)
+  return cut === -1 ? t : t.slice(0, cut)
+}
 
-/** Which operator list a column gets. Case-insensitive; anything unrecognized is text. */
+const DATETIME_TYPES = new Set(["date", "datetime", "timestamp", "time", "year"])
+const BOOLEAN_TYPES = new Set(["tinyint", "bool", "boolean", "bit"])
+const NUMERIC_TYPES = new Set(["int", "integer", "smallint", "mediumint", "bigint", "decimal", "numeric", "float", "double", "real"])
+
+/** Which operator list a column gets. Token-matched on the first word; anything unrecognized is text. */
 export const columnKind = (dataType: string): ColumnKind => {
-  const t = (dataType ?? "").toLowerCase()
-  if (/date|time|timestamp/.test(t)) return "datetime"
-  if (NUMERIC_RE.test(t)) return "numeric"
+  const t = firstWord(dataType)
+  if (DATETIME_TYPES.has(t)) return "datetime"
+  if (BOOLEAN_TYPES.has(t)) return "boolean"
+  if (NUMERIC_TYPES.has(t)) return "numeric"
   return "text"
 }
 
@@ -68,6 +77,13 @@ export interface OpOption {
 
 const IS_NULL: OpOption = { value: "isNull", label: "Is null" }
 const IS_NOT_NULL: OpOption = { value: "isNotNull", label: "Is not null" }
+
+const BOOLEAN_OPS: OpOption[] = [
+  { value: "eq", label: "Equals" },
+  { value: "neq", label: "Not equals" },
+  IS_NULL,
+  IS_NOT_NULL,
+]
 
 const TEXT_OPS: OpOption[] = [
   { value: "contains", label: "Contains" },
@@ -105,6 +121,8 @@ const DATETIME_OPS: OpOption[] = [
 /** The operators a column of the given kind offers. Every list ends with isNull/isNotNull. */
 export const opsFor = (kind: ColumnKind): OpOption[] => {
   switch (kind) {
+    case "boolean":
+      return BOOLEAN_OPS
     case "numeric":
       return NUMERIC_OPS
     case "datetime":
@@ -137,9 +155,6 @@ export const toggleSortColumn = (sort: BrowseSort[], column: string): BrowseSort
 /** How many committed things are active: enabled conditions + a non-blank manual condition. */
 export const activeCount = (filters: BrowseFilter[], manualCondition: string | null | undefined): number =>
   filters.filter((f) => f.enabled).length + (manualCondition?.trim() ? 1 : 0)
-
-/** Display-only trim of a draft value (the server binds values untrimmed). */
-export const trimDraft = (value: string): string => value.trim()
 
 /** The `/browse` request body, keys in wire order. */
 export const serializeBrowse = (

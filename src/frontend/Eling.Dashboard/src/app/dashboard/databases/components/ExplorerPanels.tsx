@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button"
 import { DbTab, DbConn, QueryResult, SchemaInfo, RedisInspect } from "@/app/dashboard/databases/types"
-import { isRedisTab } from "@/app/dashboard/databases/db-tabs"
+import { isRedisTab, tabKey } from "@/app/dashboard/databases/db-tabs"
 import type { RedisPage, RedisPrefixPreview } from "@/app/dashboard/databases/redis-browser"
 import { ConnectionTree } from "./connection-tree/ConnectionTree"
 import { SchemaView } from "./schema-view/SchemaView"
@@ -253,6 +253,7 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
 
         {!activeIsRedis && rightTab === "data" && activeTable ? (
           <DataGrid
+            key={tabKey(activeTable)}
             activeTable={activeTable}
             schemaInfo={schemaInfo}
             browseResult={browseResult}

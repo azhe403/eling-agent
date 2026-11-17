@@ -28,7 +28,7 @@ export interface FilterPanelProps {
   onClose: () => void
 }
 
-const selectClass = "h-8 w-full text-xs"
+const selectClass = "h-8 w-full cursor-pointer text-xs"
 
 /**
  * The condition builder for the Data tab. Draft state is local and the
@@ -53,7 +53,7 @@ export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onAp
     setDraftSort((prev) => updater(sortDirty ? prev : committedSort))
   }
 
-  const defaultColumn = useMemo(() => columns[0] ?? "", [columns])
+  const defaultColumn = useMemo(() => columns.find((c) => !/^id$/i.test(c)) ?? columns[0] ?? "", [columns])
 
   const apply = () => onApply({ filters, sort, manualCondition })
 
@@ -132,7 +132,7 @@ export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onAp
                   onValueChange={(v) => patchFilter(i, { logic: v as BrowseFilter["logic"] })}
                   disabled={isFirst}
                 >
-                  <SelectTrigger className="h-8 w-28 text-xs" aria-label="Logic">
+                  <SelectTrigger className="h-8 w-28 cursor-pointer text-xs" aria-label="Logic">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

@@ -95,7 +95,7 @@ export const DataGrid = ({
   const committedFilters = useMemo(() => browseFilters ?? [], [browseFilters])
   const committedSort = useMemo(() => browseSort ?? [], [browseSort])
   const activeFilterCount = activeCount(committedFilters, manualCondition)
-  const filteredColumns = useMemo(() => new Set(committedFilters.map((f) => f.column)), [committedFilters])
+  const filteredColumns = useMemo(() => new Set(committedFilters.filter((f) => f.enabled).map((f) => f.column)), [committedFilters])
   const sortOrderFor = useCallback(
     (col: string) => committedSort.find((s) => s.column === col)?.order ?? null,
     [committedSort]
