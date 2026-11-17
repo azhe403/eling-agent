@@ -65,6 +65,7 @@ public sealed record CommitLeaseSnapshotDto
             {
                 LeaseId = l.LeaseId,
                 CallerId = l.CallerId,
+                Branch = l.Branch,
                 Since = l.Since,
                 ReleasedAt = l.ReleasedAt,
                 ReleaseReason = l.ReleaseReason,

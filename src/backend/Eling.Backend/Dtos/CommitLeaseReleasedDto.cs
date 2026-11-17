@@ -11,6 +11,9 @@ public sealed record CommitLeaseReleasedDto
     [JsonPropertyName("caller_id")]
     public required string CallerId { get; init; }
 
+    [JsonPropertyName("branch")]
+    public required string? Branch { get; init; }
+
     [JsonPropertyName("since")]
     public required DateTimeOffset Since { get; init; }
 

@@ -192,6 +192,7 @@ public sealed class CommitLeaseEndpointTests : IAsyncLifetime, IDisposable
         var released = Assert.Single(doc.RootElement.GetProperty("recently_released").EnumerateArray());
         Assert.Equal(stale.LeaseId, released.GetProperty("lease_id").GetString());
         Assert.Equal("stale", released.GetProperty("release_reason").GetString());
+        Assert.Equal("main", released.GetProperty("branch").GetString());
         Assert.Equal(300, released.GetProperty("ttl_seconds").GetInt32());
         // Recently-released rows keep their shape: no last_heartbeat there.
         Assert.False(released.TryGetProperty("last_heartbeat", out _));
