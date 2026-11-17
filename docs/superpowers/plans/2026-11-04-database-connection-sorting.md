@@ -9,7 +9,7 @@
 **Tech Stack:** .NET 10 (ASP.NET Core minimal API), `Eling.Core`, xUnit. Dashboard: Next.js 16, React 19, TypeScript, Tailwind, shadcn-style components from `@/components/ui`, vitest.
 
 **Spec:** `docs/superpowers/specs/2026-11-04-database-connection-sorting-design.md`
-**Standard:** `docs/sorting-standard.md` (§1–§4 are binding: `sort` + `order=asc|desc`, server sorts, restore chain URL → localStorage → `name`/`asc`)
+**Standard:** `docs/superpowers/standards/sorting-standard.md` (§1–§4 are binding: `sort` + `order=asc|desc`, server sorts, restore chain URL → localStorage → `name`/`asc`)
 
 ## Global Constraints
 

@@ -12,8 +12,8 @@
 
 ## Global Constraints
 
-- Wire property for sort direction is `order` with values `asc`/`desc` — the name `direction` is **forbidden** in this feature (`docs/sorting-standard.md`).
-- `/browse` is a documented carve-out from `docs/sorting-standard.md` (list-panel rules do not apply to the paged grid). Unknown column/op/order value answers **400 naming the offender**, not fallback.
+- Wire property for sort direction is `order` with values `asc`/`desc` — the name `direction` is **forbidden** in this feature (`docs/superpowers/standards/sorting-standard.md`).
+- `/browse` is a documented carve-out from `docs/superpowers/standards/sorting-standard.md` (list-panel rules do not apply to the paged grid). Unknown column/op/order value answers **400 naming the offender**, not fallback.
 - LIKE escape character is `!`; `!` is doubled first, then `%` and `_` are escaped; every LIKE carries `ESCAPE '!'`. Never `\`.
 - AND/OR fold is left-associative: `(((a <logic2> b) <logic3> c) …)`. The first enabled row's `logic` is ignored. `First`/`And`/`Or` map to the SQL-side keyword set `and`/`or` (lowercase on the wire, upper-cased server-side).
 - `tinyint` columns coerce bool-first: `true`/`false`/`1`/`0` (case-insensitive) → 1/0 before the decimal parse; every other numeric type parses as invariant-culture decimal else 400 `column '<col>' is numeric; '<value>' is not a number`.
@@ -61,7 +61,7 @@ The five input classes the spec implies but does not spell out, most likely firs
 - Modify `db-tabs.ts` — `DbTab` gains `browseFilters?`, `browseSort?`, `manualCondition?`; `persistableTab` strips them. (+ `db-tabs.test.ts` case.)
 - Modify `hooks/useTableData.ts` — browse path becomes one `/browse` call; page clamps on server `total` (shape unchanged: `countedTotal`).
 - Modify `components/ExplorerPanels.tsx`, `Databases.tsx` — plumb callbacks/state; 404 toast text.
-- Docs: `docs/sorting-standard.md` — one exception row in the adoption table (Task 7).
+- Docs: `docs/superpowers/standards/sorting-standard.md` — one exception row in the adoption table (Task 7).
 
 ---
 
@@ -283,12 +283,12 @@ Response: `{ "columns": [...], "rows": [...], "truncated": false, "total": 118, 
 
 ---
 
-### Task 7: `docs/sorting-standard.md` exception row
+### Task 7: `docs/superpowers/standards/sorting-standard.md` exception row
 
 - [ ] Add one row to the adoption table (§4):
 
   ```markdown
-  | `POST /api/databases/{id}/browse` (paged grid: arbitrary columns, multi-column sort, filter payload, per-tab session state) | **Exception** — scoped to paged grids, not list panels. Server sorts; JSON body with `order` (never `direction`); no URL/localStorage persistence; unknown value → 400, not fallback. See `docs/superpowers/specs/2026-11-16-databases-filter-sort-design.md` § Relation to `docs/sorting-standard.md`. |
+  | `POST /api/databases/{id}/browse` (paged grid: arbitrary columns, multi-column sort, filter payload, per-tab session state) | **Exception** — scoped to paged grids, not list panels. Server sorts; JSON body with `order` (never `direction`); no URL/localStorage persistence; unknown value → 400, not fallback. See `docs/superpowers/specs/2026-11-16-databases-filter-sort-design.md` § Relation to `docs/superpowers/standards/sorting-standard.md`. |
   ```
 
   And adjust the lead-in of §4 "Applies to every list endpoint" → "Applies to every **list panel** endpoint". No other rule changes.

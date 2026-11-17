@@ -3,7 +3,7 @@
 Design for adding a sort control to `GET /api/databases` and the *Connections*
 panel that consumes it.
 
-**Standard:** `docs/sorting-standard.md` §1–§4 — `sort` + `order=asc|desc`, server sorts, restore chain URL → localStorage → `name`/`asc`. This spec is the first adopter; it adds nothing the standard does not already decide.
+**Standard:** `docs/superpowers/standards/sorting-standard.md` §1–§4 — `sort` + `order=asc|desc`, server sorts, restore chain URL → localStorage → `name`/`asc`. This spec is the first adopter; it adds nothing the standard does not already decide.
 
 ## Intent
 

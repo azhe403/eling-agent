@@ -75,7 +75,7 @@ Supporting pieces of B that are unavoidable: `IDatabaseAdapter.QueryAsync` and
 `null`, so existing call sites compile unchanged), and the read cache folds parameter
 values into its query key when present.
 
-## Relation to `docs/sorting-standard.md`
+## Relation to `docs/superpowers/standards/sorting-standard.md`
 
 The 2026-11-04 sorting standard applies to **list panels** (`GET
 /api/databases?sort=&order=`, dashboard workspaces): server sorts, `sort`/`order`
@@ -341,7 +341,7 @@ frontend; `dotnet build` + targeted `dotnet test --filter` for the backend.
 
 1. Core builder + records + read-service/adapter parameter plumbing + unit tests.
 2. Endpoint + DTO + audit const + endpoint tests + the one-line exception entry in
-   `docs/sorting-standard.md`'s adoption table.
+   `docs/superpowers/standards/sorting-standard.md`'s adoption table.
 3. Frontend: model → panel → grid header + toolbar wiring → Databases/ExplorerPanels
    plumbing; vitest green; `tsc --noEmit`.
 4. Browser-panel verification on the dev connection's mst_* table (see Manual/e2e);
@@ -363,7 +363,7 @@ Each phase is its own commit(s) per the repo's one-context-per-commit convention
 - **Header sort is single-column and replaces the panel's sort list**; multi-column
   sorting exists only via the panel.
 - **No BETWEEN/IN in v1** - manual condition covers them; operator list stays small.
-- **`/browse` is a documented carve-out from `docs/sorting-standard.md`** (user
+- **`/browse` is a documented carve-out from `docs/superpowers/standards/sorting-standard.md`** (user
   decision) - that standard scopes to list panels; a paged grid view keeps
   `browseLimit`/`browsePage`-style per-tab session state. `/browse` still honours
   the standard's property name (`order`, never `direction`) and asc/desc values, and
