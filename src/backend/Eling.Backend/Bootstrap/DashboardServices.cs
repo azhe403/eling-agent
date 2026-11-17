@@ -18,6 +18,7 @@ using Eling.Core.CommitLease;
 using Eling.Core.Memory;
 using Eling.Core.Projects;
 using Eling.Core.Scope;
+using Eling.Core.Skill;
 using Eling.Core.Workspaces;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -92,6 +93,11 @@ public static class DashboardServices
             services.AddSingleton<MemoryChangeBroadcaster>();
             services.AddSingleton<IMemoryChangeNotifier>(sp => sp.GetRequiredService<MemoryChangeBroadcaster>());
         }
+
+        // eling-mediated skill mutations must reach the owner's SSE stream no
+        // matter which container serves them; the owner has an in-proc path.
+        services.AddSingleton<ISkillChangeNotifier>(sp =>
+            new BroadcasterSkillChangeNotifier(sp.GetRequiredService<MemoryChangeBroadcaster>()));
 
         services.AddSingleton<IMemoryScopePolicy, MemoryScopePolicy>();
         services.AddSingleton<IMemoryMerger, MemoryMerger>();
