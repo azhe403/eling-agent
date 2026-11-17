@@ -97,7 +97,8 @@ public static class DashboardServices
 
         // eling-mediated skill mutations must reach the owner's SSE stream no
         // matter which container serves them; the owner has an in-proc path.
-        // Peers have no resolve path for this registration — they tolerate the dead one (tests build non-owner hosts).
+        // Peers tolerate this registration (non-owner HTTP hosts map no
+        // routes, so nothing resolves it there).
         services.AddSingleton<ISkillChangeNotifier>(sp =>
             new BroadcasterSkillChangeNotifier(sp.GetRequiredService<MemoryChangeBroadcaster>()));
 
