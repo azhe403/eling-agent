@@ -221,6 +221,7 @@ export const DataGrid = ({
               onClick={() => setFilterOpen((v) => !v)}
               title="Filter and sort"
               aria-pressed={filterOpen}
+              className="cursor-pointer"
             >
               <ListFilter className="size-4" />
               <span className="ml-1">Filter</span>
