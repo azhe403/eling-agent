@@ -25,8 +25,8 @@ namespace Eling.Backend;
 /// A rescan is the reconcile: the REST list reads the SQLite index, not the
 /// disk, so a new external skill only becomes visible after
 /// <see cref="ISkillCatalogScanner.ScanAsync"/> runs; the broadcast fires
-/// after the scan on purpose. A scan failure is logged and swallowed; the
-/// next file event flags the catalog dirty again and the drain retries.
+/// after the scan on purpose. A scan failure is logged and the dirty flag is
+/// re-armed, so the drain retries on the next tick even without a file event.
 /// </summary>
 public sealed class SkillCatalogDirWatcher : IDisposable
 {
@@ -164,7 +164,10 @@ public sealed class SkillCatalogDirWatcher : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Skill catalog rescan failed; the next event will retry.");
+                    // Re-arm: a persistently failing scanner with no further
+                    // disk events must not leave the index stale forever.
+                    Interlocked.Exchange(ref _dirty, 1);
+                    _logger.LogWarning(ex, "Skill catalog rescan failed; it will retry on the next tick.");
                 }
             }
         }
