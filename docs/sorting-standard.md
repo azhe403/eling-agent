@@ -1,6 +1,6 @@
 # Client Sorting Standard (Dashboard & Desktop)
 
-2026-11-04 · Applies to every list endpoint. Adopted one endpoint at a time, never in a batch.
+2026-11-04 · Applies to every list panel endpoint. Adopted one endpoint at a time, never in a batch. **Paged grid views are not list panels** and may carry a documented exception (see §4); nothing else may.
 
 ## 1. Core rules
 
@@ -47,6 +47,7 @@ One endpoint = one commit. New endpoints must follow the standard from birth.
 | Endpoint | Status |
 |---|---|
 | `GET /api/databases` (`name`, `provider`, `created`, `lastUsed`) | **Adopted** — `DatabaseConnectionSort` (core), `GET /api/databases?sort=&order=` (backend), connections panel (dashboard). Design: `docs/superpowers/specs/2026-11-04-database-connection-sorting-design.md` |
+| `POST /api/databases/{id}/browse` (paged grid view: arbitrary columns, multi-column sort, filter payload) | **Exception** — paged grid, not a list panel. Server sorts; POST body with `order` (never `direction`); multi-column via the panel, single-column cycle via the grid header; no URL/localStorage persistence (per-tab session state, like `browseLimit`/`browsePage`); unknown column/op/order value answers 400 naming the offender, not fallback. Design: `docs/superpowers/specs/2026-11-16-databases-filter-sort-design.md` § Relation to `docs/sorting-standard.md` |
 | Dashboard workspaces `?sort=&dir=` (`natural`/`flipped`) | Not yet standard — migrate `dir` → `order=asc/desc` (keep old alias for one release) |
 
 MCP tools (`db_list_connections` etc.) read the store directly — **unchanged**.
