@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DatePicker } from "@/components/ui/date-picker"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo } from "react"
 import { ListFilter, ArrowUp, ArrowDown } from "lucide-react"
 import { DbTab, QueryResult, SchemaInfo, ColumnSchema } from "@/app/dashboard/databases/types"
 import { formatCacheAge, isStaleCache } from "@/app/dashboard/databases/utils/format-helpers"
@@ -56,6 +56,10 @@ export interface DataGridProps {
   onSubmitNewRow: () => void
   onPromptDeleteRow: (row: number) => void
   onCellContextMenu: (e: React.MouseEvent, row: number, col: number) => void
+  /** Whether the filter panel is open. Comes from the tab and persists with it. */
+  filterOpen?: boolean
+  /** Called when the reader opens or closes the filter panel. Parent commits to the tab. */
+  onFilterOpenChange?: (open: boolean) => void
 }
 
 export const DataGrid = ({
@@ -90,8 +94,13 @@ export const DataGrid = ({
   onSubmitNewRow,
   onPromptDeleteRow,
   onCellContextMenu,
+  filterOpen = false,
+  onFilterOpenChange,
 }: DataGridProps) => {
-  const [filterOpen, setFilterOpen] = useState(false)
+  const setFilterOpen = (v: boolean | ((prev: boolean) => boolean)) => {
+    const next = typeof v === "function" ? (v as (prev: boolean) => boolean)(filterOpen) : v
+    if (next !== filterOpen && onFilterOpenChange) onFilterOpenChange(next)
+  }
   const committedFilters = useMemo(() => browseFilters ?? [], [browseFilters])
   const committedSort = useMemo(() => browseSort ?? [], [browseSort])
   const activeFilterCount = activeCount(committedFilters, manualCondition)
@@ -248,6 +257,7 @@ export const DataGrid = ({
                 manualCondition: manualCondition ?? "",
               }}
               committedSort={committedSort}
+              applyPending={browseLoading}
               onApply={(next) => onApplyBrowse?.(next)}
               onClose={() => setFilterOpen(false)}
             />
@@ -271,27 +281,31 @@ export const DataGrid = ({
                             title="Cycle sort: none → ascending → descending"
                           >
                             {col}
-                            {sortOrderFor(col) === "asc" ? (
-                              <ArrowUp className="size-3 text-emerald-600" />
-                            ) : sortOrderFor(col) === "desc" ? (
-                              <ArrowDown className="size-3 text-emerald-600" />
-                            ) : null}
-                            {filteredColumns.has(col) ? <ListFilter className="size-3 text-emerald-600" /> : null}
+                            <span className="flex w-7 shrink-0 items-center justify-start gap-0.5" aria-hidden={!sortOrderFor(col) && !filteredColumns.has(col)}>
+                              {sortOrderFor(col) === "asc" ? (
+                                <ArrowUp className="size-3 text-emerald-600" />
+                              ) : sortOrderFor(col) === "desc" ? (
+                                <ArrowDown className="size-3 text-emerald-600" />
+                              ) : null}
+                              {filteredColumns.has(col) ? <ListFilter className="size-3 text-emerald-600" /> : null}
+                            </span>
                           </button>
                         ) : (
                           <span className="flex items-center gap-1">
                             {col}
-                            {sortOrderFor(col) === "asc" ? (
-                              <ArrowUp className="size-3 text-emerald-600" />
-                            ) : sortOrderFor(col) === "desc" ? (
-                              <ArrowDown className="size-3 text-emerald-600" />
-                            ) : null}
-                            {filteredColumns.has(col) ? <ListFilter className="size-3 text-emerald-600" /> : null}
+                            <span className="flex w-7 shrink-0 items-center justify-start gap-0.5" aria-hidden={!sortOrderFor(col) && !filteredColumns.has(col)}>
+                              {sortOrderFor(col) === "asc" ? (
+                                <ArrowUp className="size-3 text-emerald-600" />
+                              ) : sortOrderFor(col) === "desc" ? (
+                                <ArrowDown className="size-3 text-emerald-600" />
+                              ) : null}
+                              {filteredColumns.has(col) ? <ListFilter className="size-3 text-emerald-600" /> : null}
+                            </span>
                           </span>
                         )}
                       </TableHead>
                     ))}
-                    <TableHead className="sticky right-0 z-40 w-16 border px-2 py-1 text-left bg-background">act</TableHead>
+                    <TableHead className="sticky right-0 z-40 w-20 border px-2 py-1 text-left bg-background">act</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -318,7 +332,7 @@ export const DataGrid = ({
                             )
                           }
                           return (
-                            <TableCell key={j} className="border px-1 py-0.5">
+                            <TableCell key={j} className="border px-1 py-0.5 min-w-64 whitespace-nowrap">
                               <div className="flex items-center gap-1">
                                 <input
                                   type="text"
@@ -336,17 +350,6 @@ export const DataGrid = ({
                                   disabled={savingCell}
                                   readOnly={selectedIsReadOnly}
                                 />
-                                {!selectedIsReadOnly ? (
-                                  <button
-                                    type="button"
-                                    className="shrink-0 rounded border px-1.5 py-0.5 text-xs text-green-600 hover:bg-accent"
-                                    onClick={() => void onCommitEdit()}
-                                    disabled={savingCell || mutating || !!browseResult?.fromCache}
-                                    title="Apply edit"
-                                  >
-                                    Apply
-                                  </button>
-                                ) : null}
                               </div>
                             </TableCell>
                           )
@@ -374,7 +377,7 @@ export const DataGrid = ({
                           </TableCell>
                         )
                       })}
-                      <TableCell className="sticky right-0 z-10 border px-2 py-1 bg-background">
+                      <TableCell className="sticky right-0 z-10 border px-2 py-1 w-20 bg-background">
                         {editingCell?.row === i ? (
                           <div className="flex gap-1">
                             {!selectedIsReadOnly ? (
@@ -462,7 +465,7 @@ export const DataGrid = ({
                       {col.name}
                     </TableHead>
                   ))}
-                  <TableHead className="sticky right-0 z-40 w-16 border px-2 py-1 text-left bg-background">act</TableHead>
+                  <TableHead className="sticky right-0 z-40 w-20 border px-2 py-1 text-left bg-background">act</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

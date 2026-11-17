@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { REDIS_TAB_TABLE, isRedisTab, redisTabKey, tabKey, persistableTab } from "./db-tabs"
+import { REDIS_TAB_TABLE, isRedisTab, redisTabKey, tabKey, persistableTab, sanitizePersistedTab } from "./db-tabs"
 
 describe("isRedisTab", () => {
   it("is true for a tab flagged as Redis", () => {
@@ -58,7 +58,7 @@ describe("tabKey", () => {
   })
 })
 describe("persistableTab", () => {
-  it("drops browseLimit, browsePage, browseFilters, browseSort and manualCondition but keeps identity fields", () => {
+  it("drops browseLimit and browsePage but keeps the committed filter, sort and manual condition", () => {
     const t = {
       connId: "c1",
       table: "orders",
@@ -68,11 +68,60 @@ describe("persistableTab", () => {
       browseFilters: [{ column: "name", op: "contains" as const, value: "a", enabled: true, logic: "first" as const }],
       browseSort: [{ column: "updated_at", order: "desc" as const }],
       manualCondition: "is_active = 1",
+      filterOpen: true,
     }
-    expect(persistableTab(t)).toEqual({ connId: "c1", table: "orders", database: "db" })
+    expect(persistableTab(t)).toEqual({
+      connId: "c1",
+      table: "orders",
+      database: "db",
+      browseFilters: t.browseFilters,
+      browseSort: t.browseSort,
+      manualCondition: "is_active = 1",
+      filterOpen: true,
+    })
   })
   it("keeps redis identity fields", () => {
     const t = { connId: "c1", table: "Redis keys", kind: "redis" as const, redisDb: 2, browseLimit: 250, browsePage: 2 }
     expect(persistableTab(t)).toEqual({ connId: "c1", table: "Redis keys", kind: "redis", redisDb: 2 })
+  })
+})
+describe("sanitizePersistedTab", () => {
+  it("round-trips a persisted tab through persistableTab", () => {
+    const t = {
+      connId: "c1",
+      table: "orders",
+      database: "db",
+      browseFilters: [{ column: "name", op: "eq" as const, value: "a", enabled: false, logic: "and" as const }],
+      browseSort: [{ column: "id", order: "asc" as const }],
+      manualCondition: "x = 1",
+      filterOpen: true,
+    }
+    const restored = sanitizePersistedTab(JSON.parse(JSON.stringify(persistableTab(t))))
+    expect(restored).toEqual(t)
+  })
+  it("drops unknown operators and tolerates garbage shapes", () => {
+    const restored = sanitizePersistedTab({
+      connId: "c1",
+      table: "orders",
+      browseFilters: [
+        { column: "id", op: "bogus", value: "1", enabled: true, logic: "first" },
+        "nope",
+        { column: "id", op: "gt", value: 42, enabled: "yes", logic: "OR" },
+      ],
+      browseSort: [{ column: "id", order: "sideways" }, { column: "id", order: "desc" }, 7],
+      manualCondition: 123,
+    })
+    expect(restored).toEqual({
+      connId: "c1",
+      table: "orders",
+      browseFilters: [{ column: "id", op: "gt", value: "42", enabled: true, logic: "or" }],
+      browseSort: [{ column: "id", order: "desc" }],
+      manualCondition: "",
+    })
+  })
+  it("returns null when the identity fields are missing", () => {
+    expect(sanitizePersistedTab({ table: "orders" })).toBeNull()
+    expect(sanitizePersistedTab(null)).toBeNull()
+    expect(sanitizePersistedTab("orders")).toBeNull()
   })
 })

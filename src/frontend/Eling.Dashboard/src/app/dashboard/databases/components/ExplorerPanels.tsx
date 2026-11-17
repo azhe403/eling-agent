@@ -1,5 +1,8 @@
 import { Button } from "@/components/ui/button"
 import { DbTab, DbConn, QueryResult, SchemaInfo, RedisInspect } from "@/app/dashboard/databases/types"
+import { useEffect, useState } from "react"
+import { List } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { isRedisTab, tabKey } from "@/app/dashboard/databases/db-tabs"
 import type { RedisPage, RedisPrefixPreview } from "@/app/dashboard/databases/redis-browser"
 import { ConnectionTree } from "./connection-tree/ConnectionTree"
@@ -113,6 +116,8 @@ export interface ExplorerPanelsProps {
   browseFilters?: BrowseFilter[]
   browseSort?: BrowseSort[]
   manualCondition?: string
+  filterOpen?: boolean
+  onFilterOpenChange?: (open: boolean) => void
   onApplyBrowse: (next: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string }) => void
   onCycleSortColumn: (column: string) => void
   onBrowseLimitChange: (limit: number) => void
@@ -128,7 +133,7 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
     conns, expandedConns, expandedDbs, connSchemas, dbSchemas, redisDbs, activeTable, openTabs,
     rightTab, connSort, connOrder, loading, isFading, schemaConnId, schemaInfo, schemaLoading,
     selectedId, selectedIsReadOnly, selectedIsRedis, browseResult, browseTotal, browseLoading, browseLimit, browsePage,
-    browseFilters, browseSort, manualCondition,
+    browseFilters, browseSort, manualCondition, filterOpen, onFilterOpenChange,
     mutating, editingCell, editValue, savingCell, newRow, pkNames, sql, qResult, qLoading,
     activeRedisDb, redisPrefix, redisRootPrefix, redisPages, redisExpanded, redisInspectKey,
     redisLoading, redisInspect, redisInspectOpen,
@@ -136,37 +141,88 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
     redisPrefixPreviewOpen, redisPrefixPreviewTarget, redisAutoRefresh, redisAutoRefreshMs, isWide, retryLabel,
   } = props
 
+  const [connectionsOpen, setConnectionsOpen] = useState(false)
   const activeIsRedis = isRedisTab(activeTable)
+
+  // Escape closes the overlay; no-op when it is closed.
+  useEffect(() => {
+    if (!connectionsOpen) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setConnectionsOpen(false)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [connectionsOpen])
+
+  const closeConnections = () => setConnectionsOpen(false)
+
+  const renderConnectionsTree = () => (
+    <ConnectionTree
+      conns={conns}
+      expandedConns={expandedConns}
+      expandedDbs={expandedDbs}
+      connSchemas={connSchemas}
+      dbSchemas={dbSchemas}
+      redisDbs={redisDbs}
+      activeTable={activeTable}
+      connSort={connSort}
+      connOrder={connOrder}
+      loading={loading}
+      isFading={isFading}
+      retryLabel={retryLabel}
+      onSortChange={props.onSortChange}
+      onOrderChange={props.onOrderChange}
+      onToggleConn={props.onToggleConn}
+      onToggleRedisConn={props.onToggleRedisConn}
+      onToggleDb={props.onToggleDb}
+      onSelectTreeTable={(connId, table, database) => {
+        props.onSelectTreeTable(connId, table, database)
+        setConnectionsOpen(false)
+      }}
+      onOpenRedisDb={(connId, dbIndex) => {
+        props.onOpenRedisDb(connId, dbIndex)
+        setConnectionsOpen(false)
+      }}
+      onContextMenu={props.onTreeContextMenu}
+      onRegisterTreeItem={props.onRegisterTreeItem}
+    />
+  )
 
   return (
     <div className="flex min-h-0 flex-1 gap-4 overflow-hidden">
-      <aside className="w-72 shrink-0 min-h-0 overflow-y-auto">
-        <ConnectionTree
-          conns={conns}
-          expandedConns={expandedConns}
-          expandedDbs={expandedDbs}
-          connSchemas={connSchemas}
-          dbSchemas={dbSchemas}
-          redisDbs={redisDbs}
-          activeTable={activeTable}
-          connSort={connSort}
-          connOrder={connOrder}
-          loading={loading}
-          isFading={isFading}
-          retryLabel={retryLabel}
-          onSortChange={props.onSortChange}
-          onOrderChange={props.onOrderChange}
-          onToggleConn={props.onToggleConn}
-          onToggleRedisConn={props.onToggleRedisConn}
-          onToggleDb={props.onToggleDb}
-          onSelectTreeTable={props.onSelectTreeTable}
-          onOpenRedisDb={props.onOpenRedisDb}
-          onContextMenu={props.onTreeContextMenu}
-          onRegisterTreeItem={props.onRegisterTreeItem}
-        />
-      </aside>
+      {isWide ? (
+        <aside className="w-72 shrink-0 min-h-0 overflow-y-auto">{renderConnectionsTree()}</aside>
+      ) : null}
+
+      {!isWide && connectionsOpen ? (
+        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Connections">
+          <button type="button" className="absolute inset-0 cursor-pointer bg-black/50" onClick={closeConnections} aria-label="Close connections" />
+          <div className="relative z-10 h-full w-80 shrink-0 overflow-y-auto border-r bg-background p-3 pr-1 shadow-xl">
+            {renderConnectionsTree()}
+          </div>
+        </div>
+      ) : null}
 
       <main className={`min-h-0 flex-1 overflow-hidden flex flex-col gap-4`}>
+        {!isWide ? (
+          <div className="flex shrink-0 items-center">
+            <Button
+              variant="outline"
+              size="sm"
+              className="cursor-pointer gap-1.5"
+              aria-expanded={connectionsOpen}
+              aria-controls="connections-overlay"
+              onClick={() => setConnectionsOpen((v) => !v)}
+              title={connectionsOpen ? "Hide connections" : "Show connections"}
+            >
+              <List className="size-4" />
+              <span className="ml-1">Connections</span>
+              <Badge variant="outline" className="h-4 min-w-4 justify-center px-1 text-[10px] tabular-nums">
+                {conns.length}
+              </Badge>
+            </Button>
+          </div>
+        ) : null}
       <ExplorerTabBar
         conns={conns}
         openTabs={openTabs}
@@ -271,6 +327,8 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
             browseFilters={browseFilters}
             browseSort={browseSort}
             manualCondition={manualCondition}
+            filterOpen={filterOpen}
+            onFilterOpenChange={onFilterOpenChange}
             onApplyBrowse={props.onApplyBrowse}
             onCycleSortColumn={props.onCycleSortColumn}
             onBrowseLimitChange={props.onBrowseLimitChange}

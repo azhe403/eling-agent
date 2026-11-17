@@ -22,6 +22,119 @@ export type BrowseOp =
   | "isNull"
   | "isNotNull"
 
+/** Every operator the server knows, lower-cased for case-insensitive compares. */
+const BROWSE_OPS = new Set(
+  ["eq", "neq", "contains", "notcontains", "startswith", "endswith", "gt", "gte", "lt", "lte", "isnull", "isnotnull"]
+)
+
+/** The wire operator name a string carries, or null when unknown. */
+export const normalizeBrowseOp = (value: unknown): BrowseOp | null => {
+  if (typeof value !== "string") return null
+  const lower = value.toLowerCase()
+  if (BROWSE_OPS.has(lower)) {
+    switch (lower) {
+      case "eq": return "eq"
+      case "neq": return "neq"
+      case "contains": return "contains"
+      case "notcontains": return "notContains"
+      case "startswith": return "startsWith"
+      case "endswith": return "endsWith"
+      case "gt": return "gt"
+      case "gte": return "gte"
+      case "lt": return "lt"
+      case "lte": return "lte"
+      case "isnull": return "isNull"
+      case "isnotnull": return "isNotNull"
+      default: return null
+    }
+  }
+  // Fall back direct-camel-case passthrough, in case a value arrives as-is.
+  if ((BROWSE_OPS as Set<string>).has(lower)) return null
+  return null
+}
+
+/** The `first|and|or` logic a string carries. */
+const normalizeBrowseLogic = (value: unknown): BrowseLogic =>
+  typeof value === "string" && value.toLowerCase() === "or" ? "or"
+  : typeof value === "string" && value.toLowerCase() === "and" ? "and"
+  : "first"
+
+/** The sort direction a string carries. */
+const normalizeBrowseOrder = (value: unknown): "asc" | "desc" | null =>
+  value === "asc" || value === "desc" ? value : null
+
+/** Drop invalid filter rows and coerce tolerable ones. Unknown ops are dropped. */
+export const sanitizeBrowseFilters = (raw: unknown): BrowseFilter[] => {
+  if (!Array.isArray(raw)) return []
+  const out: BrowseFilter[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const item = raw[i]
+    if (typeof item !== "object" || item === null) continue
+    const r = item as Record<string, unknown>
+    const op = normalizeBrowseOp(r.op)
+    const column = typeof r.column === "string" && r.column.length > 0 ? r.column : null
+    if (!op || !column) continue
+    out.push({
+      column,
+      op,
+      value: typeof r.value === "string" ? r.value : String(r.value ?? ""),
+      enabled: typeof r.enabled === "boolean" ? r.enabled : true,
+      logic: normalizeBrowseLogic(r.logic ?? (i === 0 ? "first" : "and")),
+    })
+  }
+  return out
+}
+
+/** Drop invalid sort rows; pass through asc/desc only. */
+export const sanitizeBrowseSort = (raw: unknown): BrowseSort[] => {
+  if (!Array.isArray(raw)) return []
+  const out: BrowseSort[] = []
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue
+    const r = item as Record<string, unknown>
+    const column = typeof r.column === "string" && r.column.length > 0 ? r.column : null
+    const order = normalizeBrowseOrder(r.order)
+    if (!column || !order) continue
+    out.push({ column, order })
+  }
+  return out
+}
+
+/** Manual condition: keep the string as-is (whitespace is the server's call). */
+export const sanitizeManualCondition = (raw: unknown): string => (typeof raw === "string" ? raw : "")
+
+/** The tab's committed view payload, as the URL envelope sees it. */
+export interface BrowseStatePayload {
+  filters: BrowseFilter[]
+  sort: BrowseSort[]
+  manualCondition: string
+}
+
+const emptyPayload = (payload: BrowseStatePayload): boolean =>
+  payload.filters.length === 0 && payload.sort.length === 0 && payload.manualCondition.trim() === ""
+
+/** Encode the tab's committed state as the `?browse=` parameter value, or omit if empty. */
+export const serializeBrowseParam = (payload: BrowseStatePayload): string | null =>
+  emptyPayload(payload) ? null : encodeURIComponent(JSON.stringify(payload))
+
+/** Read the `?browse=` envelope back; null when absent or unreadable. */
+export const parseBrowseParam = (raw: string | null | undefined): BrowseStatePayload | null => {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(decodeURIComponent(raw)) as unknown
+    if (typeof parsed !== "object" || parsed === null) return null
+    const r = parsed as Record<string, unknown>
+    const payload: BrowseStatePayload = {
+      filters: sanitizeBrowseFilters(r.filters),
+      sort: sanitizeBrowseSort(r.sort),
+      manualCondition: sanitizeManualCondition(r.manualCondition),
+    }
+    return emptyPayload(payload) ? null : payload
+  } catch {
+    return null
+  }
+}
+
 /** `first` on the first enabled row; `and`/`or` everywhere after. */
 export type BrowseLogic = "first" | "and" | "or"
 

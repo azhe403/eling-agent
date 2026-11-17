@@ -6,7 +6,8 @@ import { RefreshCw, Plus } from "lucide-react"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { Button } from "@/components/ui/button"
 
-import { DbTab, isRedisTab, tabKey, persistableTab } from "./db-tabs"
+import { DbTab, isRedisTab, tabKey, persistableTab, sanitizePersistedTab } from "./db-tabs"
+import { serializeBrowseParam, parseBrowseParam } from "./filter-model"
 import { effectiveBrowseLimit, effectiveBrowsePage } from "./utils/browse-paging"
 import { toggleSortColumn, type BrowseFilter, type BrowseSort } from "./filter-model"
 import { RedisDbInfo, fetchRedisDatabases, pickRedisDb, parseRedisDb } from "./redis-browser"
@@ -635,6 +636,14 @@ export function Databases() {
   /* --------------------------------------------------------- restore & keep */
 
   const restoredRef = useRef(false)
+  // Gate for the persist effect below: it must never run before the restore
+  // has applied its values to state, otherwise it rewrites localStorage with
+  // the default empty state in the very commit the restore ran in (the
+  // restore's setStates flush into the next render, but passive effects for
+  // this commit still see the pre-restore values). A state flag flips in the
+  // hydrated render itself, so the first persistable commit always carries
+  // the restored state.
+  const [hydrated, setHydrated] = useState(false)
   // Restore persisted explorer position after connections load
   useEffect(() => {
     if (loading || restoredRef.current) return
@@ -651,11 +660,25 @@ export function Databases() {
       const connId = urlConn || st?.schemaConnId || st?.selectedId
       const tab = urlTab || st?.rightTab || "data"
 
-      const savedTab = st?.activeTable ? persistableTab(st.activeTable as DbTab) : null
+      const savedTab = st?.activeTable ? sanitizePersistedTab(st.activeTable) : null
+      const savedTabs = Array.isArray(st?.openTabs)
+        ? (st.openTabs as unknown[]).map(sanitizePersistedTab).filter((t): t is DbTab => t !== null)
+        : []
+      // The session's committed state belongs to the tab it was saved for.
+      // A URL that names a different table must not inherit filters written
+      // for another table (a stale 'driver_id' filter broke the browse call).
+      const savedForTable = (t: string | null, db: string | null): DbTab | null => {
+        if (!connId || !t) return null
+        const match = (x: DbTab | null): x is DbTab =>
+          x !== null && x.connId === connId && x.table === t && (x.database ?? null) === (db ?? null)
+        return savedTabs.find((x) => match(x)) ?? (match(savedTab) ? savedTab : null)
+      }
 
       // eslint-disable-next-line react-hooks/set-state-in-effect -- restoring the saved explorer position is a one-shot hydrate from localStorage and the URL.
       if (st?.expandedConns) setExpandedConns(new Set(st.expandedConns))
-      if (Array.isArray(st?.openTabs)) setOpenTabs(st.openTabs.map(persistableTab))
+      if (Array.isArray(st?.openTabs)) {
+        setOpenTabs(savedTabs)
+      }
       if (connId) {
         setSelectedId(connId)
         setSchemaConnId(connId)
@@ -696,7 +719,20 @@ export function Databases() {
         })()
       } else if (connId && table) {
         autoScrollPendingRef.current = true
-        const restored = { connId, table, database: database ?? null }
+        // URL overrides localStorage for the active tab's committed filter set;
+        // other tabs come back from localStorage as-is. The stored set only
+        // applies to the tab it was committed for - never cross-table.
+        const urlBrowse = parseBrowseParam(params.get("browse"))
+        const tableSaved = savedForTable(table, database ?? null)
+        const restored: DbTab = {
+          connId,
+          table,
+          database: database ?? null,
+          browseFilters: urlBrowse?.filters ?? tableSaved?.browseFilters,
+          browseSort: urlBrowse?.sort ?? tableSaved?.browseSort,
+          manualCondition: urlBrowse?.manualCondition ?? tableSaved?.manualCondition,
+          filterOpen: tableSaved?.filterOpen,
+        }
         setActiveTable(restored)
         activeTableRef.current = restored
         setOpenTabs((prev) =>
@@ -729,11 +765,13 @@ export function Databases() {
     } catch {
       // ignore
     }
+    setHydrated(true)
   }, [loading])
 
-  // Persist explorer position (only after restore, to avoid clobbering saved state on mount)
+  // Persist explorer position (only after hydration, so the mount commit and
+  // the restore commit never write the pre-restore default state to storage)
   useEffect(() => {
-    if (!restoredRef.current) return
+    if (!hydrated) return
     try {
       localStorage.setItem(
         "db.explorer.state",
@@ -753,6 +791,12 @@ export function Databases() {
       if (activeTable?.table) params.set("table", activeTable.table)
       if (activeTable?.database) params.set("database", activeTable.database)
       if (rightTab) params.set("tab", rightTab)
+      const browseParam = serializeBrowseParam({
+        filters: activeTable?.browseFilters ?? [],
+        sort: activeTable?.browseSort ?? [],
+        manualCondition: activeTable?.manualCondition ?? "",
+      })
+      if (browseParam) params.set("browse", browseParam)
       // The chosen pair travels in the URL only when it differs from the
       // default, so a shared link stays as short as it was before sorting
       // existed.
@@ -769,7 +813,7 @@ export function Databases() {
     } catch {
       // ignore
     }
-  }, [expandedConns, rightTab, selectedId, schemaConnId, activeTable, openTabs, connSort, connOrder])
+  }, [hydrated, expandedConns, rightTab, selectedId, schemaConnId, activeTable, openTabs, connSort, connOrder])
 
   /* ------------------------------------------------------------- connection */
 
@@ -1073,6 +1117,8 @@ export function Databases() {
           browseFilters={activeTable?.browseFilters}
           browseSort={activeTable?.browseSort}
           manualCondition={activeTable?.manualCondition}
+          filterOpen={activeTable?.filterOpen ?? false}
+          onFilterOpenChange={(open) => patchActiveTab({ filterOpen: open })}
           onApplyBrowse={applyBrowse}
           onCycleSortColumn={cycleSortColumn}
           mutating={mutating}

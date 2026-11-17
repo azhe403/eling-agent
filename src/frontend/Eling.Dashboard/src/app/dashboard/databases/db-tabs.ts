@@ -11,6 +11,7 @@
 export const REDIS_TAB_TABLE = "Redis keys"
 
 import type { BrowseFilter, BrowseSort } from "./filter-model"
+import { sanitizeBrowseFilters, sanitizeBrowseSort, sanitizeManualCondition } from "./filter-model"
 
 export type DbTab = {
   connId: string
@@ -32,6 +33,8 @@ export type DbTab = {
   browseSort?: BrowseSort[]
   /** The committed raw manual WHERE fragment, ANDed verbatim. Session view state. */
   manualCondition?: string
+  /** Whether the filter panel is open in this tab. Persisted with the tab. */
+  filterOpen?: boolean
 }
 
 /**
@@ -57,19 +60,31 @@ export const tabKey = (tab: DbTab): string =>
 export const redisTabKey = (tab: DbTab): string => `${tab.connId}:${tab.redisDb ?? 0}`
 
 /**
- * The persisted form of a tab: identity only. `browseLimit`, `browsePage`,
- * `browseFilters`, `browseSort` and `manualCondition` are session view state -
- * saving them would resurrect a page 9 of a filtered table and a stale filter
- * after a reload, so they never reach localStorage.
+ * The persisted form of a tab: identity + its committed filter/sort/manual-condition.
+ * `browseLimit` and `browsePage` are excluded on purpose (a resurrected page 9 of an
+ * empty filtered table is a trap). `filterOpen` persists so an open filter stays open.
  */
 export const persistableTab = (tab: DbTab): DbTab => {
-  const {
-    browseLimit: _browseLimit,
-    browsePage: _browsePage,
-    browseFilters: _browseFilters,
-    browseSort: _browseSort,
-    manualCondition: _manualCondition,
-    ...rest
-  } = tab
+  const { browseLimit: _browseLimit, browsePage: _browsePage, ...rest } = tab
   return rest
+}
+
+/** A clean DbTab from a historical localStorage payload, or null if the tab is not usable. */
+export const sanitizePersistedTab = (t: unknown): DbTab | null => {
+  if (typeof t !== "object" || t === null) return null
+  const raw = t as Record<string, unknown>
+  const connId = typeof raw.connId === "string" ? raw.connId : null
+  const table = typeof raw.table === "string" && raw.table.length > 0 ? raw.table : null
+  if (!connId || !table) return null
+
+  const tab: DbTab = { connId, table }
+  if (typeof raw.database === "string") tab.database = raw.database
+  if (raw.kind === "redis") tab.kind = "redis"
+  if (typeof raw.redisDb === "number") tab.redisDb = raw.redisDb
+  // Session view state: keep whatever the reader committed before the reload.
+  tab.browseFilters = sanitizeBrowseFilters(raw.browseFilters)
+  tab.browseSort = sanitizeBrowseSort(raw.browseSort)
+  tab.manualCondition = sanitizeManualCondition(raw.manualCondition)
+  if (raw.filterOpen === true) tab.filterOpen = true
+  return tab
 }
