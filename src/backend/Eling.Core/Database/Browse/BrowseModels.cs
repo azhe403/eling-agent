@@ -15,10 +15,14 @@ public sealed record BrowseFilter(
     string Logic);
 
 /// <summary>One sort key. <paramref name="Order"/> is <c>asc</c> or <c>desc</c> (case-insensitive).</summary>
-public sealed record BrowseSort(string Column, string Order);
+public sealed record BrowseSort(
+    string Column,
+    string Order);
 
 /// <summary>A SQL fragment and the parameters that travel with it.</summary>
-public sealed record BrowseQuery(string Sql, IReadOnlyList<SqlParam> Parameters);
+public sealed record BrowseQuery(
+    string Sql,
+    IReadOnlyList<SqlParam> Parameters);
 
 /// <summary>
 /// The pair of statements one browse request needs, plus a readable
@@ -26,4 +30,7 @@ public sealed record BrowseQuery(string Sql, IReadOnlyList<SqlParam> Parameters)
 /// values inlined as SQL literals; it is truncated to 600 characters and is
 /// never used to execute anything.
 /// </summary>
-public sealed record BrowsePlan(BrowseQuery Rows, BrowseQuery Count, string WhereText);
+public sealed record BrowsePlan(
+    BrowseQuery Rows,
+    BrowseQuery Count,
+    string WhereText);

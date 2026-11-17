@@ -4,8 +4,10 @@ using Eling.Backend.Dtos;
 using Eling.Core.Audit;
 using Eling.Core.Database;
 using Eling.Core.Database.Adapters;
+using Eling.Core.Database.Browse;
 using StackExchange.Redis;
 using Microsoft.AspNetCore.Http;
+using System.Globalization;
 
 namespace Eling.Backend.Endpoints;
 
@@ -428,6 +430,210 @@ public static class DatabaseEndpoints
             {
                 logger.LogWarning(ex, "Listing databases failed for {Id}", id);
                 return Results.Problem(statusCode: 502, title: "databases failed", detail: "could not read the databases on this server");
+            }
+        });
+
+        group.MapPost("/{id}/browse", async (
+            string id,
+            HttpContext httpContext,
+            BrowseRequest req,
+            IDatabaseConnectionStore store,
+            IDatabaseReadService readService,
+            IAuditLogger auditLogger,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            var logger = loggerFactory.CreateLogger("Database");
+            var row = await store.FindAsync(id, ct);
+            if (row is null) return ConnectionNotFoundResult.Create(id, httpContext);
+            if (row.Provider == DatabaseProvider.Redis)
+            {
+                return Results.BadRequest(RedisRequirement.NotSql(row, "use /keys"));
+            }
+            if (string.IsNullOrWhiteSpace(req.Table))
+            {
+                return Results.BadRequest("table is required");
+            }
+            var tableName = req.Table.Trim();
+
+            var page = req.Page < 1 ? 1 : req.Page;
+            var limit = Math.Clamp(req.Limit, 1, 1000);
+            var preferCache = !req.Refresh;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            // Validation against the schema: table must exist, columns
+            // referenced by filter or sort must exist. If the schema itself
+            // cannot be read (DB down, no snapshot), the browse proceeds
+            // with quoting alone - identifiers are safe by doubling, and a
+            // cached snapshot must still be viewable offline.
+            var schemaAvailable = true;
+            var tableExists = false;
+            var columnTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var schema = await readService.GetSchemaAsync(row, req.Database, ct, preferCache: preferCache);
+                var table = schema.Tables.FirstOrDefault(t =>
+                    string.Equals(t.Name, tableName, StringComparison.OrdinalIgnoreCase));
+                if (table is not null)
+                {
+                    tableExists = true;
+                    foreach (var c in table.Columns)
+                    {
+                        if (!string.IsNullOrEmpty(c.Name))
+                        {
+                            columnTypes[c.Name] = c.DataType ?? "";
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Schema read skipped for browse validation of {Id}; proceeding with quoting only.", id);
+                schemaAvailable = false;
+            }
+
+            if (schemaAvailable && !tableExists)
+            {
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Access,
+                    Category = AuditCategory.Database,
+                    Action = DatabaseAuditActions.Browse,
+                    Actor = "dashboard",
+                    Target = id,
+                    Outcome = AuditOutcome.Denied,
+                    Query = tableName,
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                }, ct);
+                return Results.BadRequest($"table '{tableName}' not found");
+            }
+
+            // A filter row with an unknown logic would silently change the
+            // fold, so it is named, not silently mapped.
+            var filters = (req.Filters ?? [])
+                .Select(f => new BrowseFilter(f.Column ?? "", (f.Op ?? "").Trim().ToLowerInvariant(), f.Value, f.Enabled, f.Logic ?? "first"))
+                .ToList();
+            var sorts = (req.Sort ?? [])
+                .Select(s => new BrowseSort(s.Column ?? "", (s.Order ?? "asc").Trim().ToLowerInvariant()))
+                .ToList();
+            foreach (var f in filters)
+            {
+                var l = (f.Logic ?? "first").Trim().ToLowerInvariant();
+                if (l is not "first" and not "and" and not "or")
+                {
+                    await auditLogger.RecordAsync(new AuditEvent
+                    {
+                        Trail = AuditTrail.Access,
+                        Category = AuditCategory.Database,
+                        Action = DatabaseAuditActions.Browse,
+                        Actor = "dashboard",
+                        Target = id,
+                        Outcome = AuditOutcome.Denied,
+                        Query = tableName,
+                        DurationMs = (int)sw.ElapsedMilliseconds,
+                    }, ct);
+                    return Results.BadRequest($"unknown logic '{f.Logic}'");
+                }
+            }
+
+            BrowsePlan plan;
+            try
+            {
+                plan = BrowseQueryBuilder.Build(
+                    row.Provider,
+                    tableName,
+                    filters,
+                    sorts,
+                    req.ManualCondition,
+                    columnTypes,
+                    schemaAvailable,
+                    page,
+                    limit);
+            }
+            catch (BrowseQueryException ex)
+            {
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Access,
+                    Category = AuditCategory.Database,
+                    Action = DatabaseAuditActions.Browse,
+                    Actor = "dashboard",
+                    Target = id,
+                    Outcome = AuditOutcome.Denied,
+                    Query = tableName,
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                }, ct);
+                return Results.BadRequest(ex.Message);
+            }
+
+            try
+            {
+                var rows = await readService.QueryAsync(
+                    row, req.Database, plan.Rows.Sql, limit, ct,
+                    preferCache: preferCache, parameters: plan.Rows.Parameters);
+                var count = await readService.QueryAsync(
+                    row, req.Database, plan.Count.Sql, 1, ct,
+                    preferCache: preferCache, parameters: plan.Count.Parameters);
+
+                // Half a response is worse than no response: when the rows
+                // are served but the count is not, the whole call fails.
+                var totalRaw = count.Rows.Count > 0 && count.Rows[0].Count > 0 ? count.Rows[0][0] : null;
+                if (totalRaw is null
+                    || !long.TryParse(
+                        Convert.ToString(totalRaw, CultureInfo.InvariantCulture),
+                        NumberStyles.Integer,
+                        CultureInfo.InvariantCulture,
+                        out var total))
+                {
+                    throw new InvalidOperationException("the count statement did not return a number");
+                }
+
+                var fromCache = rows.FromCache || count.FromCache;
+                DateTimeOffset? cachedAt = null;
+                if (rows.FromCache) cachedAt = rows.CachedAt;
+                if (count.FromCache && (cachedAt is null || (count.CachedAt is not null && count.CachedAt > cachedAt)))
+                {
+                    cachedAt = count.CachedAt;
+                }
+
+                sw.Stop();
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Access,
+                    Category = AuditCategory.Database,
+                    Action = DatabaseAuditActions.Browse,
+                    Actor = "dashboard",
+                    Target = id,
+                    Outcome = AuditOutcome.Success,
+                    Query = string.IsNullOrEmpty(plan.WhereText) ? tableName : plan.WhereText,
+                    ResultCount = (int)Math.Min(total, int.MaxValue),
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                    FromCache = fromCache,
+                }, ct);
+                return Results.Ok(new BrowseResponse(
+                    rows.Columns,
+                    rows.Rows,
+                    Truncated: false,
+                    total,
+                    fromCache,
+                    cachedAt));
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                logger.LogWarning(ex, "Browse failed for {Id}", id);
+                await auditLogger.RecordAsync(new AuditEvent
+                {
+                    Trail = AuditTrail.Access,
+                    Category = AuditCategory.Database,
+                    Action = DatabaseAuditActions.Browse,
+                    Actor = "dashboard",
+                    Target = id,
+                    Outcome = AuditOutcome.Error,
+                    Query = tableName,
+                    DurationMs = (int)sw.ElapsedMilliseconds,
+                }, ct);
+                return Results.Problem(statusCode: 502, title: "browse failed", detail: ex.Message);
             }
         });
 

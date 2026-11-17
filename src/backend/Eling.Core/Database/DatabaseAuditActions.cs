@@ -17,6 +17,13 @@ public static class DatabaseAuditActions
 
     public const string Query = "db_query";
 
+    /// <summary>
+    /// The structured browse read (Data tab, filter &amp; sort builder). Mirrors
+    /// the <c>db.mutate</c> spelling style: a dotted action rather than an MCP
+    /// tool name, because <c>/api/databases/{id}/browse</c> has no MCP twin.
+    /// </summary>
+    public const string Browse = "db.browse";
+
     public const string DetectConnections = "db_detect_connections";
 
     public const string Keys = "db_keys";
