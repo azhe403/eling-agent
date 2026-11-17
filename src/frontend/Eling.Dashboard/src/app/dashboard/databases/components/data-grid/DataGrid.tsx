@@ -4,10 +4,17 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DatePicker } from "@/components/ui/date-picker"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
+import { ListFilter, ArrowUp, ArrowDown } from "lucide-react"
 import { DbTab, QueryResult, SchemaInfo, ColumnSchema } from "@/app/dashboard/databases/types"
 import { formatCacheAge, isStaleCache } from "@/app/dashboard/databases/utils/format-helpers"
 import { BROWSE_LIMIT_OPTIONS, totalPages } from "@/app/dashboard/databases/utils/browse-paging"
+import {
+  activeCount,
+  type BrowseFilter,
+  type BrowseSort,
+} from "@/app/dashboard/databases/filter-model"
+import { FilterPanel } from "./FilterPanel"
 
 export interface DataGridProps {
   activeTable: DbTab | null
@@ -31,6 +38,16 @@ export interface DataGridProps {
   onBrowsePageChange: (page: number) => void
   onRefresh: () => void
   onAddRow: () => void
+  /** The tab's committed conditions. Undefined = none. */
+  browseFilters?: BrowseFilter[]
+  /** The tab's committed sort columns. Undefined = unsorted. */
+  browseSort?: BrowseSort[]
+  /** The tab's committed raw manual WHERE fragment. */
+  manualCondition?: string
+  /** Commit a draft: filters/sort/manual condition for this tab; refetch happens in the parent. */
+  onApplyBrowse?: (next: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string }) => void
+  /** Header click: cycle single-column sort for one column. */
+  onCycleSortColumn?: (column: string) => void
   onStartEdit: (row: number, col: number, value: unknown) => void
   onEditValueChange: (value: string) => void
   onCommitEdit: (overrideValue?: string) => void
@@ -60,6 +77,11 @@ export const DataGrid = ({
   onBrowsePageChange,
   onRefresh,
   onAddRow,
+  browseFilters,
+  browseSort,
+  manualCondition,
+  onApplyBrowse,
+  onCycleSortColumn,
   onStartEdit,
   onEditValueChange,
   onCommitEdit,
@@ -69,6 +91,15 @@ export const DataGrid = ({
   onPromptDeleteRow,
   onCellContextMenu,
 }: DataGridProps) => {
+  const [filterOpen, setFilterOpen] = useState(false)
+  const committedFilters = useMemo(() => browseFilters ?? [], [browseFilters])
+  const committedSort = useMemo(() => browseSort ?? [], [browseSort])
+  const activeFilterCount = activeCount(committedFilters, manualCondition)
+  const filteredColumns = useMemo(() => new Set(committedFilters.map((f) => f.column)), [committedFilters])
+  const sortOrderFor = useCallback(
+    (col: string) => committedSort.find((s) => s.column === col)?.order ?? null,
+    [committedSort]
+  )
   const columns = useMemo(() => browseResult?.columns ?? [], [browseResult])
   const rows = useMemo(() => browseResult?.rows ?? [], [browseResult])
   /** How many pages the total spans; null while the count is unknown. */
@@ -184,10 +215,41 @@ export const DataGrid = ({
             >
               + Add row
             </Button>
+            <Button
+              size="sm"
+              variant={activeFilterCount > 0 ? "secondary" : "outline"}
+              onClick={() => setFilterOpen((v) => !v)}
+              title="Filter and sort"
+              aria-pressed={filterOpen}
+            >
+              <ListFilter className="size-4" />
+              <span className="ml-1">Filter</span>
+              {activeFilterCount > 0 ? (
+                <Badge variant="secondary" className="ml-1.5 h-5 min-w-5 justify-center px-1 text-[10px] tabular-nums">
+                  {activeFilterCount}
+                </Badge>
+              ) : null}
+            </Button>
             {pkColumnNames.length === 0 ? (
               <span className="text-xs text-muted-foreground">No primary key - read only</span>
             ) : null}
           </div>
+
+          {filterOpen ? (
+            <FilterPanel
+              columns={browseResult?.columns ?? (activeSchema()?.columns ?? []).map((c) => c.name)}
+              columnTypes={Object.fromEntries(
+                (activeSchema()?.columns ?? []).map((c) => [c.name, c.dataType ?? ""])
+              )}
+              initial={{
+                filters: committedFilters,
+                sort: committedSort,
+                manualCondition: manualCondition ?? "",
+              }}
+              onApply={(next) => onApplyBrowse?.(next)}
+              onClose={() => setFilterOpen(false)}
+            />
+          ) : null}
 
           {browseResult ? (
             <>
@@ -199,7 +261,32 @@ export const DataGrid = ({
                         key={col}
                         className={`border px-2 py-1 text-left ${/^id$/i.test(col) ? "w-px whitespace-nowrap" : ""}`}
                       >
-                        {col}
+                        {onCycleSortColumn ? (
+                          <button
+                            type="button"
+                            className="flex cursor-pointer items-center gap-1 rounded hover:text-foreground/80 hover:underline"
+                            onClick={() => onCycleSortColumn(col)}
+                            title="Cycle sort: none → ascending → descending"
+                          >
+                            {col}
+                            {sortOrderFor(col) === "asc" ? (
+                              <ArrowUp className="size-3 text-emerald-600" />
+                            ) : sortOrderFor(col) === "desc" ? (
+                              <ArrowDown className="size-3 text-emerald-600" />
+                            ) : null}
+                            {filteredColumns.has(col) ? <ListFilter className="size-3 text-emerald-600" /> : null}
+                          </button>
+                        ) : (
+                          <span className="flex items-center gap-1">
+                            {col}
+                            {sortOrderFor(col) === "asc" ? (
+                              <ArrowUp className="size-3 text-emerald-600" />
+                            ) : sortOrderFor(col) === "desc" ? (
+                              <ArrowDown className="size-3 text-emerald-600" />
+                            ) : null}
+                            {filteredColumns.has(col) ? <ListFilter className="size-3 text-emerald-600" /> : null}
+                          </span>
+                        )}
                       </TableHead>
                     ))}
                     <TableHead className="sticky right-0 z-40 w-16 border px-2 py-1 text-left bg-background">act</TableHead>
