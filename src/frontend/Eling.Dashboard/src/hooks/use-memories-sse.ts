@@ -13,6 +13,7 @@ export type SseTopic =
   | "audit:changes"
   | "audit:access"
   | "databases"
+  | "skills"
 
 /**
  * Subscribe to the backend's change SSE stream (`/api/events/memories`).

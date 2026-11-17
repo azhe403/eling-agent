@@ -35,6 +35,7 @@ import { Input } from "@/components/ui/input"
 import { LoadingBar } from "@/components/ui/loading-bar"
 import { Switch } from "@/components/ui/switch"
 import { useMediaQuery } from "@/hooks/use-media-query"
+import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import { usePersistedState, useResumePageParams } from "@/lib/persisted-state"
 import { XL_BREAKPOINT } from "@/lib/constants"
 import { apiFetch, ApiError } from "@/lib/api"
@@ -237,6 +238,17 @@ export function SkillsList() {
   // always reads the full record. A 404 here means the skill is in the trash —
   // the panel falls back to the compact shape with a restore action.
   const selectedId = selected?.id ?? null
+  // Live catalog changes refetch silently: the list reloads in place and the
+  // open detail panel re-fetches on the next render. The panel is keyed by
+  // skill id, so an edit-form's local state survives this — per the spec's
+  // user decision (silent reload, no confirm, form untouched).
+  const [detailNonce, setDetailNonce] = useState(0)
+  const handleSkillsChanged = useCallback(() => {
+    void load()
+    setDetailNonce((n) => n + 1)
+  }, [load])
+  useMemoriesSse(handleSkillsChanged, undefined, ["skills"])
+
   useEffect(() => {
     if (!selectedId) return
     let cancelled = false
@@ -269,7 +281,7 @@ export function SkillsList() {
     return () => {
       cancelled = true
     }
-  }, [selectedId])
+  }, [selectedId, detailNonce])
 
   // The selection resolves against the latest list: once a skill vanishes
   // (delete), the panel closes on its own and no effect has to force it.
