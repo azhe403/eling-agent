@@ -260,12 +260,19 @@ public sealed class SkillService : ISkillService
             throw new SkillNotFoundException($"No skill named '{name}' exists in the skill catalog.");
         }
 
+        // Mark the row trashed BEFORE moving the folder: an in-flight catalog
+        // rescan must never observe an active row whose folder just vanished —
+        // it would drop the row as "missing" and the next restore would find
+        // nothing. The marker is reversed if the move fails.
+        await _index.MarkTrashedAsync(name, trashed: true);
+
         try
         {
             await _storage.MoveToTrashAsync(name);
         }
         catch (SkillConflictException)
         {
+            await _index.MarkTrashedAsync(name, trashed: false);
             // The trash destination is occupied — the caller must restore or
             // purge that name first; never merge.
             throw;
@@ -273,12 +280,14 @@ public sealed class SkillService : ISkillService
         catch (SkillStorageException ex)
         {
             // Index row exists but the folder is gone (drift): nothing to move.
+            await _index.MarkTrashedAsync(name, trashed: false);
             throw new SkillNotFoundException(ex.Message, ex);
         }
 
         // The row deliberately stays in the index, marked trashed; list/search
-        // exclude it by default until restored.
-        await _index.MarkTrashedAsync(name, trashed: true);
+        // exclude it by default until restored. (The marker was applied before
+        // the move so concurrent rescans never see an active row with a
+        // vanished folder.)
         await NotifyAsync("deleted");
     }
 
