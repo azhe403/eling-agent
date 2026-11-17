@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 
 import { DbTab, isRedisTab, tabKey, persistableTab } from "./db-tabs"
 import { effectiveBrowseLimit, effectiveBrowsePage } from "./utils/browse-paging"
+import { toggleSortColumn, type BrowseFilter, type BrowseSort } from "./filter-model"
 import { RedisDbInfo, fetchRedisDatabases, pickRedisDb, parseRedisDb } from "./redis-browser"
 import {
   DEFAULT_CONN_ORDER,
@@ -417,6 +418,35 @@ export function Databases() {
     // the selection wrote another database's rows under this table's name.
     await browseData(activeTable.connId, activeTable.table, activeTable.database, false, true)
   }, [activeTable, browseData])
+
+  // Committing a filter/sort set: session view state, page resets to 1,
+  // the grid refetches against the server-side builder.
+  const applyBrowse = useCallback(
+    (next: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string }) => {
+      const t = patchActiveTab({
+        browseFilters: next.filters,
+        browseSort: next.sort,
+        manualCondition: next.manualCondition,
+        browsePage: 1,
+      })
+      if (!t) return
+      void browseData(t.connId, t.table, t.database, false, true)
+    },
+    [patchActiveTab, browseData]
+  )
+
+  // Header cycle: single-column sort, replaces whatever the panel had sorted.
+  const cycleSortColumn = useCallback(
+    (column: string) => {
+      const cur = activeTableRef.current
+      if (!cur) return
+      const nextSort = toggleSortColumn(cur.browseSort ?? [], column)
+      const t = patchActiveTab({ browseSort: nextSort, browsePage: 1 })
+      if (!t) return
+      void browseData(t.connId, t.table, t.database, false, true)
+    },
+    [patchActiveTab, browseData]
+  )
 
   // Limit change resets the page; page change stays put. Both re-fetch, and
   // both touch only the active tab - the ref is updated inside patchActiveTab
@@ -1040,6 +1070,11 @@ export function Databases() {
           browsePage={browsePage}
           onBrowseLimitChange={setBrowseLimit}
           onBrowsePageChange={setBrowsePage}
+          browseFilters={activeTable?.browseFilters}
+          browseSort={activeTable?.browseSort}
+          manualCondition={activeTable?.manualCondition}
+          onApplyBrowse={applyBrowse}
+          onCycleSortColumn={cycleSortColumn}
           mutating={mutating}
           editingCell={editingCell}
           editValue={editValue}

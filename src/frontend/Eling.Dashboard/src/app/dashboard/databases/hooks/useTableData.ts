@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { DbConn, DbTab, QueryResult, SchemaInfo } from "../types"
 import { API, quoteIdent, sqlQuote, buildWherePk } from "../utils/connection-helpers"
-import { apiFetch } from "@/lib/api"
+import { apiFetch, ApiError } from "@/lib/api"
 import { pkColumnNames } from "../utils/schema-helpers"
 import type { NotifyDb } from "./useNotifications"
 import { effectiveBrowseLimit, effectiveBrowsePage, clampPage } from "../utils/browse-paging"
+import { serializeBrowse, type BrowseResponse } from "../filter-model"
 
 /** How long a cached read waits before asking the database again. */
 const POLL_MS = 5000
@@ -74,44 +75,29 @@ export function useTableData({
         setBrowseResult(null)
         setBrowseTotal(null)
       }
-      // Limit and page are read from the tab at request time, so a poll
-      // fired after the reader switched tabs asks for that tab's window.
+      // Limit, page and the tab's committed condition set are read at
+      // request time, so a poll fired after a tab switch asks about that
+      // tab's window.
       const limit = effectiveBrowseLimit(current)
       const page = effectiveBrowsePage(current)
-      const offset = (page - 1) * limit
+      const committedFilters = current?.browseFilters ?? []
+      const committedSort = current?.browseSort ?? []
+      const manualCondition = current?.manualCondition?.trim() ? current.manualCondition : null
       try {
-        const conn = conns.find((c) => c.id === id)
-        const quote = conn?.provider === "MySql" ? "`" : '"'
-        const escaped = table.replace(new RegExp(quote, "g"), quote + quote)
-        const selectSql = "SELECT * FROM " + quote + escaped + quote + " LIMIT " + limit + " OFFSET " + offset
-        const [data, countData] = await Promise.all([
-          apiFetch<QueryResult>(API + "/" + id + "/query", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sql: selectSql, maxRows: limit, database: database ?? null, refresh }),
+        const data = await apiFetch<BrowseResponse>(API + "/" + id + "/browse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...serializeBrowse(table, database ?? null, page, limit, committedFilters, committedSort, manualCondition),
+            refresh,
           }),
-          apiFetch<QueryResult>(API + "/" + id + "/query", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sql: "SELECT COUNT(*) FROM " + quote + escaped + quote,
-              maxRows: 1,
-              database: database ?? null,
-              refresh,
-            }),
-          }).catch(() => null),
-        ])
+        })
+        const countedTotal = typeof data.total === "number" ? data.total : data.rows.length
         // Count first: when the requested page no longer exists (rows were
         // deleted under it), hand the clamp to the caller and paint nothing.
         // The empty response would render as a grid of nothing on page 99.
         // The clamp belongs to the newest request only - a stale in-flight
         // response must not yank the reader off the page they chose.
-        let countedTotal: number | null = null
-        if (countData) {
-          const v = countData?.rows?.[0]?.[0]
-          const n = typeof v === "number" ? v : v != null ? Number(v) : NaN
-          if (Number.isFinite(n)) countedTotal = n
-        }
         if (countedTotal !== null) {
           const safePage = clampPage(page, countedTotal, limit)
           if (safePage !== page && onClampPage) {
@@ -136,6 +122,12 @@ export function useTableData({
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "browse failed"
         const conn = conns.find((c) => c.id === id)
+        if (e instanceof ApiError && e.status === 404 && e.code !== "connection_not_found") {
+          // The backend predates the /browse endpoint - say so plainly
+          // instead of looking like a generic failure.
+          notifyDb("error", "Browse unavailable", "Backend does not support /browse; rebuild and restart it.")
+          return
+        }
         notifyDb("error", `Could not load ${table}`, `${conn?.name ?? id}: ${msg}`)
       } finally {
         // Only the newest request clears the spinner it raised.

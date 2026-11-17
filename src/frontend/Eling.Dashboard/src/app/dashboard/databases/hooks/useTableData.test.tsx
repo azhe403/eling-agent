@@ -25,8 +25,15 @@ const conn: DbConn = {
 const page4Tab: DbTab = { connId: "c", table: "t", database: null, browseLimit: 100, browsePage: 4 }
 const page1Tab: DbTab = { ...page4Tab, browsePage: 1 }
 
-const page = (rows: unknown[][]) => ({ columns: ["id"], rows, truncated: false })
-const count = (n: number) => ({ columns: ["COUNT(*)"], rows: [[n]], truncated: false })
+/** The /browse response: one page of rows plus the filtered total. */
+const browse = (rows: unknown[][], total: number) => ({
+  columns: ["id"],
+  rows,
+  truncated: false,
+  total,
+  fromCache: false,
+  cachedAt: null,
+})
 
 /** A promise whose resolution this test controls, plus the calls apiFetch saw. */
 const deferred = <T,>() => {
@@ -65,15 +72,11 @@ describe("useTableData clamp vs the stale-answer guard", () => {
     // (page 2 valid). Before it resolves, the reader navigates back to
     // page 1 (request 2). When request 1 resolves, it must not touch
     // anything: the clamp belongs to the newest request only.
-    const pageReq1 = deferred<never>()
-    const countReq1 = deferred<never>()
-    const pageReq2 = deferred<never>()
-    const countReq2 = deferred<never>()
+    const req1 = deferred<never>()
+    const req2 = deferred<never>()
     apiFetchMock
-      .mockImplementationOnce(() => pageReq1.promise)
-      .mockImplementationOnce(() => countReq1.promise)
-      .mockImplementationOnce(() => pageReq2.promise)
-      .mockImplementationOnce(() => countReq2.promise)
+      .mockImplementationOnce(() => req1.promise)
+      .mockImplementationOnce(() => req2.promise)
 
     const { activeTableRef, onClampPage, hooks } = setup(page4Tab)
 
@@ -91,8 +94,7 @@ describe("useTableData clamp vs the stale-answer guard", () => {
 
     // Request 1 resolves: page beyond the end (empty), count says 150 rows.
     await act(async () => {
-      pageReq1.resolve(page([]) as never)
-      countReq1.resolve(count(150) as never)
+      req1.resolve(browse([], 150) as never)
       await Promise.allSettled([p1!])
     })
 
@@ -100,8 +102,7 @@ describe("useTableData clamp vs the stale-answer guard", () => {
 
     // Request 2 resolves normally; its rows and total land.
     await act(async () => {
-      pageReq2.resolve(page([[1]]) as never)
-      countReq2.resolve(count(150) as never)
+      req2.resolve(browse([[1]], 150) as never)
       await Promise.allSettled([p2!])
     })
 
@@ -110,9 +111,8 @@ describe("useTableData clamp vs the stale-answer guard", () => {
   })
 
   it("the newest overflowed response clamps and paints nothing", async () => {
-    const pageReq = deferred<never>()
-    const countReq = deferred<never>()
-    apiFetchMock.mockImplementationOnce(() => pageReq.promise).mockImplementationOnce(() => countReq.promise)
+    const req = deferred<never>()
+    apiFetchMock.mockImplementationOnce(() => req.promise)
 
     const { onClampPage, hooks } = setup(page4Tab)
 
@@ -122,8 +122,7 @@ describe("useTableData clamp vs the stale-answer guard", () => {
     })
 
     await act(async () => {
-      pageReq.resolve(page([]) as never)
-      countReq.resolve(count(150) as never)
+      req.resolve(browse([], 150) as never)
       await Promise.allSettled([p!])
     })
 
@@ -132,5 +131,50 @@ describe("useTableData clamp vs the stale-answer guard", () => {
     // The empty page must not be painted as the grid's content.
     expect(hooks.result.current.browseResult).toBeNull()
     expect(hooks.result.current.browseTotal).toBe(150)
+  })
+
+  it("sends the committed filter, sort and manual condition to /browse", async () => {
+    apiFetchMock.mockImplementationOnce(async () => browse([[1]], 1) as never)
+    const tab: DbTab = {
+      connId: "c",
+      table: "t",
+      database: "db1",
+      browseLimit: 100,
+      browsePage: 2,
+      browseFilters: [{ column: "name", op: "contains", value: "a", enabled: true, logic: "first" }],
+      browseSort: [{ column: "updated_at", order: "desc" }],
+      manualCondition: "is_active = 1",
+    }
+
+    const { hooks } = setup(tab)
+    await act(async () => {
+      await hooks.result.current.browseData("c", "t", "db1")
+    })
+
+    const [url, init] = apiFetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain("/c/browse")
+    const body = JSON.parse(String(init.body))
+    expect(body).toMatchObject({
+      table: "t",
+      database: "db1",
+      page: 2,
+      limit: 100,
+      filters: [{ column: "name", op: "contains", value: "a", enabled: true, logic: "first" }],
+      sort: [{ column: "updated_at", order: "desc" }],
+      manualCondition: "is_active = 1",
+    })
+  })
+
+  it("sends refresh=true to bypass the cache", async () => {
+    apiFetchMock.mockImplementationOnce(async () => browse([[1]], 1) as never)
+
+    const { hooks } = setup(page1Tab)
+    await act(async () => {
+      await hooks.result.current.browseData("c", "t", null, false, true)
+    })
+
+    const [url, init] = apiFetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain("/c/browse")
+    expect(JSON.parse(String(init.body)).refresh).toBe(true)
   })
 })

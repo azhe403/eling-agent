@@ -8,6 +8,7 @@ import { DataGrid } from "./data-grid/DataGrid"
 import { SqlEditor } from "./sql-editor/SqlEditor"
 import { RedisBrowser } from "./redis-browser/RedisBrowser"
 import { ExplorerTabBar } from "./ExplorerTabBar"
+import type { BrowseFilter, BrowseSort } from "@/app/dashboard/databases/filter-model"
 
 export interface ExplorerPanelsProps {
   conns: DbConn[]
@@ -109,6 +110,11 @@ export interface ExplorerPanelsProps {
   /** Effective per-tab view state, computed by the page. */
   browseLimit: number
   browsePage: number
+  browseFilters?: BrowseFilter[]
+  browseSort?: BrowseSort[]
+  manualCondition?: string
+  onApplyBrowse: (next: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string }) => void
+  onCycleSortColumn: (column: string) => void
   onBrowseLimitChange: (limit: number) => void
   onBrowsePageChange: (page: number) => void
 }
@@ -122,6 +128,7 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
     conns, expandedConns, expandedDbs, connSchemas, dbSchemas, redisDbs, activeTable, openTabs,
     rightTab, connSort, connOrder, loading, isFading, schemaConnId, schemaInfo, schemaLoading,
     selectedId, selectedIsReadOnly, selectedIsRedis, browseResult, browseTotal, browseLoading, browseLimit, browsePage,
+    browseFilters, browseSort, manualCondition,
     mutating, editingCell, editValue, savingCell, newRow, pkNames, sql, qResult, qLoading,
     activeRedisDb, redisPrefix, redisRootPrefix, redisPages, redisExpanded, redisInspectKey,
     redisLoading, redisInspect, redisInspectOpen,
@@ -260,6 +267,11 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
             pkColumnNames={pkNames}
             browseLimit={browseLimit}
             browsePage={browsePage}
+            browseFilters={browseFilters}
+            browseSort={browseSort}
+            manualCondition={manualCondition}
+            onApplyBrowse={props.onApplyBrowse}
+            onCycleSortColumn={props.onCycleSortColumn}
             onBrowseLimitChange={props.onBrowseLimitChange}
             onBrowsePageChange={props.onBrowsePageChange}
             onRefresh={props.onRefreshData}
