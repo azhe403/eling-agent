@@ -527,6 +527,29 @@ public sealed class DatabaseBrowseEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Browse_OperatorCasings_AllAnswer200()
+    {
+        var id = await SeedSqliteAsync();
+
+        // The endpoint lowercases ops before they reach the builder; the builder
+        // must recognise every spelling the client might send, not only the
+        // canonical camelCase ones.
+        string[] ops = ["isNull", "ISNULL", "IsNull", "isnull", "isNotNull", "isnotnull",
+            "notContains", "notcontains", "NOTCONTAINS", "startsWith", "startswith", "EndsWith", "endswith"];
+        foreach (var op in ops)
+        {
+            var response = await PostBrowse(id, new
+            {
+                table = "mst_test",
+                page = 1,
+                limit = 10,
+                filters = new[] { new { column = "name", op, value = "a", enabled = true, logic = "first" } },
+            });
+            Assert.True(response.IsSuccessStatusCode, $"op '{op}' must answer 200, got {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+        }
+    }
+
+    [Fact]
     public async Task Browse_AuditActionIsDbBrowse()
     {
         var id = await SeedSqliteAsync();

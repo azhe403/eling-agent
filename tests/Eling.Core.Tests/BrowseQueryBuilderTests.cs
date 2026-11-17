@@ -249,6 +249,17 @@ public sealed class BrowseQueryBuilderTests
     }
 
     [Fact]
+    public void Build_OperatorCasing_IsAcceptedAndCanonicalised()
+    {
+        Assert.Contains("\"name\" IS NULL", Build([F("name", "ISNULL")]).Rows.Sql);
+        Assert.Contains("\"name\" IS NOT NULL", Build([F("name", "isnotnull")]).Rows.Sql);
+        Assert.Contains("NOT (\"name\" LIKE", Build([F("name", "NOTCONTAINS", "a")]).Rows.Sql);
+        Assert.Contains("\"name\" LIKE", Build([F("name", "StartsWith", "a")]).Rows.Sql);
+        Assert.EndsWith("%", Build([F("name", "StartsWith", "a")]).Rows.Parameters[0].Value as string);
+        Assert.StartsWith("%", Build([F("name", "ENDSWITH", "a")]).Rows.Parameters[0].Value as string);
+    }
+
+    [Fact]
     public void Build_AllDisabledAndNoManual_OmitsWhere()
     {
         var plan = Build([F("name", "eq", "x", enabled: false)]);

@@ -22,10 +22,23 @@ namespace Eling.Core.Database.Browse;
 /// </summary>
 public static class BrowseQueryBuilder
 {
-    private static readonly HashSet<string> ValidOps = new(StringComparer.Ordinal)
+    // The wire spells operators in any casing ("isNull", "ISNULL", "isnull");
+    // every comparison against the canonical camelCase form goes through one
+    // lookup, so the endpoint and the builder cannot drift apart.
+    private static readonly Dictionary<string, string> CanonicalOps = new(StringComparer.OrdinalIgnoreCase)
     {
-        "eq", "neq", "contains", "notContains", "startsWith", "endsWith",
-        "gt", "gte", "lt", "lte", "isNull", "isNotNull",
+        ["eq"] = "eq",
+        ["neq"] = "neq",
+        ["contains"] = "contains",
+        ["notcontains"] = "notContains",
+        ["startswith"] = "startsWith",
+        ["endswith"] = "endsWith",
+        ["gt"] = "gt",
+        ["gte"] = "gte",
+        ["lt"] = "lt",
+        ["lte"] = "lte",
+        ["isnull"] = "isNull",
+        ["isnotnull"] = "isNotNull",
     };
 
     private static readonly HashSet<string> NoValueOps = new(StringComparer.Ordinal) { "isNull", "isNotNull" };
@@ -78,10 +91,10 @@ public static class BrowseQueryBuilder
         {
             if (!filter.Enabled) continue;
 
-            var op = filter.Op ?? "";
-            if (!ValidOps.Contains(op))
+            var rawOp = (filter.Op ?? "").Trim();
+            if (!CanonicalOps.TryGetValue(rawOp, out var op))
             {
-                throw new BrowseQueryException($"unknown operator '{op}'");
+                throw new BrowseQueryException($"unknown operator '{filter.Op}'");
             }
 
             var col = Quote(filter.Column);
@@ -129,8 +142,7 @@ public static class BrowseQueryBuilder
                         clauseText.Add(likeText);
                     }
                     break;
-                default:
-                    throw new BrowseQueryException($"unknown operator '{op}'");
+                // op is canonicalised above, so the cases above are exhaustive.
             }
 
             clauseLogic.Add(NormalizeLogic(filter.Logic));
