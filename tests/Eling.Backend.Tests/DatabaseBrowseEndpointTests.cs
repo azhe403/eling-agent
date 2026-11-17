@@ -113,6 +113,26 @@ public sealed class DatabaseBrowseEndpointTests : IAsyncLifetime
         => await _client.PostAsync("/api/databases/" + id + "/browse",
             new StringContent(JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json"));
 
+    /// <summary>Seeds a REAL column - the case Microsoft.Data.Sqlite binds as TEXT.</summary>
+    private async Task<string> SeedRealScoreAsync(string name)
+    {
+        var db = Path.Combine(_root, name + ".db");
+        await using (var conn = new SqliteConnection($"Data Source={db};Pooling=False"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                "CREATE TABLE scores (id INTEGER PRIMARY KEY, name TEXT, score REAL NOT NULL DEFAULT 0);"
+                + "INSERT INTO scores (name, score) VALUES ('low', 1.5), ('mid', 2.5), ('high', 10.25);";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var connection = DatabaseConnection.Create(
+            name, DatabaseProvider.Sqlite, $"Data Source={db}", DatabaseEnvironment.ReadOnly);
+        await _store.UpsertAsync(connection);
+        return connection.Id;
+    }
+
     [Fact]
     public async Task Browse_HappyPath_ReturnsRowsAndTotal()
     {
@@ -167,6 +187,40 @@ public sealed class DatabaseBrowseEndpointTests : IAsyncLifetime
         var names = doc.RootElement.GetProperty("rows").EnumerateArray()
             .Select(r => r[1].GetString()).ToArray();
         Assert.Equal(new[] { "alphabet soup", "Zulu", "Beta", "Alpha" }, names);
+    }
+
+    [Fact]
+    public async Task Browse_NumericFilterGt_OnRealColumn_ReturnsMatchingRows()
+    {
+        var id = await SeedRealScoreAsync("scores-gt@test");
+
+        var response = await PostBrowse(id, new
+        {
+            table = "scores",
+            filters = new[] { new { column = "score", op = "gt", value = "2", enabled = true, logic = "first" } },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, doc.RootElement.GetProperty("total").GetInt64());
+        var names = doc.RootElement.GetProperty("rows").EnumerateArray().Select(r => r[1].GetString()).ToArray();
+        Assert.Equal(new[] { "mid", "high" }, names);
+    }
+
+    [Fact]
+    public async Task Browse_NumericFilterEq_OnRealColumn_ReturnsTheOneRow()
+    {
+        var id = await SeedRealScoreAsync("scores-eq@test");
+
+        var response = await PostBrowse(id, new
+        {
+            table = "scores",
+            filters = new[] { new { column = "score", op = "eq", value = "2.5", enabled = true, logic = "first" } },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(1, doc.RootElement.GetProperty("total").GetInt64());
     }
 
     [Fact]

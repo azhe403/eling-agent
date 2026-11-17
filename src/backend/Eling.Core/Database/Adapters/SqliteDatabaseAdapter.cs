@@ -80,7 +80,17 @@ public sealed class SqliteDatabaseAdapter : IDatabaseAdapter
         {
             foreach (var p in parameters)
             {
-                cmd.Parameters.AddWithValue(p.Name, p.Value ?? DBNull.Value);
+                // Microsoft.Data.Sqlite has no native decimal and binds CLR
+                // decimal as TEXT, which SQL compare would then misjudge
+                // (TEXT > REAL, TEXT = REAL never). Bind as REAL instead.
+                if (p.Value is decimal dec)
+                {
+                    cmd.Parameters.Add(new SqliteParameter(p.Name, SqliteType.Real) { Value = (double)dec });
+                }
+                else
+                {
+                    cmd.Parameters.AddWithValue(p.Name, p.Value ?? DBNull.Value);
+                }
             }
         }
         await using var reader = await cmd.ExecuteReaderAsync(ct);
