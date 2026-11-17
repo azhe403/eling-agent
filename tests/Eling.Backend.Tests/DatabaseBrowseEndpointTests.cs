@@ -339,6 +339,67 @@ public sealed class DatabaseBrowseEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Browse_NoSchemaButQueryCached_AnswersFromCache()
+    {
+        var connection = DatabaseConnection.Create(
+            "broken@test-cache-only",
+            DatabaseProvider.MySql,
+            "Server=127.0.0.1;Port=1;Database=broken;User Id=u;Password=p;ConnectionTimeout=1",
+            DatabaseEnvironment.ReadOnly);
+        await _store.UpsertAsync(connection);
+
+        // No schema primed: the validation path degrades to quoting-only,
+        // and the primed query snapshot answers both statements offline.
+        var cache = new JsonDatabaseReadCache(_root, NullLogger<JsonDatabaseReadCache>.Instance);
+        var plan = BrowseQueryBuilder.Build(
+            DatabaseProvider.MySql,
+            "mst_test",
+            [new BrowseFilter("name", "eq", "a", true, "first")],
+            [],
+            null,
+            new Dictionary<string, string>(),
+            schemaAvailable: false,
+            page: 1,
+            limit: 50);
+        cache.SetQuery(
+            connection.Id, null, 50,
+            QueryCacheKey.For(plan.Rows.Sql, plan.Rows.Parameters),
+            new QueryResult(["id", "name"], [[1L, "a"]], false));
+        cache.SetQuery(
+            connection.Id, null, 1,
+            QueryCacheKey.For(plan.Count.Sql, plan.Count.Parameters),
+            new QueryResult(["COUNT(*)"], [[1L]], false));
+
+        var response = await PostBrowse(connection.Id, new
+        {
+            table = "mst_test",
+            filters = new[] { new { column = "name", op = "eq", value = "a", enabled = true, logic = "first" } },
+            page = 1,
+            limit = 50,
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(doc.RootElement.GetProperty("fromCache").GetBoolean());
+        Assert.Equal(1L, doc.RootElement.GetProperty("total").GetInt64());
+    }
+
+    [Fact]
+    public async Task Browse_SortOnUnknownColumn_Answers400()
+    {
+        var id = await SeedSqliteAsync();
+
+        var response = await PostBrowse(id, new
+        {
+            table = "mst_test",
+            sort = new[] { new { column = "created_at_nope", order = "asc" } },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("created_at_nope", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task Browse_RedisConnection_Answers400()
     {
         var connection = DatabaseConnection.Create(
