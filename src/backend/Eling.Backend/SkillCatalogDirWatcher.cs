@@ -60,6 +60,10 @@ public sealed class SkillCatalogDirWatcher : IDisposable
     {
         _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
         _broadcaster = broadcaster ?? throw new ArgumentNullException(nameof(broadcaster));
+        if (interval is { } value && value <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(interval), "The drain interval must be positive.");
+        }
         _skillsDirectory = skillsDirectory ?? SkillCatalogPaths.SkillsDirectory;
         _interval = interval ?? DefaultInterval;
         _logger = logger ?? NullLogger<SkillCatalogDirWatcher>.Instance;
@@ -89,21 +93,33 @@ public sealed class SkillCatalogDirWatcher : IDisposable
                 return;
             }
 
-            // No Filter is set: the default matches everything (the catalog
-            // holds only skill folders, so there is nothing to exclude).
-            _watcher = new FileSystemWatcher(_skillsDirectory)
+            try
             {
-                IncludeSubdirectories = true,
-                NotifyFilter = NotifyFilters.LastWrite
-                    | NotifyFilters.FileName
-                    | NotifyFilters.DirectoryName
-            };
-            _watcher.Created += OnFileEvent;
-            _watcher.Changed += OnFileEvent;
-            _watcher.Deleted += OnFileEvent;
-            _watcher.Renamed += OnFileEvent;
-            _watcher.Error += OnWatcherError;
-            _watcher.EnableRaisingEvents = true;
+                // No Filter is set: the default matches everything (the catalog
+                // holds only skill folders, so there is nothing to exclude).
+                _watcher = new FileSystemWatcher(_skillsDirectory)
+                {
+                    IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.LastWrite
+                        | NotifyFilters.FileName
+                        | NotifyFilters.DirectoryName
+                };
+                _watcher.Created += OnFileEvent;
+                _watcher.Changed += OnFileEvent;
+                _watcher.Deleted += OnFileEvent;
+                _watcher.Renamed += OnFileEvent;
+                _watcher.Error += OnWatcherError;
+                _watcher.EnableRaisingEvents = true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Could not arm the skill catalog watcher on {Directory}; the catalog watcher is not running.",
+                    _skillsDirectory);
+                _watcher?.Dispose();
+                _watcher = null;
+                return;
+            }
 
             var cts = new CancellationTokenSource();
             _cts = cts;
