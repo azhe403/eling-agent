@@ -36,7 +36,7 @@ public sealed class SkillService : ISkillService
         _logger = logger;
     }
 
-    public async Task<Skill> SaveAsync(SkillSaveInput input)
+    public async Task<SkillSaveResult> SaveAsync(SkillSaveInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
         ValidateSaveInput(input);
@@ -89,7 +89,7 @@ public sealed class SkillService : ISkillService
         await _index.MarkTrashedAsync(skill.Name, trashed: false);
 
         await NotifyAsync("saved");
-        return skill;
+        return new SkillSaveResult(skill, existing is null ? SkillSaveAction.Created : SkillSaveAction.Updated);
     }
 
     public async Task<Skill> RenameAsync(string oldName, string newName)

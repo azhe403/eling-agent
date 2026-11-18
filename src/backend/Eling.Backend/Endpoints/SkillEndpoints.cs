@@ -211,7 +211,7 @@ public static class SkillEndpoints
                 siblingFiles);
 
             var saved = await service.SaveAsync(input);
-            return TypedResults.Created($"/api/skills/{saved.Id}", SkillDto.From(saved, SkillPath(saved.Name)));
+            return TypedResults.Created($"/api/skills/{saved.Skill.Id}", SkillDto.From(saved.Skill, SkillPath(saved.Skill.Name)));
         }
         catch (Exception ex) when (IsMappedSkillException(ex))
         {
@@ -270,7 +270,7 @@ public static class SkillEndpoints
                     current.RelatedMemories,
                     current.RelatedSnippets);
 
-                current = await service.SaveAsync(input);
+                current = (await service.SaveAsync(input)).Skill;
             }
 
             return TypedResults.Ok(SkillDto.From(current, SkillPath(current.Name)));

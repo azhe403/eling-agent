@@ -411,7 +411,7 @@ public sealed class SkillToolsTests : IDisposable
 
         public int ListCalls { get; private set; }
 
-        public Task<Skill> SaveAsync(SkillSaveInput input) => _inner.SaveAsync(input);
+        public Task<SkillSaveResult> SaveAsync(SkillSaveInput input) => _inner.SaveAsync(input);
         public Task<Skill> RenameAsync(string oldName, string newName) => _inner.RenameAsync(oldName, newName);
         public Task<Skill?> GetByNameAsync(string name) => _inner.GetByNameAsync(name);
         public Task<Skill?> GetByIdAsync(SkillId id) => _inner.GetByIdAsync(id);

@@ -28,7 +28,13 @@ public interface ISkillService
     /// Updating a skill whose name is occupied in the trash is refused by
     /// storage (<see cref="Storage.SkillConflictException"/>).
     /// </summary>
-    Task<Skill> SaveAsync(SkillSaveInput input);
+    /// <remarks>
+    /// The result's <see cref="SkillSaveResult.Action"/> reports
+    /// <see cref="SkillSaveAction.Created"/> when no index row existed for the
+    /// name, <see cref="SkillSaveAction.Updated"/> otherwise — a drifted-but-present
+    /// row (file unreadable, index mirror used) counts as Updated.
+    /// </remarks>
+    Task<SkillSaveResult> SaveAsync(SkillSaveInput input);
 
     /// <summary>
     /// Renames an Eling-managed skill, moving the folder and rewriting the

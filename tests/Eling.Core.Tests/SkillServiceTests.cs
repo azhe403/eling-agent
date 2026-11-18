@@ -30,7 +30,7 @@ public sealed class SkillServiceTests : IDisposable
     {
         var service = NewService();
 
-        var saved = await service.SaveAsync(NewInput("my-skill"));
+        var saved = (await service.SaveAsync(NewInput("my-skill"))).Skill;
 
         Assert.True(File.Exists(SkillFile("my-skill")));
         Assert.Equal(SkillOrigin.Eling, saved.Origin);
@@ -50,9 +50,9 @@ public sealed class SkillServiceTests : IDisposable
     public async Task Save_update_preserves_id_and_createdAt()
     {
         var service = NewService();
-        var created = await service.SaveAsync(NewInput("my-skill", "first description", "# first"));
+        var created = (await service.SaveAsync(NewInput("my-skill", "first description", "# first"))).Skill;
 
-        var updated = await service.SaveAsync(NewInput("my-skill", "second description", "# second"));
+        var updated = (await service.SaveAsync(NewInput("my-skill", "second description", "# second"))).Skill;
 
         Assert.Equal(created.Id, updated.Id);
         Assert.Equal(created.CreatedAt, updated.CreatedAt);
@@ -81,7 +81,7 @@ public sealed class SkillServiceTests : IDisposable
         await index.IndexAsync(sourced);
 
         var service = NewService(index);
-        var updated = await service.SaveAsync(new SkillSaveInput("sourced-skill", "rewritten", "# body two"));
+        var updated = (await service.SaveAsync(new SkillSaveInput("sourced-skill", "rewritten", "# body two"))).Skill;
 
         Assert.Equal("example.test/upstream", updated.Source?.Upstream);
         Assert.True(updated.Source?.Tracked);
@@ -135,7 +135,7 @@ public sealed class SkillServiceTests : IDisposable
     public async Task Rename_renames_folder_preserves_ulid()
     {
         var service = NewService();
-        var created = await service.SaveAsync(NewInput("a-skill"));
+        var created = (await service.SaveAsync(NewInput("a-skill"))).Skill;
 
         var renamed = await service.RenameAsync("a-skill", "b-skill");
 
@@ -204,7 +204,7 @@ public sealed class SkillServiceTests : IDisposable
     public async Task Rename_after_trash_folder_restored_out_of_band_clears_trashed_marker()
     {
         var service = NewService();
-        var created = await service.SaveAsync(NewInput("ren-me"));
+        var created = (await service.SaveAsync(NewInput("ren-me"))).Skill;
         await service.DeleteAsync("ren-me");
 
         // Trash folder put back to the active catalog out of band; the index
@@ -222,7 +222,7 @@ public sealed class SkillServiceTests : IDisposable
     public async Task Restore_restores_from_trash()
     {
         var service = NewService();
-        var created = await service.SaveAsync(NewInput("my-skill"));
+        var created = (await service.SaveAsync(NewInput("my-skill"))).Skill;
         await service.DeleteAsync("my-skill");
 
         await service.RestoreAsync("my-skill");
@@ -338,7 +338,7 @@ public sealed class SkillServiceTests : IDisposable
     public async Task GetById_returns_active_skill_and_ignores_trashed()
     {
         var service = NewService();
-        var created = await service.SaveAsync(NewInput("my-skill"));
+        var created = (await service.SaveAsync(NewInput("my-skill"))).Skill;
 
         Assert.Equal(created.Id, (await service.GetByIdAsync(created.Id))!.Id);
 
@@ -423,7 +423,7 @@ public sealed class SkillServiceTests : IDisposable
             new Skill.Skill("ext-keep", "external desc", "external body", origin: SkillOrigin.External));
 
         var service = NewService(index);
-        var created = await service.SaveAsync(NewInput("my-skill"));
+        var created = (await service.SaveAsync(NewInput("my-skill"))).Skill;
         await service.DeleteAsync("my-skill");
 
         await service.RebuildIndexAsync();
@@ -637,7 +637,7 @@ public sealed class SkillServiceTests : IDisposable
         await service.AdoptAsync("ext-adoptable");
 
         // After adoption the skill is a full eling skill: save is allowed.
-        var updated = await service.SaveAsync(NewInput("ext-adoptable", "now editable", "# rewritten\n"));
+        var updated = (await service.SaveAsync(NewInput("ext-adoptable", "now editable", "# rewritten\n"))).Skill;
         Assert.Equal(SkillOrigin.Eling, updated.Origin);
         var stored = await service.GetByNameAsync("ext-adoptable");
         Assert.Equal("now editable", stored!.Description);

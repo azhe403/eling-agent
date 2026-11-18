@@ -77,8 +77,8 @@ public sealed class SkillWriteTool
             var saved = await _skills.SaveAsync(
                 new SkillSaveInput(trimmedName, description, body, tags, memories, snippets, siblings));
 
-            _logger?.LogInformation("Saved skill '{Name}' (id {Id})", saved.Name, saved.Id);
-            return SaveSkillResponse.From(saved, SkillTools.MarkdownPath(_catalogRoot, saved.Name));
+            _logger?.LogInformation("Saved skill '{Name}' (id {Id}) ({Action})", saved.Skill.Name, saved.Skill.Id, saved.Action);
+            return SaveSkillResponse.From(saved.Skill, SkillTools.MarkdownPath(_catalogRoot, saved.Skill.Name));
         }
         catch (Exception ex)
         {

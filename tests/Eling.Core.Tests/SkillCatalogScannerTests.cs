@@ -81,7 +81,7 @@ public sealed class SkillCatalogScannerTests : IDisposable
     {
         var index = NewIndex();
         var service = NewService(index);
-        var saved = await service.SaveAsync(NewInput("doomed-skill"));
+        var saved = (await service.SaveAsync(NewInput("doomed-skill"))).Skill;
 
         Directory.Delete(SkillFolder("doomed-skill"), recursive: true);
 
@@ -213,7 +213,7 @@ public sealed class SkillCatalogScannerTests : IDisposable
     public async Task Scan_detects_folder_rename_by_ulid()
     {
         var index = NewIndex();
-        var saved = await NewService(index).SaveAsync(NewInput("old-name"));
+        var saved = (await NewService(index).SaveAsync(NewInput("old-name"))).Skill;
 
         // Simulate the index missing a rename: move the folder and rewrite the
         // name in frontmatter via storage (which does not touch the index).
@@ -239,7 +239,7 @@ public sealed class SkillCatalogScannerTests : IDisposable
     {
         var index = NewIndex();
         var service = NewService(index);
-        var saved = await service.SaveAsync(NewInput("shared-name"));
+        var saved = (await service.SaveAsync(NewInput("shared-name"))).Skill;
         await service.DeleteAsync("shared-name");
 
         // Foreign tooling drops a same-named folder into the active catalog.
