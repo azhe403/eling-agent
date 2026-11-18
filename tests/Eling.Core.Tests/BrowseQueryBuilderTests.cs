@@ -355,6 +355,10 @@ public sealed class BrowseQueryBuilderTests
         var sqlite = Build([F("co\"l\"x", "eq", "v")], table: "ta\"b\"x", provider: DatabaseProvider.Sqlite, columnTypes: weirdTypes);
         Assert.Contains("\"ta\"\"b\"\"x\"", sqlite.Rows.Sql);
         Assert.Contains("\"co\"\"l\"\"x\"", sqlite.Rows.Sql);
+
+        var postgres = Build([F("co\"l\"x", "eq", "v")], table: "ta\"b\"x", provider: DatabaseProvider.PostgreSql, columnTypes: weirdTypes);
+        Assert.Contains("\"ta\"\"b\"\"x\"", postgres.Rows.Sql);
+        Assert.Contains("\"co\"\"l\"\"x\"", postgres.Rows.Sql);
     }
 
     [Fact]

@@ -11,6 +11,7 @@ internal static class SqlIdentifiers
     {
         DatabaseProvider.MySql => "`" + name.Replace("`", "``") + "`",
         DatabaseProvider.Sqlite => "\"" + name.Replace("\"", "\"\"") + "\"",
+        DatabaseProvider.PostgreSql => "\"" + name.Replace("\"", "\"\"") + "\"",
         _ => throw new NotSupportedException($"Provider '{provider}' is not supported for browse."),
     };
 }

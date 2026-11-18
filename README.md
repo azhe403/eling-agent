@@ -23,7 +23,7 @@ One line per OS installs the `eling-backend` binary + dashboard UI and adds it t
 - **Persistent agent memory over MCP** — `memory_save` / `memory_get` / `memory_search` / `recall` with hybrid FTS search, scope-aware ranking, and overflow summaries; plus `memory_list`, `memory_delete`, `memory_maintenance` (dedup), and ULID-based identity.
 - **Three scopes** — `project` (`.eling/memories/`, committed to Git), `project-local` (machine-only, default), and `global` (`~/.config/eling/`).
 - **Codebase index & search** — per-workspace FTS index, `codebase_search` with content/path/file scopes, worktree-aware indexing.
-- **Read-only database access** — `db_list_connections`, `db_detect_connections`, `db_import_connections`, `db_get_schema`, `db_query` (single-statement, read-only) over MySQL/SQLite; plus `redis_scan` / `redis_inspect` with a scan cache.
+- **Read-only database access** — `db_list_connections`, `db_detect_connections`, `db_import_connections`, `db_get_schema`, `db_query` (single-statement, read-only) over MySQL/PostgreSQL/SQLite; plus `redis_scan` / `redis_inspect` with a scan cache.
 - **Audit trail** — change and access trails as JSONL (`AuditEvent` schema), SQLite read cache, retention and rollups.
 - **Operational tooling** — structured logs (`log_list` / `log_read`, text and JSONL), a policy-gated `shell_execute` MCP tool, and a per-user tool policy (`tools_policy`).
 - **Web dashboard** (Next.js) — memories, workspaces, codebase search, databases/Redis explorer, tools, audit trail, logs; served by the same binary.
