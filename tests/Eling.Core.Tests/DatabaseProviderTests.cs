@@ -5,7 +5,8 @@ namespace Eling.Core.Tests;
 /// <summary>
 /// Redis is the third provider. Adding it must not have renumbered the two
 /// that existed first - a registry that stores the number would break - so
-/// the values are pinned here.
+/// the values are pinned here. PostgreSql is the fourth; it is appended, not
+/// inserted.
 /// </summary>
 public sealed class DatabaseProviderTests
 {
@@ -23,8 +24,14 @@ public sealed class DatabaseProviderTests
     }
 
     [Fact]
-    public void AllThree_Present()
+    public void PostgreSql_IsAppended_NotInserted()
     {
-        Assert.Equal(3, Enum.GetValues<DatabaseProvider>().Length);
+        Assert.Equal(3, (int)DatabaseProvider.PostgreSql);
+    }
+
+    [Fact]
+    public void AllFour_Present()
+    {
+        Assert.Equal(4, Enum.GetValues<DatabaseProvider>().Length);
     }
 }

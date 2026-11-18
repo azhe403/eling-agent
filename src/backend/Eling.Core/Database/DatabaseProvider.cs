@@ -4,5 +4,6 @@ public enum DatabaseProvider
 {
     Sqlite,
     MySql,
-    Redis
+    Redis,
+    PostgreSql
 }
