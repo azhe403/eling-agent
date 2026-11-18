@@ -57,6 +57,10 @@ public sealed class CommitLeaseTool
     /// <summary>Liveness window for a commit lease; callers heartbeat to keep it alive.</summary>
     private const int DefaultTtlSeconds = 300;
 
+    /// <summary>Lease lifetime is clamped to this range so a typo cannot park a slot forever.</summary>
+    private const int MinTtlSeconds = 60;
+    private const int MaxTtlSeconds = 3600;
+
     /// <summary>Path comparisons follow the host file system's case rules (mirrors JsonCommitLeaseStore).</summary>
     private static readonly StringComparison PathComparison
         = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
@@ -84,12 +88,13 @@ public sealed class CommitLeaseTool
     // Parameter names below use snake_case deliberately: the MCP host passes
     // C# parameter names through to the wire schema unchanged, and the
     // commit_* tool surface is snake_case end to end.
-    [McpServerTool(Name = "commit_lease"), Description("Take the commit lease on this checkout and branch before staging or committing. The conflict check is folded in: verdict 'green' and acquired: true - stage. verdict 'red' and acquired: false - do not stage; a foreign live commit lease holds the slot. verdict 'red' on an acquired lease means foreign file leases collide with your paths - stage nothing until they clear. Returns { acquired, lease_id?, since?, verdict, staged_without_lease, conflicting_file_leases? }; when acquired: false, holder info is in { holder_caller_id, since, lease_age_seconds, intent }. Re-claiming your own live lease with the same (or no) intent is idempotent (succeeds with the same lease_id). A different intent against your own live lease returns an intent_mismatch error (lease unchanged). branch is optional and is discovered via git when omitted. The claim issues a lease_token that this session must present to commit_release to end the claim; if this session did not supply one, callers holding a lease will receive a missing_lease_token error from commit_release. Call commit_release once the commit lands - and just the same when the attempt fails.")]
+    [McpServerTool(Name = "commit_lease"), Description("Take the commit lease on this checkout and branch before staging or committing. The conflict check is folded in: verdict 'green' and acquired: true - stage. verdict 'red' and acquired: false - do not stage; a foreign live commit lease holds the slot. verdict 'red' on an acquired lease means foreign file leases collide with your paths - stage nothing until they clear. Returns { acquired, lease_id?, since?, verdict, staged_without_lease, conflicting_file_leases? }; when acquired: false, holder info is in { holder_caller_id, since, lease_age_seconds, intent }. Re-claiming your own live lease with the same (or no) intent is idempotent (succeeds with the same lease_id). A different intent against your own live lease returns an intent_mismatch error (lease unchanged). branch is optional and is discovered via git when omitted. The claim issues a lease_token that this session must present to commit_release to end the claim; if this session did not supply one, callers holding a lease will receive a missing_lease_token error from commit_release. Call commit_release once the commit lands - and just the same when the attempt fails. Optional ttl_seconds sets the lease lifetime (clamped to 60-3600, default 300); use a longer window before a slow pre-commit.")]
     public async Task<string> LeaseAsync(
         [Description("The caller's stable identifier. Any non-blank string of at least 24 characters you choose - a slug, a UUID, or your host's session id; pass the same value on every call. If your identifier carries a date, put the date FIRST (e.g. 2026-11-15-...), never last, so plain lexical sorting matches chronological order. The format is not validated.")] string caller_id,
         [Description("Current branch of the checkout. Optional; discovered via git when omitted. Pass it to skip discovery (e.g. when git is unavailable).")] string? branch = null,
         [Description("One-line summary of the planned commit. Optional.")] string? intent = null,
         [Description("Paths the commit is expected to touch. Optional.")] string[]? paths = null,
+        [Description("Lease lifetime in seconds. Optional; clamped to 60-3600; default 300. Use a longer window for a slow pre-commit (e.g. 900-1800).")] int? ttl_seconds = null,
         CancellationToken cancellationToken = default)
     {
         if (!CommitLeaseToolHelpers.IsCallerIdPlausible(caller_id))
@@ -164,6 +169,7 @@ public sealed class CommitLeaseTool
             // The store does NOT re-issue or re-show it if a sibling reads the
             // file.
             var leaseToken = Ulid.NewUlid().ToString();
+            var ttl = ClampTtl(ttl_seconds ?? DefaultTtlSeconds);
 
             var candidate = new CommitLeaseRecord
             {
@@ -174,7 +180,7 @@ public sealed class CommitLeaseTool
                 Branch = branchKey,
                 Since = now,
                 LastHeartbeat = now,
-                TtlSeconds = DefaultTtlSeconds,
+                TtlSeconds = ttl,
                 Paths = NormalizePaths(paths),
                 Intent = CommitLeaseToolHelpers.NormalizeIntent(intent),
                 LeaseToken = leaseToken,
@@ -283,6 +289,8 @@ public sealed class CommitLeaseTool
             return CommitLeaseToolHelpers.Serialize(new CommitLeaseError { Acquired = false, Error = $"Could not take the commit lease: {ex.Message}" });
         }
     }
+
+    private static int ClampTtl(int ttlSeconds) => Math.Clamp(ttlSeconds, MinTtlSeconds, MaxTtlSeconds);
 
     private string[] NormalizeRequestedPaths(string[]? paths, string checkout)
     {

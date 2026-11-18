@@ -549,6 +549,62 @@ public sealed class CommitLeaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task Claim_DefaultTtl_Is300()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main");
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        var stored = Assert.Single((await store.ListAllAsync()).Where(l => l.Kind == CommitLeaseKind.Commit));
+        Assert.Equal(300, stored.TtlSeconds);
+    }
+
+    [Fact]
+    public async Task Claim_WithTtl_StoresIt()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", ttl_seconds: 900);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        var stored = Assert.Single((await store.ListAllAsync()).Where(l => l.Kind == CommitLeaseKind.Commit));
+        Assert.Equal(900, stored.TtlSeconds);
+    }
+
+    [Fact]
+    public async Task Claim_Ttl_ClampedTo3600()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", ttl_seconds: 100000);
+
+        var stored = Assert.Single((await store.ListAllAsync()).Where(l => l.Kind == CommitLeaseKind.Commit));
+        Assert.Equal(3600, stored.TtlSeconds);
+    }
+
+    [Fact]
+    public async Task Claim_Ttl_ClampedTo60()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", ttl_seconds: 1);
+
+        var stored = Assert.Single((await store.ListAllAsync()).Where(l => l.Kind == CommitLeaseKind.Commit));
+        Assert.Equal(60, stored.TtlSeconds);
+    }
+
+    [Fact]
     public async Task BlankCallerId_ReturnsError_AndStoresNothing()
     {
         using var store = NewStore();
