@@ -78,6 +78,7 @@ export const ConnectionFormFields = ({
         <SelectItem value="Sqlite">Sqlite</SelectItem>
         <SelectItem value="MySql">MySql</SelectItem>
         <SelectItem value="Redis">Redis</SelectItem>
+        <SelectItem value="PostgreSql">PostgreSql</SelectItem>
       </SelectContent>
     </Select>
   )
@@ -140,7 +141,7 @@ export const ConnectionFormFields = ({
         <div className="grid gap-2 sm:grid-cols-2">
           <Input placeholder="host" value={host} onChange={(e) => onHostChange(e.target.value)} />
           <Input
-            placeholder="port (3306)"
+            placeholder={provider === "MySql" ? "port (3306)" : provider === "PostgreSql" ? "port (5432)" : "port"}
             value={port}
             onChange={(e) => onPortChange(e.target.value)}
             aria-invalid={portInvalid}

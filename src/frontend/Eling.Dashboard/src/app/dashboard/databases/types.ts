@@ -133,7 +133,7 @@ export type ManualPayload = {
 }
 
 /** Provider identifiers. */
-export type Provider = "Sqlite" | "MySql" | "Redis"
+export type Provider = "Sqlite" | "MySql" | "Redis" | "PostgreSql"
 
 export type ConnMode = "manual" | "raw"
 

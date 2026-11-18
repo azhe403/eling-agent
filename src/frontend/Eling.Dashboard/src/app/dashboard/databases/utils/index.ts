@@ -7,6 +7,7 @@ export {
   providerLabel,
   isRedis,
   isMySql,
+  isPostgreSql,
   quoteChar,
   quoteIdent,
   sqlQuote,

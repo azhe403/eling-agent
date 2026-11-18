@@ -6,6 +6,13 @@
 
 import type { DbConn, ManualPayload } from "../types"
 
+/** Per-provider default ports, for the name derivation's port suffix. */
+export const DEFAULT_PORTS: Record<string, number> = {
+  MySql: 3306,
+  PostgreSql: 5432,
+  Redis: 6379,
+}
+
 /** The name a connection gets when nobody typed one. */
 export const deriveConnectionName = (
   provider: string,
@@ -22,7 +29,7 @@ export const deriveConnectionName = (
   const h = host.trim()
   if (!h) return ""
   const p = port.trim()
-  const portSuffix = p && Number(p) !== 3306 ? `:${p}` : ""
+  const portSuffix = p && Number(p) !== (DEFAULT_PORTS[provider] ?? 3306) ? `:${p}` : ""
   const db = database.trim()
   return db ? `${db}@${h}${portSuffix}` : `${h}${portSuffix}`
 }
@@ -74,6 +81,7 @@ export const providerLabel = (provider: string): string => {
     case "Sqlite": return "SQLite"
     case "MySql": return "MySQL"
     case "Redis": return "Redis"
+    case "PostgreSql": return "PostgreSQL"
     default: return provider
   }
 }
@@ -85,6 +93,10 @@ export const isRedis = (conn: DbConn | null | undefined): boolean =>
 /** Whether a connection is MySQL. */
 export const isMySql = (conn: DbConn | null | undefined): boolean =>
   conn?.provider === "MySql"
+
+/** Whether a connection is PostgreSQL. */
+export const isPostgreSql = (conn: DbConn | null | undefined): boolean =>
+  conn?.provider === "PostgreSql"
 
 /** The quote character for an identifier on a connection. */
 export const quoteChar = (conn: DbConn | null | undefined): string =>
