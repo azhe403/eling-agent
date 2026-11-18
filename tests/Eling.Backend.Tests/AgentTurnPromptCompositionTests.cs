@@ -70,6 +70,10 @@ public sealed class AgentTurnPromptCompositionTests
             Assert.Contains("Save (MUST DO)", sys);
             Assert.Contains("fragment of the user's message", sys);
             Assert.Contains("Scope - you choose it", sys);
+            Assert.Contains("Skills (workflows)", sys);
+            Assert.Contains("skill_search", sys);
+            Assert.Contains("proposal-first", sys);
+            Assert.Contains("only temporary", sys);
         }
         finally
         {

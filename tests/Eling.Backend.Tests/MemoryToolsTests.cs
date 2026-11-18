@@ -529,6 +529,19 @@ public class MemoryToolsTests
         Assert.Contains("NEVER a fragment of the user's message", options.ServerInstructions, StringComparison.Ordinal);
         Assert.Contains("stranger test", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Scope - you choose it", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Skills (workflows)", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("skill_search", options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("skill_save", options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("proposal-first", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("only temporary", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("left as it is", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("up front", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("before the work starts", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("for this run", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            options.ServerInstructions.IndexOf("Skills (workflows)", StringComparison.OrdinalIgnoreCase) is var skillsIndex and >= 0
+            && options.ServerInstructions.IndexOf("Codebase:", StringComparison.OrdinalIgnoreCase) is var codebaseIndex and >= 0
+            && skillsIndex < codebaseIndex);
         Assert.Contains("Codebase", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("codebase_index", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("codebase_search", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);

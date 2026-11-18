@@ -2,6 +2,11 @@
 
 All notable changes to Eling are documented here. Follows [Keep a Changelog](https://keepachangelog.com/) and [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [Unreleased] - 2026-11-18
+
+### Added
+- **MCP server instructions now tell every agent about skills - check, follow, offer to create or update (backend + MCP)**: a new `Skills (workflows)` section in the initialize handshake text clients receive. Agents are told to check `skill_search` (or the `skills` block in `recall`) before a multi-step workflow, to read and follow a matching SKILL.md step by step without skipping, reordering, or improvising (stop and ask when a step fails or does not fit), to flag up front when no skill matches and the workflow looks repeatable, to propose a drafted skill once the work is done (proposal-first, never silently, `skill_save` only after the user approves), and to propose updating an existing skill when the user's durable corrections rewrite its steps - whether stated before the work starts or after, and likewise when a skill is noticed stale by reading; a correction that is only a rule stays a memory - the skill is not rewritten for it. If during execution the workflow diverges from the skill (skipping, reordering, or doing a step another way - including a different route the user asks for on this run), the agent must stop and ask whether the skill should be updated or left as it is - the change may be only temporary - never silently drifting from the skill. Closes the gap where Smart Create was documented in the skill-management spec as agent behavior but never reached the instructions clients actually read - a session with a matching skill could still improvise and skip steps. Proposal-first on every write path; no backend detection, no recall payload change.
+
 ## [Unreleased] - 2026-11-17
 
 ### Added
