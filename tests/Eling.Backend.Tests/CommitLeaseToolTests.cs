@@ -559,7 +559,7 @@ public sealed class CommitLeaseToolTests : IDisposable
 
         using var doc = JsonDocument.Parse(result);
         Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
-        var stored = Assert.Single((await store.ListAllAsync()).Where(l => l.Kind == CommitLeaseKind.Commit));
+        var stored = Assert.Single(await store.ListActiveAsync(cwd, null));
         Assert.Equal(300, stored.TtlSeconds);
     }
 
@@ -574,7 +574,7 @@ public sealed class CommitLeaseToolTests : IDisposable
 
         using var doc = JsonDocument.Parse(result);
         Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
-        var stored = Assert.Single((await store.ListAllAsync()).Where(l => l.Kind == CommitLeaseKind.Commit));
+        var stored = Assert.Single(await store.ListActiveAsync(cwd, null));
         Assert.Equal(900, stored.TtlSeconds);
     }
 
@@ -587,7 +587,7 @@ public sealed class CommitLeaseToolTests : IDisposable
 
         await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", ttl_seconds: 100000);
 
-        var stored = Assert.Single((await store.ListAllAsync()).Where(l => l.Kind == CommitLeaseKind.Commit));
+        var stored = Assert.Single(await store.ListActiveAsync(cwd, null));
         Assert.Equal(3600, stored.TtlSeconds);
     }
 
@@ -600,8 +600,109 @@ public sealed class CommitLeaseToolTests : IDisposable
 
         await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", ttl_seconds: 1);
 
-        var stored = Assert.Single((await store.ListAllAsync()).Where(l => l.Kind == CommitLeaseKind.Commit));
+        var stored = Assert.Single(await store.ListActiveAsync(cwd, null));
         Assert.Equal(60, stored.TtlSeconds);
+    }
+
+    [Fact]
+    public async Task Claim_WithoutHistory_DefaultsTo300()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main");
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        var stored = Assert.Single(await store.ListActiveAsync(cwd, null));
+        Assert.Equal(300, stored.TtlSeconds);
+    }
+
+    [Fact]
+    public async Task Claim_DefaultTtl_ComesFromHistoryP75()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        // p75 of [100, 200, 300, 1200] is 300; the default is then 600.
+        await SeedReleasedAsync(store, cwd, "ses_test_2_000000000000000000000", heldSeconds: 100);
+        await SeedReleasedAsync(store, cwd, "ses_test_2_000000000000000000000", heldSeconds: 200);
+        await SeedReleasedAsync(store, cwd, "ses_test_2_000000000000000000000", heldSeconds: 300);
+        await SeedReleasedAsync(store, cwd, "ses_test_2_000000000000000000000", heldSeconds: 1200);
+        var tool = NewTool(store, cwd);
+
+        var result = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main");
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean());
+        var stored = Assert.Single((await store.ListAllAsync()).Where(l => l.Kind == CommitLeaseKind.Commit && l.CallerId == "ses_test_1_000000000000000000000"));
+        Assert.Equal(600, stored.TtlSeconds);
+    }
+
+    [Fact]
+    public async Task Claim_DefaultTtl_CapsHistoryAt1800()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        // p75 of [4000, 4000, 4000] is 4000; the cap is 1800.
+        await SeedReleasedAsync(store, cwd, "ses_test_2_000000000000000000000", heldSeconds: 4000);
+        await SeedReleasedAsync(store, cwd, "ses_test_2_000000000000000000000", heldSeconds: 4000);
+        await SeedReleasedAsync(store, cwd, "ses_test_2_000000000000000000000", heldSeconds: 4000);
+        var tool = NewTool(store, cwd);
+
+        await tool.LeaseAsync("ses_test_1_000000000000000000000", "main");
+
+        var stored = Assert.Single(await store.ListActiveAsync(cwd, null));
+        Assert.Equal(1800, stored.TtlSeconds);
+    }
+
+    [Fact]
+    public async Task Claim_DefaultTtl_TooFewHistorySamples_Uses300()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        // Only two history samples: not enough data for a meaningful p75.
+        await SeedReleasedAsync(store, cwd, "ses_test_2_000000000000000000000", heldSeconds: 1800);
+        await SeedReleasedAsync(store, cwd, "ses_test_2_000000000000000000000", heldSeconds: 1800);
+        var tool = NewTool(store, cwd);
+
+        await tool.LeaseAsync("ses_test_1_000000000000000000000", "main");
+
+        var stored = Assert.Single(await store.ListActiveAsync(cwd, null));
+        Assert.Equal(300, stored.TtlSeconds);
+    }
+
+    [Fact]
+    public async Task Claim_ExplicitTtl_WinsOverHistory()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        await SeedReleasedAsync(store, cwd, "ses_test_2_000000000000000000000", heldSeconds: 1800);
+        var tool = NewTool(store, cwd);
+
+        await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", ttl_seconds: 60);
+
+        var stored = Assert.Single(await store.ListActiveAsync(cwd, null));
+        Assert.Equal(60, stored.TtlSeconds);
+    }
+
+    [Fact]
+    public async Task Claim_Reclaim_RefreshesTheHeartbeat()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        // Claim once, then let the heartbeat go stale-ish without going stale.
+        await tool.LeaseAsync("ses_test_1_000000000000000000000", "main");
+        _clock.Advance(TimeSpan.FromSeconds(120));
+        var before = (await store.ListAllAsync()).Single(l => l.Kind == CommitLeaseKind.Commit).LastHeartbeat;
+
+        // The idempotent re-claim must extend the heartbeat so a slow hook does not lose the slot.
+        await tool.LeaseAsync("ses_test_1_000000000000000000000", "main");
+        var after = (await store.ListAllAsync()).Single(l => l.Kind == CommitLeaseKind.Commit).LastHeartbeat;
+
+        Assert.True(after > before, "the idempotent re-claim must refresh LastHeartbeat");
     }
 
     [Fact]
@@ -616,6 +717,36 @@ public sealed class CommitLeaseToolTests : IDisposable
         using var doc = JsonDocument.Parse(result);
         Assert.False(string.IsNullOrWhiteSpace(doc.RootElement.GetProperty("error").GetString()));
         Assert.Empty(await store.ListAllAsync());
+    }
+
+    /// <summary>
+    /// Adds a released commit lease to the store with the given hold duration
+    /// and moves it to the recently-released list (released at the current
+    /// clock). Used to give claim-time history a distribution to read.
+    /// </summary>
+    private async Task SeedReleasedAsync(
+        JsonCommitLeaseStore store,
+        string checkout,
+        string callerId,
+        int heldSeconds,
+        string branch = "main")
+    {
+        var since = _clock.GetUtcNow() - TimeSpan.FromSeconds(heldSeconds);
+        var lease = new CommitLeaseRecord
+        {
+            LeaseId = Ulid.NewUlid().ToString(),
+            CallerId = callerId,
+            Kind = CommitLeaseKind.Commit,
+            Checkout = checkout,
+            Branch = branch,
+            Since = since,
+            LastHeartbeat = since,
+            TtlSeconds = 300,
+            Paths = null,
+            Intent = null,
+        };
+        await store.TryLeaseAsync(lease);
+        await store.ReleaseAsync(callerId, CommitLeaseKind.Commit);
     }
 
     private Task SeedCommitLeaseAsync(

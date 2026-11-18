@@ -61,6 +61,12 @@ public sealed class CommitLeaseTool
     private const int MinTtlSeconds = 60;
     private const int MaxTtlSeconds = 3600;
 
+    /// <summary>History-based defaults are clamped to this range: never below the static default, never past half an hour.</summary>
+    private const int MaxHistoryDefaultTtlSeconds = 1800;
+
+    /// <summary>A p75 needs at least this many samples before it is trusted over the static default.</summary>
+    private const int MinHistorySamples = 3;
+
     /// <summary>Path comparisons follow the host file system's case rules (mirrors JsonCommitLeaseStore).</summary>
     private static readonly StringComparison PathComparison
         = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
@@ -88,7 +94,7 @@ public sealed class CommitLeaseTool
     // Parameter names below use snake_case deliberately: the MCP host passes
     // C# parameter names through to the wire schema unchanged, and the
     // commit_* tool surface is snake_case end to end.
-    [McpServerTool(Name = "commit_lease"), Description("Take the commit lease on this checkout and branch before staging or committing. The conflict check is folded in: verdict 'green' and acquired: true - stage. verdict 'red' and acquired: false - do not stage; a foreign live commit lease holds the slot. verdict 'red' on an acquired lease means foreign file leases collide with your paths - stage nothing until they clear. Returns { acquired, lease_id?, since?, verdict, staged_without_lease, conflicting_file_leases? }; when acquired: false, holder info is in { holder_caller_id, since, lease_age_seconds, intent }. Re-claiming your own live lease with the same (or no) intent is idempotent (succeeds with the same lease_id). A different intent against your own live lease returns an intent_mismatch error (lease unchanged). branch is optional and is discovered via git when omitted. The claim issues a lease_token that this session must present to commit_release to end the claim; if this session did not supply one, callers holding a lease will receive a missing_lease_token error from commit_release. Call commit_release once the commit lands - and just the same when the attempt fails. Optional ttl_seconds sets the lease lifetime (clamped to 60-3600, default 300); use a longer window before a slow pre-commit.")]
+    [McpServerTool(Name = "commit_lease"), Description("Take the commit lease on this checkout and branch before staging or committing. The conflict check is folded in: verdict 'green' and acquired: true - stage. verdict 'red' and acquired: false - do not stage; a foreign live commit lease holds the slot. verdict 'red' on an acquired lease means foreign file leases collide with your paths - stage nothing until they clear. Returns { acquired, lease_id?, since?, verdict, staged_without_lease, conflicting_file_leases? }; when acquired: false, holder info is in { holder_caller_id, since, lease_age_seconds, intent }. Re-claiming your own live lease with the same (or no) intent is idempotent (succeeds with the same lease_id, and extends the lease's heartbeat). A different intent against your own live lease returns an intent_mismatch error (lease unchanged). branch is optional and is discovered via git when omitted. The claim issues a lease_token that this session must present to commit_release to end the claim; if this session did not supply one, callers holding a lease will receive a missing_lease_token error from commit_release. Call commit_release once the commit lands - and just the same when the attempt fails. ttl_seconds sets the lease lifetime; when omitted, the default is computed from this checkout's recently-released commit leases (p75 held x2, clamped to 300-1800; explicit ttl_seconds is clamped to 60-3600).")]
     public async Task<string> LeaseAsync(
         [Description("The caller's stable identifier. Any non-blank string of at least 24 characters you choose - a slug, a UUID, or your host's session id; pass the same value on every call. If your identifier carries a date, put the date FIRST (e.g. 2026-11-15-...), never last, so plain lexical sorting matches chronological order. The format is not validated.")] string caller_id,
         [Description("Current branch of the checkout. Optional; discovered via git when omitted. Pass it to skip discovery (e.g. when git is unavailable).")] string? branch = null,
@@ -169,7 +175,9 @@ public sealed class CommitLeaseTool
             // The store does NOT re-issue or re-show it if a sibling reads the
             // file.
             var leaseToken = Ulid.NewUlid().ToString();
-            var ttl = ClampTtl(ttl_seconds ?? DefaultTtlSeconds);
+            var ttl = ttl_seconds is not null
+                ? ClampTtl(ttl_seconds.Value)
+                : await ComputeDefaultTtlAsync(checkout, cancellationToken);
 
             var candidate = new CommitLeaseRecord
             {
@@ -214,6 +222,13 @@ public sealed class CommitLeaseTool
                     });
                 }
 
+                // Extending the slot's liveness is the whole point of a
+                // re-claim during a long commit: without this the slot drifts
+                // toward its TTL boundary with no way back except a fresh
+                // claim after it expires. The intent-mismatch return above
+                // keeps the lease literally unchanged, heartbeat included, so
+                // the refresh stays off that path.
+                await _leaseStore.HeartbeatAsync(ownCommitLease.LeaseId, caller, ownCommitLease.LeaseToken, cancellationToken);
                 return CommitLeaseToolHelpers.Serialize(new CommitLeaseSuccess
                 {
                     Acquired = true,
@@ -291,6 +306,45 @@ public sealed class CommitLeaseTool
     }
 
     private static int ClampTtl(int ttlSeconds) => Math.Clamp(ttlSeconds, MinTtlSeconds, MaxTtlSeconds);
+
+    /// <summary>
+    /// The claim-time default, drawn from what this checkout's recently-released
+    /// commit leases actually held. The p75 held duration, doubled, is the
+    /// "how long a typical commit takes, with headroom" estimate. Fewer than
+    /// <see cref="MinHistorySamples"/> samples falls back to the static
+    /// <see cref="DefaultTtlSeconds"/>; the window never drops below it and
+    /// never exceeds <see cref="MaxHistoryDefaultTtlSeconds"/>.
+    /// </summary>
+    private async Task<int> ComputeDefaultTtlAsync(string checkout, CancellationToken ct)
+    {
+        IReadOnlyList<CommitLeaseRecord> released;
+        try
+        {
+            released = await _leaseStore.ListRecentlyReleasedAsync(checkout, 50, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A broken history read must not block the claim, only the calibration.
+            _logger?.LogWarning(ex, "Could not read released-lease history for the TTL default on {Checkout}; using the static default.", checkout);
+            return DefaultTtlSeconds;
+        }
+
+        var helds = released
+            .Where(r => r.Kind == CommitLeaseKind.Commit && r.ReleasedAt is not null)
+            .Select(r => Math.Max(0, (long)(r.ReleasedAt!.Value - r.Since).TotalSeconds))
+            .OrderBy(seconds => seconds)
+            .ToArray();
+        if (helds.Length < MinHistorySamples)
+        {
+            return DefaultTtlSeconds;
+        }
+
+        var p75 = helds[(int)Math.Ceiling(helds.Length * 0.75) - 1];
+        var candidate = p75 * 2;
+        if (candidate > MaxHistoryDefaultTtlSeconds) return MaxHistoryDefaultTtlSeconds;
+        if (candidate < DefaultTtlSeconds) return DefaultTtlSeconds;
+        return (int)candidate;
+    }
 
     private string[] NormalizeRequestedPaths(string[]? paths, string checkout)
     {
