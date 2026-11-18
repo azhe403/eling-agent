@@ -283,4 +283,213 @@ public sealed class DatabaseConnectionStringFactoryTests
         Assert.Equal("secret", parsed.Password);
         Assert.False(DatabaseConnectionStringFactory.IsServerLevel(DatabaseProvider.MySql, updated));
     }
+
+    [Fact]
+    public void Build_PostgreSql_WritesEveryField()
+    {
+        var fields = new ManualConnectionFields(
+            Host: "10.0.0.5",
+            Port: 5433,
+            Database: "orders",
+            Username: "app",
+            Password: "secret",
+            FilePath: null);
+
+        var connectionString = DatabaseConnectionStringFactory.Build(DatabaseProvider.PostgreSql, fields);
+
+        var parsed = DatabaseConnectionStringFactory.Parse(DatabaseProvider.PostgreSql, connectionString);
+        Assert.NotNull(parsed);
+        Assert.Equal("10.0.0.5", parsed.Host);
+        Assert.Equal(5433, parsed.Port);
+        Assert.Equal("orders", parsed.Database);
+        Assert.Equal("app", parsed.Username);
+        Assert.Equal("secret", parsed.Password);
+    }
+
+    [Fact]
+    public void Build_PostgreSql_WithSeparatorsInPassword_RoundTripsThePassword()
+    {
+        var password = "p@ss;word=1'x";
+        var fields = new ManualConnectionFields(
+            Host: "db.internal",
+            Port: 5432,
+            Database: "orders",
+            Username: "app",
+            Password: password,
+            FilePath: null);
+
+        var connectionString = DatabaseConnectionStringFactory.Build(DatabaseProvider.PostgreSql, fields);
+
+        var parsed = DatabaseConnectionStringFactory.Parse(DatabaseProvider.PostgreSql, connectionString);
+        Assert.NotNull(parsed);
+        Assert.Equal(password, parsed.Password);
+    }
+
+    [Fact]
+    public void Build_PostgreSql_WithoutPort_UsesTheDefaultPort()
+    {
+        var fields = new ManualConnectionFields(
+            Host: "10.0.0.5",
+            Port: null,
+            Database: "orders",
+            Username: null,
+            Password: null,
+            FilePath: null);
+
+        var connectionString = DatabaseConnectionStringFactory.Build(DatabaseProvider.PostgreSql, fields);
+
+        var parsed = DatabaseConnectionStringFactory.Parse(DatabaseProvider.PostgreSql, connectionString);
+        Assert.NotNull(parsed);
+        Assert.Equal(DatabaseConnectionStringFactory.DefaultPostgreSqlPort, parsed.Port);
+    }
+
+    [Fact]
+    public void Build_PostgreSql_WithoutHost_Throws()
+    {
+        var fields = new ManualConnectionFields(
+            Host: "  ",
+            Port: 5432,
+            Database: "orders",
+            Username: null,
+            Password: null,
+            FilePath: null);
+
+        var act = () => DatabaseConnectionStringFactory.Build(DatabaseProvider.PostgreSql, fields);
+
+        Assert.Throws<ArgumentException>(act);
+    }
+
+    [Fact]
+    public void Build_PostgreSql_WithoutDatabase_BuildsAServerLevelConnection()
+    {
+        var fields = new ManualConnectionFields(
+            Host: "10.0.0.5",
+            Port: 5432,
+            Database: null,
+            Username: "app",
+            Password: "secret",
+            FilePath: null);
+
+        var connectionString = DatabaseConnectionStringFactory.Build(DatabaseProvider.PostgreSql, fields);
+
+        var parsed = DatabaseConnectionStringFactory.Parse(DatabaseProvider.PostgreSql, connectionString);
+        Assert.NotNull(parsed);
+        Assert.Equal("10.0.0.5", parsed.Host);
+        Assert.Null(parsed.Database);
+        Assert.True(DatabaseConnectionStringFactory.IsServerLevel(DatabaseProvider.PostgreSql, connectionString));
+    }
+
+    [Fact]
+    public void Build_PostgreSql_NonDefaultPort_RoundTrips()
+    {
+        var fields = new ManualConnectionFields(
+            Host: "10.0.0.5",
+            Port: 55432,
+            Database: "orders",
+            Username: null,
+            Password: null,
+            FilePath: null);
+
+        var connectionString = DatabaseConnectionStringFactory.Build(DatabaseProvider.PostgreSql, fields);
+
+        var parsed = DatabaseConnectionStringFactory.Parse(DatabaseProvider.PostgreSql, connectionString);
+        Assert.NotNull(parsed);
+        Assert.Equal(55432, parsed.Port);
+    }
+
+    [Fact]
+    public void Parse_PostgreSql_Garbage_ReturnsNull()
+    {
+        var parsed = DatabaseConnectionStringFactory.Parse(DatabaseProvider.PostgreSql, "::::");
+
+        Assert.Null(parsed);
+    }
+
+    [Fact]
+    public void WithDatabase_PostgreSql_SetsTheDatabase()
+    {
+        var serverLevel = DatabaseConnectionStringFactory.Build(DatabaseProvider.PostgreSql,
+            new ManualConnectionFields("10.0.0.5", 5432, null, "app", "secret", null));
+
+        var updated = DatabaseConnectionStringFactory.WithDatabase(DatabaseProvider.PostgreSql, serverLevel, "orders");
+
+        var parsed = DatabaseConnectionStringFactory.Parse(DatabaseProvider.PostgreSql, updated);
+        Assert.NotNull(parsed);
+        Assert.Equal("orders", parsed.Database);
+        Assert.False(DatabaseConnectionStringFactory.IsServerLevel(DatabaseProvider.PostgreSql, updated));
+    }
+
+    [Fact]
+    public void IsServerLevel_PostgreSql_TrueWithoutDatabase_FalseWithOne()
+    {
+        var without = DatabaseConnectionStringFactory.Build(DatabaseProvider.PostgreSql,
+            new ManualConnectionFields("10.0.0.5", 5432, null, null, null, null));
+        var with = DatabaseConnectionStringFactory.Build(DatabaseProvider.PostgreSql,
+            new ManualConnectionFields("10.0.0.5", 5432, "orders", null, null, null));
+
+        Assert.True(DatabaseConnectionStringFactory.IsServerLevel(DatabaseProvider.PostgreSql, without));
+        Assert.False(DatabaseConnectionStringFactory.IsServerLevel(DatabaseProvider.PostgreSql, with));
+    }
+
+    [Fact]
+    public void Update_PostgreSql_BlankPassword_KeepsTheStoredPassword()
+    {
+        var stored = DatabaseConnectionStringFactory.Build(DatabaseProvider.PostgreSql,
+            new ManualConnectionFields("10.0.0.5", 5432, "orders", "app", "secret", null));
+        var entered = new ManualConnectionFields(
+            Host: "10.0.0.5",
+            Port: 5433,
+            Database: "orders",
+            Username: "app",
+            Password: null,
+            FilePath: null);
+
+        var updated = DatabaseConnectionStringFactory.Update(DatabaseProvider.PostgreSql, stored, entered);
+
+        var parsed = DatabaseConnectionStringFactory.Parse(DatabaseProvider.PostgreSql, updated);
+        Assert.NotNull(parsed);
+        Assert.Equal(5433, parsed.Port);
+        Assert.Equal("secret", parsed.Password);
+        Assert.Equal("app", parsed.Username);
+        Assert.Equal("orders", parsed.Database);
+    }
+
+    [Fact]
+    public void Update_PostgreSql_BlankDatabase_ClearsTheStoredDatabase()
+    {
+        var stored = DatabaseConnectionStringFactory.Build(DatabaseProvider.PostgreSql,
+            new ManualConnectionFields("10.0.0.5", 5432, "orders", "app", "secret", null));
+        var entered = new ManualConnectionFields(
+            Host: "10.0.0.5",
+            Port: 5432,
+            Database: null,
+            Username: "app",
+            Password: null,
+            FilePath: null);
+
+        var updated = DatabaseConnectionStringFactory.Update(DatabaseProvider.PostgreSql, stored, entered);
+
+        var parsed = DatabaseConnectionStringFactory.Parse(DatabaseProvider.PostgreSql, updated);
+        Assert.NotNull(parsed);
+        Assert.Null(parsed.Database);
+        Assert.True(DatabaseConnectionStringFactory.IsServerLevel(DatabaseProvider.PostgreSql, updated));
+    }
+
+    [Fact]
+    public void Update_PostgreSql_PreservesUnknownKeywords()
+    {
+        var stored = "Host=10.0.0.5;Port=5432;Database=orders;Username=app;Password=secret;SSL Mode=Require";
+        var entered = new ManualConnectionFields(
+            Host: "10.0.0.5",
+            Port: null,
+            Database: "orders",
+            Username: "app",
+            Password: null,
+            FilePath: null);
+
+        var updated = DatabaseConnectionStringFactory.Update(DatabaseProvider.PostgreSql, stored, entered);
+
+        Assert.Contains("SSL Mode=Require", updated, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("secret", DatabaseConnectionStringFactory.Parse(DatabaseProvider.PostgreSql, updated)?.Password);
+    }
 }

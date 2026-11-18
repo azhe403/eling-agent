@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using MySqlConnector;
+using Npgsql;
 using StackExchange.Redis;
 
 namespace Eling.Core.Database;
@@ -17,6 +18,9 @@ public static class DatabaseConnectionStringFactory
 {
     /// <summary>The port MySQL listens on unless the connection says otherwise.</summary>
     public const int DefaultMySqlPort = 3306;
+
+    /// <summary>The port PostgreSQL listens on unless the connection says otherwise.</summary>
+    public const int DefaultPostgreSqlPort = 5432;
 
     /// <summary>The port Redis listens on unless the connection says otherwise.</summary>
     public const int DefaultRedisPort = 6379;
@@ -38,6 +42,7 @@ public static class DatabaseConnectionStringFactory
             DatabaseProvider.MySql => ParseMySql(connectionString),
             DatabaseProvider.Sqlite => ParseSqlite(connectionString),
             DatabaseProvider.Redis => ParseRedis(connectionString),
+            DatabaseProvider.PostgreSql => ParsePostgreSql(connectionString),
             _ => null,
         };
     }
@@ -45,9 +50,9 @@ public static class DatabaseConnectionStringFactory
     /// <summary>
     /// Builds a provider connection string from the given fields.
     ///
-    /// The database is optional for MySQL: a connection without one is a
-    /// server-level connection, and the dashboard lists the databases on that
-    /// server instead of the tables of one of them.
+    /// The database is optional for MySQL and PostgreSQL: a connection
+    /// without one is a server-level connection, and the dashboard lists the
+    /// databases on that server instead of the tables of one of them.
     /// </summary>
     /// <exception cref="ArgumentException">A field the provider needs is missing.</exception>
     public static string Build(DatabaseProvider provider, ManualConnectionFields fields) => provider switch
@@ -55,6 +60,7 @@ public static class DatabaseConnectionStringFactory
         DatabaseProvider.MySql => BuildMySql(fields),
         DatabaseProvider.Sqlite => BuildSqlite(fields),
         DatabaseProvider.Redis => BuildRedis(fields),
+        DatabaseProvider.PostgreSql => BuildPostgreSql(fields),
         _ => throw new ArgumentException($"provider '{provider}' is not supported.", nameof(provider)),
     };
 
@@ -79,6 +85,7 @@ public static class DatabaseConnectionStringFactory
         DatabaseProvider.MySql => UpdateMySql(storedConnectionString, entered),
         DatabaseProvider.Sqlite => UpdateSqlite(storedConnectionString, entered),
         DatabaseProvider.Redis => UpdateRedis(storedConnectionString, entered),
+        DatabaseProvider.PostgreSql => UpdatePostgreSql(storedConnectionString, entered),
         _ => throw new ArgumentException($"provider '{provider}' is not supported.", nameof(provider)),
     };
 
@@ -101,6 +108,7 @@ public static class DatabaseConnectionStringFactory
             // Redis database index is passed per-request via the keys route; the
             // stored connection keeps its default database unless explicitly set.
             DatabaseProvider.Redis => WithRedisDatabase(connectionString, database),
+            DatabaseProvider.PostgreSql => WithPostgreSqlDatabase(connectionString, database),
             _ => throw new ArgumentException($"provider '{provider}' is not supported.", nameof(provider)),
         };
 
@@ -123,15 +131,38 @@ public static class DatabaseConnectionStringFactory
         return builder.ConnectionString;
     }
 
+    private static string WithPostgreSqlDatabase(string connectionString, string database)
+    {
+        var target = NullIfBlank(database)
+            ?? throw new ArgumentException("database must not be blank.", nameof(database));
+
+        NpgsqlConnectionStringBuilder builder;
+        try
+        {
+            builder = new NpgsqlConnectionStringBuilder(connectionString);
+        }
+        catch (Exception)
+        {
+            throw new ArgumentException("the stored connection string is not readable as PostgreSQL.", nameof(connectionString));
+        }
+
+        builder.Database = target;
+        return builder.ConnectionString;
+    }
+
     /// <summary>
     /// True when the connection names no database - a server-level
     /// connection, which reaches every database on the server.
     ///
-    /// Only MySQL has that notion: a SQLite file is its own database.
+    /// Only MySQL and PostgreSQL have that notion: a SQLite file is its own
+    /// database, and a Redis logical database is a per-request index.
     /// </summary>
     public static bool IsServerLevel(DatabaseProvider provider, string? connectionString)
     {
-        if (provider != DatabaseProvider.MySql) return false;
+        if (provider != DatabaseProvider.MySql && provider != DatabaseProvider.PostgreSql)
+        {
+            return false;
+        }
 
         var fields = Parse(provider, connectionString);
         return fields is not null && string.IsNullOrWhiteSpace(fields.Database);
@@ -162,6 +193,34 @@ public static class DatabaseConnectionStringFactory
                 connection.ConnectionString,
                 database)
         };
+    }
+
+    private static ManualConnectionFields? ParsePostgreSql(string connectionString)
+    {
+        NpgsqlConnectionStringBuilder builder;
+        try
+        {
+            builder = new NpgsqlConnectionStringBuilder(connectionString);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        var host = NullIfBlank(builder.Host);
+        if (host is null)
+        {
+            // Nothing that identifies a server: there is no form to pre-fill.
+            return null;
+        }
+
+        return new ManualConnectionFields(
+            host,
+            builder.Port,
+            NullIfBlank(builder.Database),
+            NullIfBlank(builder.Username),
+            NullIfBlank(builder.Password),
+            null);
     }
 
     private static ManualConnectionFields? ParseMySql(string connectionString)
@@ -243,6 +302,100 @@ public static class DatabaseConnectionStringFactory
         }
 
         var password = NullIfBlank(fields.Password);
+        if (password is not null)
+        {
+            builder.Password = password;
+        }
+
+        return builder.ConnectionString;
+    }
+
+    private static string BuildPostgreSql(ManualConnectionFields fields)
+    {
+        var host = NullIfBlank(fields.Host)
+            ?? throw new ArgumentException("host must not be blank.", nameof(fields));
+
+        var port = fields.Port ?? DefaultPostgreSqlPort;
+        if (port < 1 || port > 65535)
+        {
+            throw new ArgumentException("port must be between 1 and 65535.", nameof(fields));
+        }
+
+        var builder = new NpgsqlConnectionStringBuilder
+        {
+            Host = host,
+            Port = port,
+        };
+
+        var database = NullIfBlank(fields.Database);
+        if (database is not null)
+        {
+            builder.Database = database;
+        }
+
+        var username = NullIfBlank(fields.Username);
+        if (username is not null)
+        {
+            builder.Username = username;
+        }
+
+        var password = NullIfBlank(fields.Password);
+        if (password is not null)
+        {
+            builder.Password = password;
+        }
+
+        return builder.ConnectionString;
+    }
+
+    private static string UpdatePostgreSql(string storedConnectionString, ManualConnectionFields entered)
+    {
+        NpgsqlConnectionStringBuilder builder;
+        try
+        {
+            builder = new NpgsqlConnectionStringBuilder(storedConnectionString);
+        }
+        catch (Exception)
+        {
+            // The stored string is not readable as PostgreSQL: build a fresh one.
+            return BuildPostgreSql(entered);
+        }
+
+        // A blank field keeps what was stored, so a form that only knows the
+        // password cannot wipe the host out from under it.
+        var host = NullIfBlank(entered.Host) ?? NullIfBlank(builder.Host)
+            ?? throw new ArgumentException("host must not be blank.", nameof(entered));
+        builder.Host = host;
+
+        if (entered.Port is not null)
+        {
+            var port = entered.Port.Value;
+            if (port < 1 || port > 65535)
+            {
+                throw new ArgumentException("port must be between 1 and 65535.", nameof(entered));
+            }
+            builder.Port = port;
+        }
+
+        var database = NullIfBlank(entered.Database);
+        if (database is null)
+        {
+            // An empty database box means "server-level", so the stored
+            // database goes away. The keyword is dropped, not blanked.
+            builder.Database = null;
+        }
+        else
+        {
+            builder.Database = database;
+        }
+
+        var username = NullIfBlank(entered.Username);
+        if (username is not null)
+        {
+            builder.Username = username;
+        }
+
+        var password = NullIfBlank(entered.Password);
         if (password is not null)
         {
             builder.Password = password;
