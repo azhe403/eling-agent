@@ -201,6 +201,61 @@ public sealed class SkillServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Save_creates_new_skill_reports_created_action()
+    {
+        var service = NewService();
+
+        var result = await service.SaveAsync(NewInput("action-create"));
+
+        Assert.Equal(SkillSaveAction.Created, result.Action);
+    }
+
+    [Fact]
+    public async Task Save_over_existing_skill_reports_updated_action()
+    {
+        var service = NewService();
+        var first = await service.SaveAsync(NewInput("action-update", "first description", "# first"));
+
+        var second = await service.SaveAsync(NewInput("action-update", "second description", "# second"));
+
+        Assert.Equal(SkillSaveAction.Updated, second.Action);
+        Assert.Equal(first.Skill.Id, second.Skill.Id);
+        Assert.Equal(first.Skill.CreatedAt, second.Skill.CreatedAt);
+    }
+
+    [Fact]
+    public async Task Save_after_trash_folder_deleted_out_of_band_reports_updated()
+    {
+        var service = NewService();
+        await service.SaveAsync(NewInput("drift-action-skill"));
+        await service.DeleteAsync("drift-action-skill");
+
+        Directory.Delete(TrashFolder("drift-action-skill"), recursive: true);
+
+        var result = await service.SaveAsync(NewInput("drift-action-skill"));
+
+        Assert.Equal(SkillSaveAction.Updated, result.Action);
+    }
+
+    [Fact]
+    public async Task Save_over_unparsable_file_reports_updated_via_index_mirror()
+    {
+        var service = NewService();
+        var created = await service.SaveAsync(NewInput("broken-skill"));
+        // Break the on-disk SKILL.md so the storage read throws
+        // SkillFrontMatterException; the save must fall back to the index
+        // mirror and still report an update (never a create).
+        await File.WriteAllTextAsync(
+            Path.Combine(SkillFolder("broken-skill"), "SKILL.md"),
+            "---\nid: not-a-ulid\nname: broken-skill\ndescription: d\n---\n\nbroken\n");
+
+        var result = await service.SaveAsync(NewInput("broken-skill", "rewritten", "# rewritten"));
+
+        Assert.Equal(SkillSaveAction.Updated, result.Action);
+        Assert.Equal(created.Skill.Id, result.Skill.Id);
+    }
+
+    [Fact]
     public async Task Rename_after_trash_folder_restored_out_of_band_clears_trashed_marker()
     {
         var service = NewService();
