@@ -416,6 +416,53 @@ public sealed class DatabaseManualConnectionTests : IAsyncLifetime
         Assert.DoesNotContain("Password=", json);
     }
 
+    [Fact]
+    public async Task Create_WithPostgreSqlManualFields_StoresTheProviderAndAnswersWithoutThePassword()
+    {
+        var res = await _client.PostAsync("/api/databases", Json($$"""
+            {
+              "name": "orders@10.0.0.5",
+              "provider": "PostgreSql",
+              "environment": "ReadOnly",
+              "allowAgentMutations": false,
+              "requireApprovalForMutations": true,
+              "manual": {
+                "host": "10.0.0.5",
+                "port": 5432,
+                "database": "orders",
+                "username": "{{Username}}",
+                "password": "{{Password}}"
+              }
+            }
+            """));
+
+        Assert.Equal(HttpStatusCode.Created, res.StatusCode);
+        var body = await res.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(Password, body);
+
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal("PostgreSql", doc.RootElement.GetProperty("provider").GetString());
+        var details = doc.RootElement.GetProperty("details");
+        Assert.Equal(5432, details.GetProperty("port").GetInt32());
+    }
+
+    [Fact]
+    public async Task Create_WithUnknownProviderString_IsRejected()
+    {
+        var res = await _client.PostAsync("/api/databases", Json("""
+            {
+              "name": "x",
+              "provider": "NotAProvider",
+              "environment": "ReadOnly",
+              "allowAgentMutations": false,
+              "requireApprovalForMutations": true,
+              "connectionString": "Host=h;Database=d;"
+            }
+            """));
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
     private static StringContent Json(string body) =>
         new(body, Encoding.UTF8, "application/json");
 }
