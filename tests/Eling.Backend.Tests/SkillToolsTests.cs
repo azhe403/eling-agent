@@ -102,6 +102,29 @@ public sealed class SkillToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task skill_save_reports_action_created_then_updated()
+    {
+        var writeTool = NewWriteTool(NewService());
+
+        var created = await writeTool.SaveAsync("wire-action-skill", "desc", "# body");
+        var updated = await writeTool.SaveAsync("wire-action-skill", "desc v2", "# body v2");
+
+        Assert.Equal("created", created.Action);
+        Assert.Equal("updated", updated.Action);
+    }
+
+    [Fact]
+    public async Task skill_save_serializes_action_on_the_wire()
+    {
+        var writeTool = NewWriteTool(NewService());
+
+        var created = await writeTool.SaveAsync("wire-json-skill", "desc", "# body");
+
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(created, JsonOptions));
+        Assert.Equal("created", doc.RootElement.GetProperty("action").GetString());
+    }
+
+    [Fact]
     public async Task skill_save_rejects_kebab_invalid()
     {
         var writeTool = NewWriteTool(NewService());

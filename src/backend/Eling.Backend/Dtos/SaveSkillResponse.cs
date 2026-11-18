@@ -9,6 +9,14 @@ namespace Eling.Backend.Dtos;
 /// </summary>
 public sealed class SaveSkillResponse
 {
+    /// <summary>
+    /// "created" when no index row existed for the name; "updated" when an
+    /// existing Eling-managed skill was replaced. Lowercase, matching
+    /// memory_save's <c>action</c> wire spelling.
+    /// </summary>
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = "";
+
     [JsonPropertyName("id")]
     public string Id { get; set; } = "";
 
@@ -21,11 +29,12 @@ public sealed class SaveSkillResponse
     [JsonPropertyName("origin")]
     public string Origin { get; set; } = "";
 
-    public static SaveSkillResponse From(Skill skill, string path) => new()
+    public static SaveSkillResponse From(SkillSaveResult result, string path) => new()
     {
-        Id = skill.Id.Value,
-        Name = skill.Name,
+        Action = result.Action == SkillSaveAction.Created ? "created" : "updated",
+        Id = result.Skill.Id.Value,
+        Name = result.Skill.Name,
         Path = path,
-        Origin = skill.Origin.WireName
+        Origin = result.Skill.Origin.WireName
     };
 }
