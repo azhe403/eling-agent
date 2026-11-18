@@ -1,7 +1,7 @@
 # PostgreSQL Support — Design Specification (parity with MySQL)
 
 - **Date:** 2026-11-12
-- **Status:** Proposed (awaiting user review)
+- **Status:** Shipped (2026-11-18)
 - **Target Projects:** `Eling.Core`, `Eling.Backend`, `Eling.Dashboard`, `tests/Eling.Core.Tests`, `tests/Eling.Backend.Tests`, `Eling.Dashboard` unit tests
 - **Supersedes:** the PostgreSQL deferral in `2026-10-13-db-connection-design.md` §8 ("PostgreSQL (Npgsql) and SQL Server adapters — Later — factory already fails cleanly for them"). SQL Server stays deferred.
 
