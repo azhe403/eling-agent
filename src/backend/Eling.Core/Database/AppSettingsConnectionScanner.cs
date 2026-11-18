@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using MySqlConnector;
+using Npgsql;
 using StackExchange.Redis;
 
 namespace Eling.Core.Database;
@@ -255,6 +256,19 @@ public sealed class AppSettingsConnectionScanner
         string masked = "***";
         bool classified = false;
 
+        // Raw-key pre-scan: the MySQL and Npgsql builders both accept Host=
+        // (MySQL aliases it to Server=), so the split has to happen before
+        // either builder votes. Server= wins for MySQL; Host= wins for
+        // PostgreSQL; mixed strings resolve to MySQL.
+        var hasServer = value.Contains("Server=", StringComparison.OrdinalIgnoreCase);
+        var hasHost = value.Contains("Host=", StringComparison.OrdinalIgnoreCase);
+
+        if (!hasServer && hasHost)
+        {
+            var pg = TryClassifyPostgreSql(key, value);
+            if (pg is not null) return pg;
+        }
+
         try
         {
             var mb = new MySqlConnectionStringBuilder(value);
@@ -326,6 +340,17 @@ public sealed class AppSettingsConnectionScanner
             }
         }
 
+        if (!classified && !hasServer && !hasHost && HasNpgsqlOnlyKeyword(value))
+        {
+            // Exotic keying without Host= or Server=: the Npgsql-only keyword
+            // is the tell. With none of those, the MySQL attempt above stands.
+            var pg = TryClassifyPostgreSql(key, value);
+            if (pg is not null)
+            {
+                return pg;
+            }
+        }
+
         if (!classified)
         {
             provider = null;
@@ -336,6 +361,40 @@ public sealed class AppSettingsConnectionScanner
 
         return new DetectedConnection(key, name, value, masked, provider, rejection);
     }
+
+    /// <summary>
+    /// A Postgres string in the shape the import convention requires: a host
+    /// and a database. Host-only values are deliberately not importable —
+    /// the naming convention derives from the database. Null when the value
+    /// does not parse or lacks either field.
+    /// </summary>
+    private static DetectedConnection? TryClassifyPostgreSql(string key, string value)
+    {
+        try
+        {
+            var builder = new NpgsqlConnectionStringBuilder(value);
+            if (string.IsNullOrWhiteSpace(builder.Host) || string.IsNullOrWhiteSpace(builder.Database))
+            {
+                return null;
+            }
+
+            var name = builder.Port != 5432
+                ? $"{builder.Database}@{builder.Host}:{builder.Port}"
+                : $"{builder.Database}@{builder.Host}";
+            var maskedBuilder = new NpgsqlConnectionStringBuilder(value) { Password = "***" };
+            return new DetectedConnection(key, name, value, maskedBuilder.ToString(), DatabaseProvider.PostgreSql, null);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool HasNpgsqlOnlyKeyword(string value) =>
+        value.Contains("SSL Mode=", StringComparison.OrdinalIgnoreCase)
+        || value.Contains("Search Path=", StringComparison.OrdinalIgnoreCase)
+        || value.Contains("Application Name=", StringComparison.OrdinalIgnoreCase)
+        || value.Contains("Include Error Details=", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Appends a sibling "Password" property to a Redis connection string when

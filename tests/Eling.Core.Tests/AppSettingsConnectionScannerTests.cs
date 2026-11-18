@@ -223,6 +223,69 @@ public sealed class AppSettingsConnectionScannerTests : IDisposable
         Assert.Equal("***", detected[0].MaskedConnectionString);
     }
 
+    [Fact]
+    public void Scan_ClassifiesPostgreSql_AndMasksThePassword()
+    {
+        // Arrange
+        Write("appsettings.json", ConnectionStrings("Default",
+            "Host=pg.internal;Port=5432;Database=orders;Username=app;Password=pg-secret;"));
+
+        // Act
+        var detected = new AppSettingsConnectionScanner(_dir).Scan();
+
+        // Assert
+        Assert.Single(detected);
+        Assert.Equal(DatabaseProvider.PostgreSql, detected[0].Provider);
+        Assert.Equal("orders@pg.internal", detected[0].Name);
+        Assert.Contains("Password=***", detected[0].MaskedConnectionString);
+        Assert.DoesNotContain("pg-secret", detected[0].MaskedConnectionString);
+    }
+
+    [Fact]
+    public void Scan_PostgreSql_NonDefaultPort_SuffixedInTheName()
+    {
+        // Arrange
+        Write("appsettings.json", ConnectionStrings("Default",
+            "Host=pg.internal;Port=5433;Database=orders;Username=app;Password=pg-secret;"));
+
+        // Act
+        var detected = new AppSettingsConnectionScanner(_dir).Scan();
+
+        // Assert
+        Assert.Equal("orders@pg.internal:5433", detected[0].Name);
+    }
+
+    [Fact]
+    public void Scan_HostKeyedStringWithServerKey_ClassifiesAsMySql()
+    {
+        // Arrange - the mixed string resolves to the keyword's owner.
+        Write("appsettings.json", ConnectionStrings("Default",
+            "Host=pg.internal;Server=mysql.internal;Database=orders;"));
+
+        // Act
+        var detected = new AppSettingsConnectionScanner(_dir).Scan();
+
+        // Assert
+        Assert.Equal(DatabaseProvider.MySql, detected[0].Provider);
+    }
+
+    [Fact]
+    public void Scan_HostKeyedStringWithoutDatabase_IsNotImportable()
+    {
+        // Arrange - no database means no {db}@{host} name to derive; the value
+        // stays visible but not importable.
+        Write("appsettings.json", ConnectionStrings("Default",
+            "Host=pg.internal;Username=app;Password=pg-secret;"));
+
+        // Act
+        var detected = new AppSettingsConnectionScanner(_dir).Scan();
+
+        // Assert
+        Assert.Single(detected);
+        Assert.Null(detected[0].Provider);
+        Assert.Equal("unrecognized connection string", detected[0].RejectionReason);
+    }
+
     private void Write(string fileName, string content)
         => File.WriteAllText(Path.Combine(_dir, fileName), content);
 
