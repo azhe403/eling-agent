@@ -100,6 +100,16 @@ public static class BrowseQueryBuilder
             var col = Quote(filter.Column);
             var columnType = TypeOf(filter.Column);
 
+            // PostgreSQL has no implicit text/numeric/uuid/timestamp cast in
+            // comparison operators, so a raw string bound to one of those
+            // columns is 42883. MySQL and SQLite coerce like the browser
+            // expects; PG needs the cast spelled out.
+            var isPg = provider == DatabaseProvider.PostgreSql;
+            var pgText = isPg && IsPgTextType(columnType);
+            var likeCol = isPg && !pgText ? col + "::text" : col;
+            var eqCast = isPg ? PgScalarCast(columnType) : null;
+            var comparison = eqCast is null ? "" : "::" + eqCast;
+
             if (NoValueOps.Contains(op))
             {
                 clauseSql.Add(op == "isNull" ? $"{col} IS NULL" : $"{col} IS NOT NULL");
@@ -108,7 +118,7 @@ public static class BrowseQueryBuilder
                 continue;
             }
 
-            var bind = CoerceValue(filter.Column, filter.Value, columnType);
+            var bind = CoerceValue(filter.Column, filter.Value, columnType, isPg);
             parameters.Add(new SqlParam("@p" + parameters.Count, bind));
             var name = "@p" + (parameters.Count - 1);
             var literal = LiteralFor(bind);
@@ -116,12 +126,12 @@ public static class BrowseQueryBuilder
             string likePattern;
             switch (op)
             {
-                case "eq": clauseSql.Add($"{col} = {name}"); clauseText.Add($"{filter.Column} = {literal}"); break;
-                case "neq": clauseSql.Add($"{col} <> {name}"); clauseText.Add($"{filter.Column} <> {literal}"); break;
-                case "gt": clauseSql.Add($"{col} > {name}"); clauseText.Add($"{filter.Column} > {literal}"); break;
-                case "gte": clauseSql.Add($"{col} >= {name}"); clauseText.Add($"{filter.Column} >= {literal}"); break;
-                case "lt": clauseSql.Add($"{col} < {name}"); clauseText.Add($"{filter.Column} < {literal}"); break;
-                case "lte": clauseSql.Add($"{col} <= {name}"); clauseText.Add($"{filter.Column} <= {literal}"); break;
+                case "eq": clauseSql.Add($"{col} = {name}{comparison}"); clauseText.Add($"{filter.Column} = {literal}"); break;
+                case "neq": clauseSql.Add($"{col} <> {name}{comparison}"); clauseText.Add($"{filter.Column} <> {literal}"); break;
+                case "gt": clauseSql.Add($"{col} > {name}{comparison}"); clauseText.Add($"{filter.Column} > {literal}"); break;
+                case "gte": clauseSql.Add($"{col} >= {name}{comparison}"); clauseText.Add($"{filter.Column} >= {literal}"); break;
+                case "lt": clauseSql.Add($"{col} < {name}{comparison}"); clauseText.Add($"{filter.Column} < {literal}"); break;
+                case "lte": clauseSql.Add($"{col} <= {name}{comparison}"); clauseText.Add($"{filter.Column} <= {literal}"); break;
                 case "contains":
                 case "notContains":
                 case "startsWith":
@@ -130,7 +140,7 @@ public static class BrowseQueryBuilder
                     parameters[parameters.Count - 1] = new SqlParam(name, likePattern);
                     literal = LiteralFor(likePattern);
                     var likeText = $"{filter.Column} LIKE {literal}";
-                    var likeSql = $"{col} LIKE {name} ESCAPE '!'";
+                    var likeSql = $"{likeCol} LIKE {name} ESCAPE '!'";
                     if (op == "notContains")
                     {
                         clauseSql.Add($"NOT ({likeSql})");
@@ -242,6 +252,38 @@ public static class BrowseQueryBuilder
         // No thousands separator: '1,234' binds as 1234 otherwise, silently.
         const NumberStyles NumericStyle = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint;
 
+        // PostgreSQL: the column type is the source of truth for whether the
+        // value binds as text. Text-like families accept LIKE directly;
+        // everything else needs the column cast (LIKE) or the parameter cast.
+        static bool IsPgTextType(string? dataType) =>
+            TrimPgType(dataType) is "text" or "character varying" or "varchar" or "character"
+                or "char" or "name" or "citext";
+
+        // Collapses runs of spaces: "timestamp  without" is spellable only one way here.
+        static string TrimPgType(string? dataType)
+        {
+            var t = (dataType ?? "").Trim().ToLowerInvariant();
+            var cut = t.IndexOf('(');
+            if (cut > 0) t = t[..cut];
+            return string.Join(' ', t.Split([' '], StringSplitOptions.RemoveEmptyEntries));
+        }
+
+        static string? PgScalarCast(string? dataType)
+        {
+            var t = (dataType ?? "").Trim().ToLowerInvariant();
+            t = string.Join(' ', t.Split([' '], StringSplitOptions.RemoveEmptyEntries));
+            return t switch
+            {
+                "uuid" => "uuid",
+                "date" => "date",
+                "time" or "time without time zone" => "time",
+                "time with time zone" or "timetz" => "timetz",
+                "timestamp" or "timestamp without time zone" or "datetime" => "timestamp",
+                "timestamp with time zone" or "timestamptz" => "timestamptz",
+                _ => null,
+            };
+        }
+
         static string FamilyOf(string? dataType)
         {
             var t = (dataType ?? "").ToLowerInvariant().Trim();
@@ -257,7 +299,7 @@ public static class BrowseQueryBuilder
             };
         }
 
-        object CoerceValue(string column, string? raw, string? columnType)
+        object CoerceValue(string column, string? raw, string? columnType, bool isPg)
         {
             var value = raw ?? "";
             var family = FamilyOf(columnType);
@@ -266,6 +308,13 @@ public static class BrowseQueryBuilder
             if (family == "boolean")
             {
                 var b = value.Trim();
+                if (isPg)
+                {
+                    if (b.Equals("true", StringComparison.OrdinalIgnoreCase) || b.Equals("1", StringComparison.Ordinal)) return true;
+                    if (b.Equals("false", StringComparison.OrdinalIgnoreCase) || b.Equals("0", StringComparison.Ordinal)) return false;
+                    if (decimal.TryParse(value, NumericStyle, CultureInfo.InvariantCulture, out var pgBool)) return pgBool != 0;
+                    throw new BrowseQueryException($"column '{column}' is boolean; '{value}' is not true/false");
+                }
                 if (b.Equals("true", StringComparison.OrdinalIgnoreCase) || b.Equals("1", StringComparison.Ordinal)) return 1;
                 if (b.Equals("false", StringComparison.OrdinalIgnoreCase) || b.Equals("0", StringComparison.Ordinal)) return 0;
                 if (decimal.TryParse(value, NumericStyle, CultureInfo.InvariantCulture, out var d)) return d;

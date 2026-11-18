@@ -342,6 +342,57 @@ public sealed class BrowseQueryBuilderTests
     }
 
     [Fact]
+    public void Build_ContainsOnUuidColumn_PostgreSql_CastsColumnToText()
+    {
+        var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["attachment_id"] = "uuid" };
+
+        var plan = Build([F("attachment_id", "contains", "abc")], provider: DatabaseProvider.PostgreSql, columnTypes: types);
+
+        Assert.Contains("\"attachment_id\"::text LIKE @p0", plan.Rows.Sql);
+        Assert.Contains("ESCAPE '!'", plan.Rows.Sql);
+    }
+
+    [Fact]
+    public void Build_ContainsOnUuidColumn_MySql_LeavesTheColumnAlone()
+    {
+        var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["attachment_id"] = "uuid" };
+
+        var plan = Build([F("attachment_id", "contains", "abc")], provider: DatabaseProvider.MySql, columnTypes: types);
+
+        Assert.DoesNotContain("::text", plan.Rows.Sql);
+    }
+
+    [Fact]
+    public void Build_EqualityOnTimestamp_PostgreSql_CastsParameter()
+    {
+        var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["created_at"] = "timestamp without time zone" };
+
+        var plan = Build([F("created_at", "eq", "2026-06-30")], provider: DatabaseProvider.PostgreSql, columnTypes: types);
+
+        Assert.Contains("\"created_at\" = @p0::timestamp", plan.Rows.Sql);
+    }
+
+    [Fact]
+    public void Build_EqualityOnUuid_PostgreSql_CastsParameter()
+    {
+        var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["attachment_id"] = "uuid" };
+
+        var plan = Build([F("attachment_id", "eq", "4e88fcde-4946-4745-a55e-4fef1d2fd621")], provider: DatabaseProvider.PostgreSql, columnTypes: types);
+
+        Assert.Contains("\"attachment_id\" = @p0::uuid", plan.Rows.Sql);
+    }
+
+    [Fact]
+    public void Build_BoolEquality_PostgreSql_BindsBool()
+    {
+        var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["is_active"] = "boolean" };
+
+        var plan = Build([F("is_active", "eq", "true")], provider: DatabaseProvider.PostgreSql, columnTypes: types);
+
+        Assert.Equal(true, plan.Rows.Parameters[0].Value);
+    }
+
+    [Fact]
     public void Build_IdentifierQuoting_DoublesQuoteChar()
     {
         var weirdTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
