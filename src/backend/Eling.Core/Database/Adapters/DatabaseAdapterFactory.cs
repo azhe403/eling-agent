@@ -11,6 +11,7 @@ public static class DatabaseAdapterFactory
         {
             DatabaseProvider.Sqlite => new SqliteDatabaseAdapter(connection),
             DatabaseProvider.MySql => new MySqlDatabaseAdapter(connection),
+            DatabaseProvider.PostgreSql => new PostgreSqlDatabaseAdapter(connection),
             _ => throw new NotSupportedException($"Provider '{connection.Provider}' is not supported.")
         };
     }
