@@ -1,3 +1,4 @@
+import { X } from "lucide-react"
 import { DbConn, DbTab } from "@/app/dashboard/databases/types"
 import { isRedisTab, tabKey } from "@/app/dashboard/databases/db-tabs"
 
@@ -30,28 +31,33 @@ export const ExplorerTabBar = ({
     <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b pb-2">
       {openTabs.map((t, idx) => {
         const isActive = activeTable ? tabKey(activeTable) === tabKey(t) : false
+        const connName = conns.find((c) => c.id === t.connId)?.name
+        const lineTwo = isRedisTab(t) ? `db${t.redisDb ?? 0}` : t.table
         return (
           <div
             key={tabKey(t)}
-            className={`flex cursor-pointer items-center gap-1 rounded border px-2 py-1 text-xs ${
+            className={`flex min-w-[208px] cursor-pointer items-center gap-1 rounded border px-2 py-1 text-xs ${
               isActive ? "border-accent bg-accent font-medium" : "border-transparent hover:bg-accent/50"
             }`}
+            title={connName ? `${connName} · ${lineTwo}` : lineTwo}
             onClick={() => onActivateTab(idx)}
             onContextMenu={(e) => onTabContextMenu(e, idx)}
           >
-            <span className="max-w-[140px] truncate">
-              {isRedisTab(t)
-                ? `${conns.find((c) => c.id === t.connId)?.name ?? t.table} · db${t.redisDb ?? 0}`
-                : t.table}
+            <span className="flex max-w-[160px] flex-col leading-tight">
+              <span className="text-[10px] font-normal text-muted-foreground truncate">
+                {connName ?? t.connId}
+              </span>
+              <span className="truncate">{lineTwo}</span>
             </span>
             <button
-              className="ml-1 text-muted-foreground hover:text-foreground"
+              className="ml-auto self-center rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+              aria-label={`Close tab ${lineTwo}`}
               onClick={(e) => {
                 e.stopPropagation()
                 onCloseTab(idx)
               }}
             >
-              ×
+              <X className="size-5" strokeWidth={2.25} />
             </button>
           </div>
         )
