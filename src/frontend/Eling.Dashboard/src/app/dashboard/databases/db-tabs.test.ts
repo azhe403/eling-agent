@@ -94,6 +94,7 @@ describe("sanitizePersistedTab", () => {
       browseFilters: [{ column: "name", op: "eq" as const, value: "a", enabled: false, logic: "and" as const }],
       browseSort: [{ column: "id", order: "asc" as const }],
       manualCondition: "x = 1",
+      manualEnabled: false,
       filterOpen: true,
     }
     const restored = sanitizePersistedTab(JSON.parse(JSON.stringify(persistableTab(t))))

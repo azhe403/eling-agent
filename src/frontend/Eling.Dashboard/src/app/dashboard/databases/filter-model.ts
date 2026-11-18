@@ -108,6 +108,8 @@ export interface BrowseStatePayload {
   filters: BrowseFilter[]
   sort: BrowseSort[]
   manualCondition: string
+  /** Whether the manual condition participates. Defaults to true when absent (old envelopes). */
+  manualEnabled: boolean
 }
 
 const emptyPayload = (payload: BrowseStatePayload): boolean =>
@@ -128,6 +130,7 @@ export const parseBrowseParam = (raw: string | null | undefined): BrowseStatePay
       filters: sanitizeBrowseFilters(r.filters),
       sort: sanitizeBrowseSort(r.sort),
       manualCondition: sanitizeManualCondition(r.manualCondition),
+      manualEnabled: r.manualEnabled !== false,
     }
     return emptyPayload(payload) ? null : payload
   } catch {
@@ -231,6 +234,10 @@ const DATETIME_OPS: OpOption[] = [
   IS_NOT_NULL,
 ]
 
+/** The operator a fresh condition row starts with. Text columns favor substring matching; other families have no `contains`, so they start at equality. */
+export const defaultOpFor = (column: string, columnTypes: Record<string, string>): BrowseOp =>
+  columnKind(columnTypes[column] ?? "") === "text" ? "contains" : "eq"
+
 /** The operators a column of the given kind offers. Every list ends with isNull/isNotNull. */
 export const opsFor = (kind: ColumnKind): OpOption[] => {
   switch (kind) {
@@ -265,11 +272,15 @@ export const toggleSortColumn = (sort: BrowseSort[], column: string): BrowseSort
   return [{ column, order: next }]
 }
 
-/** How many committed things are active: enabled conditions + a non-blank manual condition. */
-export const activeCount = (filters: BrowseFilter[], manualCondition: string | null | undefined): number =>
-  filters.filter((f) => f.enabled).length + (manualCondition?.trim() ? 1 : 0)
+/** How many committed things are active: enabled conditions + a non-blank manual condition that is enabled. */
+export const activeCount = (
+  filters: BrowseFilter[],
+  manualCondition: string | null | undefined,
+  manualEnabled?: boolean,
+): number =>
+  filters.filter((f) => f.enabled).length + (manualEnabled !== false && manualCondition?.trim() ? 1 : 0)
 
-/** The `/browse` request body, keys in wire order. */
+/** The `/browse` request body, keys in wire order. A disabled manual condition is never sent. */
 export const serializeBrowse = (
   table: string,
   database: string | null | undefined,
@@ -278,6 +289,7 @@ export const serializeBrowse = (
   filters: BrowseFilter[],
   sort: BrowseSort[],
   manualCondition: string | null | undefined,
+  manualEnabled?: boolean,
 ) => ({
   table,
   database: database ?? null,
@@ -285,5 +297,5 @@ export const serializeBrowse = (
   limit,
   filters,
   sort,
-  manualCondition: manualCondition ?? null,
+  manualCondition: manualEnabled === false ? null : manualCondition?.trim() ? manualCondition : null,
 })

@@ -82,13 +82,14 @@ export function useTableData({
       const page = effectiveBrowsePage(current)
       const committedFilters = current?.browseFilters ?? []
       const committedSort = current?.browseSort ?? []
-      const manualCondition = current?.manualCondition?.trim() ? current.manualCondition : null
+      const manualCondition =
+        current?.manualEnabled === false ? null : current?.manualCondition?.trim() ? current.manualCondition : null
       try {
         const data = await apiFetch<BrowseResponse>(API + "/" + id + "/browse", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            ...serializeBrowse(table, database ?? null, page, limit, committedFilters, committedSort, manualCondition),
+            ...serializeBrowse(table, database ?? null, page, limit, committedFilters, committedSort, manualCondition, current?.manualEnabled),
             refresh,
           }),
         })

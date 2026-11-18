@@ -33,6 +33,8 @@ export type DbTab = {
   browseSort?: BrowseSort[]
   /** The committed raw manual WHERE fragment, ANDed verbatim. Session view state. */
   manualCondition?: string
+  /** Whether the manual condition participates in /browse. Absent = enabled. */
+  manualEnabled?: boolean
   /** Whether the filter panel is open in this tab. Persisted with the tab. */
   filterOpen?: boolean
 }
@@ -85,6 +87,7 @@ export const sanitizePersistedTab = (t: unknown): DbTab | null => {
   tab.browseFilters = sanitizeBrowseFilters(raw.browseFilters)
   tab.browseSort = sanitizeBrowseSort(raw.browseSort)
   tab.manualCondition = sanitizeManualCondition(raw.manualCondition)
+  if (raw.manualEnabled === false) tab.manualEnabled = false
   if (raw.filterOpen === true) tab.filterOpen = true
   return tab
 }

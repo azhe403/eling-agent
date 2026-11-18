@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   opsFor,
   columnKind,
+  defaultOpFor,
   type BrowseFilter,
   type BrowseSort,
 } from "../../filter-model"
@@ -19,11 +20,11 @@ export interface FilterPanelProps {
   /** Column name → declared data type (e.g. "tinyint(1)"). Empty when the schema is unknown. */
   columnTypes: Record<string, string>
   /** The tab's committed state; drafts start from it on mount. */
-  initial: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string }
+  initial: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string; manualEnabled?: boolean }
   /** The tab's committed sort, live. The panel's sort rows follow it until the reader edits them. */
   committedSort: BrowseSort[]
   /** Commit the current draft (grid refetches, page resets to 1). */
-  onApply: (next: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string }) => void
+  onApply: (next: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string; manualEnabled: boolean }) => void
   /** True while the committed state is being refetched - locks Apply so a spam-click does not fire duplicate /browse calls. */
   applyPending?: boolean
   /** Close the panel without applying - unsaved drafts are discarded. */
@@ -61,6 +62,7 @@ export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onAp
   const [draftSort, setDraftSort] = useState<BrowseSort[]>(initial.sort)
   const [sortDirty, setSortDirty] = useState(false)
   const [manualCondition, setManualCondition] = useState(initial.manualCondition)
+  const [manualEnabled, setManualEnabled] = useState(initial.manualEnabled !== false)
 
   // One source of truth for the sort rows: committed until the reader edits
   // them here, the reader's draft afterwards. Header changes ride through on
@@ -73,13 +75,31 @@ export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onAp
 
   const defaultColumn = useMemo(() => columns.find((c) => !/^id$/i.test(c)) ?? columns[0] ?? "", [columns])
 
-  const apply = () => {
+  // Single choke point for anything that commits: Apply button, Enter, or an
+  // immediate-apply checkbox toggle. Locked while a refetch is in flight.
+  const commit = (nextFilters: BrowseFilter[], nextManualEnabled: boolean) => {
     if (applyPending) return
-    onApply({ filters, sort, manualCondition })
+    onApply({ filters: nextFilters, sort, manualCondition, manualEnabled: nextManualEnabled })
+  }
+  const apply = () => commit(filters, manualEnabled)
+
+  // Checkbox toggles commit straight away, like clicking Apply: the grid
+  // refetches against the server-side builder on every toggle.
+  const toggleRow = (i: number, enabled: boolean) => {
+    const nextFilters = filters.map((item, j) => (j === i ? { ...item, enabled } : item))
+    setFilters(nextFilters)
+    commit(nextFilters, manualEnabled)
+  }
+  const toggleManualEnabled = (enabled: boolean) => {
+    setManualEnabled(enabled)
+    commit(filters, enabled)
   }
 
   const addCondition = () =>
-    setFilters((f) => [...f, { column: defaultColumn, op: "eq", value: "", enabled: true, logic: f.length === 0 ? "first" : "and" }])
+    setFilters((f) => [
+      ...f,
+      { column: defaultColumn, op: defaultOpFor(defaultColumn, columnTypes), value: "", enabled: true, logic: f.length === 0 ? "first" : "and" },
+    ])
 
   const addSort = () =>
     editSort((s) => {
@@ -94,8 +114,12 @@ export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onAp
   const patchSort = (i: number, patch: Partial<BrowseSort>) =>
     editSort((s) => s.map((item, j) => (j === i ? { ...item, ...patch } : item)))
 
-  const setAllEnabled = (enabled: boolean) =>
-    setFilters((f) => f.map((item) => ({ ...item, enabled })))
+  // Enable all / Disable all commit straight away, same as a checkbox toggle.
+  const setAllEnabled = (enabled: boolean) => {
+    const nextFilters = filters.map((item) => ({ ...item, enabled }))
+    setFilters(nextFilters)
+    commit(nextFilters, manualEnabled)
+  }
 
   const opOptions = (column: string) => opsFor(columnKind(columnTypes[column] ?? ""))
 
@@ -121,12 +145,23 @@ export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onAp
   return (
     <div className="space-y-2 rounded-md border bg-muted/30 p-2" onKeyDown={onKeyDown}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
-        <label className="w-full shrink-0 text-xs font-medium text-muted-foreground sm:w-44" htmlFor="manual-condition">
+        <label
+          className="flex w-full shrink-0 cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground sm:w-44"
+          htmlFor="manual-condition"
+        >
+          <input
+            type="checkbox"
+            className="size-4 shrink-0 cursor-pointer accent-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+            checked={manualEnabled}
+            onChange={(e) => toggleManualEnabled(e.target.checked)}
+            disabled={applyPending}
+            aria-label="Manual condition enabled"
+          />
           Manual query condition
         </label>
         <Input
           id="manual-condition"
-          className="h-8 w-full flex-1 font-mono text-xs"
+          className={`h-8 w-full flex-1 font-mono text-xs transition-opacity ${manualEnabled ? "" : "opacity-50"}`}
           placeholder="status = 1 AND name LIKE 'A%'"
           spellCheck={false}
           value={manualCondition}
@@ -143,7 +178,7 @@ export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onAp
         </button>
       </div>
       <p className="text-[11px] text-muted-foreground">
-        ANDed verbatim, raw SQL. Leave empty to filter only by the rows below.
+        ANDed verbatim, raw SQL. Leave empty to filter only by the rows below. Unticking applies immediately.
       </p>
 
       {filters.length > 0 ? (
@@ -155,9 +190,10 @@ export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onAp
               <div key={i} className={`flex flex-wrap items-center gap-1.5 rounded-md border border-border/30 bg-muted/20 p-1.5 ${f.enabled ? "" : "opacity-50"}`}>
                 <input
                   type="checkbox"
-                  className="size-4 shrink-0 cursor-pointer accent-emerald-600"
+                  className="size-4 shrink-0 cursor-pointer accent-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
                   checked={f.enabled}
-                  onChange={(e) => patchFilter(i, { enabled: e.target.checked })}
+                  onChange={(e) => toggleRow(i, e.target.checked)}
+                  disabled={applyPending}
                   aria-label="Enabled"
                 />
                 <Select
@@ -175,7 +211,15 @@ export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onAp
                     <SelectItem value="or">Or (OR)</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={f.column} onValueChange={(v) => v && patchFilter(i, { column: v })} items={identityItems(columns)}>
+                <Select
+                  value={f.column}
+                  onValueChange={(v) => {
+                    if (!v) return
+                    const allowed = opOptions(v).map((o) => o.value)
+                    patchFilter(i, { column: v, op: allowed.includes(f.op) ? f.op : defaultOpFor(v, columnTypes) })
+                  }}
+                  items={identityItems(columns)}
+                >
                   <SelectTrigger className={`${selectClass} min-w-36 max-w-56 truncate`} aria-label="Column">
                     <SelectValue />
                   </SelectTrigger>
@@ -282,10 +326,10 @@ export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onAp
           <Plus className="mr-1 size-3.5" /> Add sort
         </Button>
         <span className="ml-auto flex items-center gap-1.5">
-          <Button variant="outline" size="sm" onClick={() => setAllEnabled(true)} disabled={filters.length === 0} className="cursor-pointer">
+          <Button variant="outline" size="sm" onClick={() => setAllEnabled(true)} disabled={filters.length === 0 || applyPending} className="cursor-pointer">
             Enable all
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setAllEnabled(false)} disabled={filters.length === 0} className="cursor-pointer">
+          <Button variant="outline" size="sm" onClick={() => setAllEnabled(false)} disabled={filters.length === 0 || applyPending} className="cursor-pointer">
             Disable all
           </Button>
           <Button
@@ -299,7 +343,8 @@ export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onAp
               setDraftSort([])
               setSortDirty(false)
               setManualCondition("")
-              onApply({ filters: [], sort: [], manualCondition: "" })
+              setManualEnabled(true)
+              onApply({ filters: [], sort: [], manualCondition: "", manualEnabled: true })
             }}
           >
             Clear all

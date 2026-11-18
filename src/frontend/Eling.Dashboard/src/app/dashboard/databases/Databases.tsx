@@ -423,11 +423,12 @@ export function Databases() {
   // Committing a filter/sort set: session view state, page resets to 1,
   // the grid refetches against the server-side builder.
   const applyBrowse = useCallback(
-    (next: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string }) => {
+    (next: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string; manualEnabled: boolean }) => {
       const t = patchActiveTab({
         browseFilters: next.filters,
         browseSort: next.sort,
         manualCondition: next.manualCondition,
+        manualEnabled: next.manualEnabled,
         browsePage: 1,
       })
       if (!t) return
@@ -731,6 +732,7 @@ export function Databases() {
           browseFilters: urlBrowse?.filters ?? tableSaved?.browseFilters,
           browseSort: urlBrowse?.sort ?? tableSaved?.browseSort,
           manualCondition: urlBrowse?.manualCondition ?? tableSaved?.manualCondition,
+          manualEnabled: urlBrowse?.manualEnabled ?? tableSaved?.manualEnabled,
           filterOpen: tableSaved?.filterOpen,
         }
         setActiveTable(restored)
@@ -795,6 +797,7 @@ export function Databases() {
         filters: activeTable?.browseFilters ?? [],
         sort: activeTable?.browseSort ?? [],
         manualCondition: activeTable?.manualCondition ?? "",
+        manualEnabled: activeTable?.manualEnabled !== false,
       })
       if (browseParam) params.set("browse", browseParam)
       // The chosen pair travels in the URL only when it differs from the
@@ -1117,6 +1120,7 @@ export function Databases() {
           browseFilters={activeTable?.browseFilters}
           browseSort={activeTable?.browseSort}
           manualCondition={activeTable?.manualCondition}
+          manualEnabled={activeTable?.manualEnabled}
           filterOpen={activeTable?.filterOpen ?? false}
           onFilterOpenChange={(open) => patchActiveTab({ filterOpen: open })}
           onApplyBrowse={applyBrowse}

@@ -44,8 +44,10 @@ export interface DataGridProps {
   browseSort?: BrowseSort[]
   /** The tab's committed raw manual WHERE fragment. */
   manualCondition?: string
+  /** Whether the committed manual condition participates. Absent = enabled. */
+  manualEnabled?: boolean
   /** Commit a draft: filters/sort/manual condition for this tab; refetch happens in the parent. */
-  onApplyBrowse?: (next: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string }) => void
+  onApplyBrowse?: (next: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string; manualEnabled: boolean }) => void
   /** Header click: cycle single-column sort for one column. */
   onCycleSortColumn?: (column: string) => void
   onStartEdit: (row: number, col: number, value: unknown) => void
@@ -84,6 +86,7 @@ export const DataGrid = ({
   browseFilters,
   browseSort,
   manualCondition,
+  manualEnabled = true,
   onApplyBrowse,
   onCycleSortColumn,
   onStartEdit,
@@ -103,7 +106,7 @@ export const DataGrid = ({
   }
   const committedFilters = useMemo(() => browseFilters ?? [], [browseFilters])
   const committedSort = useMemo(() => browseSort ?? [], [browseSort])
-  const activeFilterCount = activeCount(committedFilters, manualCondition)
+  const activeFilterCount = activeCount(committedFilters, manualCondition, manualEnabled)
   const filteredColumns = useMemo(() => new Set(committedFilters.filter((f) => f.enabled).map((f) => f.column)), [committedFilters])
   const sortOrderFor = useCallback(
     (col: string) => committedSort.find((s) => s.column === col)?.order ?? null,
@@ -182,6 +185,10 @@ export const DataGrid = ({
             >
               {isStaleCache(browseResult.cachedAt) ? "stale" : "cached"} · {formatCacheAge(browseResult.cachedAt)}
             </Badge>
+          ) : browseResult ? (
+            <Badge variant="outline" className="border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400">
+              live
+            </Badge>
           ) : null}
         </CardTitle>
       </CardHeader>
@@ -255,6 +262,7 @@ export const DataGrid = ({
                 filters: committedFilters,
                 sort: committedSort,
                 manualCondition: manualCondition ?? "",
+                manualEnabled,
               }}
               committedSort={committedSort}
               applyPending={browseLoading}

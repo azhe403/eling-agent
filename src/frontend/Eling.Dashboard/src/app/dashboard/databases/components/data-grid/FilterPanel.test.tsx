@@ -25,7 +25,7 @@ describe("FilterPanel keyboard", () => {
     fireEvent.change(manual, { target: { value: "is_active = 1" } })
     fireEvent.keyDown(manual, { key: "Enter" })
     expect(onApply).toHaveBeenCalledTimes(1)
-    expect(onApply).toHaveBeenCalledWith({ filters: [], sort: [], manualCondition: "is_active = 1" })
+    expect(onApply).toHaveBeenCalledWith({ filters: [], sort: [], manualCondition: "is_active = 1", manualEnabled: true })
   })
 
   it("Enter in the value field commits the draft filter", () => {
@@ -44,9 +44,10 @@ describe("FilterPanel keyboard", () => {
     fireEvent.keyDown(value, { key: "Enter" })
     expect(onApply).toHaveBeenCalledTimes(1)
     expect(onApply).toHaveBeenCalledWith({
-      filters: [{ column: "name", op: "eq", value: "Batangan", enabled: true, logic: "first" }],
+      filters: [{ column: "name", op: "contains", value: "Batangan", enabled: true, logic: "first" }],
       sort: [],
       manualCondition: "",
+      manualEnabled: true,
     })
   })
 
@@ -62,6 +63,172 @@ describe("FilterPanel keyboard", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: "Add condition" }))
     fireEvent.keyDown(screen.getByRole("combobox", { name: "Operator" }), { key: "Enter" })
+    expect(onApply).not.toHaveBeenCalled()
+  })
+
+  it("Unticking Manual condition enabled commits manualEnabled: false with the text kept", () => {
+    const onApply = vi.fn()
+    render(
+      <FilterPanel
+        {...base}
+        initial={{ ...base.initial, manualCondition: "x = 1", manualEnabled: true }}
+        committedSort={[]}
+        onApply={onApply}
+        onClose={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByRole("checkbox", { name: "Manual condition enabled" }))
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    expect(onApply).toHaveBeenCalledWith({ filters: [], sort: [], manualCondition: "x = 1", manualEnabled: false })
+  })
+
+  it("Starts disabled when the committed manual condition is disabled", () => {
+    render(
+      <FilterPanel
+        {...base}
+        initial={{ ...base.initial, manualCondition: "x = 1", manualEnabled: false }}
+        committedSort={[]}
+        onApply={() => {}}
+        onClose={() => {}}
+      />,
+    )
+    expect((screen.getByRole("checkbox", { name: "Manual condition enabled" }) as HTMLInputElement).checked).toBe(false)
+  })
+
+  it("New condition rows default to Contains for text columns", () => {
+    render(
+      <FilterPanel
+        {...base}
+        columnTypes={{ id: "int", name: "varchar(50)", updated_at: "datetime" }}
+        committedSort={[]}
+        onApply={() => {}}
+        onClose={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Add condition" }))
+    expect(screen.getByRole("combobox", { name: "Operator" }).textContent).toContain("Contains")
+  })
+
+  it("New condition rows default to Equals for non-text columns", () => {
+    render(
+      <FilterPanel
+        {...base}
+        columns={["score"]}
+        columnTypes={{ score: "decimal(10,2)" }}
+        committedSort={[]}
+        onApply={() => {}}
+        onClose={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Add condition" }))
+    expect(screen.getByRole("combobox", { name: "Operator" }).textContent).toContain("=")
+  })
+
+  it("Toggling a row's Enabled checkbox commits immediately like Apply", () => {
+    const onApply = vi.fn()
+    const enabledFirst = [{ column: "name", op: "contains" as const, value: "a", enabled: true, logic: "first" as const }]
+    render(
+      <FilterPanel
+        {...base}
+        initial={{ ...base.initial, filters: enabledFirst }}
+        committedSort={[]}
+        onApply={onApply}
+        onClose={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Enabled" })[0])
+    expect(onApply).toHaveBeenCalledTimes(1)
+    expect(onApply).toHaveBeenCalledWith({
+      filters: [{ ...enabledFirst[0], enabled: false }],
+      sort: [],
+      manualCondition: "",
+      manualEnabled: true,
+    })
+  })
+
+  it("Toggling Manual condition enabled commits immediately like Apply", () => {
+    const onApply = vi.fn()
+    render(
+      <FilterPanel
+        {...base}
+        initial={{ ...base.initial, manualCondition: "x = 1", manualEnabled: true }}
+        committedSort={[]}
+        onApply={onApply}
+        onClose={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByRole("checkbox", { name: "Manual condition enabled" }))
+    expect(onApply).toHaveBeenCalledTimes(1)
+    expect(onApply).toHaveBeenCalledWith({ filters: [], sort: [], manualCondition: "x = 1", manualEnabled: false })
+  })
+
+  it("Enabled checkboxes are inert while a refetch is pending", () => {
+    const onApply = vi.fn()
+    const enabledFirst = [{ column: "name", op: "contains" as const, value: "a", enabled: true, logic: "first" as const }]
+    render(
+      <FilterPanel
+        {...base}
+        initial={{ ...base.initial, filters: enabledFirst, manualCondition: "x = 1" }}
+        committedSort={[]}
+        applyPending
+        onApply={onApply}
+        onClose={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Enabled" })[0])
+    fireEvent.click(screen.getByRole("checkbox", { name: "Manual condition enabled" }))
+    expect(onApply).not.toHaveBeenCalled()
+  })
+
+  it("Enable all and Disable all commit immediately like Apply", () => {
+    const onApply = vi.fn()
+    const mixed = [
+      { column: "a", op: "eq" as const, value: "1", enabled: true, logic: "first" as const },
+      { column: "b", op: "eq" as const, value: "2", enabled: false, logic: "and" as const },
+    ]
+    const { rerender } = render(
+      <FilterPanel
+        {...base}
+        initial={{ ...base.initial, filters: mixed }}
+        committedSort={[]}
+        onApply={onApply}
+        onClose={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Disable all" }))
+    expect(onApply).toHaveBeenLastCalledWith({
+      filters: mixed.map((f) => ({ ...f, enabled: false })),
+      sort: [],
+      manualCondition: "",
+      manualEnabled: true,
+    })
+    expect(onApply).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole("button", { name: "Enable all" }))
+    expect(onApply).toHaveBeenLastCalledWith({
+      filters: mixed.map((f) => ({ ...f, enabled: true })),
+      sort: [],
+      manualCondition: "",
+      manualEnabled: true,
+    })
+    expect(onApply).toHaveBeenCalledTimes(2)
+    rerender(<></>)
+  })
+
+  it("Enable all is inert while a refetch is pending", () => {
+    const onApply = vi.fn()
+    const rows = [{ column: "a", op: "eq" as const, value: "1", enabled: true, logic: "first" as const }]
+    render(
+      <FilterPanel
+        {...base}
+        initial={{ ...base.initial, filters: rows }}
+        committedSort={[]}
+        applyPending
+        onApply={onApply}
+        onClose={() => {}}
+      />,
+    )
+    expect((screen.getByRole("button", { name: "Enable all" }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: "Enable all" }))
     expect(onApply).not.toHaveBeenCalled()
   })
 
@@ -159,6 +326,7 @@ describe("FilterPanel committed sort", () => {
       filters: [],
       sort: [{ column: "updated_at", order: "desc" }],
       manualCondition: "",
+      manualEnabled: true,
     })
   })
 
@@ -187,7 +355,7 @@ describe("FilterPanel committed sort", () => {
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Apply" }))
-    expect(onApply).toHaveBeenCalledWith({ filters: [], sort: [], manualCondition: "" })
+    expect(onApply).toHaveBeenCalledWith({ filters: [], sort: [], manualCondition: "", manualEnabled: true })
   })
 
   it("keeps the reader's own edit when committed changes afterwards", () => {

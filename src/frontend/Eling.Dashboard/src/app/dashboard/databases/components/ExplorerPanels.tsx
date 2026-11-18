@@ -116,9 +116,11 @@ export interface ExplorerPanelsProps {
   browseFilters?: BrowseFilter[]
   browseSort?: BrowseSort[]
   manualCondition?: string
+  /** Whether the committed manual condition participates. Absent = enabled. */
+  manualEnabled?: boolean
   filterOpen?: boolean
   onFilterOpenChange?: (open: boolean) => void
-  onApplyBrowse: (next: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string }) => void
+  onApplyBrowse: (next: { filters: BrowseFilter[]; sort: BrowseSort[]; manualCondition: string; manualEnabled: boolean }) => void
   onCycleSortColumn: (column: string) => void
   onBrowseLimitChange: (limit: number) => void
   onBrowsePageChange: (page: number) => void
@@ -133,7 +135,7 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
     conns, expandedConns, expandedDbs, connSchemas, dbSchemas, redisDbs, activeTable, openTabs,
     rightTab, connSort, connOrder, loading, isFading, schemaConnId, schemaInfo, schemaLoading,
     selectedId, selectedIsReadOnly, selectedIsRedis, browseResult, browseTotal, browseLoading, browseLimit, browsePage,
-    browseFilters, browseSort, manualCondition, filterOpen, onFilterOpenChange,
+    browseFilters, browseSort, manualCondition, manualEnabled, filterOpen, onFilterOpenChange,
     mutating, editingCell, editValue, savingCell, newRow, pkNames, sql, qResult, qLoading,
     activeRedisDb, redisPrefix, redisRootPrefix, redisPages, redisExpanded, redisInspectKey,
     redisLoading, redisInspect, redisInspectOpen,
@@ -327,6 +329,7 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
             browseFilters={browseFilters}
             browseSort={browseSort}
             manualCondition={manualCondition}
+            manualEnabled={manualEnabled}
             filterOpen={filterOpen}
             onFilterOpenChange={onFilterOpenChange}
             onApplyBrowse={props.onApplyBrowse}
