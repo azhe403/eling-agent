@@ -115,7 +115,12 @@ public sealed class SkillCatalogScanner : ISkillCatalogScanner
 
                     displayName = relaxed.Name;
                     externalBodyPath = relaxed.BodyPath;
-                    _logger?.LogInformation(
+                    // Logged per folder, and the scan runs on every MCP host
+                    // spawn — one line per non-kebab folder used to fill the
+                    // 4 KB stderr pipe on Windows and stall startup before the
+                    // stdio handshake could answer. Debug keeps it available
+                    // without taxing agent startup.
+                    _logger?.LogDebug(
                         "Indexing non-kebab-case folder {Folder} under frontmatter name '{Name}'.",
                         folder,
                         displayName);
