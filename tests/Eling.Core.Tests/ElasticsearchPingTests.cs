@@ -28,13 +28,38 @@ public sealed class ElasticsearchPingTests
     [Fact]
     public async Task Ping_Es7_ThrowsUnsupportedVersion()
     {
+        var service = CreateServiceForVersion(
+            """{"name":"n","cluster_name":"c","cluster_uuid":"u","version":{"number":"7.17.0","build_flavor":"default","lucene_version":"8.11.0"},"tagline":"You Know, for Search"}""");
+        var connection = MakeConnection();
+
+        var exception = await Assert.ThrowsAsync<NotSupportedException>(
+            () => service.PingAsync(connection, CancellationToken.None));
+
+        Assert.Equal(ElasticsearchRequirement.UnsupportedVersion, exception.Message);
+    }
+
+    [Theory]
+    [InlineData("8.7.0")]
+    [InlineData("9.7.0")]
+    [InlineData("10.7.0")]
+    [InlineData("8.19.2")]
+    public async Task Ping_SupportedVersionsWithSevenMinor_ReturnVersion(string version)
+    {
+        var service = CreateServiceForVersion(
+            $$"""{"name":"n","cluster_name":"c","cluster_uuid":"u","version":{"number":"{{version}}","build_flavor":"default","lucene_version":"9.10.0"},"tagline":"You Know, for Search"}""");
+        var connection = MakeConnection();
+
+        var result = await service.PingAsync(connection, CancellationToken.None);
+
+        Assert.Equal(version, result.Version);
+    }
+
+    private static ElasticsearchReadService CreateServiceForVersion(string cannedInfo)
+    {
         var pool = new Elastic.Transport.SingleNodePool(new Uri("http://elasticsearch-test:9200/"));
         var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent(
-                """{"name":"n","cluster_name":"c","cluster_uuid":"u","version":{"number":"7.17.0","build_flavor":"default","lucene_version":"8.11.0"},"tagline":"You Know, for Search"}""",
-                Encoding.UTF8,
-                "application/json"),
+            Content = new StringContent(cannedInfo, Encoding.UTF8, "application/json"),
         };
         response.Headers.Add("X-Elastic-Product", "Elasticsearch");
         var invoker = new Elastic.Transport.HttpRequestInvoker((_, _) => new StubHttpMessageHandler(response));
@@ -42,19 +67,15 @@ public sealed class ElasticsearchPingTests
             .RequestTimeout(TimeSpan.FromSeconds(5))
             .DisableDirectStreaming(true);
         var client = new ElasticsearchClient(settings);
+        return new ElasticsearchReadService(new StubClientCache(client));
+    }
 
-        var service = new ElasticsearchReadService(new StubClientCache(client));
-        var connection = DatabaseConnection.Create(
+    private static DatabaseConnection MakeConnection() =>
+        DatabaseConnection.Create(
             "test",
             DatabaseProvider.Elasticsearch,
             "http://elasticsearch-test:9200/",
             DatabaseEnvironment.Development);
-
-        var exception = await Assert.ThrowsAsync<NotSupportedException>(
-            () => service.PingAsync(connection, CancellationToken.None));
-
-        Assert.Equal(ElasticsearchRequirement.UnsupportedVersion, exception.Message);
-    }
 
     private sealed class StubClientCache : IElasticsearchClientCache
     {

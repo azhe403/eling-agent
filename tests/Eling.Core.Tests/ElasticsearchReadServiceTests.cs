@@ -123,6 +123,10 @@ public sealed class ElasticsearchReadServiceTests
         Assert.Equal(48211320, detail.StoreSizeBytes);
         Assert.Contains("properties", detail.Mappings.GetRawText());
         Assert.Contains("number_of_replicas", detail.Settings.GetRawText());
+        // The detail pin: one _stats call scoped to this index, not the
+        // cluster-wide variant the list endpoint uses.
+        Assert.Contains("GET /logs-app-2026/_stats", handler.RequestedPaths);
+        Assert.DoesNotContain("GET /_stats", handler.RequestedPaths);
         Assert.Equal(3, handler.RequestedPaths.Count);
     }
 

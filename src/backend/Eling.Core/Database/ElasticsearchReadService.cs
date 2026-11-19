@@ -41,7 +41,7 @@ public sealed class ElasticsearchReadService : IElasticsearchReadService
     private const int MaxSize = 100;
     private const int MaxBuckets = 100;
     private static readonly Regex Es7VersionPattern = new(
-        @"\b7\.",
+        @"^7\.",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex FieldPattern = new(
