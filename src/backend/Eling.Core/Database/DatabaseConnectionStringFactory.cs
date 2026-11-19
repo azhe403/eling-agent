@@ -25,6 +25,9 @@ public static class DatabaseConnectionStringFactory
     /// <summary>The port Redis listens on unless the connection says otherwise.</summary>
     public const int DefaultRedisPort = 6379;
 
+    /// <summary>The port Elasticsearch listens on unless the connection says otherwise.</summary>
+    public const int DefaultElasticsearchPort = 9200;
+
     /// <summary>
     /// Reads a stored connection string back into its fields, or returns
     /// <c>null</c> when the string cannot be read as this provider - the
@@ -43,6 +46,7 @@ public static class DatabaseConnectionStringFactory
             DatabaseProvider.Sqlite => ParseSqlite(connectionString),
             DatabaseProvider.Redis => ParseRedis(connectionString),
             DatabaseProvider.PostgreSql => ParsePostgreSql(connectionString),
+            DatabaseProvider.Elasticsearch => ParseElasticsearch(connectionString),
             _ => null,
         };
     }
@@ -61,6 +65,7 @@ public static class DatabaseConnectionStringFactory
         DatabaseProvider.Sqlite => BuildSqlite(fields),
         DatabaseProvider.Redis => BuildRedis(fields),
         DatabaseProvider.PostgreSql => BuildPostgreSql(fields),
+        DatabaseProvider.Elasticsearch => BuildElasticsearch(fields),
         _ => throw new ArgumentException($"provider '{provider}' is not supported.", nameof(provider)),
     };
 
@@ -86,6 +91,7 @@ public static class DatabaseConnectionStringFactory
         DatabaseProvider.Sqlite => UpdateSqlite(storedConnectionString, entered),
         DatabaseProvider.Redis => UpdateRedis(storedConnectionString, entered),
         DatabaseProvider.PostgreSql => UpdatePostgreSql(storedConnectionString, entered),
+        DatabaseProvider.Elasticsearch => UpdateElasticsearch(storedConnectionString, entered),
         _ => throw new ArgumentException($"provider '{provider}' is not supported.", nameof(provider)),
     };
 
@@ -109,6 +115,9 @@ public static class DatabaseConnectionStringFactory
             // stored connection keeps its default database unless explicitly set.
             DatabaseProvider.Redis => WithRedisDatabase(connectionString, database),
             DatabaseProvider.PostgreSql => WithPostgreSqlDatabase(connectionString, database),
+            // Elasticsearch has no database notion, so there is nothing to
+            // point the string at: it falls through to the unsupported-provider
+            // exception below, exactly like a provider this factory does not know.
             _ => throw new ArgumentException($"provider '{provider}' is not supported.", nameof(provider)),
         };
 
@@ -155,7 +164,8 @@ public static class DatabaseConnectionStringFactory
     /// connection, which reaches every database on the server.
     ///
     /// Only MySQL and PostgreSQL have that notion: a SQLite file is its own
-    /// database, and a Redis logical database is a per-request index.
+    /// database, a Redis logical database is a per-request index, and an
+    /// Elasticsearch cluster has no database concept at all.
     /// </summary>
     public static bool IsServerLevel(DatabaseProvider provider, string? connectionString)
     {
@@ -678,6 +688,168 @@ public static class DatabaseConnectionStringFactory
         if (s is null) return null;
         var parts = s.Split(':', 2);
         return parts.Length == 2 && int.TryParse(parts[1], out var p) ? p : null;
+    }
+
+    private static ManualConnectionFields? ParseElasticsearch(string connectionString)
+    {
+        var uri = TryCreateElasticsearchUri(connectionString);
+        if (uri is null)
+        {
+            return null;
+        }
+
+        var host = NullIfBlank(uri.Host);
+        if (host is null)
+        {
+            // Nothing that identifies a cluster: there is no form to pre-fill.
+            return null;
+        }
+
+        string? username, password;
+        try
+        {
+            SplitUserInfo(uri.UserInfo, out username, out password);
+        }
+        catch (UriFormatException)
+        {
+            // A userinfo component that cannot be percent-decoded is not a
+            // string this form can pre-fill.
+            return null;
+        }
+
+        // Elasticsearch has no database concept: Database and FilePath always
+        // read back as null.
+        return new ManualConnectionFields(host, uri.Port, null, username, password, null);
+    }
+
+    private static string BuildElasticsearch(ManualConnectionFields fields) =>
+        AssembleElasticsearchUri("http", fields);
+
+    private static string UpdateElasticsearch(string storedConnectionString, ManualConnectionFields entered)
+    {
+        var stored = TryCreateElasticsearchUri(storedConnectionString);
+        if (stored is null)
+        {
+            // The stored string is not readable as Elasticsearch: build a fresh one.
+            return BuildElasticsearch(entered);
+        }
+
+        string? storedUsername, storedPassword;
+        try
+        {
+            SplitUserInfo(stored.UserInfo, out storedUsername, out storedPassword);
+        }
+        catch (UriFormatException)
+        {
+            // The stored string cannot be decoded either: build a fresh one.
+            return BuildElasticsearch(entered);
+        }
+
+        // A blank field keeps what was stored, so a form that only knows the
+        // password cannot wipe the host out from under it.
+        var host = NullIfBlank(entered.Host) ?? NullIfBlank(stored.Host)
+            ?? throw new ArgumentException("host must not be blank.", nameof(entered));
+
+        var port = entered.Port ?? stored.Port;
+        if (port < 1 || port > 65535)
+        {
+            throw new ArgumentException("port must be between 1 and 65535.", nameof(entered));
+        }
+
+        // The stored scheme survives the update: an https endpoint stays https.
+        // Elasticsearch has no database to rewrite, so one is never assembled.
+        return AssembleElasticsearchUri(
+            stored.Scheme,
+            host,
+            port,
+            NullIfBlank(entered.Username) ?? storedUsername,
+            NullIfBlank(entered.Password) ?? storedPassword);
+    }
+
+    private static string AssembleElasticsearchUri(string scheme, ManualConnectionFields fields)
+    {
+        var host = NullIfBlank(fields.Host)
+            ?? throw new ArgumentException("host must not be blank.", nameof(fields));
+
+        var port = fields.Port ?? DefaultElasticsearchPort;
+        if (port < 1 || port > 65535)
+        {
+            throw new ArgumentException("port must be between 1 and 65535.", nameof(fields));
+        }
+
+        return AssembleElasticsearchUri(
+            scheme,
+            host,
+            port,
+            NullIfBlank(fields.Username),
+            NullIfBlank(fields.Password));
+    }
+
+    private static string AssembleElasticsearchUri(string scheme, string host, int port, string? username, string? password)
+    {
+        // Userinfo components are percent-encoded on build: '@', ':', '%', '/',
+        // '=' and '&' all survive the round trip inside a credential.
+        var uri = $"{scheme}://{EncodeUserInfo(username, password)}{host}:{port}/";
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out _))
+        {
+            throw new ArgumentException("host must be a valid host name or address.", nameof(host));
+        }
+
+        return uri;
+    }
+
+    private static string EncodeUserInfo(string? username, string? password)
+    {
+        if (username is null && password is null)
+        {
+            return string.Empty;
+        }
+
+        var encodedUsername = username is null ? string.Empty : Uri.EscapeDataString(username);
+        var encodedPassword = password is null ? null : Uri.EscapeDataString(password);
+        return encodedPassword is null
+            ? encodedUsername + "@"
+            : encodedUsername + ":" + encodedPassword + "@";
+    }
+
+    private static void SplitUserInfo(string? userInfo, out string? username, out string? password)
+    {
+        username = null;
+        password = null;
+        if (string.IsNullOrEmpty(userInfo))
+        {
+            return;
+        }
+
+        // The first literal ':' separates user from password; every ':' inside
+        // a percent-encoded component is written as %3A, so it never reaches
+        // this split.
+        var separator = userInfo.IndexOf(':');
+        if (separator < 0)
+        {
+            username = NullIfBlank(Uri.UnescapeDataString(userInfo));
+            return;
+        }
+
+        username = NullIfBlank(Uri.UnescapeDataString(userInfo.Substring(0, separator)));
+        password = NullIfBlank(Uri.UnescapeDataString(userInfo[(separator + 1)..]));
+    }
+
+    private static Uri? TryCreateElasticsearchUri(string connectionString)
+    {
+        if (!Uri.TryCreate(connectionString, UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        // Only the HTTP schemes are Elasticsearch endpoints; anything else is
+        // not a string this provider can read.
+        if (uri.Scheme != "http" && uri.Scheme != "https")
+        {
+            return null;
+        }
+
+        return uri;
     }
 
     private static string? NullIfBlank(string? value) =>
