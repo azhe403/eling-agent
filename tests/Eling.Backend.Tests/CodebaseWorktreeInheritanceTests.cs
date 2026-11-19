@@ -12,7 +12,7 @@ namespace Eling.Backend.Tests;
 /// repository that was never indexed still waits for consent, exactly like any
 /// other workspace.
 /// </summary>
-[Collection(WorktreeIndexCollection.Name)]
+[Collection(ElingDataDirCollection.Name)]
 public sealed class CodebaseWorktreeInheritanceTests : IDisposable
 {
     private const string DataDirEnv = "ELING_DATA_DIR";

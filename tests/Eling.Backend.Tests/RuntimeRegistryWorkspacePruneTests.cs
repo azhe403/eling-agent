@@ -50,10 +50,9 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
             workspaces);
 
         // Act
-        await registry.PruneMissingWorkspacesAsync();
+        var rows = await PruneUntilRowCountAsync(registry, workspaces, 1);
 
         // Assert
-        var rows = await workspaces.ListAsync();
         Assert.Single(rows);
         Assert.Equal(alive, rows[0].WorkspaceRoot);
     }
@@ -90,10 +89,9 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
                 workspaces);
 
             // Act
-            await registry.PruneMissingWorkspacesAsync();
+            var rows = await PruneUntilRowCountAsync(registry, workspaces, 1);
 
             // Assert
-            var rows = await workspaces.ListAsync();
             Assert.Single(rows);
             Assert.Equal(project, rows[0].WorkspaceRoot);
         }
@@ -132,10 +130,9 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
             registry.Register(Registration(scratch));
 
             // Act
-            await registry.PruneMissingWorkspacesAsync();
+            var rows = await PruneUntilRowCountAsync(registry, workspaces, 1);
 
             // Assert
-            var rows = await workspaces.ListAsync();
             Assert.Single(rows);
             Assert.Equal(scratch, rows[0].WorkspaceRoot);
         }
@@ -167,9 +164,7 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
             const int deadPid = 999_999_999;
             registry.Register(Registration(scratch, deadPid));
 
-            await registry.PruneMissingWorkspacesAsync();
-
-            var rows = await workspaces.ListAsync();
+            var rows = await PruneUntilRowCountAsync(registry, workspaces, expectedCount: 0);
             Assert.Empty(rows);
         }
         finally
@@ -254,8 +249,17 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
             await using var enumerator = broadcaster.SubscribeAsync(cts.Token).GetAsyncEnumerator(cts.Token);
             var pending = enumerator.MoveNextAsync();
 
-            // Act
-            await registry.PruneMissingWorkspacesAsync();
+            // Act — bounded retry: if the registry's own startup prune is
+            // mid-flight, the explicit call declines to overlap with it and
+            // returns without doing the work; keep calling until it does.
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (!pending.IsCompleted)
+            {
+                await registry.PruneMissingWorkspacesAsync();
+                if (pending.IsCompleted) break;
+                Assert.True(DateTime.UtcNow < deadline, "the prune never notified the dashboard within 5s");
+                await Task.Delay(50);
+            }
 
             // Assert - bounded, so a regression fails the test instead of
             // hanging the run.
@@ -275,14 +279,38 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
         workspaces);
 
     /// <summary>
+    /// Prunes until the catalogue holds the expected row count. The registry's
+    /// own startup sync fires the same prune in the background (fire-and-forget);
+    /// while it is mid-flight the explicit call declines to overlap with it and
+    /// returns without pruning, so a single call can return without doing the
+    /// work — and a detaching test would see a stale catalogue.
+    /// </summary>
+    private static async Task<IReadOnlyList<RegisteredWorkspace>> PruneUntilRowCountAsync(
+        RuntimeRegistry registry,
+        JsonWorkspaceRegistry workspaces,
+        int expectedCount)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        IReadOnlyList<RegisteredWorkspace> rows = [];
+        while (true)
+        {
+            await registry.PruneMissingWorkspacesAsync();
+            rows = await workspaces.ListAsync();
+            if (rows.Count == expectedCount || DateTime.UtcNow >= deadline)
+                return rows;
+            await Task.Delay(50);
+        }
+    }
+
+    /// <summary>
     /// Best-effort removal of a scratch folder. A leftover folder is the
     /// litter this whole change is about, so the fixture does not add to it.
     /// </summary>
     private static void TryDelete(string dir)
     {
         try { Directory.Delete(dir, recursive: true); }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (IOException ex) { TestLogs.Log("test cleanup: prune workspace delete failed", ex); }
+        catch (UnauthorizedAccessException ex) { TestLogs.Log("test cleanup: prune workspace delete failed", ex); }
     }
 
     private static RuntimeRegistration Registration(string workspace, int pid = 0) => new()
@@ -306,9 +334,9 @@ public sealed class RuntimeRegistryWorkspacePruneTests : IDisposable
                 Directory.Delete(_dir, recursive: true);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Best-effort cleanup; the OS reclaims the temp root eventually.
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 }

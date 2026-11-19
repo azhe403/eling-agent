@@ -6,6 +6,20 @@ namespace Eling.Backend.Tests;
 
 public sealed class ZombieProcessCleanerTests
 {
+    /// <summary>
+    /// An OS-assigned free port: avoids the birthday-collision of a random
+    /// pick from a bounded range when classes run in parallel. There is a
+    /// tiny release-to-bind window, same shape as the first test's probe.
+    /// </summary>
+    private static int FreePort()
+    {
+        using var probe = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        return port;
+    }
+
     [Fact]
     public async Task IsHealthyAsync_False_WhenPortClosed()
     {
@@ -24,7 +38,7 @@ public sealed class ZombieProcessCleanerTests
     public async Task IsHealthyAsync_True_WhenHealthEndpointReturns200()
     {
         using var listener = new HttpListener();
-        var port = 49152 + Random.Shared.Next(1000, 10000);
+        var port = FreePort();
         var prefix = $"http://127.0.0.1:{port}/";
         listener.Prefixes.Add(prefix);
         listener.Start();
@@ -59,7 +73,7 @@ public sealed class ZombieProcessCleanerTests
     public async Task TryClearZombieOnPortAsync_ReturnsFalse_WhenPortHealthy()
     {
         using var listener = new HttpListener();
-        var port = 49152 + Random.Shared.Next(1000, 10000);
+        var port = FreePort();
         var prefix = $"http://127.0.0.1:{port}/";
         listener.Prefixes.Add(prefix);
         listener.Start();

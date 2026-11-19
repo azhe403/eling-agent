@@ -71,10 +71,37 @@ public sealed class AuditCodebaseHookTests : IAsyncLifetime
             new SqliteCodebaseIndex(Path.Combine(workspace, "codebase.db")));
     }
 
-    private static string[] ReadLines(string trail, string root) =>
-        File.Exists(Path.Combine(root, trail, DateTimeOffset.UtcNow.ToString("yyyy-MM-dd") + ".jsonl"))
-            ? File.ReadAllLines(Path.Combine(root, trail, DateTimeOffset.UtcNow.ToString("yyyy-MM-dd") + ".jsonl"))
-            : [];
+    private static string[] ReadLines(string trail, string root)
+    {
+        // The audit engine flushes through a background pump; the file is
+        // opened for write by that pump until it releases it, and may not be
+        // flushed at all when the caller returns early. A busy or not-yet-
+        // written file is a retry, not a failure.
+        var path = Path.Combine(root, trail, DateTimeOffset.UtcNow.ToString("yyyy-MM-dd") + ".jsonl");
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        var logged = false;
+        while (true)
+        {
+            if (File.Exists(path))
+            {
+                try
+                {
+                    return File.ReadAllLines(path);
+                }
+                catch (IOException ex) when (DateTime.UtcNow < deadline)
+                {
+                    if (!logged)
+                    {
+                        logged = true;
+                        TestLogs.Log("audit changes jsonl in use; retrying", ex);
+                    }
+                }
+            }
+
+            if (DateTime.UtcNow >= deadline) return [];
+            Thread.Sleep(25);
+        }
+    }
 
     [Fact]
     public async Task IndexTool_ExplicitInvocation_RecordsOneChangeEntry()

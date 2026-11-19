@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
@@ -14,10 +16,11 @@ namespace Eling.Core.Projects;
 /// Grain is the folder, not the process — the file outlives whatever process
 /// wrote it, which is the whole reason this store exists.
 /// <para>
-/// Writes are serialized by a named cross-process mutex (each Eling runtime
-/// registers its own workspace on start) and land atomically via a temp file
-/// plus <see cref="File.Move(string, string, bool)"/>, so a crash mid-write or
-/// two processes writing at once can never leave a torn file. Every mutation
+/// Writes are serialized by a per-file named cross-process mutex (derived from
+/// the full path: two hosts writing the same catalogue serialize, unrelated
+/// registries never do) and land atomically via a temp file plus
+/// <see cref="File.Move(string, string, bool)"/>, so a crash mid-write or two
+/// processes writing at once can never leave a torn file. Every mutation
 /// re-reads the file under that mutex, which is what keeps concurrent
 /// registrations from overwriting each other's rows.
 /// </para>
@@ -39,7 +42,6 @@ namespace Eling.Core.Projects;
 /// </remarks>
 public sealed class JsonWorkspaceRegistry : IWorkspacesRegistry, IDisposable
 {
-    private const string MutexName = @"Global\eling-workspaces-registry";
     private const string TempSuffix = ".tmp";
 
     /// <summary>
@@ -49,16 +51,21 @@ public sealed class JsonWorkspaceRegistry : IWorkspacesRegistry, IDisposable
     /// </summary>
     private static readonly TimeSpan GateTimeout = TimeSpan.FromSeconds(5);
 
-    /// <summary>
-    /// One mutex per name per process. Two <see cref="Mutex"/> objects over the
-    /// same named kernel object in one process corrupt thread-ownership
-    /// accounting — ReleaseMutex starts throwing "unsynchronized block" and the
-    /// gate leaks — so every registry instance shares this one object.
-    /// </summary>
-    private static readonly Mutex Gate = new(initiallyOwned: false, MutexName);
-
     private readonly string _filePath;
     private readonly ILogger<JsonWorkspaceRegistry>? _logger;
+    private readonly Mutex _gate;
+
+    /// <summary>
+    /// One gate per file, keyed by the full path. Two hosts writing the same
+    /// catalogue still serialize exactly as a shared name does — but unrelated
+    /// registries (a fresh test catalogue, one per suite) stop contending for
+    /// one machine-wide lock. A hot global gate times out under a full test
+    /// suite, and the caller's catch swallows the timeout, silently dropping
+    /// the row.
+    /// </summary>
+    private static string MutexNameFor(string path)
+        => @"Global\eling-workspaces-registry-"
+            + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(path))).ToLowerInvariant();
 
     public JsonWorkspaceRegistry(
         string filePath,
@@ -66,6 +73,7 @@ public sealed class JsonWorkspaceRegistry : IWorkspacesRegistry, IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         _filePath = Path.GetFullPath(filePath);
+        _gate = new Mutex(initiallyOwned: false, MutexNameFor(_filePath));
         _logger = logger;
     }
 
@@ -256,7 +264,7 @@ public sealed class JsonWorkspaceRegistry : IWorkspacesRegistry, IDisposable
         }
         finally
         {
-            Gate.ReleaseMutex();
+            _gate.ReleaseMutex();
         }
     }
 
@@ -269,7 +277,7 @@ public sealed class JsonWorkspaceRegistry : IWorkspacesRegistry, IDisposable
         }
         finally
         {
-            Gate.ReleaseMutex();
+            _gate.ReleaseMutex();
         }
     }
 
@@ -284,7 +292,7 @@ public sealed class JsonWorkspaceRegistry : IWorkspacesRegistry, IDisposable
     {
         try
         {
-            if (!Gate.WaitOne(GateTimeout))
+            if (!_gate.WaitOne(GateTimeout))
             {
                 throw new TimeoutException(
                     $"Timed out after {GateTimeout} waiting for the workspace registry gate.");
@@ -338,8 +346,8 @@ public sealed class JsonWorkspaceRegistry : IWorkspacesRegistry, IDisposable
 
     public void Dispose()
     {
-        // The mutex is process-shared: disposing it here would yank the gate
-        // from under every other registry instance. It dies with the process,
+        // Other registry instances pointing at the same file share this gate;
+        // disposing it would yank it from under them. It dies with the process,
         // one handle, like SqliteWorkspacesRegistry before it.
     }
 }
