@@ -114,6 +114,38 @@ public sealed class ElasticsearchConnectionStringTests
         Assert.Null(parsed.FilePath);
     }
 
+    [Theory]
+    [InlineData("a/b")]
+    [InlineData("h?x=1")]
+    [InlineData("h#frag")]
+    [InlineData("user@h")]
+    public void Build_HostWithAuthorityShiftingText_Throws(string host)
+    {
+        // Uri.TryCreate waves these through: the authority re-interprets the
+        // host text (path segment, dropped query/fragment, or userinfo), so
+        // the assembled string is self-consistent but points at the wrong
+        // cluster. The assembler must refuse them component-by-component.
+        var fields = new ManualConnectionFields(host, null, null, null, null, null);
+
+        Assert.Throws<ArgumentException>(() => DatabaseConnectionStringFactory.Build(DatabaseProvider.Elasticsearch, fields));
+    }
+
+    [Fact]
+    public void Update_HostWithAuthorityShiftingText_Throws()
+    {
+        // The Update path shares the assembler, so it is protected by the
+        // same component-equality check.
+        var entered = new ManualConnectionFields(
+            Host: "a/b",
+            Port: null,
+            Database: null,
+            Username: null,
+            Password: null,
+            FilePath: null);
+
+        Assert.Throws<ArgumentException>(() => DatabaseConnectionStringFactory.Update(DatabaseProvider.Elasticsearch, "https://h:9200/", entered));
+    }
+
     [Fact]
     public void Update_KeepsStoredHttpsScheme()
     {

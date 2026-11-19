@@ -789,8 +789,18 @@ public static class DatabaseConnectionStringFactory
     {
         // Userinfo components are percent-encoded on build: '@', ':', '%', '/',
         // '=' and '&' all survive the round trip inside a credential.
-        var uri = $"{scheme}://{EncodeUserInfo(username, password)}{host}:{port}/";
-        if (!Uri.TryCreate(uri, UriKind.Absolute, out _))
+        var encodedUserInfo = EncodeUserInfo(username, password);
+        var uri = $"{scheme}://{encodedUserInfo}{host}:{port}/";
+        // Uri.TryCreate accepts strings whose host text shifts the authority:
+        // a '/', '?', '#' or '@' in the host re-interprets the string (the host
+        // becomes a path, the port becomes a path segment, or the host text
+        // becomes userinfo). Match every parsed component back against the
+        // fields instead of trusting TryCreate alone.
+        var expectedUserInfo = encodedUserInfo.Length == 0 ? string.Empty : encodedUserInfo[..^1];
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
+            || !string.Equals(parsed.Host, host, StringComparison.OrdinalIgnoreCase)
+            || parsed.Port != port
+            || !string.Equals(parsed.UserInfo, expectedUserInfo, StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException("host must be a valid host name or address.", nameof(host));
         }
