@@ -31,8 +31,11 @@ const nextConfig: NextConfig = {
     ? {
         // Reclaim in-memory Turbopack cache after persisting to disk
         turbopackMemoryEviction: "full",
-        // GC unreachable work in memory + persistent cache (16.4.0+)
-        turbopackGc: true,
+        // GC unreachable work in memory + persistent cache (16.4.0+).
+        // Expire unanchored roots after 1 day instead of the 3-day default.
+        turbopackGc: {
+          rootTtlMs: 24 * 60 * 60 * 1000,
+        },
       }
     : {},
 };
