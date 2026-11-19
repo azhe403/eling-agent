@@ -221,6 +221,67 @@ public sealed class ElasticsearchFilterCompilerTests
     }
 
     [Fact]
+    public void RangeWithFractionalEpochMs_Accepts()
+    {
+        var rows = new[]
+        {
+            new ElasticsearchFilterRow(
+                Field: "@timestamp",
+                Op: "gte",
+                Value: "1760000000000.5"),
+        };
+
+        var result = ElasticsearchFilterCompiler.Compile(rows, logic: null);
+
+        Assert.Contains("\"gte\":\"1760000000000.5\"", result.GetRawText());
+    }
+
+    [Fact]
+    public void RangeWithIsoExactRoundTrip_Accepts()
+    {
+        var rows = new[]
+        {
+            new ElasticsearchFilterRow(
+                Field: "@timestamp",
+                Op: "gte",
+                Value: "2026-01-01T00:00:00.000+00:00"),
+        };
+
+        var result = ElasticsearchFilterCompiler.Compile(rows, logic: null);
+
+        using var document = JsonDocument.Parse(result.GetRawText());
+        var rangeNode = document.RootElement
+            .GetProperty("bool")
+            .GetProperty("must")[0]
+            .GetProperty("range")
+            .GetProperty("@timestamp");
+
+        Assert.Equal("2026-01-01T00:00:00.000+00:00", rangeNode.GetProperty("gte").GetString());
+    }
+
+    [Theory]
+    [InlineData("$5")]
+    [InlineData("(5)")]
+    [InlineData("1,000")]
+    [InlineData("Infinity")]
+    [InlineData("-Infinity")]
+    [InlineData("NaN")]
+    [InlineData("1/2/2026")]
+    [InlineData("January 2 2026")]
+    public void RangeWithNonContractValue_Throws(string value)
+    {
+        var rows = new[]
+        {
+            new ElasticsearchFilterRow(
+                Field: "@timestamp",
+                Op: "gte",
+                Value: value),
+        };
+
+        Assert.Throws<ElasticsearchFilterException>(() => ElasticsearchFilterCompiler.Compile(rows, logic: null));
+    }
+
+    [Fact]
     public void RangeWithNullValue_Throws()
     {
         var rows = new[]

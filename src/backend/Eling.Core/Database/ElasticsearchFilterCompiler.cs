@@ -14,9 +14,13 @@ namespace Eling.Core.Database;
 /// <remarks>
 /// Validation is row-by-row and the first failure wins. <c>Value == null</c> is legal
 /// only for <c>exists</c>; every other op requires a value. Range values are passed
-/// through to the DSL verbatim (as strings) - a value is accepted when it parses as an
-/// invariant-culture number (epoch milliseconds etc.) or as an ISO 8601 date/time
-/// ("2026-01-01"), which is what range filters on <c>@timestamp</c> carry.
+/// through to the DSL verbatim (as strings). A range value is accepted when it parses
+/// (invariant culture, <see cref="NumberStyles.Float"/>, and finite) as a double -
+/// e.g. epoch milliseconds - or as an exact ISO 8601 date/time in one of
+/// "yyyy-MM-dd", "yyyy-MM-ddTHH:mm:ss.fffzzz" or the round-trip "o" format, which is
+/// what range filters on <c>@timestamp</c> carry. Currency symbols, parentheses,
+/// thousands separators, non-finite results ("Infinity") and culture-specific date
+/// spellings ("1/2/2026", "January 2 2026") are all rejected.
 /// </remarks>
 public static class ElasticsearchFilterCompiler
 {
@@ -110,8 +114,18 @@ public static class ElasticsearchFilterCompiler
 
     private static bool IsRangeValue(string value)
     {
-        return double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out _)
-            || DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out _);
+        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)
+            && double.IsFinite(number))
+        {
+            return true;
+        }
+
+        return DateTimeOffset.TryParseExact(
+            value,
+            new[] { "yyyy-MM-dd", "yyyy-MM-ddTHH:mm:ss.fffzzz", "o" },
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out _);
     }
 
     private static JsonObject CompileRow(ElasticsearchFilterRow row)
