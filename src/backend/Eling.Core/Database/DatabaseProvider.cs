@@ -5,5 +5,6 @@ public enum DatabaseProvider
     Sqlite,
     MySql,
     Redis,
-    PostgreSql
+    PostgreSql,
+    Elasticsearch
 }

@@ -39,4 +39,12 @@ public static class DatabaseAuditActions
     public const string RedisPrefixPreview = "redis_prefix_preview";
 
     public const string RedisPrefixDelete = "redis_prefix_delete";
+
+    public const string EsIndices = "es_indices";
+
+    public const string EsMapping = "es_mapping";
+
+    public const string EsSearch = "es_search";
+
+    public const string EsCount = "es_count";
 }
