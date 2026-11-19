@@ -60,7 +60,7 @@ Eling.Core/Database/
 Eling.Backend/
   Dtos/ElasticsearchDtos.cs            (new)  request/view DTOs for the es routes
   Endpoints/DatabaseElasticsearchEndpoints.cs  (new)  6 routes under MapGroup("/api/databases")
-  Endpoints/DatabaseEndpoints.cs       (edit) ES refusals (schema/query/browse/mutate/keys) + ES test branch before adapter seam (see Tasks 7–8); Redis branch reordered while in the same method (bug, see Task 7)
+  Endpoints/DatabaseEndpoints.cs       (edit) ES refusals (schema/query/browse/mutate/keys) + ES test branch before adapter seam (Redis untouched — follow-up)
   Endpoints/DatabaseKeyEndpoints.cs    (edit) ES refusal on /{id}/keys* routes
   Mcp/Tools/EsIndicesTool.cs           (new)
   Mcp/Tools/EsMappingTool.cs           (new)
@@ -255,8 +255,9 @@ Handler-stub tests (`HttpMessageHandler` subclass returning canned JSON per path
 - Create: `src/backend/Eling.Backend/Dtos/ElasticsearchDtos.cs` (request/view records: `ElasticsearchIndicesDto`? no — reuse Core records; only request DTOs: `ElasticsearchSearchRequest { string? Index; JsonElement? Query; JsonElement? Sort; JsonElement? Aggs; int Size = 25; int From; IReadOnlyList<string>? SourceIncludes }`, `ElasticsearchCountRequest { string? Index; JsonElement? Query }`)
 - Create: `src/backend/Eling.Backend/Endpoints/DatabaseElasticsearchEndpoints.cs` (maps `/{id}/es/indices`, `/{id}/es/index`, `/{id}/es/documents`, `/{id}/es/histogram`, `/{id}/es/search`, `/{id}/es/count`)
 - Create: `src/backend/Eling.Backend/Bootstrap/DashboardRoutes.cs` edit (analysis comment + `app.MapDatabaseElasticsearchEndpoints();`), `DashboardServices.cs`, `McpHostBuilder.cs` (DI: `AddSingleton<IElasticsearchClientCache>`, `IElasticsearchReadService`)
-- Modify: `DatabaseEndpoints.cs` — (a) add `Elasticsearch` branches to the refusal sites (`/schema`, `/query`, `/browse`, `/{id}/mutate`, `/list-databases`) with `ElasticsearchRequirement.NotSql`, mirroring the Redis checks; (b) **reorder** the `Redis` provider branch **above** `TryCreateAdapter` in both test routes, and add the `Elasticsearch` branch above it (ES test via `IElasticsearchReadService.PingAsync`, like `TestRedisAsync`). This is a latent bug being fixed in passing: today the Redis branch is unreachable because `DatabaseAdapterFactory` throws before the branch — a Redis "Test Connection" returns `Provider 'Redis' is not supported.` instead of pinging. Fix here because the ES branch must go in the same place; keep the change minimal (branch order only, plus `MarkConnectedAsync` handling for success, same as Redis).
+- Modify: `DatabaseEndpoints.cs` — (a) add `Elasticsearch` branches to the refusal sites (`/schema`, `/query`, `/browse`, `/{id}/mutate`, `/list-databases`) with `ElasticsearchRequirement.NotSql`, mirroring the Redis checks; (b) add an `Elasticsearch` provider branch in both test routes, placed **above** `TryCreateAdapter`, mirroring the Redis branch shape (test via `IElasticsearchReadService.PingAsync`). The pre-existing latent Redis bug (Redis branch unreachable because the adapter factory throws first) is **deliberately left alone** — the user opted to split that fix out and ask about it separately; do not touch the Redis branches or the Redis ordering in this task.
 - Modify: `DatabaseKeyEndpoints.cs` — ES provider → 400 on `/{id}/keys*`.
+- **Note — Redis branch deliberately untouched:** there is a latent dead-code bug in both test routes (`TryCreateAdapter` is called before the Redis branch, and the factory throws for Redis). The user decided to split that fix out from this work; the ES branch goes above `TryCreateAdapter`, the Redis branches and their ordering stay as-is, and nobody "helps" by fixing Redis in this task.
 - Tests: `tests/Eling.Backend.Tests/ElasticsearchEndpointTests.cs`, `DatabaseRefusalElasticsearchTests.cs`, `ElasticsearchWriteVerbSweepTests.cs`
 
 Route behavior (spec §4, exact):
@@ -282,7 +283,7 @@ Tests (endpoint layer, stubbed `IElasticsearchReadService`, TestServer):
 
 - [ ] **Steps:** failing endpoint tests (stub service registered in test DI) → implement DTO + endpoints + refusal edits + DI → green → `dotnet test tests/Eling.Backend.Tests` full suite → commit `feat(backend): es routes, refusals and test-branch ordering`
 
-**Note for the reviewer:** Task 8 includes the Redis branch reorder (latent dead-code bug — the Redis test path is unreachable today because the adapter factory throws first). If the user vetoes this fix, the ES branch still goes before `TryCreateAdapter`; the Redis reorder must then be split into its own follow-up commit on the user's call.
+**Note for the reviewer:** Task 8 places the ES branch above `TryCreateAdapter` (required, mirrors the Redis shape). The latent Redis ordering bug is intentionally NOT fixed here — user decision, split to a follow-up.
 
 ### Task 9: Smoke-check that pins the Review Focus lines
 
