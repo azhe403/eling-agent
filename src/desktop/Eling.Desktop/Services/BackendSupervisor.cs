@@ -102,60 +102,79 @@ public sealed class BackendSupervisor(ILogger<BackendSupervisor> logger) : IDisp
         var repoRoot = FindRepoRoot();
         logger.LogInformation("Repo root: {RepoRoot}", repoRoot);
 
-        var psi = new ProcessStartInfo
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = repoRoot
-        };
-        psi.EnvironmentVariables["ELING_DASHBOARD_PORT"] = "4417";
-
         // Try direct exe in base directory (distribution / side-by-side)
         var localExe = Path.Combine(AppContext.BaseDirectory, "eling-backend.exe");
+        var binExe = Path.Combine(repoRoot, ".bin", "eling-backend.exe");
+
+        CliWrap.Command command;
         if (File.Exists(localExe))
         {
             logger.LogInformation("Using backend exe: {Path}", localExe);
-            psi.FileName = localExe;
+            command = CliWrap.Cli.Wrap(localExe);
+            logger.LogInformation(
+                "Spawn mode: exe (inherits this process environment unchanged; launchSettings.json does not apply)");
+        }
+        else if (File.Exists(binExe))
+        {
+            logger.LogInformation("Using backend exe: {Path}", binExe);
+            command = CliWrap.Cli.Wrap(binExe);
             logger.LogInformation(
                 "Spawn mode: exe (inherits this process environment unchanged; launchSettings.json does not apply)");
         }
         else
         {
-            // Check in .bin directory if available
-            var binExe = Path.Combine(repoRoot, ".bin", "eling-backend.exe");
-
-            if (File.Exists(binExe))
-            {
-                logger.LogInformation("Using backend exe: {Path}", binExe);
-                psi.FileName = binExe;
-                logger.LogInformation(
-                    "Spawn mode: exe (inherits this process environment unchanged; launchSettings.json does not apply)");
-            }
-            else
-            {
-                // Fallback: dotnet run
-                var backendCsProj = Path.Combine(repoRoot, "src", "backend", "Eling.Backend", "Eling.Backend.csproj");
-                logger.LogInformation("Using dotnet run: {Project}", backendCsProj);
-                psi.FileName = "dotnet";
-                psi.Arguments = $"run --project \"{backendCsProj}\" -p:ElingSkipDashboard=true";
-
-                // The one branch that can disagree with this process. `dotnet run`
-                // reads Properties/launchSettings.json and applies it on top of
-                // the inherited environment, so ASPNETCORE_ENVIRONMENT lands in
-                // the child as Development even when it is unset here. The [env:]
-                // field on this process is NOT the backend's environment; the
-                // backend's own log line is authoritative.
-                logger.LogInformation(
-                    "Spawn mode: dotnet run (launchSettings.json applies ASPNETCORE_ENVIRONMENT over the inherited value; read the backend log for the backend's environment)");
-            }
+            // Fallback: dotnet run
+            var backendCsProj = Path.Combine(repoRoot, "src", "backend", "Eling.Backend", "Eling.Backend.csproj");
+            logger.LogInformation("Using dotnet run: {Project}", backendCsProj);
+            command = CliWrap.Cli.Wrap("dotnet")
+                .WithArguments(["run", "--project", backendCsProj, "-p:ElingSkipDashboard=true"]);
+            // The one branch that can disagree with this process. `dotnet run`
+            // reads Properties/launchSettings.json and applies it on top of
+            // the inherited environment, so ASPNETCORE_ENVIRONMENT lands in
+            // the child as Development even when it is unset here. The [env:]
+            // field on this process is NOT the backend's environment; the
+            // backend's own log line is authoritative.
+            logger.LogInformation(
+                "Spawn mode: dotnet run (launchSettings.json applies ASPNETCORE_ENVIRONMENT over the inherited value; read the backend log for the backend's environment)");
         }
 
-        _spawnedProcess = Process.Start(psi);
-        if (_spawnedProcess != null)
+        // Same long-lived-child pattern the frontend spawn uses: output goes
+        // to the null device (the backend writes its own log file), the
+        // console window stays hidden, and the process handle is captured
+        // through configureProcess so the supervisor can kill the child.
+        Process? childProcess = null;
+        var spawn = command
+            .WithWorkingDirectory(repoRoot)
+            .WithEnvironmentVariables(env => env.Set("ELING_DASHBOARD_PORT", "4417"))
+            .WithStandardOutputPipe(CliWrap.PipeTarget.Null)
+            .WithStandardErrorPipe(CliWrap.PipeTarget.Null)
+            .ExecuteAsync(
+                startInfo =>
+                {
+                    startInfo.CreateNoWindow = true;
+                    startInfo.UseShellExecute = false;
+                },
+                configureProcess: process => childProcess = process)
+            .Task;
+        _spawnedProcess = childProcess;
+        if (_spawnedProcess is not null)
         {
             logger.LogInformation("Spawned backend PID {Pid}", _spawnedProcess.Id);
             AppDomain.CurrentDomain.ProcessExit += (_, _) => KillSpawnedProcess();
         }
+
+        // Nothing awaits the child; without this the failure is silent. A
+        // non-zero exit surfaces through CliWrap as an exception; the only
+        // routine non-zero exit is this supervisor's own kill on shutdown.
+        _ = spawn.ContinueWith(
+            task =>
+            {
+                if (task.Exception is not null)
+                    logger.LogDebug("Backend process exited: {Error}", task.Exception.GetBaseException().Message);
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 
         return Task.CompletedTask;
     }
@@ -187,9 +206,10 @@ public sealed class BackendSupervisor(ILogger<BackendSupervisor> logger) : IDisp
                 _spawnedProcess = null;
             }
         }
-        catch
+        catch (Exception ex)
         {
             // Ignore during shutdown
+            logger.LogDebug(ex, "KillSpawnedProcess failed; backend is left for the OS to reap");
         }
     }
 

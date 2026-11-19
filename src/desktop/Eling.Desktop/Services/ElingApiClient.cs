@@ -921,7 +921,7 @@ public sealed class ElingApiClient
                                     break;
                             }
                         }
-                        catch { /* ignore malformed */ }
+                        catch (Exception ex) { _logger.LogDebug(ex, "Skipping malformed SSE event payload"); }
                     }
                     eventName = null;
                     dataBuilder.Clear();

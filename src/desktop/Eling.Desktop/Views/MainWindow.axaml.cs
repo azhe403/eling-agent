@@ -7,6 +7,7 @@ using Eling.Desktop.Services;
 using Eling.Desktop.Models;
 using Eling.Desktop.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Desktop.Views;
 
@@ -14,6 +15,7 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel? _viewModel;
     private readonly DesktopSettingsStore? _settingsStore;
+    private readonly ILogger<MainWindow>? _logger;
     private readonly DispatcherTimer _saveDebounceTimer;
     private bool _restoring;
 
@@ -23,11 +25,12 @@ public partial class MainWindow : Window
         _saveDebounceTimer = CreateSaveTimer();
     }
 
-    public MainWindow(MainViewModel viewModel, DesktopSettingsStore settingsStore)
+    public MainWindow(MainViewModel viewModel, DesktopSettingsStore settingsStore, ILogger<MainWindow>? logger = null)
     {
         InitializeComponent();
         _viewModel = viewModel;
         _settingsStore = settingsStore;
+        _logger = logger;
         DataContext = _viewModel;
         _saveDebounceTimer = CreateSaveTimer();
 
@@ -218,9 +221,10 @@ public partial class MainWindow : Window
             _settingsStore.SaveWindowBounds(
                 new DesktopSettingsStore.WindowBounds(Position.X, Position.Y, Width, Height, false));
         }
-        catch
+        catch (Exception ex)
         {
             // Fail-safe: never disrupt the window for a settings write.
+            _logger?.LogDebug(ex, "Saving window bounds failed");
         }
     }
 }

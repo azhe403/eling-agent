@@ -606,6 +606,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         catch (OperationCanceledException)
         {
             // A newer mode switch superseded this request.
+            _logger.LogDebug("Workspace tree load superseded by a mode switch");
         }
         catch (Exception ex)
         {

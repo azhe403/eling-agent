@@ -1,5 +1,7 @@
 using Avalonia;
 using Avalonia.Input.Platform;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Desktop.Models;
 
@@ -18,11 +20,14 @@ public sealed class MessageBlock
     public bool IsText => Type == MessageBlockType.Text;
     public string LanguageDisplay => string.IsNullOrWhiteSpace(Language) ? "code" : Language.ToLowerInvariant();
 
-    public MessageBlock(MessageBlockType type, string content, string? language = null)
+    private readonly ILogger<MessageBlock>? _logger;
+
+    public MessageBlock(MessageBlockType type, string content, string? language = null, ILogger<MessageBlock>? logger = null)
     {
         Type = type;
         Content = content;
         Language = language;
+        _logger = logger;
     }
 
     public async void CopyToClipboard()
@@ -35,9 +40,15 @@ public sealed class MessageBlock
                 await clipboard.SetTextAsync(Content);
             }
         }
-        catch
+        catch (Exception ex)
         {
             // Clipboard failure is benign; copy is fire-and-forget.
+            // Constructor-injected when possible; otherwise resolved from the
+            // app's service container like the view code does to reach view models.
+            if (_logger is not null)
+                _logger.LogDebug(ex, "Clipboard copy failed");
+            else if (Application.Current is App app && app.Services is not null)
+                app.Services.GetService<ILogger<MessageBlock>>()?.LogDebug(ex, "Clipboard copy failed");
         }
     }
 }

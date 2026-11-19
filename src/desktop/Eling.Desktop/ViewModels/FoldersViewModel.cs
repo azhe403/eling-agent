@@ -290,6 +290,7 @@ public class FoldersViewModel : ViewModelBase
         catch (OperationCanceledException)
         {
             // Suppressed on cancellation
+            _logger.LogDebug("Workspace filter superseded/cancelled");
         }
         catch (Exception ex)
         {

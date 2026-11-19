@@ -35,5 +35,6 @@
     <PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
     <PackageReference Include="Polly.Core" Version="8.9.1" />
+    <PackageReference Include="CliWrap" Version="3.10.5" />
   </ItemGroup>
 </Project>
