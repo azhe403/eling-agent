@@ -21,35 +21,19 @@
         },
         "disabled": false,
         "timeout": {
-          "startup": 120000
+          "startup": 200000
         },
-        "protocol": "auto"
+        "protocol": "auto",
+        "codemode": false
       },
       "eling": {
         "type": "local",
         "command": [
           "eling-backend"
         ],
-        "disabled": false
-      },
-      "shadcn": {
-        "type": "local",
-        "command": [
-          "npx",
-          "shadcn@latest",
-          "mcp"
-        ],
-        "disabled": false
+        "disabled": false,
+        "codemode": false
       }
-    },
-    "shadcn": {
-      "type": "local",
-      "command": [
-        "npx",
-        "shadcn@latest",
-        "mcp"
-      ],
-      "enabled": true
     }
   }
 }
