@@ -1,5 +1,6 @@
 using Eling.Core.Audit;
 using Eling.Core.Audit.Storage;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Backend.Mcp;
 
@@ -13,8 +14,10 @@ namespace Eling.Backend.Mcp;
 /// unwritten. This wrapper exposes both disposal shapes, so whichever way a host
 /// tears itself down, the pending entries still land (design §7.3).
 /// </summary>
-public sealed class DisposableAuditLogger(BufferedAuditLogger inner) : IAuditLogger, IAsyncDisposable, IDisposable
+public sealed class DisposableAuditLogger(BufferedAuditLogger inner, ILogger<DisposableAuditLogger>? logger = null) : IAuditLogger, IAsyncDisposable, IDisposable
 {
+    private readonly ILogger<DisposableAuditLogger>? _logger = logger;
+
     public ValueTask RecordAsync(AuditEvent entry, CancellationToken cancellationToken = default) =>
         inner.RecordAsync(entry, cancellationToken);
 
@@ -32,10 +35,11 @@ public sealed class DisposableAuditLogger(BufferedAuditLogger inner) : IAuditLog
         {
             inner.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(5));
         }
-        catch
+        catch (Exception ex)
         {
             // Fail-open, exactly as the engine's own shutdown drain: a failure
             // here must never break the host that is shutting down.
+            _logger?.LogWarning(ex, "Audit drain failed at sync dispose; tail entries not persisted");
         }
     }
 }

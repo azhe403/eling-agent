@@ -18,9 +18,9 @@ public sealed class DatabaseRegistryWatcherTests : IDisposable
         {
             Directory.Delete(_dir, recursive: true);
         }
-        catch (IOException)
+        catch (IOException ex)
         {
-            // A leftover temp directory must not fail the test run.
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 
@@ -103,9 +103,9 @@ public sealed class DatabaseRegistryWatcherTests : IDisposable
             await cts.CancelAsync();
             if (pending is not null && !pending.IsCompleted)
             {
-                try { await pending; } catch (OperationCanceledException) { }
+                try { await pending; } catch (OperationCanceledException ex) { TestLogs.Log("test watch: await pending event canceled", ex); }
             }
-            try { await enumerator.DisposeAsync(); } catch (OperationCanceledException) { }
+            try { await enumerator.DisposeAsync(); } catch (OperationCanceledException ex) { TestLogs.Log("test watch: dispose watch enumerator canceled", ex); }
         }
     }
 }

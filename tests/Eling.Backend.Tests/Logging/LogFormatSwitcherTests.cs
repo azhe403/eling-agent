@@ -61,7 +61,7 @@ public sealed class LogFormatSwitcherTests : IDisposable
                 Directory.Delete(_logsDirectory, true);
             }
         }
-        catch { }
+        catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
     }
 
     private string Today => DateTime.Today.ToString("yyyy-MM-dd");

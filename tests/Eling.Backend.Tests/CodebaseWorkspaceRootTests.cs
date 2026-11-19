@@ -152,7 +152,7 @@ public sealed class CodebaseWorkspaceRootTests : IDisposable
         }
         finally
         {
-            try { Directory.Delete(dir, recursive: true); } catch { }
+            try { Directory.Delete(dir, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
         }
     }
 
@@ -172,7 +172,7 @@ public sealed class CodebaseWorkspaceRootTests : IDisposable
         }
         finally
         {
-            try { Directory.Delete(dir, recursive: true); } catch { }
+            try { Directory.Delete(dir, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
         }
     }
 
@@ -203,7 +203,7 @@ public sealed class CodebaseWorkspaceRootTests : IDisposable
     {
         _provider.Dispose();
         Environment.SetEnvironmentVariable(DataDirEnv, _originalDataDir);
-        try { Directory.Delete(_parent, recursive: true); } catch { }
-        try { Directory.Delete(_dataDir, recursive: true); } catch { }
+        try { Directory.Delete(_parent, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
+        try { Directory.Delete(_dataDir, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
     }
 }

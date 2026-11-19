@@ -78,18 +78,18 @@ public sealed class PeerMemoryNotifyTests : IAsyncLifetime, IDisposable
             {
                 await OwnerApp.StopAsync();
             }
-            catch
+            catch (Exception ex)
             {
-                /* ignore */
+                TestLogs.Log("test cleanup: stop peer app failed", ex);
             }
 
             try
             {
                 await OwnerApp.DisposeAsync();
             }
-            catch
+            catch (Exception ex)
             {
-                /* ignore */
+                TestLogs.Log("test cleanup: dispose peer app failed", ex);
             }
 
             OwnerApp = null;

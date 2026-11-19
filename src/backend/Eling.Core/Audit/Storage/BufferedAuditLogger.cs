@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Core.Audit.Storage;
 
@@ -18,8 +19,7 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
     /// <summary>
     /// One queued entry plus the per-entry signal the flusher completes once the
     /// batch holding it is appended. A record rather than a tuple because the
-    /// repo's no-tuple convention forbids tuple shapes outside the legacy
-    /// allowlist (CodeOrganizationConventionTests.NoTuples_BeyondAllowlist).
+    /// repo's no-tuple convention forbids tuple shapes (CodeOrganizationConventionTests.NoTuples).
     /// </summary>
     private sealed record PendingEntry(
         AuditEvent Entry,
@@ -33,8 +33,9 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _pump;
+    private readonly ILogger<BufferedAuditLogger>? _logger;
 
-    public BufferedAuditLogger(AuditFileStore store, IAuditIndex? index, AuditOptions options, TimeProvider timeProvider)
+    public BufferedAuditLogger(AuditFileStore store, IAuditIndex? index, AuditOptions options, TimeProvider timeProvider, ILogger<BufferedAuditLogger>? logger = null)
     {
         // A batch size of zero (or less) makes the pump's drain loop fill no
         // batch at all, so it spins through the channel without ever appending:
@@ -59,6 +60,7 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
         _index = index;
         _options = options;
         _timeProvider = timeProvider;
+        _logger = logger;
         _channel = Channel.CreateBounded<PendingEntry>(new BoundedChannelOptions(Capacity)
         {
             SingleReader = true,
@@ -121,7 +123,7 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
             // Access trail is fire-and-forget (§7.3): the caller never waits. The
             // entry is still queued rather than dropped, so a full channel delays
             // the pump, not the caller.
-            _ = SettleAsync(write);
+            _ = SettleAsync(write, AuditTrail.Access);
             return;
         }
 
@@ -134,7 +136,7 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
         var budget = Task.Delay(_options.FlushTimeout, cancellationToken);
         if (await Task.WhenAny(write, budget) == write)
         {
-            await SettleAsync(write);
+            await SettleAsync(write, AuditTrail.Change);
             await Task.WhenAny(written.Task, budget);
             return;
         }
@@ -143,7 +145,7 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
         // pump still owns it, so nothing about durability may be claimed here.
         // Settling it keeps a late rejection from surfacing as an unobserved
         // task exception.
-        _ = SettleAsync(write);
+        _ = SettleAsync(write, AuditTrail.Change);
     }
 
     private async Task PumpAsync()
@@ -196,6 +198,7 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
         {
             // The window elapsed or the logger is shutting down: flush what is
             // already in the batch rather than wait for more.
+            _logger?.LogDebug("Audit accumulation window elapsed; flushing partial batch");
         }
     }
 
@@ -225,9 +228,10 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
                 item.Written.TrySetResult();
             }
         }
-        catch
+        catch (Exception ex)
         {
             // Fail-open: an audit failure must never break the caller's operation.
+            _logger?.LogWarning(ex, "Audit flush failed; batch of {EntryCount} entries was not persisted", batch.Count);
         }
         finally
         {
@@ -240,15 +244,19 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
     /// write is swallowed fail-open (§14) and — being awaited or observed here —
     /// can never surface later as an unobserved task exception.
     /// </summary>
-    private static async Task SettleAsync(Task pending)
+    private async Task SettleAsync(Task pending, AuditTrail trail)
     {
         try
         {
             await pending;
         }
-        catch
+        catch (Exception ex)
         {
             // Fail-open, exactly as the flush path above.
+            if (trail == AuditTrail.Change)
+                _logger?.LogWarning(ex, "Audit enqueue rejected; change entry was not queued for persistence");
+            else
+                _logger?.LogDebug(ex, "Audit enqueue rejected; access entry dropped (fail-open)");
         }
     }
 
@@ -259,9 +267,10 @@ public sealed class BufferedAuditLogger : IAuditLogger, IAsyncDisposable
         {
             await _pump.WaitAsync(TimeSpan.FromSeconds(5));
         }
-        catch
+        catch (Exception ex)
         {
             // Best effort drain.
+            _logger?.LogWarning(ex, "Audit pump did not drain within 5s at dispose; pending entries not persisted");
         }
         _cts.Cancel();
         _cts.Dispose();

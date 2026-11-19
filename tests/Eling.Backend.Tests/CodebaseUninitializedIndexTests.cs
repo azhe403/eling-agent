@@ -23,7 +23,7 @@ public sealed class CodebaseUninitializedIndexTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch { }
+        try { Directory.Delete(_root, true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
     }
 
     /// <summary>A file that exists on disk but has no tables in it.</summary>

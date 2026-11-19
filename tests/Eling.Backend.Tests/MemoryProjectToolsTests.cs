@@ -1,3 +1,5 @@
+using CliWrap;
+using CliWrap.Buffered;
 using Eling.Backend.Bootstrap;
 using Eling.Backend.Dtos;
 using Eling.Backend.Mcp.Tools;
@@ -22,7 +24,7 @@ public sealed class MemoryProjectToolsTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, recursive: true); } catch { }
+        try { Directory.Delete(_root, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
     }
 
     private string CreateDir(params string[] segments)
@@ -123,7 +125,7 @@ public sealed class MemoryProjectToolsTests : IDisposable
     public async Task Init_WritesGitignoreWhenMissingPatterns()
     {
         var cwd = CreateDir("repo");
-        InitGitRepo(cwd);
+        await InitGitRepoAsync(cwd);
         File.WriteAllText(Path.Combine(cwd, ".gitignore"), "# existing\n");
         var tool = new MemoryInitProjectTool(cwd);
 
@@ -144,7 +146,7 @@ public sealed class MemoryProjectToolsTests : IDisposable
     public async Task Init_GitignoreNoopWhenPatternsPresent()
     {
         var cwd = CreateDir("repo");
-        InitGitRepo(cwd);
+        await InitGitRepoAsync(cwd);
         var original = "# patterns\n.eling/memory.db*\n.eling/*.db-journal\n.eling/*.db-wal\n.eling/runtime/\n";
         File.WriteAllText(Path.Combine(cwd, ".gitignore"), original);
         var tool = new MemoryInitProjectTool(cwd);
@@ -154,16 +156,11 @@ public sealed class MemoryProjectToolsTests : IDisposable
         Assert.Equal(original, File.ReadAllText(Path.Combine(cwd, ".gitignore")));
     }
 
-    private static void InitGitRepo(string dir)
+    private static async Task InitGitRepoAsync(string dir)
     {
-        var psi = new System.Diagnostics.ProcessStartInfo("git", "init")
-        {
-            WorkingDirectory = dir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-        using var process = System.Diagnostics.Process.Start(psi)!;
-        process.WaitForExit();
+        await Cli.Wrap("git")
+            .WithArguments(["init"])
+            .WithWorkingDirectory(dir)
+            .ExecuteBufferedAsync();
     }
 }

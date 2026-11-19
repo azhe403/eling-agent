@@ -122,7 +122,7 @@ public sealed class MemoryProvenanceDtoTests
         }
         finally
         {
-            try { Directory.Delete(tempDir, recursive: true); } catch { }
+            try { Directory.Delete(tempDir, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
         }
     }
 }

@@ -168,9 +168,9 @@ public sealed class DatabaseReadServiceCacheTests : IDisposable
         {
             if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
         }
-        catch (IOException)
+        catch (IOException ex)
         {
-            // A file still open on a slow filesystem is not a test failure.
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 }

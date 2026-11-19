@@ -2,6 +2,7 @@ using Eling.Core.Audit;
 using Eling.Core.Exceptions;
 using Eling.Core.Memory.Storage;
 using Eling.Core.Scope;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Core.Memory;
 
@@ -16,6 +17,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
     private readonly string _cwd;
     private readonly SmartSaveOptions _smartSave;
     private readonly MemoryAuditRecorder _audit;
+    private readonly ILogger<ScopedMemoryService>? _logger;
 
     public IReadOnlyList<string> ChainRoots => _levels.Select(l => l.Scope.Root).ToList().AsReadOnly();
 
@@ -169,7 +171,8 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         string? projectRoot,
         IMemoryService? localService = null,
         string? canonicalRoot = null,
-        IAuditLogger? auditLogger = null)
+        IAuditLogger? auditLogger = null,
+        ILogger<ScopedMemoryService>? logger = null)
         : this(
             [new ProjectLevel(new ProjectScope(projectRoot ?? Directory.GetCurrentDirectory()), projectService)],
             globalService,
@@ -178,7 +181,8 @@ public sealed class ScopedMemoryService : IScopedMemoryService
             projectRoot ?? Directory.GetCurrentDirectory(),
             localService: localService,
             canonicalRoot: canonicalRoot,
-            auditLogger: auditLogger)
+            auditLogger: auditLogger,
+            logger: logger)
     {
     }
 
@@ -191,7 +195,8 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         SmartSaveOptions? smartSave = null,
         IMemoryService? localService = null,
         string? canonicalRoot = null,
-        IAuditLogger? auditLogger = null)
+        IAuditLogger? auditLogger = null,
+        ILogger<ScopedMemoryService>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(levels);
         ArgumentNullException.ThrowIfNull(globalService);
@@ -210,6 +215,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         // logger the service records nothing (NullAuditLogger), which is the
         // same behaviour it had before the audit trail existed.
         _audit = MemoryAuditRecorder.Create(auditLogger);
+        _logger = logger;
     }
 
     private IMemoryService LocalOrThrow() =>
@@ -453,10 +459,11 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         {
             removed = await service.GetByIdAsync(reference.Id);
         }
-        catch
+        catch (Exception ex)
         {
             // The delete below reads and writes the same storage; a failure here
             // is the storage's to report, not the audit snapshot's.
+            _logger?.LogWarning(ex, "Audit snapshot read before delete failed for memory {MemoryId}; before-state not captured", reference.Id);
         }
 
         var deleted = await service.DeleteAsync(reference.Id);
@@ -679,9 +686,10 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         {
             previous = await service.GetByIdAsync(reference.Id);
         }
-        catch
+        catch (Exception ex)
         {
             // Same reasoning as the delete path: the storage owns the failure.
+            _logger?.LogWarning(ex, "Audit snapshot read before update failed for memory {MemoryId}; before-state not captured", reference.Id);
         }
 
         var updated = await service.UpdateAsync(reference.Id, content, type, tags, source, status);
@@ -736,7 +744,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         }
     }
 
-    private (IMemoryService Service, bool IsCurrentHead) ResolveTargetService(string targetProjectRoot)
+    private IMemoryService ResolveTargetService(string targetProjectRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetProjectRoot);
         if (_levels.Count == 0)
@@ -747,13 +755,13 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         var headRoot = _levels[0].Scope.Root;
         if (string.Equals(headRoot.TrimEnd(Path.DirectorySeparatorChar), target.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
         {
-            return (_levels[0].Service, true);
+            return _levels[0].Service;
         }
         var level = _levels.FirstOrDefault(l =>
             string.Equals(l.Scope.Root.TrimEnd(Path.DirectorySeparatorChar), target.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase));
         if (level is not null)
         {
-            return (level.Service, false);
+            return level.Service;
         }
         var dataDir = target.EndsWith(ProjectScope.DataDirectoryName, StringComparison.OrdinalIgnoreCase)
             ? target
@@ -765,9 +773,9 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         {
             throw new ProjectScopeNotInitializedException(target);
         }
-        return (new MemoryService(
+        return new MemoryService(
             new FileSystemMemoryStorage(dataDir),
-            new SqliteMemoryIndex(Path.Combine(dataDir, "memory.db"))), false);
+            new SqliteMemoryIndex(Path.Combine(dataDir, "memory.db")));
     }
 
     public async Task<ScopedMemory?> CopyToProjectAsync(MemoryReference source, string targetProjectRoot)
@@ -780,7 +788,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         if (memory is null) return null;
 
         var copy = new Memory(memory.Type, memory.Content, memory.Tags, memory.Source, memory.Status);
-        var (targetService, _) = ResolveTargetService(targetProjectRoot);
+        var targetService = ResolveTargetService(targetProjectRoot);
         var saved = await targetService.SaveAsync(copy);
         var target = new ScopedMemory(saved, MemoryScopeKind.Project, targetProjectRoot);
         await _audit.RecordCopiedAsync(MemoryAuditActions.CopyToProject, target);
@@ -866,7 +874,7 @@ public sealed class ScopedMemoryService : IScopedMemoryService
         var memory = await sourceService.GetByIdAsync(source.Id);
         if (memory is null) return null;
 
-        var (targetService, _) = ResolveTargetService(targetProjectRoot);
+        var targetService = ResolveTargetService(targetProjectRoot);
         var saved = await targetService.SaveAsync(MoveCopy(memory));
         await sourceService.DeleteAsync(source.Id);
 

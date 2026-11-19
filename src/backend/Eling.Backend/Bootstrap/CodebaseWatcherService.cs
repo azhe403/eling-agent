@@ -107,6 +107,7 @@ public sealed class CodebaseWatcherService : BackgroundService
         catch (OperationCanceledException)
         {
             // Host shutting down; watcher stops with it.
+            _logger?.LogDebug("Codebase watcher loop stopped (host shutting down)");
         }
         catch (Exception ex)
         {
@@ -313,6 +314,7 @@ public sealed class CodebaseWatcherService : BackgroundService
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // Host shutting down.
+            _logger?.LogDebug("Codebase watcher full incremental pass cancelled (host shutting down)");
         }
         catch (Exception ex)
         {

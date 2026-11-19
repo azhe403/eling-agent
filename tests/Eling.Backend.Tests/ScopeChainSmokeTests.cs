@@ -29,7 +29,7 @@ public sealed class ScopeChainSmokeTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, recursive: true); } catch { }
+        try { Directory.Delete(_root, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete scope chain root failed", ex); }
     }
 
     private string CreateDir(params string[] segments)

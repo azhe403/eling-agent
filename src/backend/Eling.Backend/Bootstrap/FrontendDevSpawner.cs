@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using CliWrap.Buffered;
 using Microsoft.Extensions.Logging;
 
 namespace Eling.Backend.Bootstrap;
@@ -331,7 +332,7 @@ internal static class FrontendDevSpawner
         // wrappers alive and the port still bound - which is how the respawn
         // turned into EADDRINUSE.
         KillOwnSpawn(session, logger);
-        KillProcessTreeOnPort(FrontendPort, logger);
+        await KillProcessTreeOnPortAsync(FrontendPort, logger);
 
         // Wait for the port before spawning, on both paths. A spawn into a
         // bound port is a guaranteed EADDRINUSE, so "the port looked free a
@@ -439,7 +440,7 @@ internal static class FrontendDevSpawner
             .WithStandardOutputPipe(CliWrap.PipeTarget.ToDelegate(line => logger.LogInformation("[pnpm-dev] {Line}", line)))
             .WithStandardErrorPipe(CliWrap.PipeTarget.ToDelegate(line => logger.LogWarning("[pnpm-dev:err] {Line}", line)))
             .ExecuteAsync(
-                configureProcessStartInfo: _ => { },
+                _ => { },
                 configureProcess: process => rootProcessId = process.Id)
             .Task;
 
@@ -524,11 +525,11 @@ internal static class FrontendDevSpawner
         }
     }
 
-    private static void KillProcessTreeOnPort(int port, ILogger logger)
+    private static async Task KillProcessTreeOnPortAsync(int port, ILogger logger)
     {
         try
         {
-            var pids = GetPidsListeningOnPort(port, logger);
+            var pids = await GetPidsListeningOnPortAsync(port, logger);
             if (pids.Count == 0)
             {
                 logger.LogWarning(
@@ -565,32 +566,17 @@ internal static class FrontendDevSpawner
         }
     }
 
-    private static HashSet<int> GetPidsListeningOnPort(int port, ILogger logger)
+    private static async Task<HashSet<int>> GetPidsListeningOnPortAsync(int port, ILogger logger)
     {
         var pids = new HashSet<int>();
         try
         {
-            using var ps = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "netstat.exe",
-                Arguments = "-ano -p TCP",
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            })!;
-            // Read before waiting: a netstat that outlives the timeout would
-            // otherwise block ReadToEnd forever, since the pipe stays open for
-            // as long as the child lives.
-            var pending = ps.StandardOutput.ReadToEndAsync();
-            if (!ps.WaitForExit(2000))
-            {
-                try { ps.Kill(entireProcessTree: true); } catch { /* already gone */ }
-                logger.LogWarning("netstat did not exit within 2s; port owners unknown this round");
-                return pids;
-            }
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var result = await CliWrap.Cli.Wrap("netstat")
+                .WithArguments(["-ano", "-p", "TCP"])
+                .ExecuteBufferedAsync(timeout.Token);
 
-            var output = pending.GetAwaiter().GetResult();
-            foreach (var line in output.Split('\n'))
+            foreach (var line in result.StandardOutput.Split('\n'))
             {
                 var trimmed = line.Trim();
                 if (!trimmed.StartsWith("TCP", StringComparison.Ordinal)) continue;
@@ -609,7 +595,8 @@ internal static class FrontendDevSpawner
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "netstat failed");
+            // A timed-out netstat surfaces as an exception from CliWrap; either way, port owners are unknown this round.
+            logger.LogWarning(ex, "netstat query failed for port {Port}; port owners unknown this round", port);
         }
 
         return pids;

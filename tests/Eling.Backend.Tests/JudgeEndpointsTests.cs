@@ -172,7 +172,7 @@ public class JudgeEndpointsTests : IAsyncLifetime, IDisposable
         {
             cts.Cancel();
             listener.Stop();
-            try { await stubTask; } catch { }
+            try { await stubTask; } catch (Exception ex) { TestLogs.Log("test cleanup: await stub task failed", ex); }
         }
     }
 

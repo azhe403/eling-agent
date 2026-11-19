@@ -28,9 +28,9 @@ public sealed class LogReaderJsonlTests : IDisposable
         {
             Directory.Delete(_dir, recursive: true);
         }
-        catch
+        catch (Exception ex)
         {
-            // Best effort cleanup.
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 

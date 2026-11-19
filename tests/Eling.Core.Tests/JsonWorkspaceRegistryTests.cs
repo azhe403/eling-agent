@@ -310,8 +310,9 @@ public sealed class JsonWorkspaceRegistryTests : IDisposable
                 Directory.Delete(_dir, recursive: true);
             }
         }
-        catch
+        catch (Exception ex)
         {
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 }

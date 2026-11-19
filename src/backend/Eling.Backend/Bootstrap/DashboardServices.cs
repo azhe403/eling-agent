@@ -155,7 +155,8 @@ public static class DashboardServices
             sp.GetRequiredService<IDatabaseReadCache>(),
             sp.GetRequiredService<ILogger<DatabaseReadService>>()));
 
-        services.AddSingleton<IRedisConnectionPool>(sp => new RedisConnectionPool());
+        services.AddSingleton<IRedisConnectionPool>(sp =>
+            new RedisConnectionPool(logger: sp.GetService<ILogger<RedisConnectionPool>>()));
         services.AddSingleton<IRedisReadCache>(sp => new JsonRedisReadCache(
             globalAgentDir,
             sp.GetRequiredService<ILogger<JsonRedisReadCache>>()));

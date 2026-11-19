@@ -123,8 +123,8 @@ public sealed class RuntimeRegistryWorkspaceRecordingTests : IDisposable
         foreach (var dir in _scratchDirs)
         {
             try { Directory.Delete(dir, recursive: true); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            catch (IOException ex) { TestLogs.Log("test cleanup: scratch dir delete failed", ex); }
+            catch (UnauthorizedAccessException ex) { TestLogs.Log("test cleanup: scratch dir delete failed", ex); }
         }
 
         try
@@ -134,9 +134,9 @@ public sealed class RuntimeRegistryWorkspaceRecordingTests : IDisposable
                 Directory.Delete(_dir, recursive: true);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Best-effort cleanup; the OS reclaims the temp root eventually.
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 }

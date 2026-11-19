@@ -114,9 +114,9 @@ public sealed class StatsEndpointsTests : IAsyncLifetime, IDisposable
         {
             if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true);
         }
-        catch
+        catch (Exception ex)
         {
-            /* the temp dir is best-effort cleanup */
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 

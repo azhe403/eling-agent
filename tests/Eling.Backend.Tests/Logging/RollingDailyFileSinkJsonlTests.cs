@@ -28,7 +28,7 @@ public sealed class RollingDailyFileSinkJsonlTests : IDisposable
                 Directory.Delete(_tempLogsDir, true);
             }
         }
-        catch { }
+        catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
     }
 
     private static string ReadFileShared(string path)

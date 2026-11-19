@@ -168,6 +168,7 @@ public sealed class MemoryWriteTool
                         catch (Exception localEx) when (localEx is ProjectScopeNotInitializedException or InvalidOperationException)
                         {
                             // No local tier to fall back to — fall through to init-required.
+                            _logger?.LogDebug(localEx, "No local tier to fall back to; falling through to init-required");
                         }
                     }
                     _logger?.LogWarning("memory_save blocked: {Message}", ex.Message);

@@ -22,8 +22,8 @@ public sealed class LogFormatForwardingSinkTests : IDisposable
 
     public void Dispose()
     {
-        try { if (Directory.Exists(_dirA)) Directory.Delete(_dirA, true); } catch { }
-        try { if (Directory.Exists(_dirB)) Directory.Delete(_dirB, true); } catch { }
+        try { if (Directory.Exists(_dirA)) Directory.Delete(_dirA, true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir a failed", ex); }
+        try { if (Directory.Exists(_dirB)) Directory.Delete(_dirB, true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir b failed", ex); }
     }
 
     private static LogEvent Probe(string marker)

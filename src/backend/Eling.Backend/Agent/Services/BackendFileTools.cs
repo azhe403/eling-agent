@@ -47,7 +47,7 @@ public sealed class BackendFileTools(ILogger<BackendFileTools> logger)
         }
     }
 
-    public (string Content, bool Truncated) ReadText(string fullPath)
+    public ReadTextResult ReadText(string fullPath)
     {
         try
         {
@@ -69,7 +69,7 @@ public sealed class BackendFileTools(ILogger<BackendFileTools> logger)
 
             var truncated = stream.Length > ReadCapBytes;
             var text = System.Text.Encoding.UTF8.GetString(buffer, 0, (int)Math.Min(read, ReadCapBytes));
-            return (text, truncated);
+            return new ReadTextResult(text, truncated);
         }
         catch (Exception ex) when (ex is FileNotFoundException || (ex is InvalidOperationException ioe && ioe.Message == "binary"))
         {

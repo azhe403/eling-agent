@@ -45,15 +45,15 @@ public class MemoryMaintenanceApiTests : IAsyncLifetime, IDisposable
 
         if (_app is not null)
         {
-            try { await _app.StopAsync(); } catch { }
-            try { await _app.DisposeAsync(); } catch { }
+            try { await _app.StopAsync(); } catch (Exception ex) { TestLogs.Log("test cleanup: stop app failed", ex); }
+            try { await _app.DisposeAsync(); } catch (Exception ex) { TestLogs.Log("test cleanup: dispose app failed", ex); }
             _app = null;
         }
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempDir, recursive: true); } catch { }
+        try { Directory.Delete(_tempDir, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
         GC.SuppressFinalize(this);
     }
 

@@ -265,10 +265,10 @@ public sealed class RollingDailyFileSink : ILogEventSink, IDisposable
             if (priorDayGroups.Count > 0)
             {
                 // Write prior day lines to their respective archive files
-                foreach (var (dateKey, groupLines) in priorDayGroups)
+                foreach (var entry in priorDayGroups)
                 {
-                    var archivePath = Path.Combine(_logsDirectory, $"{_archivePrefix}-{dateKey}{archiveExtension}");
-                    File.AppendAllLines(archivePath, groupLines, Encoding.UTF8);
+                    var archivePath = Path.Combine(_logsDirectory, $"{_archivePrefix}-{entry.Key}{archiveExtension}");
+                    File.AppendAllLines(archivePath, entry.Value, Encoding.UTF8);
                 }
 
                 // Rewrite active file with today's lines (or truncate if empty)

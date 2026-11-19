@@ -170,6 +170,7 @@ public sealed class JsonDatabaseConnectionStore : IDatabaseConnectionStore, IDis
         }
         catch (AbandonedMutexException)
         {
+            _logger?.LogDebug("Database registry gate mutex abandoned; proceeding with ownership handed over");
         }
     }
 

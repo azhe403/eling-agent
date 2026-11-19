@@ -6,6 +6,7 @@ using Eling.Core.Runtime;
 using Eling.Core.Scope;
 using Eling.Core.Workspaces;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Backend.Controllers;
 
@@ -42,8 +43,10 @@ public sealed class CoordinatorController(
     RuntimeRegistry registry,
     MemoryChangeBroadcaster broadcaster,
     WorkspaceExpansionStore expansionStore,
-    ProcessMetricsTracker? metricsTracker = null) : ControllerBase
+    ProcessMetricsTracker? metricsTracker = null,
+    ILogger<CoordinatorController>? logger = null) : ControllerBase
 {
+    private readonly ILogger<CoordinatorController>? _logger = logger;
     /// <summary>
     /// Registered runtimes. With <paramref name="includeRegistered"/> the result
     /// also contains workspaces whose process has exited; those carry
@@ -228,7 +231,7 @@ public sealed class CoordinatorController(
             try
             {
                 var dbPath = ElingPaths.ResolveCodebaseDbPath(normalized);
-                if (!await DeleteCodebaseIndexAsync(dbPath, cancellationToken))
+                if (!await DeleteCodebaseIndexAsync(dbPath, cancellationToken, _logger))
                 {
                     warnings.Add($"The codebase index at '{dbPath}' could not be deleted.");
                 }
@@ -281,7 +284,7 @@ public sealed class CoordinatorController(
     /// writing to.
     /// </remarks>
     /// <returns>True when the index is gone or empty afterwards.</returns>
-    private static async Task<bool> DeleteCodebaseIndexAsync(string dbPath, CancellationToken cancellationToken)
+    private static async Task<bool> DeleteCodebaseIndexAsync(string dbPath, CancellationToken cancellationToken, ILogger? logger)
     {
         // Give this database's pooled handles back first: the read path pools
         // a read-write handle, and one that is still open makes the file
@@ -297,11 +300,12 @@ public sealed class CoordinatorController(
         {
             // Best-effort: the delete below is still attempted, and its own
             // outcome is what gets reported.
+            logger?.LogDebug(ex, "Codebase index pooled handles could not be released; delete still attempted");
         }
 
-        if (TryDeleteFile(dbPath))
+        if (TryDeleteFile(dbPath, logger))
         {
-            TryDeleteSidecars(dbPath);
+            TryDeleteSidecars(dbPath, logger);
             return true;
         }
 
@@ -324,26 +328,28 @@ public sealed class CoordinatorController(
     /// open a stale or corrupt DB on next access.
     /// </summary>
     /// <returns>True when the database file is gone afterwards.</returns>
-    private static bool TryDeleteFile(string dbPath)
+    private static bool TryDeleteFile(string dbPath, ILogger? logger)
     {
         try
         {
             if (System.IO.File.Exists(dbPath))
                 System.IO.File.Delete(dbPath);
         }
-        catch (IOException)
+        catch (IOException ex)
         {
             // Another process holds the file open. The caller falls back to
             // clearing the content instead.
+            logger?.LogDebug(ex, "Codebase index file locked; content-clear fallback follows");
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
+            logger?.LogDebug(ex, "Codebase index file delete unauthorized; content-clear fallback follows");
         }
 
         return !System.IO.File.Exists(dbPath);
     }
 
-    private static void TryDeleteSidecars(string dbPath)
+    private static void TryDeleteSidecars(string dbPath, ILogger? logger)
     {
         foreach (var suffix in new[] { "-wal", "-shm", "-journal" })
         {
@@ -353,11 +359,13 @@ public sealed class CoordinatorController(
                 if (System.IO.File.Exists(sidecarPath))
                     System.IO.File.Delete(sidecarPath);
             }
-            catch (IOException)
+            catch (IOException ex)
             {
+                logger?.LogDebug(ex, "Codebase index sidecar {Sidecar} delete failed", suffix);
             }
-            catch (UnauthorizedAccessException)
+            catch (UnauthorizedAccessException ex)
             {
+                logger?.LogDebug(ex, "Codebase index sidecar {Sidecar} delete unauthorized", suffix);
             }
         }
     }

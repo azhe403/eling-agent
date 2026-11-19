@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Eling.Core;
 using Eling.Core.Memory;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Backend;
 
@@ -18,11 +19,13 @@ namespace Eling.Backend;
 public sealed class HttpCoordinatorMemoryChangeNotifier : IMemoryChangeNotifier
 {
     private readonly int _port;
+    private readonly ILogger<HttpCoordinatorMemoryChangeNotifier>? _logger;
     private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(2) };
 
-    public HttpCoordinatorMemoryChangeNotifier(int port)
+    public HttpCoordinatorMemoryChangeNotifier(int port, ILogger<HttpCoordinatorMemoryChangeNotifier>? logger = null)
     {
         _port = port;
+        _logger = logger;
     }
 
     public async Task NotifyAsync(string reason = "mutation", CancellationToken cancellationToken = default)
@@ -37,9 +40,10 @@ public sealed class HttpCoordinatorMemoryChangeNotifier : IMemoryChangeNotifier
                 content: content,
                 cancellationToken);
         }
-        catch
+        catch (Exception ex)
         {
             // Dashboard is optional; fire-and-forget
+            _logger?.LogDebug(ex, "Dashboard notify failed (owner offline?) for port {Port}", _port);
         }
     }
 }

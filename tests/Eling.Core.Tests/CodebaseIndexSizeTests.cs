@@ -22,12 +22,13 @@ public sealed class CodebaseIndexSizeTests : IDisposable
         {
             if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
         }
-        catch (IOException)
+        catch (IOException ex)
         {
-            // A leftover temp directory is not worth failing a test over.
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 

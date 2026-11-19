@@ -37,9 +37,9 @@ public sealed class ZombieProcessCleanerTests
                 context.Response.StatusCode = 200;
                 context.Response.Close();
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignored on teardown
+                TestLogs.Log("test cleanup: http listener task ignored on teardown", ex);
             }
         });
 
@@ -72,9 +72,9 @@ public sealed class ZombieProcessCleanerTests
                 context.Response.StatusCode = 200;
                 context.Response.Close();
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignored on teardown
+                TestLogs.Log("test cleanup: http listener task ignored on teardown", ex);
             }
         });
 

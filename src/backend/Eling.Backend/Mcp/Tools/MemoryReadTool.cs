@@ -95,6 +95,7 @@ public sealed class MemoryReadTool
                 catch (ProjectScopeNotInitializedException)
                 {
                     // Uninitialized project scope: fall through to global lookup.
+                    _logger?.LogDebug("Project scope uninitialized; falling back to global memory read");
                 }
                 var global = await _scoped!.GetByIdAsync(MemoryReference.ForGlobal(memoryId));
                 _logger?.LogInformation("Retrieved memory '{Id}' merged (found: {Found})", id, global is not null);

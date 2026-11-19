@@ -106,6 +106,7 @@ public sealed class RuntimeMetricsBroadcaster
         catch (ObjectDisposedException)
         {
             /* already torn down */
+            _logger.LogDebug("Metrics pump CTS already torn down");
         }
     }
 
@@ -123,6 +124,7 @@ public sealed class RuntimeMetricsBroadcaster
         catch (OperationCanceledException)
         {
             // The last subscriber left; ending here is the design.
+            _logger.LogDebug("Metrics pump stopped (last subscriber left)");
         }
         finally
         {

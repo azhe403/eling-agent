@@ -1,5 +1,6 @@
 using Eling.Core.Memory;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Core.Audit.Storage;
 
@@ -9,10 +10,12 @@ namespace Eling.Core.Audit.Storage;
 /// Losing this database is safe: <see cref="RebuildAsync"/> rescans every JSONL
 /// file and repopulates it, the same cache-not-truth contract as the memory index.
 /// </summary>
-public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : IAuditIndex
+public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store, ILogger<SqliteAuditIndex>? logger = null) : IAuditIndex
 {
     private const string After = "after";
     private const string Previous = "previous";
+
+    private readonly ILogger<SqliteAuditIndex>? _logger = logger;
 
     private string DbPath => Path.Combine(auditRoot, "audit-index.db");
 
@@ -97,9 +100,16 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
             {
                 await ExecuteAsync(connection, $"ALTER TABLE audit_events ADD COLUMN {colDecl};", cancellationToken);
             }
-            catch (SqliteException)
+            catch (SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
             {
                 // Column already exists — nothing to do.
+                _logger?.LogDebug(ex, "Audit index column {Column} already exists; migration skipped", colDecl);
+            }
+            catch (SqliteException ex)
+            {
+                // Not a duplicate-column failure: a real migration error, but the
+                // index is a rebuildable cache — log loudly, don't break startup.
+                _logger?.LogWarning(ex, "Audit index column {Column} migration failed", colDecl);
             }
         }
     }
@@ -331,6 +341,7 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store) : I
         {
             // The index is a rebuildable cache; leaving the file unshrunk is a
             // size problem, not a correctness one.
+            _logger?.LogDebug(ex, "Audit index incremental_vacuum failed; cache not shrunk");
         }
     }
 

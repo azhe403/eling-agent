@@ -115,6 +115,7 @@ public sealed class DatabaseRegistryWatcher : IDisposable
         {
             // Superseded by a newer change within the debounce window; the
             // latest event performs the broadcast.
+            _logger.LogDebug("Debounced database registry broadcast superseded by a newer change");
         }
         catch (Exception ex)
         {

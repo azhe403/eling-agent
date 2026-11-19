@@ -12,9 +12,8 @@ namespace Eling.Backend.Tests;
 /// The grouping rule is keyed on what the types ARE, never on the folder they sit
 /// in. Keying on the folder let a <c>Dtos/</c> file of two plain classes pass while
 /// would have failed the desktop's <c>Models/*Dtos.cs</c> files, which are exactly
-/// the shape the rule allows. Both allowlists below are self-cleaning: an entry that
-/// no longer describes a real multi-type file fails the suite, so a split file cannot
-/// leave a silent exemption behind.
+/// the shape the rule allows. There are no exception lists: every file must pass
+/// as written.
 /// </remarks>
 public sealed class CodeOrganizationConventionTests
 {
@@ -110,33 +109,6 @@ public sealed class CodeOrganizationConventionTests
         new(@"(?<![+\-*/%&|^!<>?=])=\s*\(\s*(?!(await|new)\b|\w+\s*\()[^)]*,", RegexOptions.Compiled),
     ];
 
-    // Files grandfathered with tuple shapes, relative to the repo root with
-    // forward slashes. Memory/filesystem/runtime plumbing predates the
-    // no-tuple rule. Do NOT extend this list — declare a named record
-    // instead, then remove the file from the list.
-    private static readonly HashSet<string> TupleAllowlist = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "src/backend/Eling.Core/Memory/Storage/SqliteMemoryIndex.cs",
-        "src/backend/Eling.Core/Memory/MemoryService.cs",
-        "src/backend/Eling.Core/Memory/ScopedMemoryService.cs",
-        "src/backend/Eling.Core/Recall/IntentionTriggerMatcher.cs",
-        "src/backend/Eling.Core/Recall/RecallService.cs",
-        "src/backend/Eling.Core/Logging/RollingDailyFileSink.cs",
-        "src/backend/Eling.Backend/RuntimeRegistry.cs",
-        "src/backend/Eling.Backend/FileSystem/FileSystemService.cs",
-        "src/backend/Eling.Backend/Agent/Services/BackendFileTools.cs",
-        "src/backend/Eling.Backend/Agent/Infrastructure/Ai/MeaiChatGateway.cs",
-        "src/backend/Eling.Backend/Endpoints/AgentChatEndpoints.cs",
-        "src/backend/Eling.Backend/Endpoints/AgentWorkspaceEndpoints.cs",
-    };
-
-    // Files grandfathered with more than one top-level type, relative to the repo
-    // root with forward slashes. Legacy to split later. Do NOT extend this list —
-    // split the file instead. NoNewMultiTypeAllowlistEntries asserts every entry
-    // still describes a real multi-type file, so a split file cannot leave a
-    // silent exemption behind.
-    private static readonly HashSet<string> MultiTypeAllowlist = new(StringComparer.OrdinalIgnoreCase);
-
     private static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -211,8 +183,6 @@ public sealed class CodeOrganizationConventionTests
         foreach (var file in Sources())
         {
             var rel = Relative(repoRoot, file);
-            if (MultiTypeAllowlist.Contains(rel))
-                continue;
 
             var lines = File.ReadAllLines(file);
             var types = TopLevelTypes(lines);
@@ -324,42 +294,6 @@ public sealed class CodeOrganizationConventionTests
     }
 
     [Fact]
-    public void NoNewMultiTypeAllowlistEntries_AndNoStaleOnes()
-    {
-        var repoRoot = RepoRoot();
-        var problems = new List<string>();
-        foreach (var entry in MultiTypeAllowlist)
-        {
-            var path = Path.Combine(repoRoot, entry.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(path))
-            {
-                problems.Add($"{entry}: allowlisted but the file no longer exists — remove the entry");
-                continue;
-            }
-
-            if (TopLevelTypes(File.ReadAllLines(path)).Count <= 1)
-                problems.Add($"{entry}: holds one type or fewer, so it no longer needs an exemption — remove the entry");
-        }
-        Assert.True(problems.Count == 0,
-            "The multi-type allowlist must not accumulate dead entries:\n" + string.Join("\n", problems));
-    }
-
-    [Fact]
-    public void NoStaleTupleAllowlistEntries()
-    {
-        var repoRoot = RepoRoot();
-        var stale = new List<string>();
-        foreach (var entry in TupleAllowlist)
-        {
-            var path = Path.Combine(repoRoot, entry.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(path))
-                stale.Add($"{entry}: allowlisted but the file no longer exists — remove the entry");
-        }
-        Assert.True(stale.Count == 0,
-            "The tuple allowlist must not accumulate dead entries:\n" + string.Join("\n", stale));
-    }
-
-    [Fact]
     public void MultiParameterRecords_AreChoppedOnePerLine()
     {
         var repoRoot = RepoRoot();
@@ -406,171 +340,24 @@ public sealed class CodeOrganizationConventionTests
     public void CatchBlocks_MustNotBeSilent()
     {
         var repoRoot = RepoRoot();
-        var byFile = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var offenders = new List<string>();
         foreach (var file in Sources())
         {
             // This file is the detector; its own literals spell out "catch {" shapes.
             if (file.EndsWith("CodeOrganizationConventionTests.cs", StringComparison.OrdinalIgnoreCase)) continue;
             var rel = Relative(repoRoot, file);
             var n = SilentCatches(File.ReadAllText(file), rel).Count();
-            if (n > 0) byFile[rel] = n;
+            if (n > 0)
+                offenders.Add($"{rel}: {n} silent catch(s) — silent catches are never acceptable");
         }
+        offenders.Sort(StringComparer.Ordinal);
 
-        var offenders = new List<string>();
-        foreach (var (rel, count) in byFile.OrderBy(kv => kv.Key, StringComparer.Ordinal))
-        {
-            if (SilentCatchAllowlist.TryGetValue(rel, out var allowed))
-            {
-                if (count > allowed)
-                    offenders.Add($"{rel}: {count} silent catch(s), allowlist permits {allowed} (list is shrink-only, never extend)");
-                else if (count < allowed)
-                    offenders.Add($"{rel}: silent-catch count dropped to {count} - lower/remove its allowlist entry (shrink-only)");
-            }
-            else
-            {
-                offenders.Add($"{rel}: {count} silent catch(s) — silent catches are never acceptable");
-            }
-        }
-        foreach (var rel in SilentCatchAllowlist.Keys)
-        {
-            if (!byFile.ContainsKey(rel))
-                offenders.Add($"{rel}: allowlist entry no longer matches any silent catch - remove it (shrink-only)");
-        }
         Assert.True(offenders.Count == 0,
             "Every catch block must log, at any layer - no empty or comment-only bodies:\n"
             + string.Join("\n", offenders));
     }
 
     /// <summary>
-    /// Baseline of silent catches present on 2026-11-12 (178 sites, 118 files,
-    /// harvested from the whole-tree scan; fix these as you touch each file).
-    /// SHRINK-ONLY: a PR may reduce a count but may never raise one, and a
-    /// file that reaches zero must have its entry removed — the test fails
-    /// either way rather than silently blessing a new site.
-    /// </summary>
-    private static readonly IReadOnlyDictionary<string, int> SilentCatchAllowlist =
-        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["src/backend/Eling.Backend/AuditDirWatcher.cs"] = 1,
-            ["src/backend/Eling.Backend/Bootstrap/CodebaseWatcherService.cs"] = 2,
-            ["src/backend/Eling.Backend/Bootstrap/DashboardPort.cs"] = 1,
-            ["src/backend/Eling.Backend/Bootstrap/FrontendDevSpawner.cs"] = 1,
-            ["src/backend/Eling.Backend/Bootstrap/HttpLoop.cs"] = 1,
-            ["src/backend/Eling.Backend/Bootstrap/RuntimeSelfRegistration.cs"] = 1,
-            ["src/backend/Eling.Backend/Bootstrap/ZombieProcessCleaner.cs"] = 1,
-            ["src/backend/Eling.Backend/CodebaseDirWatcher.cs"] = 1,
-            ["src/backend/Eling.Backend/Controllers/CoordinatorController.cs"] = 5,
-            ["src/backend/Eling.Backend/DatabaseRegistryWatcher.cs"] = 1,
-            ["src/backend/Eling.Backend/HttpCoordinatorMemoryChangeNotifier.cs"] = 1,
-            ["src/backend/Eling.Backend/Logging/LogFormatSwitcher.cs"] = 2,
-            ["src/backend/Eling.Backend/Mcp/DisposableAuditLogger.cs"] = 1,
-            ["src/backend/Eling.Backend/Mcp/Tools/MemoryReadTool.cs"] = 1,
-            ["src/backend/Eling.Backend/Mcp/Tools/MemoryWriteTool.cs"] = 1,
-            ["src/backend/Eling.Backend/RuntimeDirWatcher.cs"] = 1,
-            ["src/backend/Eling.Backend/RuntimeRegistry.cs"] = 6,
-            ["src/backend/Eling.Backend/Services/RuntimeMetricsBroadcaster.cs"] = 2,
-            ["src/backend/Eling.Backend/Updates/UpdateCheckerService.cs"] = 2,
-            ["src/backend/Eling.Core/Audit/Storage/BufferedAuditLogger.cs"] = 4,
-            ["src/backend/Eling.Core/Audit/Storage/SqliteAuditIndex.cs"] = 2,
-            ["src/backend/Eling.Core/Database/AppSettingsConnectionScanner.cs"] = 3,
-            ["src/backend/Eling.Core/Database/JsonDatabaseConnectionStore.cs"] = 1,
-            ["src/backend/Eling.Core/Database/RedisConnectionPool.cs"] = 5,
-            ["src/backend/Eling.Core/Memory/ScopedMemoryService.cs"] = 2,
-            ["src/backend/Eling.Core/Projects/JsonWorkspaceRegistry.cs"] = 1,
-            ["src/backend/Eling.Core/Scope/CanonicalProjectRoot.cs"] = 1,
-            ["src/backend/Eling.Core/Scope/CentralAgentDirectory.cs"] = 2,
-            ["src/backend/Eling.Core/Scope/CentralAuditDirectory.cs"] = 1,
-            ["src/backend/Eling.Core/Scope/CentralLogDirectory.cs"] = 1,
-            ["src/backend/Eling.Core/Workspaces/WorkspaceExpansionStore.cs"] = 1,
-            ["src/desktop/Eling.Desktop/Models/MessageBlock.cs"] = 1,
-            ["src/desktop/Eling.Desktop/Services/BackendSupervisor.cs"] = 1,
-            ["src/desktop/Eling.Desktop/Services/ElingApiClient.cs"] = 1,
-            ["src/desktop/Eling.Desktop/ViewModels/FoldersViewModel.cs"] = 1,
-            ["src/desktop/Eling.Desktop/ViewModels/MainViewModel.cs"] = 1,
-            ["src/desktop/Eling.Desktop/Views/MainWindow.axaml.cs"] = 1,
-            ["tests/Eling.Backend.Tests/AgentBuiltinMcpToolTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/AgentChatStreamTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/AgentChatTests.cs"] = 2,
-            ["tests/Eling.Backend.Tests/AgentHostBrowseTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/AgentStoreMigrationTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/AgentTurnPromptCompositionTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/AgentWorkspaceTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/CodebaseExclusionTests.cs"] = 4,
-            ["tests/Eling.Backend.Tests/CodebaseRebuildScopeTests.cs"] = 2,
-            ["tests/Eling.Backend.Tests/CodebaseStaleSweepTests.cs"] = 2,
-            ["tests/Eling.Backend.Tests/CodebaseUninitializedIndexTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/CodebaseWorkspaceRootTests.cs"] = 4,
-            ["tests/Eling.Backend.Tests/DashboardLifecycleTests.cs"] = 3,
-            ["tests/Eling.Backend.Tests/DatabaseDetectImportTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/DatabaseRegistryWatcherTests.cs"] = 3,
-            ["tests/Eling.Backend.Tests/Endpoints/StatsEndpointsTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/FileSystem/FileSystemServiceTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/HttpLoopConfigurationIsolationTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/JsonProjectScopePolicyStoreTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/JudgeEndpointsTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/Logging/LogConfigStoreTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/Logging/LogFormatForwardingSinkTests.cs"] = 2,
-            ["tests/Eling.Backend.Tests/Logging/LogFormatSwitcherTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/Logging/RollingDailyFileSinkJsonlTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/LoggingTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/Mcp/ToolPolicyFilterTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/Mcp/ToolsPolicyToolTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/McpHostConfigurationIsolationTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/McpProcessTests.cs"] = 2,
-            ["tests/Eling.Backend.Tests/MeaiGatewayTests.cs"] = 2,
-            ["tests/Eling.Backend.Tests/MemoryApiTests.cs"] = 2,
-            ["tests/Eling.Backend.Tests/MemoryMaintenanceApiTests.cs"] = 3,
-            ["tests/Eling.Backend.Tests/MemoryProjectScopePolicyToolTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/MemoryProjectToolsTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/MemoryProvenanceDtoTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/RecallToolCodebaseTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/RecallToolOverflowSummaryTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/RecallToolProjectScopeTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/RecallToolTopicAliasTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/MemoryWriteToolProjectScopeTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/Pecut10VerificationTests.cs"] = 2,
-            ["tests/Eling.Backend.Tests/PeerMemoryNotifyTests.cs"] = 2,
-            ["tests/Eling.Backend.Tests/ProjectContextNoAutoCreateTests.cs"] = 2,
-            ["tests/Eling.Backend.Tests/ProjectIdentityLoggingTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/ProjectMemoryChainEndpointTests.cs"] = 2,
-            ["tests/Eling.Backend.Tests/ProjectScopeCatalogTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/RuntimeDirWatcherTests.cs"] = 2,
-            ["tests/Eling.Backend.Tests/RuntimeMetricsSamplerTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/RuntimeRegistryWorkspacePruneTests.cs"] = 3,
-            ["tests/Eling.Backend.Tests/RuntimeRegistryWorkspaceRecordingTests.cs"] = 3,
-            ["tests/Eling.Backend.Tests/ScopeChainDiTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/ScopeChainSmokeTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/SemanticJudgeStoreTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/Shell/ShellConfigStoreTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/Shell/ShellToolsTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/ShellAgentToolTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/TestProcesses.cs"] = 5,
-            ["tests/Eling.Backend.Tests/Tools/ToolPolicyStoreTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/Updates/FileUpdateCacheTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/Updates/UpdateCheckerTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/Updates/UpdateNoticeBlockTests.cs"] = 1,
-            ["tests/Eling.Backend.Tests/ZombieProcessCleanerTests.cs"] = 2,
-            ["tests/Eling.Core.Tests/AppSettingsConnectionScannerTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/AppSettingsSourceResolverTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/CacheFileGateTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/CodebaseIndexSizeTests.cs"] = 2,
-            ["tests/Eling.Core.Tests/CodebaseSiblingReadOnlyFirstTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/DatabaseReadServiceCacheTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/JsonDatabaseReadCacheTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/JsonRedisReadCacheTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/JsonWorkspaceRegistryTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/LogReaderJsonlTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/LogReaderTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/ProjectScopeDiscoverChainTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/ProjectScopeTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/RedisKeyReadServiceOfflineTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/RedisScanCommandTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/ScopeChainTests.cs"] = 1,
-            ["tests/Eling.Core.Tests/TempWorkspace.cs"] = 2,
-            ["tests/Eling.Core.Tests/UserScopeTests.cs"] = 1,
-        };
-
-
     private static IEnumerable<string> SilentCatches(string text, string rel)
     {
         const string keyword = "catch";
@@ -721,15 +508,13 @@ public sealed class CodeOrganizationConventionTests
     }
 
     [Fact]
-    public void NoTuples_BeyondAllowlist()
+    public void NoTuples()
     {
         var repoRoot = RepoRoot();
         var offenders = new List<string>();
         foreach (var file in BackendSources())
         {
             var rel = Relative(repoRoot, file);
-            if (TupleAllowlist.Contains(rel))
-                continue;
             var lineNo = 0;
             foreach (var line in File.ReadLines(file))
             {
@@ -739,7 +524,7 @@ public sealed class CodeOrganizationConventionTests
             }
         }
         Assert.True(offenders.Count == 0,
-            "Code must use named records instead of tuples (do not extend the allowlist):\n"
+            "Code must use named records instead of tuples:\n"
             + string.Join("\n", offenders));
     }
 }

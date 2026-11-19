@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace Eling.Core.Scope;
 
 public static class CentralAuditDirectory
@@ -11,16 +13,17 @@ public static class CentralAuditDirectory
     /// goes through <see cref="ElingPaths"/> so the <c>ELING_DATA_DIR</c> override
     /// isolates test scopes exactly as it already does for logs.
     /// </summary>
-    public static string Resolve(string? xdgDataHome = null, string? userHome = null, string? elingDataDir = null)
+    public static string Resolve(string? xdgDataHome = null, string? userHome = null, string? elingDataDir = null, ILogger? logger = null)
     {
         var path = Path.Combine(ElingPaths.ResolveDataDir(xdgDataHome, userHome, elingDataDir), DirectoryName);
         try
         {
             Directory.CreateDirectory(path);
         }
-        catch
+        catch (Exception ex)
         {
             // Best-effort directory ensure; caller proceeds with the path regardless.
+            logger?.LogDebug(ex, "Central audit directory create failed at {Path}", path);
         }
         return path;
     }

@@ -163,10 +163,10 @@ public sealed class SqliteMemoryIndex : IMemoryIndex
 
         var porterAnd = porterAndQuery.Length > 0
             ? await SearchPorterAsync(porterAndQuery)
-            : Array.Empty<(string Id, double Score)>();
+            : Array.Empty<FtsRank>();
         var trigramAnd = trigramAndQuery.Length > 0
             ? await SearchTrigramAsync(trigramAndQuery)
-            : Array.Empty<(string Id, double Score)>();
+            : Array.Empty<FtsRank>();
 
         var andMode = MergeRankings(porterAnd, trigramAnd, "and");
         if (andMode.Count >= AndToOrThreshold)
@@ -182,10 +182,10 @@ public sealed class SqliteMemoryIndex : IMemoryIndex
 
         var porterOr = porterOrQuery.Length > 0
             ? await SearchPorterAsync(porterOrQuery)
-            : Array.Empty<(string Id, double Score)>();
+            : Array.Empty<FtsRank>();
         var trigramOr = trigramOrQuery.Length > 0
             ? await SearchTrigramAsync(trigramOrQuery)
-            : Array.Empty<(string Id, double Score)>();
+            : Array.Empty<FtsRank>();
 
         return MergeRankings(porterOr, trigramOr, "or-fallback");
     }
@@ -254,8 +254,8 @@ public sealed class SqliteMemoryIndex : IMemoryIndex
     }
 
     private static IReadOnlyCollection<MemorySearchResult> MergeRankings(
-        IReadOnlyCollection<(string Id, double Score)> porter,
-        IReadOnlyCollection<(string Id, double Score)> trigram,
+        IReadOnlyCollection<FtsRank> porter,
+        IReadOnlyCollection<FtsRank> trigram,
         string queryMode)
     {
         // Porter is primary signal (semantic match); trigram is secondary (typo/substring).
@@ -264,15 +264,19 @@ public sealed class SqliteMemoryIndex : IMemoryIndex
         var porterById = new Dictionary<string, double>(StringComparer.Ordinal);
         var trigramById = new Dictionary<string, double>(StringComparer.Ordinal);
 
-        foreach (var (id, score) in porter)
+        foreach (var rank in porter)
         {
+            var id = rank.Id;
+            var score = rank.Score;
             // BM25 returns negative ranks; more-negative = better. Invert so higher = better.
             var positive = -score;
             porterById[id] = positive;
             totals[id] = totals.GetValueOrDefault(id) + positive;
         }
-        foreach (var (id, score) in trigram)
+        foreach (var rank in trigram)
         {
+            var id = rank.Id;
+            var score = rank.Score;
             var weighted = (-score) * 0.4;
             trigramById[id] = trigramById.GetValueOrDefault(id) + weighted;
             totals[id] = totals.GetValueOrDefault(id) + weighted;
@@ -296,7 +300,7 @@ public sealed class SqliteMemoryIndex : IMemoryIndex
             .ToList();
     }
 
-    private async Task<IReadOnlyCollection<(string Id, double Score)>> SearchPorterAsync(string ftsQuery)
+    private async Task<IReadOnlyCollection<FtsRank>> SearchPorterAsync(string ftsQuery)
     {
         await using var connection = await OpenConnectionAsync();
         await using var command = connection.CreateCommand();
@@ -307,16 +311,16 @@ public sealed class SqliteMemoryIndex : IMemoryIndex
             ORDER BY rank;
             """;
         AddParameter(command, "$query", ftsQuery);
-        var results = new List<(string, double)>();
+        var results = new List<FtsRank>();
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
-            results.Add((reader.GetString(0), reader.GetDouble(1)));
+            results.Add(new FtsRank(reader.GetString(0), reader.GetDouble(1)));
         }
         return results;
     }
 
-    private async Task<IReadOnlyCollection<(string Id, double Score)>> SearchTrigramAsync(string ftsQuery)
+    private async Task<IReadOnlyCollection<FtsRank>> SearchTrigramAsync(string ftsQuery)
     {
         await using var connection = await OpenConnectionAsync();
         await using var command = connection.CreateCommand();
@@ -327,11 +331,11 @@ public sealed class SqliteMemoryIndex : IMemoryIndex
             ORDER BY rank;
             """;
         AddParameter(command, "$query", ftsQuery);
-        var results = new List<(string, double)>();
+        var results = new List<FtsRank>();
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
-            results.Add((reader.GetString(0), reader.GetDouble(1)));
+            results.Add(new FtsRank(reader.GetString(0), reader.GetDouble(1)));
         }
         return results;
     }
@@ -528,11 +532,11 @@ public sealed class SqliteMemoryIndex : IMemoryIndex
         }
     }
 
-    private static (string Content, string Tags, string? Source) BuildSearchFields(Memory memory)
+    private static SearchFields BuildSearchFields(Memory memory)
     {
         // Tags are already normalized by Memory.NormalizeTags at construction
         // time; join with single space so FTS5 tokenizes each word independently.
-        return (
+        return new SearchFields(
             Content: memory.Content,
             Tags: string.Join(' ', memory.Tags),
             Source: memory.Source);

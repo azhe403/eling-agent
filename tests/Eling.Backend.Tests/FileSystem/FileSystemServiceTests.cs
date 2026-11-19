@@ -29,7 +29,7 @@ public sealed class FileSystemServiceTests : IDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Best-effort temp cleanup; a leftover temp dir must not fail the suite.
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 

@@ -11,7 +11,7 @@ namespace Eling.Backend.Tests;
 [Collection("ProcessTests")]
 public sealed class McpProcessTests : IAsyncLifetime
 {
-    private readonly List<Process> _processes = [];
+    private readonly List<TestProcess> _processes = [];
     private string _tempDir = null!;
 
     public Task InitializeAsync()
@@ -27,22 +27,22 @@ public sealed class McpProcessTests : IAsyncLifetime
         {
             try
             {
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
-                process.Dispose();
+                if (!process.Process.HasExited) process.Process.Kill(entireProcessTree: true);
+                process.Process.Dispose();
             }
-            catch
+            catch (Exception ex)
             {
-                // Best effort cleanup.
+                TestLogs.Log("test cleanup: kill mcp process failed", ex);
             }
         }
 
         if (Directory.Exists(_tempDir))
         {
-            try { Directory.Delete(_tempDir, recursive: true); } catch { }
+            try { Directory.Delete(_tempDir, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
         }
     }
 
-    private Process StartEling(params string[] args)
+    private TestProcess StartEling(params string[] args)
     {
         var process = TestProcesses.Start(TestProcesses.HostDll, _tempDir, args);
         _processes.Add(process);
@@ -53,7 +53,7 @@ public sealed class McpProcessTests : IAsyncLifetime
     /// Sends an initialize request and reads stdout lines until the matching
     /// JSON-RPC response arrives. Any non-JSON line on stdout fails immediately.
     /// </summary>
-    private static async Task<JsonElement> SendInitializeAsync(Process process, int id)
+    private static async Task<JsonElement> SendInitializeAsync(TestProcess process, int id)
     {
         var request = JsonSerializer.Serialize(new Dictionary<string, object>
         {
@@ -68,13 +68,12 @@ public sealed class McpProcessTests : IAsyncLifetime
             }
         });
 
-        await process.StandardInput.WriteLineAsync(request);
-        await process.StandardInput.FlushAsync();
+        process.Stdin.WriteLine(request);
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         while (true)
         {
-            var line = await process.StandardOutput.ReadLineAsync(timeout.Token);
+            var line = await TestProcesses.ReadLineAsync(process.Stdout, timeout.Token);
             if (line is null)
                 throw new InvalidOperationException("stdout closed before an initialize response arrived.");
 
@@ -98,7 +97,7 @@ public sealed class McpProcessTests : IAsyncLifetime
         Assert.True(response.TryGetProperty("result", out var result));
         Assert.True(result.TryGetProperty("serverInfo", out _));
 
-        process.Kill(entireProcessTree: true);
+        process.Process.Kill(entireProcessTree: true);
     }
 
     [Fact]
@@ -109,7 +108,7 @@ public sealed class McpProcessTests : IAsyncLifetime
         var stderrSb = new System.Text.StringBuilder();
         var stderrTask = Task.Run(async () =>
         {
-            while (await process.StandardError.ReadLineAsync() is { } line)
+            while (await TestProcesses.ReadLineAsync(process.Stderr, CancellationToken.None) is { } line)
             {
                 stderrSb.AppendLine(line);
             }
@@ -119,7 +118,7 @@ public sealed class McpProcessTests : IAsyncLifetime
 
         // Let startup diagnostics accumulate, then stop.
         await Task.Delay(1500);
-        process.Kill(entireProcessTree: true);
+        process.Process.Kill(entireProcessTree: true);
         await stderrTask.WaitAsync(TimeSpan.FromSeconds(3));
 
         var stderr = stderrSb.ToString();
@@ -142,7 +141,7 @@ public sealed class McpProcessTests : IAsyncLifetime
 
             Assert.Equal(7, response.GetProperty("id").GetInt32());
 
-            process.Kill(entireProcessTree: true);
+            process.Process.Kill(entireProcessTree: true);
         }
         finally
         {

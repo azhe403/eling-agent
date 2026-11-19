@@ -179,8 +179,9 @@ public class AgentChatTests : IAsyncLifetime, IDisposable
             {
                 stub.StopAsync().GetAwaiter().GetResult();
             }
-            catch
+            catch (Exception ex)
             {
+                TestLogs.Log("test cleanup: stop stub failed", ex);
             }
         }
 
@@ -191,8 +192,9 @@ public class AgentChatTests : IAsyncLifetime, IDisposable
                 Directory.Delete(_tempDir, recursive: true);
             }
         }
-        catch
+        catch (Exception ex)
         {
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 

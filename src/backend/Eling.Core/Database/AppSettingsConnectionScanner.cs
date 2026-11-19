@@ -172,7 +172,7 @@ public sealed class AppSettingsConnectionScanner
         return results;
     }
 
-    private static void ScanNested(JsonElement element, List<DetectedConnection> results, string path)
+    private void ScanNested(JsonElement element, List<DetectedConnection> results, string path)
     {
         if (element.ValueKind != JsonValueKind.Object)
         {
@@ -230,7 +230,7 @@ public sealed class AppSettingsConnectionScanner
         }
     }
 
-    private static void AddCandidate(List<DetectedConnection> results, string key, JsonElement valueElement)
+    private void AddCandidate(List<DetectedConnection> results, string key, JsonElement valueElement)
     {
         if (valueElement.ValueKind != JsonValueKind.String)
         {
@@ -248,7 +248,7 @@ public sealed class AppSettingsConnectionScanner
         results.Add(Classify(key, value));
     }
 
-    private static DetectedConnection Classify(string key, string value)
+    private DetectedConnection Classify(string key, string value)
     {
         DatabaseProvider? provider = null;
         string? rejection = null;
@@ -283,8 +283,9 @@ public sealed class AppSettingsConnectionScanner
                 classified = true;
             }
         }
-        catch
+        catch (Exception ex)
         {
+            _logger?.LogDebug(ex, "Connection string for key {Key} could not be parsed as MySQL", key);
         }
 
         if (!classified)
@@ -309,8 +310,9 @@ public sealed class AppSettingsConnectionScanner
                     classified = true;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                _logger?.LogDebug(ex, "Connection string for key {Key} could not be parsed as SQLite", key);
             }
         }
 
@@ -335,8 +337,9 @@ public sealed class AppSettingsConnectionScanner
                     classified = true;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                _logger?.LogDebug(ex, "Connection string for key {Key} could not be parsed as Redis options", key);
             }
         }
 

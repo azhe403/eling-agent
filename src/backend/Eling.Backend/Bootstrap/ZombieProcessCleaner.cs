@@ -53,7 +53,7 @@ internal static class ZombieProcessCleaner
                 if (procName.Equals("eling-backend", StringComparison.OrdinalIgnoreCase))
                 {
                     DateTime? startTime = null;
-                    try { startTime = proc.StartTime; } catch { }
+                    try { startTime = proc.StartTime; } catch (Exception ex) { logger.LogDebug(ex, "Zombie process start time unreadable for PID {Pid}", pid); }
 
                     logger.LogWarning(
                         "[ZombieRecovery] Detected unresponsive zombie eling-backend process (PID {Pid}, started {StartTime:yyyy-MM-dd HH:mm:ss}) holding port {Port}. Initiating process termination...",

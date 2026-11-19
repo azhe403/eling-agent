@@ -25,7 +25,7 @@ public sealed class ProjectScopeCatalogTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch { }
+        try { Directory.Delete(_root, true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete scope root failed", ex); }
     }
 
     /// <summary>A directory with a .eling, so it is a scope.</summary>

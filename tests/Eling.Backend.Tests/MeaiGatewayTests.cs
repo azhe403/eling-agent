@@ -149,8 +149,9 @@ public class MeaiGatewayTests : IDisposable
             {
                 stub.StopAsync().GetAwaiter().GetResult();
             }
-            catch
+            catch (Exception ex)
             {
+                TestLogs.Log("test cleanup: stop stub failed", ex);
             }
         }
 
@@ -161,8 +162,9 @@ public class MeaiGatewayTests : IDisposable
                 Directory.Delete(_tempDir, recursive: true);
             }
         }
-        catch
+        catch (Exception ex)
         {
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 }

@@ -197,7 +197,10 @@ public sealed class FileSystemService : IFileSystemService
         }
 
         var start = Math.Max(offset, 1);
-        var (slice, end, totalLines) = SliceLines(content, start, limit);
+        var sliceResult = SliceLines(content, start, limit);
+        var slice = sliceResult.Slice;
+        var end = sliceResult.EndLine;
+        var totalLines = sliceResult.TotalLines;
         return new FileReadResult(full, size, slice, start, end, totalLines, end < totalLines);
     }
 
@@ -638,7 +641,9 @@ public sealed class FileSystemService : IFileSystemService
         var replacement = crlf
             ? newString.Replace("\n", "\r\n").Replace("\r\r\n", "\r\n")
             : newString.Replace("\r\n", "\n");
-        var (normalized, map) = NormalizeNewlines(content);
+        var newlineResult = NormalizeNewlines(content);
+        var normalized = newlineResult.Normalized;
+        var map = newlineResult.Map;
         var needle = oldString.Replace("\r\n", "\n");
 
         var matches = FindAll(normalized, needle);
@@ -873,7 +878,7 @@ public sealed class FileSystemService : IFileSystemService
         }
     }
 
-    private static (string Normalized, List<int> Map) NormalizeNewlines(string content)
+    private static NormalizedNewlines NormalizeNewlines(string content)
     {
         var normalized = new StringBuilder(content.Length);
         var map = new List<int>(content.Length + 1);
@@ -892,7 +897,7 @@ public sealed class FileSystemService : IFileSystemService
         }
 
         map.Add(content.Length);
-        return (normalized.ToString(), map);
+        return new NormalizedNewlines(normalized.ToString(), map);
     }
 
     private static List<int> FindAll(string text, string needle)
@@ -926,19 +931,19 @@ public sealed class FileSystemService : IFileSystemService
 
     private static int CountLines(string content) => SplitLines(content).Count;
 
-    private static (string Slice, int EndLine, int TotalLines) SliceLines(string content, int start, int limit)
+    private static LineSlice SliceLines(string content, int start, int limit)
     {
         var lines = SplitLines(content);
         var total = lines.Count;
         var startIndex = start - 1;
         if (startIndex >= total)
         {
-            return ("", start - 1, total);
+            return new LineSlice("", start - 1, total);
         }
 
         var take = limit <= 0 ? total - startIndex : Math.Min(limit, total - startIndex);
         var slice = string.Join('\n', lines.GetRange(startIndex, take).Select(l => l.TrimEnd('\r')));
-        return (slice, startIndex + take, total);
+        return new LineSlice(slice, startIndex + take, total);
     }
 
     private void RejectSandboxRoot(string full, string verb, string paramName)

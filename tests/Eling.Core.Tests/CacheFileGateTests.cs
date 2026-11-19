@@ -150,8 +150,9 @@ public sealed class CacheFileGateTests : IDisposable
         {
             if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
         }
-        catch (IOException)
+        catch (IOException ex)
         {
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 }

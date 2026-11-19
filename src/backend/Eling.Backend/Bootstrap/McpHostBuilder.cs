@@ -98,7 +98,8 @@ public static class McpHostBuilder
             services.AddSingleton<IDatabaseReadService>(sp => new DatabaseReadService(
                 sp.GetRequiredService<IDatabaseReadCache>(),
                 sp.GetRequiredService<ILogger<DatabaseReadService>>()));
-            services.AddSingleton<IRedisConnectionPool>(sp => new RedisConnectionPool());
+            services.AddSingleton<IRedisConnectionPool>(sp =>
+                new RedisConnectionPool(logger: sp.GetService<ILogger<RedisConnectionPool>>()));
             services.AddSingleton<IRedisReadCache>(sp => new JsonRedisReadCache(
                 globalAgentDir,
                 sp.GetRequiredService<ILogger<JsonRedisReadCache>>()));
@@ -134,7 +135,9 @@ public static class McpHostBuilder
             // When this process owns the port the POST lands on itself and
             // still broadcasts, so peer takeover needs no re-wiring.
             services.AddSingleton<IMemoryChangeNotifier>(
-                _ => new HttpCoordinatorMemoryChangeNotifier(effectivePort));
+                sp => new HttpCoordinatorMemoryChangeNotifier(
+                    effectivePort,
+                    sp.GetService<ILogger<HttpCoordinatorMemoryChangeNotifier>>()));
             // Lease mutations are the same cross-process story as memory writes
             // (see the note above): the shared store registered below carries
             // this same HTTP relay, and the standalone notifier covers services

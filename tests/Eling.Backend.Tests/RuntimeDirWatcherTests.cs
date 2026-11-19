@@ -114,9 +114,9 @@ public sealed class RuntimeDirWatcherTests : IDisposable
                 return evt;
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
-            // Timeout expired without any event.
+            TestLogs.Log("next event: timeout expired without any event", ex);
         }
 
         return null;
@@ -124,6 +124,6 @@ public sealed class RuntimeDirWatcherTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_dir, recursive: true); } catch { }
+        try { Directory.Delete(_dir, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
     }
 }

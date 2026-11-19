@@ -25,7 +25,7 @@ public sealed class ScopeChainDiTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, recursive: true); } catch { }
+        try { Directory.Delete(_root, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete scope chain root failed", ex); }
     }
 
     [Fact]

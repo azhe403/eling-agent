@@ -230,7 +230,7 @@ public class Pecut10VerificationTests
 
     private static void TryDelete(string path)
     {
-        try { if (Directory.Exists(path)) Directory.Delete(path, true); } catch { }
-        try { if (File.Exists(path)) File.Delete(path); } catch { }
+        try { if (Directory.Exists(path)) Directory.Delete(path, true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
+        try { if (File.Exists(path)) File.Delete(path); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp file failed", ex); }
     }
 }

@@ -22,9 +22,9 @@ public sealed class AppSettingsSourceResolverTests : IDisposable
             Directory.Delete(_workspace, recursive: true);
             Directory.Delete(_contentRoot, recursive: true);
         }
-        catch (IOException)
+        catch (IOException ex)
         {
-            // A leftover temp directory must not fail the test run.
+            TestLogs.Log("test cleanup: delete temp workspace and content root dirs failed", ex);
         }
     }
 

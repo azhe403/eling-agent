@@ -6,11 +6,6 @@ namespace Eling.Backend.Tests;
 /// <summary>
 /// Guards the project rule that external commands go through CliWrap rather
 /// than raw <c>Process.Start</c> / <c>ProcessStartInfo</c> (see AGENTS.md).
-///
-/// The allowlist is closed. Every entry is a pre-existing carve-out with a
-/// stated reason; adding a row here is the same mistake as extending the
-/// tuple allowlist in <see cref="CodeOrganizationConventionTests"/> — convert
-/// the call site to CliWrap instead.
 /// </summary>
 public sealed class CliWrapConventionTests
 {
@@ -23,22 +18,6 @@ public sealed class CliWrapConventionTests
         new(@"Process\.Start(?!Time)", RegexOptions.Compiled),
         new(@"ProcessStartInfo", RegexOptions.Compiled),
     ];
-
-    // Grandfathered ProcessStartInfo usage, relative to the repo root with
-    // forward slashes. Do NOT extend — migrate the call site to CliWrap.
-    //
-    // FrontendDevSpawner is file-granular rather than line-granular: the same
-    // file both uses CliWrap correctly (TrySpawnPnpmFrontend) and holds one
-    // documented probe carve-out (GetPidsListeningOnPort). Splitting the file
-    // would buy a finer allowlist, which is not worth the churn.
-    private static readonly HashSet<string> ProcessStartInfoAllowlist = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "src/desktop/Eling.Desktop/Services/BackendSupervisor.cs",
-        "src/desktop/Eling.Desktop/ViewModels/FoldersViewModel.cs",
-        "src/backend/Eling.Backend/Bootstrap/FrontendDevSpawner.cs",
-        "tests/Eling.Backend.Tests/TestProcesses.cs",
-        "tests/Eling.Backend.Tests/MemoryProjectToolsTests.cs",
-    };
 
     private static string RepoRoot()
     {
@@ -78,7 +57,7 @@ public sealed class CliWrapConventionTests
     }
 
     [Fact]
-    public void ExternalCommands_DoNotUseProcessStart_BeyondAllowlist()
+    public void ExternalCommands_DoNotUseProcessStart()
     {
         var repoRoot = RepoRoot();
         var offenders = new List<string>();
@@ -96,8 +75,6 @@ public sealed class CliWrapConventionTests
                     continue;
 
                 var rel = Relative(repoRoot, file);
-                if (ProcessStartInfoAllowlist.Contains(rel))
-                    continue;
 
                 var lineNo = 0;
                 foreach (var rawLine in File.ReadLines(file))
@@ -119,7 +96,7 @@ public sealed class CliWrapConventionTests
 
         Assert.True(offenders.Count == 0,
             "External commands must use CliWrap (Cli.Wrap), not Process.Start / ProcessStartInfo. "
-            + "Do not extend the allowlist — convert the call site instead:\n"
+            + "Convert the call site instead:\n"
             + string.Join("\n", offenders));
     }
 }

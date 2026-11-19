@@ -140,8 +140,9 @@ public class AgentChatStreamTests : IDisposable
                 Directory.Delete(_tempDir, recursive: true);
             }
         }
-        catch
+        catch (Exception ex)
         {
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 

@@ -30,8 +30,8 @@ public sealed class ProjectContextNoAutoCreateTests : IDisposable
     public void Dispose()
     {
         Environment.SetEnvironmentVariable(UserScopeEnv, _originalUserScope);
-        try { Directory.Delete(_userRoot, recursive: true); } catch { }
-        try { Directory.Delete(_cwd, recursive: true); } catch { }
+        try { Directory.Delete(_userRoot, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete user temp dir failed", ex); }
+        try { Directory.Delete(_cwd, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete cwd temp dir failed", ex); }
     }
 
     [Fact]

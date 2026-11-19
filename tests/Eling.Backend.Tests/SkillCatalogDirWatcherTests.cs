@@ -148,10 +148,10 @@ public sealed class SkillCatalogDirWatcherTests : IAsyncLifetime
                 if (frames.Count >= expectedCount) break;
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
             // Timeout: return whatever arrived so the caller can assert on it.
-            System.Diagnostics.Debug.WriteLine("skill-dir-watch test receive: timed out waiting for frames.");
+            TestLogs.Log("skill-dir-watch test receive: timed out waiting for frames.", ex);
         }
 
         return frames;

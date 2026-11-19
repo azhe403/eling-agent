@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
 namespace Eling.Core.Database;
@@ -17,6 +18,7 @@ public sealed class RedisConnectionPool : IRedisConnectionPool, IDisposable
 
     private readonly ConcurrentDictionary<string, Entry> _entries = new();
     private readonly Timer _evictor;
+    private readonly ILogger<RedisConnectionPool>? _logger;
     private bool _disposed;
 
     /// <param name="evictionInterval">
@@ -24,9 +26,10 @@ public sealed class RedisConnectionPool : IRedisConnectionPool, IDisposable
     /// often enough to keep a five-minute idle window honest; tests pass a
     /// long or disabled interval so a sweep never races their assertions.
     /// </param>
-    public RedisConnectionPool(TimeSpan? evictionInterval = null)
+    public RedisConnectionPool(TimeSpan? evictionInterval = null, ILogger<RedisConnectionPool>? logger = null)
     {
         var interval = evictionInterval ?? TimeSpan.FromMinutes(1);
+        _logger = logger;
         _evictor = new Timer(_ => EvictIdle(), null, interval, interval);
     }
 
@@ -43,7 +46,7 @@ public sealed class RedisConnectionPool : IRedisConnectionPool, IDisposable
             }
 
             // Connection string changed or multiplexer dead: rebuild.
-            try { await existing.Multiplexer.DisposeAsync(); } catch { }
+            try { await existing.Multiplexer.DisposeAsync(); } catch (Exception ex) { _logger?.LogDebug(ex, "Old multiplexer dispose failed; replacing"); }
             _entries.TryRemove(connection.Id, out _);
         }
 
@@ -55,7 +58,7 @@ public sealed class RedisConnectionPool : IRedisConnectionPool, IDisposable
             var lruKey = RedisPoolPolicy.PickLeastRecentlyUsed(lastUsed);
             if (lruKey is not null && _entries.TryRemove(lruKey, out var removed))
             {
-                try { await removed.Multiplexer.DisposeAsync(); } catch { }
+                try { await removed.Multiplexer.DisposeAsync(); } catch (Exception ex) { _logger?.LogDebug(ex, "LRU-evicted multiplexer dispose failed"); }
             }
         }
 
@@ -82,7 +85,7 @@ public sealed class RedisConnectionPool : IRedisConnectionPool, IDisposable
     {
         if (_entries.TryRemove(connectionId, out var removed))
         {
-            try { removed.Multiplexer.Dispose(); } catch { }
+            try { removed.Multiplexer.Dispose(); } catch (Exception ex) { _logger?.LogDebug(ex, "Invalidated multiplexer dispose failed"); }
         }
     }
 
@@ -95,7 +98,7 @@ public sealed class RedisConnectionPool : IRedisConnectionPool, IDisposable
             {
                 if (_entries.TryRemove(kv.Key, out var removed))
                 {
-                    try { removed.Multiplexer.Dispose(); } catch { }
+                    try { removed.Multiplexer.Dispose(); } catch (Exception ex) { _logger?.LogDebug(ex, "Idle multiplexer dispose failed"); }
                 }
             }
         }
@@ -108,7 +111,7 @@ public sealed class RedisConnectionPool : IRedisConnectionPool, IDisposable
         _evictor.Dispose();
         foreach (var kv in _entries)
         {
-            try { kv.Value.Multiplexer.Dispose(); } catch { }
+            try { kv.Value.Multiplexer.Dispose(); } catch (Exception ex) { _logger?.LogDebug(ex, "Pool multiplexer dispose failed"); }
         }
         _entries.Clear();
     }

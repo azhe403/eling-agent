@@ -146,6 +146,7 @@ public sealed class AuditDirWatcher : IDisposable
         {
             // Superseded by a newer change within the debounce window; the
             // latest event performs the broadcast.
+            _logger.LogDebug("Debounced audit trail broadcast superseded by a newer change");
         }
         catch (Exception ex)
         {

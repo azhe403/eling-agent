@@ -42,6 +42,6 @@ public sealed class UserScopeTests
         Assert.DoesNotContain(".eling", user.Root);
         Assert.NotEqual(user.Root, project.DataDirectory);
 
-        try { Directory.Delete(projectRoot, recursive: true); } catch { }
+        try { Directory.Delete(projectRoot, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp project dir failed", ex); }
     }
 }

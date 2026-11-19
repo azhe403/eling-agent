@@ -122,8 +122,9 @@ public class AgentWorkspaceTests : IAsyncLifetime, IDisposable
                 Directory.Delete(_root, recursive: true);
             }
         }
-        catch
+        catch (Exception ex)
         {
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Backend.Bootstrap;
 
@@ -39,7 +40,7 @@ public static class DashboardPort
     /// loopback interface. Probes via a non-blocking TCP socket connect on IPv4
     /// and IPv6 loopback, falling back to active listeners inspection.
     /// </summary>
-    public static bool IsLoopbackListening(int port)
+    public static bool IsLoopbackListening(int port, ILogger? logger = null)
     {
         if (CanConnectToLoopback(IPAddress.Loopback, port))
             return true;
@@ -53,9 +54,10 @@ public static class DashboardPort
             if (listeners.Any(ep => IPAddress.IsLoopback(ep.Address) && ep.Port == port))
                 return true;
         }
-        catch
+        catch (Exception ex)
         {
             // Best-effort inspection fallback
+            logger?.LogDebug(ex, "Loopback listener inspection failed on port {Port}; port not considered listening by this path", port);
         }
 
         return false;

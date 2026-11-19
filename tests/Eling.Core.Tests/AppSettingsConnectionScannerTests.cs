@@ -23,9 +23,9 @@ public sealed class AppSettingsConnectionScannerTests : IDisposable
         {
             Directory.Delete(_dir, recursive: true);
         }
-        catch (IOException)
+        catch (IOException ex)
         {
-            // A leftover temp directory must not fail the test run.
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 

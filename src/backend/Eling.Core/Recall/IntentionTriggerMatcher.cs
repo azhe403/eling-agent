@@ -6,9 +6,9 @@ namespace Eling.Core.Recall;
 
 internal static class IntentionTriggerMatcher
 {
-    public static (bool Matched, bool Expired) Match(Intention.Intention intention, RecallContext? context, DateTimeOffset now)
+    public static IntentionMatchResult Match(Intention.Intention intention, RecallContext? context, DateTimeOffset now)
     {
-        if (IsExpired(intention, now)) return (false, true);
+        if (IsExpired(intention, now)) return new IntentionMatchResult(Matched: false, Expired: true);
         var matched = intention.TriggerType switch
         {
             TriggerType.Topic => MatchesTopic(intention, context?.Topics),
@@ -16,7 +16,7 @@ internal static class IntentionTriggerMatcher
             TriggerType.TimeBased => MatchesTimeBased(intention, now),
             _ => false
         };
-        return (matched, false);
+        return new IntentionMatchResult(Matched: matched, Expired: false);
     }
     public static bool IsExpired(Intention.Intention intention, DateTimeOffset now) => intention.ExpiresAt is not null && intention.ExpiresAt.Value <= now;
     public static bool IsOutstanding(Intention.Intention intention, DateTimeOffset now) => intention.Status == MemoryStatus.Active && (intention.ExpiresAt is null || intention.ExpiresAt.Value > now);

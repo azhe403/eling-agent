@@ -37,7 +37,7 @@ public static class HttpLoop
             WebApplication? app = null;
             try
             {
-                var ownerMode = !DashboardPort.IsLoopbackListening(dashboardPort);
+                var ownerMode = !DashboardPort.IsLoopbackListening(dashboardPort, logger);
                 logger.LogInformation(
                     "HTTP host attempt #{Attempt}: {Mode} 127.0.0.1:{Port}",
                     attempt, ownerMode ? "OWNER, binding Kestrel to" : "peer, polling for", dashboardPort);
@@ -82,7 +82,7 @@ public static class HttpLoop
                 }
 
                 logger.LogWarning("HTTP host stopped unexpectedly without cancellation; attempting restart...");
-                await DelayWithJitterAsync(cancellationToken);
+                await DelayWithJitterAsync(cancellationToken, logger);
             }
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
             {
@@ -127,7 +127,7 @@ public static class HttpLoop
             catch (Exception ex)
             {
                 logger.LogError(ex, "HTTP host crashed on attempt #{Attempt}; retrying after jitter", attempt);
-                await DelayWithJitterAsync(cancellationToken);
+                await DelayWithJitterAsync(cancellationToken, logger);
             }
             finally
             {
@@ -158,7 +158,7 @@ public static class HttpLoop
         bool enableUpdateCheck = false
     )
     {
-        var ownerMode = !DashboardPort.IsLoopbackListening(dashboardPort);
+        var ownerMode = !DashboardPort.IsLoopbackListening(dashboardPort, loggerFactory.CreateLogger("Eling.Backend.DashboardPort"));
         var options = new WebApplicationOptions
         {
             ContentRootPath = AppContext.BaseDirectory,
@@ -225,7 +225,7 @@ public static class HttpLoop
         return app;
     }
 
-    private static async Task DelayWithJitterAsync(CancellationToken cancellationToken)
+    private static async Task DelayWithJitterAsync(CancellationToken cancellationToken, ILogger? logger = null)
     {
         var jitter = Random.Shared.NextDouble();
         var delay = MinRetryDelay + (MaxRetryDelay - MinRetryDelay) * jitter;
@@ -235,6 +235,7 @@ public static class HttpLoop
         }
         catch (OperationCanceledException)
         {
+            logger?.LogDebug("Host retry delay cancelled (shutdown)");
         }
     }
 

@@ -108,9 +108,9 @@ public sealed class RuntimeMetricsSamplerTests : IDisposable
         {
             Directory.Delete(_root, recursive: true);
         }
-        catch
+        catch (Exception ex)
         {
-            /* best effort: temp dir cleanup must not fail a test */
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
 
         GC.SuppressFinalize(this);

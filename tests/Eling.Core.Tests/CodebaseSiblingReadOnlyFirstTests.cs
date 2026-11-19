@@ -37,7 +37,7 @@ public sealed class CodebaseSiblingReadOnlyFirstTests : IDisposable
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_root, true); } catch { }
+        try { Directory.Delete(_root, true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
     }
 
     /// <summary>

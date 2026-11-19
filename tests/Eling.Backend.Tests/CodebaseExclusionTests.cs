@@ -183,11 +183,11 @@ public sealed class CodebaseExclusionTests : IDisposable
         foreach (var dir in _scratchDirs)
         {
             try { Directory.Delete(dir, recursive: true); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            catch (IOException ex) { TestLogs.Log("test cleanup: delete scratch dir failed", ex); }
+            catch (UnauthorizedAccessException ex) { TestLogs.Log("test cleanup: delete scratch dir failed", ex); }
         }
         try { Directory.Delete(_tempDir, recursive: true); }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (IOException ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
+        catch (UnauthorizedAccessException ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
     }
 }

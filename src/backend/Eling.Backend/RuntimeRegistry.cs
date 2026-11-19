@@ -5,6 +5,7 @@ using Eling.Core.Projects;
 using Eling.Core.Scope;
 using CoordinatorJsonContext = Eling.Core.Runtime.CoordinatorJsonContext;
 using RuntimeInfo = Eling.Core.Runtime.RuntimeInfo;
+using AliveProjectService = Eling.Core.Runtime.AliveProjectService;
 
 namespace Eling.Backend;
 
@@ -96,7 +97,11 @@ public sealed class RuntimeRegistry : IDisposable
 
                         lastWrite = DateTime.UtcNow;
                         try { File.SetLastWriteTimeUtc(file, lastWrite); }
-                        catch { /* Locked by its owner, which is alive; the touch is only an optimisation. */ }
+                        catch
+                        {
+                            // Locked by its owner, which is alive; the touch is only an optimisation.
+                            _logger.LogDebug("Runtime file timestamp locked by owner; touch skipped");
+                        }
                     }
 
                     diskPids.Add(pid);
@@ -126,6 +131,7 @@ public sealed class RuntimeRegistry : IDisposable
                 catch
                 {
                     // A file being written or deleted concurrently is retried on the next sync.
+                    _logger.LogDebug("Runtime registry file skipped (locked or vanished); retried next sync");
                 }
             }
 
@@ -144,6 +150,7 @@ public sealed class RuntimeRegistry : IDisposable
         catch
         {
             // A concurrent writer holds the file; the next heartbeat rewrites it.
+            _logger.LogDebug("Runtime registry write skipped (concurrent writer); next heartbeat rewrites");
         }
     }
 
@@ -157,6 +164,7 @@ public sealed class RuntimeRegistry : IDisposable
         catch
         {
             // Left behind files are swept once their process is gone.
+            _logger.LogDebug("Runtime registry file undeletable; swept once its process is gone");
         }
     }
 
@@ -191,6 +199,7 @@ public sealed class RuntimeRegistry : IDisposable
         catch
         {
             // A concurrent writer holds the file; the next heartbeat retries.
+            _logger.LogDebug("Runtime heartbeat re-create skipped (locked); next heartbeat retries");
         }
     }
 
@@ -680,11 +689,11 @@ public sealed class RuntimeRegistry : IDisposable
         return true;
     }
 
-    public IReadOnlyList<(RuntimeInfo Runtime, IMemoryService Service)> GetAliveProjectServices()
+    public IReadOnlyList<AliveProjectService> GetAliveProjectServices()
     {
         lock (_lock)
         {
-            var result = new List<(RuntimeInfo, IMemoryService)>();
+            var result = new List<AliveProjectService>();
             var seenDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var globalDataDir = Path.GetFullPath(_userScope.GlobalDataDirectory);
 
@@ -704,7 +713,7 @@ public sealed class RuntimeRegistry : IDisposable
                     _memoryByDataDirectory[runtimeDataDir] = service;
                 }
 
-                result.Add((runtime, service));
+                result.Add(new AliveProjectService(runtime, service));
             }
 
             if (result.Count == 0)
@@ -733,7 +742,7 @@ public sealed class RuntimeRegistry : IDisposable
                         LastHeartbeat = DateTimeOffset.UtcNow,
                         IsAlive = true
                     };
-                    result.Add((syntheticRuntime, localService));
+                    result.Add(new AliveProjectService(syntheticRuntime, localService));
                 }
             }
 
@@ -774,8 +783,10 @@ public sealed class RuntimeRegistry : IDisposable
 
         var allLocalMemories = new List<ScopedMemory>();
         var allProjectMemories = new List<ScopedMemory>();
-        foreach (var (runtime, service) in GetAliveProjectServices())
+        foreach (var alive in GetAliveProjectServices())
         {
+            var runtime = alive.Runtime;
+            var service = alive.Service;
             var list = await service.ListAllAsync();
             if (status.HasValue) list = list.Where(m => m.Status == status.Value).ToList();
             foreach (var m in list)
@@ -837,8 +848,10 @@ public sealed class RuntimeRegistry : IDisposable
             all.Add(new ScopedSearchResult(r.Id, r.Rank, MemoryScopeKind.Global, null));
         }
 
-        foreach (var (runtime, service) in GetAliveProjectServices())
+        foreach (var alive in GetAliveProjectServices())
         {
+            var runtime = alive.Runtime;
+            var service = alive.Service;
             var projectResults = await service.SearchAsync(query);
             foreach (var r in projectResults)
             {
@@ -926,6 +939,7 @@ public sealed class RuntimeRegistry : IDisposable
                                 catch
                                 {
                                     // Ignore lock issues
+                                    _logger.LogDebug("Runtime file timestamp refresh skipped (locked)");
                                 }
                             }
                             else

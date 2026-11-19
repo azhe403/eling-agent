@@ -74,7 +74,9 @@ public sealed class RecallService : IRecallService
                     if (IntentionTriggerMatcher.IsExpired(intention, now)) expired++;
                     continue;
                 }
-                var (matched, isExpired) = IntentionTriggerMatcher.Match(intention, context, now);
+                var intentionMatch = IntentionTriggerMatcher.Match(intention, context, now);
+                var matched = intentionMatch.Matched;
+                var isExpired = intentionMatch.Expired;
                 if (isExpired) expired++;
                 if (matched) triggered++;
                 intentionList.Add(new RecallIntentionResult(intention, matched, isExpired));

@@ -2,6 +2,7 @@ using Eling.Core;
 using Eling.Core.Runtime;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Backend.Bootstrap;
 
@@ -26,7 +27,7 @@ public static class RuntimeSelfRegistration
         McpTransport = "stdio"
     };
 
-    public static void Wire(IHost host, RuntimeRegistration registration)
+    public static void Wire(IHost host, RuntimeRegistration registration, ILogger? logger = null)
     {
         host.Services.GetRequiredService<RuntimeRegistry>().Register(registration);
         host.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.Register(() =>
@@ -35,9 +36,10 @@ public static class RuntimeSelfRegistration
             {
                 host.Services.GetRequiredService<RuntimeRegistry>().Unregister(Environment.ProcessId);
             }
-            catch
+            catch (Exception ex)
             {
                 // Best effort; peer sweep will clean up.
+                logger?.LogDebug(ex, "Runtime self-unregistration failed; peer sweep will clean up");
             }
         });
     }

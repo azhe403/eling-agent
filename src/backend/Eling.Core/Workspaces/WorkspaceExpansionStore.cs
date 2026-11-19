@@ -121,6 +121,7 @@ public sealed class WorkspaceExpansionStore
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Best effort: a stray temp file is harmless, a crashing toggle is not.
+            _logger?.LogDebug(ex, "Workspace expansion temp file delete failed; stray file left behind");
         }
     }
 

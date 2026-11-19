@@ -73,7 +73,7 @@ public sealed class CodebaseStaleSweepTests : IDisposable
         // passing run. A locked or still-in-use file is the only realistic
         // failure, and there is nothing useful to report once the test is over.
         try { Directory.Delete(_root, recursive: true); }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (IOException ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
+        catch (UnauthorizedAccessException ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
     }
 }

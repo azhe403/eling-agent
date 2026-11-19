@@ -33,7 +33,7 @@ public sealed class RedisScanCommandTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_dir, true); } catch { }
+        try { Directory.Delete(_dir, true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
     }
 
     /// <summary>

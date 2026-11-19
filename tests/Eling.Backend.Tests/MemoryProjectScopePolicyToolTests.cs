@@ -17,7 +17,7 @@ public sealed class MemoryProjectScopePolicyToolTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, recursive: true); } catch { }
+        try { Directory.Delete(_root, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
     }
 
     private JsonProjectScopePolicyStore NewStore()

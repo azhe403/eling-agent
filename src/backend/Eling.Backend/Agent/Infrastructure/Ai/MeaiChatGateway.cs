@@ -161,7 +161,7 @@ public sealed class MeaiChatGateway(ProviderStore store, ILogger<MeaiChatGateway
         var messages = BuildMessages(request);
         var options = BuildOptions(request);
 
-var pending = new Dictionary<string, (string Name, System.Text.StringBuilder Args)>(StringComparer.Ordinal);
+var pending = new Dictionary<string, PendingToolCall>(StringComparer.Ordinal);
 string? currentToolCallId = null;
 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(StreamFirstByteTimeout);
@@ -224,12 +224,12 @@ using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
                 if (!pending.TryGetValue(id, out var entry))
                 {
-                    entry = (toolUpdate.FunctionName ?? string.Empty, new System.Text.StringBuilder());
+                    entry = new PendingToolCall(toolUpdate.FunctionName ?? string.Empty, new System.Text.StringBuilder());
                     pending[id] = entry;
                 }
                 else if (!string.IsNullOrEmpty(toolUpdate.FunctionName) && string.IsNullOrEmpty(entry.Name))
                 {
-                    entry = (toolUpdate.FunctionName, entry.Args);
+                    entry = entry with { Name = toolUpdate.FunctionName };
                     pending[id] = entry;
                 }
 
@@ -245,9 +245,9 @@ using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             await enumerator.DisposeAsync();
         }
 
-        foreach (var (id, (name, args)) in pending)
+        foreach (var pair in pending)
         {
-            yield return new ChatToolRequest(new ToolCallRequest(id, name, args.ToString()));
+            yield return new ChatToolRequest(new ToolCallRequest(pair.Key, pair.Value.Name, pair.Value.Args.ToString()));
         }
     }
 }

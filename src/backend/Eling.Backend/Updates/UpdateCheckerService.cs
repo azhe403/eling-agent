@@ -49,6 +49,7 @@ public sealed class UpdateCheckerService : BackgroundService
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 // Normal shutdown.
+                _logger.LogDebug("Scheduled update check cancelled (shutdown)");
             }
             catch (Exception ex)
             {
@@ -62,7 +63,7 @@ public sealed class UpdateCheckerService : BackgroundService
     private static TimeSpan JitteredStartupDelay()
         => TimeSpan.FromMinutes(Random.Shared.NextDouble() * StartupJitterMax.TotalMinutes);
 
-    private static async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+    private async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
     {
         try
         {
@@ -71,6 +72,7 @@ public sealed class UpdateCheckerService : BackgroundService
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // Normal shutdown.
+            _logger.LogDebug("Update check delay cancelled (shutdown)");
         }
     }
 }

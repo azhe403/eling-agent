@@ -287,7 +287,7 @@ public sealed class LogFormatSwitcher : IDisposable
         }
     }
 
-    private static void WriteWatermark(string path, long value)
+    private void WriteWatermark(string path, long value)
     {
         try
         {
@@ -296,10 +296,11 @@ public sealed class LogFormatSwitcher : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // A missing watermark only costs a duplicate on the next switch.
+            _logger.LogDebug(ex, "Log archive watermark write failed; the next switch may duplicate");
         }
     }
 
-    private static void TryDeleteFile(string path)
+    private void TryDeleteFile(string path)
     {
         try
         {
@@ -308,6 +309,7 @@ public sealed class LogFormatSwitcher : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Leftover watermark is harmless: a shorter file resets it.
+            _logger.LogDebug(ex, "Log archive watermark delete failed; harmless leftover");
         }
     }
 

@@ -163,9 +163,9 @@ public sealed class LogConfigStoreTests : IDisposable
         {
             Directory.Delete(_root, recursive: true);
         }
-        catch
+        catch (Exception ex)
         {
-            // Best effort cleanup.
+            TestLogs.Log("test cleanup: delete temp dir failed", ex);
         }
     }
 }

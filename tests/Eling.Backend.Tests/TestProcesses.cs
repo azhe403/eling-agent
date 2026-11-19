@@ -1,3 +1,5 @@
+using CliWrap;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -120,15 +122,15 @@ public static class TestProcesses
                         Directory.Delete(dir, recursive: true);
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // A concurrent run may be mid-use; leave it for the next pass.
+                    TestLogs.Log("test cleanup: sweep stale temp dir failed", ex);
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Best effort: a failed sweep only means clutter for another run.
+            TestLogs.Log("test cleanup: sweep temp dirs failed", ex);
         }
     }
 
@@ -141,9 +143,9 @@ public static class TestProcesses
                 Directory.Delete(path, recursive: true);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Best effort: Windows can hold a handle briefly past exit.
+            TestLogs.Log("test cleanup: delete temp tree failed", ex);
         }
     }
 
@@ -167,58 +169,94 @@ public static class TestProcesses
                 listener.Stop();
                 return candidate;
             }
-            catch
+            catch (Exception ex)
             {
-                // Occupied; try next.
+                TestLogs.Log("find free port: port occupied, trying next", ex);
             }
         }
 
         throw new InvalidOperationException($"No free port in [{min}, {max}].");
     }
 
-    public static Process Start(string dllPath, string workingDirectory, IEnumerable<string>? args = null, IDictionary<string, string>? env = null)
+    /// <summary>
+    /// Spawns the built backend as an isolated MCP runtime via CliWrap, the
+    /// same long-lived-child pattern <c>FrontendDevSpawner</c> uses. The child's
+    /// stdin is <see cref="TestStdinStream"/>, and its stdout/stderr arrive on
+    /// <see cref="TestProcess.Stdout"/> / <see cref="TestProcess.Stderr"/> as
+    /// line queues completed when the process exits.
+    /// </summary>
+    public static TestProcess Start(string dllPath, string workingDirectory, IEnumerable<string>? args = null, IDictionary<string, string>? env = null)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            WorkingDirectory = workingDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        psi.ArgumentList.Add("exec");
-        psi.ArgumentList.Add(dllPath);
-        foreach (var argument in args ?? [])
-        {
-            psi.ArgumentList.Add(argument);
-        }
-        foreach (var (key, value) in env ?? new Dictionary<string, string>())
-        {
-            psi.Environment[key] = value;
-        }
+        var arguments = new List<string> { "exec", dllPath };
+        if (args is not null) arguments.AddRange(args);
 
-        // Every spawned runtime + its child dashboard use the isolated port.
-        psi.Environment["ELING_DASHBOARD_PORT"] = TestDashboardPort.ToString();
-        // And an isolated user scope so the test dashboard never syncs runtime
-        // registrations from a live Eling instance owned by another session.
-        psi.Environment["ELING_USER_SCOPE"] = TestUserScope;
-        // The workspace catalogue resolves from the central agent directory,
-        // which reads ELING_AGENT_DATA_DIR — a variable ELING_USER_SCOPE does
-        // not cover. Without this, every spawned runtime writes rows into the
-        // developer's real agent-workspaces.json, and running the process tests
-        // resurrects workspace entries the user just deleted.
-        psi.Environment["ELING_AGENT_DATA_DIR"] = TestUserScope;
-        // Same reasoning for the shared data directory: it is where the audit
-        // trail, the codebase index and the logs resolve. With it unset a spawned
-        // backend writes its audit store into the developer's real
-        // machine-global one — the test-noise failure class amendment A2 exists
-        // to prevent.
-        psi.Environment["ELING_DATA_DIR"] = TestUserScope;
+        var stdout = new BlockingCollection<string>(new ConcurrentQueue<string>());
+        var stderr = new BlockingCollection<string>(new ConcurrentQueue<string>());
+        var stdin = new TestStdinStream();
+        Process? process = null;
 
-        var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start process.");
-        return process;
+        var spawn = Cli.Wrap("dotnet")
+            .WithArguments(arguments)
+            .WithWorkingDirectory(workingDirectory)
+            .WithEnvironmentVariables(builder =>
+            {
+                foreach (var (key, value) in env ?? new Dictionary<string, string>())
+                    builder.Set(key, value);
+                // Every spawned runtime + its child dashboard use the isolated port.
+                builder.Set("ELING_DASHBOARD_PORT", TestDashboardPort.ToString());
+                // And an isolated user scope so the test dashboard never syncs runtime
+                // registrations from a live Eling instance owned by another session.
+                builder.Set("ELING_USER_SCOPE", TestUserScope);
+                // Same reasoning for the workspace catalogue, the shared data
+                // directory and the test dashboard port: see amendment A2 —
+                // without these, spawned processes write rows/audit/codebase
+                // chunks into the developer's real machine-global stores.
+                builder.Set("ELING_AGENT_DATA_DIR", TestUserScope);
+                builder.Set("ELING_DATA_DIR", TestUserScope);
+            })
+            .WithStandardInputPipe(CliWrap.PipeSource.FromStream(stdin, autoFlush: true))
+            .WithStandardOutputPipe(CliWrap.PipeTarget.ToDelegate(line => stdout.Add(line)))
+            .WithStandardErrorPipe(CliWrap.PipeTarget.ToDelegate(line => stderr.Add(line)))
+            .ExecuteAsync(
+                startInfo => startInfo.CreateNoWindow = true,
+                configureProcess: child => process = child)
+            .Task;
+
+        // End of child: both output queues complete, and the exit gets logged
+        // if it failed (kill shows up here as an exception; that is expected
+        // during teardown and only reported once).
+        _ = spawn.ContinueWith(
+            task =>
+            {
+                stdout.CompleteAdding();
+                stderr.CompleteAdding();
+                if (task.Exception is not null)
+                    TestLogs.Log("test process exited", task.Exception.GetBaseException());
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        return new TestProcess(
+            process ?? throw new InvalidOperationException("Failed to start process."),
+            stdout,
+            stderr,
+            stdin);
+    }
+
+    /// <summary>
+    /// Reads one line from the child's output queue, or null once the child has
+    /// exited and the queue is drained and completed.
+    /// </summary>
+    public static async Task<string?> ReadLineAsync(BlockingCollection<string> queue, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            if (queue.TryTake(out var line)) return line;
+            if (queue.IsCompleted) return null;
+            if (cancellationToken.IsCancellationRequested) return null;
+            await Task.Delay(5, CancellationToken.None);
+        }
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
@@ -226,6 +264,7 @@ public static class TestProcesses
     public static async Task<int?> WaitForDashboardPidAsync(HttpClient client, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
+        var loggedWait = false;
         while (DateTime.UtcNow < deadline)
         {
             try
@@ -237,9 +276,13 @@ public static class TestProcesses
                     return body.GetProperty("pid").GetInt32();
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Not up yet.
+                if (!loggedWait)
+                {
+                    loggedWait = true;
+                    TestLogs.Log("wait for health: server not up yet", ex);
+                }
             }
 
             await Task.Delay(200);

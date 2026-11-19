@@ -16,7 +16,7 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
 {
     private static readonly TimeSpan LifecycleTimeout = TimeSpan.FromSeconds(20);
 
-    private readonly List<Process> _processes = [];
+    private readonly List<TestProcess> _processes = [];
     private readonly List<string> _tempDirs = [];
     private readonly List<System.Collections.Concurrent.ConcurrentQueue<string>> _stderrLines = [];
     // The spawned dashboard answers through the API envelope like every other
@@ -32,12 +32,12 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
         {
             try
             {
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
-                process.Dispose();
+                if (!process.Process.HasExited) process.Process.Kill(entireProcessTree: true);
+                process.Process.Dispose();
             }
-            catch
+            catch (Exception ex)
             {
-                // Best effort cleanup.
+                TestLogs.Log("test cleanup: kill dashboard process failed", ex);
             }
         }
 
@@ -52,11 +52,11 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
 
         foreach (var dir in _tempDirs)
         {
-            try { Directory.Delete(dir, recursive: true); } catch { }
+            try { Directory.Delete(dir, recursive: true); } catch (Exception ex) { TestLogs.Log("test cleanup: delete temp dir failed", ex); }
         }
     }
 
-    private Process StartRuntime()
+    private TestProcess StartRuntime()
     {
         var dir = Path.Combine(Path.GetTempPath(), "eling-lifecycle-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dir);
@@ -72,7 +72,7 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
         _stderrLines.Add(stderrLines);
         _ = Task.Run(async () =>
         {
-            while (await process.StandardError.ReadLineAsync() is { } line)
+            while (await TestProcesses.ReadLineAsync(process.Stderr, CancellationToken.None) is { } line)
             {
                 stderrLines.Enqueue(line);
             }
@@ -87,18 +87,18 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
     }
 
     /// <summary>Closes stdin so the MCP runtime exits cleanly and unregisters.</summary>
-    private static async Task GracefulStopAsync(Process process)
+    private static async Task GracefulStopAsync(TestProcess process)
     {
         try
         {
-            process.StandardInput.Close();
+            process.Stdin.CompleteWriting();
         }
-        catch
+        catch (Exception ex)
         {
-            // Already gone.
+            TestLogs.Log("test cleanup: close process stdin failed", ex);
         }
 
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        await process.Process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
     }
 
     private async Task<int> WaitForDashboardAsync()
@@ -163,13 +163,13 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
         var runtimes = await WaitForRuntimeCountAsync(1);
         var entry = Assert.Single(runtimes);
 
-        Assert.Equal(runtime.Id, entry.GetProperty("processId").GetInt32());
+        Assert.Equal(runtime.Process.Id, entry.GetProperty("processId").GetInt32());
         Assert.Equal(Path.GetFullPath(_tempDirs[0]), entry.GetProperty("headScopeRoot").GetString());
         Assert.True(Directory.Exists(entry.GetProperty("dataDirectory").GetString()));
         // In the merged single-binary architecture, the backend process IS the
         // dashboard owner: /health returns Environment.ProcessId, which is also
         // the runtime's pid. They are intentionally equal.
-        Assert.Equal(dashboardPid, runtime.Id);
+        Assert.Equal(dashboardPid, runtime.Process.Id);
     }
 
     [Fact]
@@ -196,8 +196,8 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
         Assert.Contains(Path.GetFullPath(_tempDirs[1]), roots);  // peer registered
 
         // Both processes are still alive: second is MCP-only, first is owner.
-        Assert.False(first.HasExited, "Owner must still be alive.");
-        Assert.False(second.HasExited, "Peer must still be alive (MCP-only).");
+        Assert.False(first.Process.HasExited, "Owner must still be alive.");
+        Assert.False(second.Process.HasExited, "Peer must still be alive (MCP-only).");
 
         await GracefulStopAsync(second);
         await GracefulStopAsync(first);
@@ -241,9 +241,9 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
 
         await GracefulStopAsync(first);
 
-        var remaining = await WaitUntilRuntimeGoneAsync(first.Id);
+        var remaining = await WaitUntilRuntimeGoneAsync(first.Process.Id);
         var survivor = Assert.Single(remaining);
-        Assert.Equal(second.Id, survivor.GetProperty("processId").GetInt32());
+        Assert.Equal(second.Process.Id, survivor.GetProperty("processId").GetInt32());
 
         // Dashboard still serving for the surviving runtime.
         Assert.True(await TestProcesses.DashboardAliveAsync(_client));
@@ -280,9 +280,9 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
         await WaitForRuntimeCountAsync(1);
 
         // Crash-style death: no graceful unregister, liveness sweeper must reap it.
-        runtime.Kill(entireProcessTree: true);
+        runtime.Process.Kill(entireProcessTree: true);
 
-        var remaining = await WaitUntilRuntimeGoneAsync(runtime.Id);
+        var remaining = await WaitUntilRuntimeGoneAsync(runtime.Process.Id);
         Assert.Empty(remaining);
     }
 
@@ -324,13 +324,13 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
         var tookOverPid = await TestProcesses.WaitForDashboardPidAsync(_client, TimeSpan.FromSeconds(10));
         Assert.NotNull(tookOverPid);
         Assert.NotEqual(ownerPid, tookOverPid!.Value);
-        Assert.Equal(second.Id, tookOverPid.Value);
+        Assert.Equal(second.Process.Id, tookOverPid.Value);
 
         // Promotee's runtime registry should now show 1 alive runtime (the peer itself).
         // The original owner should NOT reappear.
         var runtimes = await WaitForRuntimeCountAsync(1);
         var entry = Assert.Single(runtimes);
-        Assert.Equal(second.Id, entry.GetProperty("processId").GetInt32());
+        Assert.Equal(second.Process.Id, entry.GetProperty("processId").GetInt32());
 
         await GracefulStopAsync(second);
     }

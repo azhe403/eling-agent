@@ -85,7 +85,7 @@ public static class McpServiceExtensions
             var localStorage = sp.GetRequiredKeyedService<IMemoryStorage>("project-local");
             var localIndex = sp.GetRequiredKeyedService<IMemoryIndex>("project-local");
             var localService = new MemoryService(localStorage, localIndex);
-            return new ScopedMemoryService(projectService, globalService, policy, merger, projectScope.Root, localService, localCanonicalRoot, auditLogger: sp.GetService<IAuditLogger>());
+            return new ScopedMemoryService(projectService, globalService, policy, merger, projectScope.Root, localService, localCanonicalRoot, auditLogger: sp.GetService<IAuditLogger>(), logger: sp.GetService<ILogger<ScopedMemoryService>>());
         });
 
         // Bounded filesystem tools sandboxed to the project root.
@@ -210,7 +210,7 @@ public static class McpServiceExtensions
             var localStorage = sp.GetRequiredKeyedService<IMemoryStorage>("project-local");
             var localIndex = sp.GetRequiredKeyedService<IMemoryIndex>("project-local");
             var localService = new MemoryService(localStorage, localIndex, new SmartSaveOptions(), judge, logger);
-            return new ScopedMemoryService(levels, globalService, policy, merger, chain.Cwd, localService: localService, canonicalRoot: localCanonicalRoot, auditLogger: sp.GetService<IAuditLogger>());
+            return new ScopedMemoryService(levels, globalService, policy, merger, chain.Cwd, localService: localService, canonicalRoot: localCanonicalRoot, auditLogger: sp.GetService<IAuditLogger>(), logger: sp.GetService<ILogger<ScopedMemoryService>>());
         });
 
         services.AddScoped<IRecallService, RecallService>();
@@ -304,12 +304,18 @@ public static class McpServiceExtensions
         // infer it as a request body (GET cannot have one) and fail the host
         // at startup, which is exactly how 62 host-based tests failed before
         // this registration existed.
-        services.TryAddSingleton(_ => CreateAuditWriter());
+        services.TryAddSingleton(sp => CreateAuditWriter(sp));
         services.TryAddSingleton<IAuditLogger>(sp =>
         {
             var writer = sp.GetRequiredService<AuditTrailWriter>();
             return new DisposableAuditLogger(
-                new BufferedAuditLogger(writer.Store, writer.Index, new AuditOptions(), TimeProvider.System));
+                new BufferedAuditLogger(
+                    writer.Store,
+                    writer.Index,
+                    new AuditOptions(),
+                    TimeProvider.System,
+                    sp.GetService<ILogger<BufferedAuditLogger>>()),
+                sp.GetService<ILogger<DisposableAuditLogger>>());
         });
         services.TryAddSingleton<IAuditIndex>(sp =>
             sp.GetRequiredService<AuditTrailWriter>().Index ?? throw new InvalidOperationException(
@@ -410,11 +416,11 @@ public static class McpServiceExtensions
     /// asynchronously, and a container disposed synchronously would otherwise
     /// refuse the singleton.
     /// </remarks>
-    private static AuditTrailWriter CreateAuditWriter()
+    private static AuditTrailWriter CreateAuditWriter(IServiceProvider sp)
     {
         var auditRoot = CentralAuditDirectory.Resolve();
         var store = new AuditFileStore(auditRoot, TimeProvider.System);
-        var index = new SqliteAuditIndex(auditRoot, store);
+        var index = new SqliteAuditIndex(auditRoot, store, sp.GetService<ILogger<SqliteAuditIndex>>());
 
         // The index is a cache that starts empty and creates its tables only on
         // initialize. Left uninitialized, the logger's first flush would fail on

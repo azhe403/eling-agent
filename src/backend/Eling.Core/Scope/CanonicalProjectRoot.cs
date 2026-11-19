@@ -1,5 +1,6 @@
 using CliWrap;
 using CliWrap.Buffered;
+using Microsoft.Extensions.Logging;
 
 namespace Eling.Core.Scope;
 
@@ -14,7 +15,7 @@ public static class CanonicalProjectRoot
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
 
-    public static string Resolve(string? startDirectory = null, Func<string, Task<string?>>? gitToplevelProbe = null)
+    public static string Resolve(string? startDirectory = null, Func<string, Task<string?>>? gitToplevelProbe = null, ILogger? logger = null)
     {
         var start = string.IsNullOrWhiteSpace(startDirectory)
             ? Directory.GetCurrentDirectory()
@@ -28,9 +29,10 @@ public static class CanonicalProjectRoot
             var top = Task.Run(() => probe(start)).GetAwaiter().GetResult();
             if (!string.IsNullOrWhiteSpace(top)) return Path.GetFullPath(top!);
         }
-        catch
+        catch (Exception ex)
         {
             // Fall through to path fallback below.
+            logger?.LogDebug(ex, "git toplevel probe failed; using directory as project root");
         }
         return Path.GetFullPath(start);
     }

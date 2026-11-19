@@ -292,6 +292,7 @@ public sealed class JsonWorkspaceRegistry : IWorkspacesRegistry, IDisposable
         }
         catch (AbandonedMutexException)
         {
+            _logger?.LogDebug("Workspace registry gate mutex abandoned; proceeding with ownership handed over");
         }
     }
 

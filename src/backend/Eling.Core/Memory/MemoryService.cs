@@ -271,6 +271,10 @@ public class MemoryService : IMemoryService
         string Reason,
         double? MatchScore);
 
+    private readonly record struct ScoredCandidate(
+        Memory Memory,
+        double Score);
+
     private async Task<Retrieval> RetrieveAsync(Memory incoming, double? duplicateThreshold = null)
     {
         var activeThreshold = duplicateThreshold ?? _smartSave.DuplicateThreshold;
@@ -279,7 +283,7 @@ public class MemoryService : IMemoryService
         Memory? bestMatch = null;
         double bestScore = 0.0;
         bool isExactMatch = false;
-        var candidatesWithScores = new List<(Memory Memory, double Score)>();
+        var candidatesWithScores = new List<ScoredCandidate>();
 
         foreach (var candidate in all)
         {
@@ -308,7 +312,7 @@ public class MemoryService : IMemoryService
 
             if (score >= _smartSave.NearMatchThreshold)
             {
-                candidatesWithScores.Add((candidate, score));
+                candidatesWithScores.Add(new ScoredCandidate(candidate, score));
             }
         }
 

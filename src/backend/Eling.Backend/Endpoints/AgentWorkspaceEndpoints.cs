@@ -94,8 +94,8 @@ public static class AgentWorkspaceEndpoints
             try
             {
                 var full = ResolveWithin(root, path);
-                var (content, truncated) = tools.ReadText(full);
-                return Results.Ok(new FileReadResponse(content, truncated));
+                var readResult = tools.ReadText(full);
+                return Results.Ok(new FileReadResponse(readResult.Content, readResult.Truncated));
             }
             catch (UnauthorizedAccessException ex)
             {

@@ -82,18 +82,18 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
             {
                 await _app.StopAsync();
             }
-            catch
+            catch (Exception ex)
             {
-                /* ignore */
+                TestLogs.Log("test cleanup: stop app failed", ex);
             }
 
             try
             {
                 await _app.DisposeAsync();
             }
-            catch
+            catch (Exception ex)
             {
-                /* ignore */
+                TestLogs.Log("test cleanup: dispose app failed", ex);
             }
 
             _app = null;

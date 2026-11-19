@@ -70,24 +70,24 @@ public static class AgentChatEndpoints
 
             async Task Write(TurnStreamEvent ev)
             {
-                var (kind, payload) = ev switch
+                var frame = ev switch
                 {
-                    TurnStarted started => ("started", (object)new { chatId = started.ChatId }),
-                    TurnTextDelta delta => ("delta", (object)new { delta = delta.Delta }),
-                    TurnToolCall tool => ("tool", (object)new { name = tool.Call.Name, arguments = tool.Call.Arguments }),
-                    TurnToolResult result => ("tool_result", (object)new { name = result.ToolName, output = result.Output }),
-                    TurnDone done => ("done", (object)done.Response),
-                    TurnFailed failed => ("failed", (object)new { message = failed.Message }),
-                    _ => ("message", (object)new { })
+                    TurnStarted started => new SSEEventFrame("started", (object)new { chatId = started.ChatId }),
+                    TurnTextDelta delta => new SSEEventFrame("delta", (object)new { delta = delta.Delta }),
+                    TurnToolCall tool => new SSEEventFrame("tool", (object)new { name = tool.Call.Name, arguments = tool.Call.Arguments }),
+                    TurnToolResult result => new SSEEventFrame("tool_result", (object)new { name = result.ToolName, output = result.Output }),
+                    TurnDone done => new SSEEventFrame("done", (object)done.Response),
+                    TurnFailed failed => new SSEEventFrame("failed", (object)new { message = failed.Message }),
+                    _ => new SSEEventFrame("message", (object)new { })
                 };
 
                 if (ev is TurnStarted || ev is TurnDone || ev is TurnFailed)
                 {
-                    logger.LogInformation("Stream emit {Kind}", kind);
+                    logger.LogInformation("Stream emit {Kind}", frame.Kind);
                 }
 
-                var json = JsonSerializer.Serialize(payload, StreamJsonOptions);
-                await ctx.Response.WriteAsync($"event: {kind}\ndata: {json}\n\n", ct);
+                var json = JsonSerializer.Serialize(frame.Payload, StreamJsonOptions);
+                await ctx.Response.WriteAsync($"event: {frame.Kind}\ndata: {json}\n\n", ct);
                 await ctx.Response.Body.FlushAsync(ct);
             }
 
