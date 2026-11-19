@@ -247,7 +247,7 @@ public sealed class ElasticsearchReadServiceTests
             CancellationToken.None));
 
         Assert.Equal(400, exception.Status);
-        Assert.Equal(0, handler.RequestedPaths.Count);
+        Assert.Empty(handler.RequestedPaths);
     }
 
     [Fact]
