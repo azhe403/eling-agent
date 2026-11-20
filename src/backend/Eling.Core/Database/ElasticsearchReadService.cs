@@ -8,6 +8,8 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Aggregations;
+using Elastic.Transport;
+using Elastic.Transport.Products.Elasticsearch;
 using Microsoft.Extensions.Logging;
 
 namespace Eling.Core.Database;
@@ -96,33 +98,62 @@ public sealed class ElasticsearchReadService : IElasticsearchReadService
         CancellationToken ct)
     {
         var client = _cache.GetOrCreate(connection);
-        var response = await SendAsync("indices stats", ct, () => client.Indices.StatsAsync(ct));
-        EnsureValid("indices stats", response.IsValidResponse, response.ApiCallDetails, response.ElasticsearchServerError);
+
+        // Use the Cat API via low-level transport since the user may not have
+        // permissions for the Indices Stats API (/_stats) but can access _cat/indices.
+        // The Cat API returns: index, health, status, docs.count, store.size, pri, rep
+        var requestPath = "/_cat/indices?h=index,health,status,docs.count,store.size,pri,rep&format=json&bytes=b";
+        var catResponse = await SendAsync("cat indices", ct, () =>
+            TransportExtensions.RequestAsync<ElasticsearchStringResponse>(client.Transport, Elastic.Transport.HttpMethod.GET, requestPath, ct));
+        EnsureValid("cat indices", catResponse.ApiCallDetails?.HttpStatusCode is 200, catResponse.ApiCallDetails, catResponse.ElasticsearchServerError);
 
         var indices = new List<ElasticsearchIndexInfo>();
-        if (response.Indices is { } perIndex)
+        var body = catResponse.Body;
+        if (!string.IsNullOrWhiteSpace(body))
         {
-            foreach (var pair in perIndex)
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
             {
-                var name = pair.Key;
-                var stats = pair.Value;
-
-                if (!includeSystem && name.StartsWith('.'))
+                foreach (var item in doc.RootElement.EnumerateArray())
                 {
-                    // includeSystem=false hides dot-prefixed system indices (spec §4.2).
-                    continue;
-                }
+                    var name = item.GetProperty("index").GetString() ?? string.Empty;
 
-                var docs = stats.Primaries?.Docs?.Count ?? 0;
-                var storeBytes = stats.Primaries?.Store?.SizeInBytes ?? 0;
-                var primaryShards = stats.Shards?.Count ?? 0;
-                var replicaCopies = stats.Shards is null
-                    ? 0
-                    : stats.Shards.Values.SelectMany(copies => copies).Count(shard => shard.Routing?.Primary == false);
-                var replicas = primaryShards == 0 ? 0 : replicaCopies / primaryShards;
-                var health = stats.Health?.ToString()?.ToLowerInvariant() ?? "unknown";
-                var status = stats.Status?.ToString()?.ToLowerInvariant() ?? "unknown";
-                indices.Add(new ElasticsearchIndexInfo(name, health, status, docs, storeBytes, primaryShards, replicas));
+                    if (!includeSystem && name.StartsWith('.'))
+                    {
+                        // includeSystem=false hides dot-prefixed system indices (spec §4.2).
+                        continue;
+                    }
+
+                    var health = item.GetProperty("health").GetString()?.ToLowerInvariant() ?? "unknown";
+                    var status = item.GetProperty("status").GetString()?.ToLowerInvariant() ?? "unknown";
+
+                    // docs.count and store.size may be null if the user lacks permissions
+                    long docs = 0;
+                    if (item.TryGetProperty("docs.count", out var docsProp) && docsProp.ValueKind == JsonValueKind.Number)
+                    {
+                        docs = docsProp.GetInt64();
+                    }
+
+                    long storeBytes = 0;
+                    if (item.TryGetProperty("store.size", out var storeProp) && storeProp.ValueKind == JsonValueKind.Number)
+                    {
+                        storeBytes = storeProp.GetInt64();
+                    }
+
+                    int primaryShards = 0;
+                    if (item.TryGetProperty("pri", out var priProp) && priProp.ValueKind == JsonValueKind.Number)
+                    {
+                        primaryShards = priProp.GetInt32();
+                    }
+
+                    int replicas = 0;
+                    if (item.TryGetProperty("rep", out var repProp) && repProp.ValueKind == JsonValueKind.Number)
+                    {
+                        replicas = repProp.GetInt32();
+                    }
+
+                    indices.Add(new ElasticsearchIndexInfo(name, health, status, docs, storeBytes, primaryShards, replicas));
+                }
             }
         }
 
@@ -614,28 +645,32 @@ public sealed class ElasticsearchReadService : IElasticsearchReadService
             return;
         }
 
-        foreach (var (key, value) in EnumerateKeys(body, part))
+        foreach (var entry in EnumerateKeys(body, part))
         {
-            if (BannedScriptKeys.Contains(key))
+            if (BannedScriptKeys.Contains(entry.Key))
             {
-                throw new ElasticsearchScriptException(key);
+                throw new ElasticsearchScriptException(entry.Key);
             }
 
-            if (value is JsonNode nested)
+            if (entry.Value is JsonNode nested)
             {
-                EnsureNoScriptKeys(nested, $"{part} > {key}");
+                EnsureNoScriptKeys(nested, $"{part} > {entry.Key}");
             }
         }
     }
 
-    private static IEnumerable<(string Key, JsonNode? Value)> EnumerateKeys(JsonNode node, string part)
+    private sealed record KeyValue(
+    string Key,
+    JsonNode? Value);
+
+    private static IEnumerable<KeyValue> EnumerateKeys(JsonNode node, string part)
     {
         switch (node)
         {
             case JsonObject obj:
-                foreach (var (key, value) in obj)
+                foreach (var kvp in obj)
                 {
-                    yield return (key, value);
+                    yield return new KeyValue(kvp.Key, kvp.Value);
                 }
                 break;
             case JsonArray arr:

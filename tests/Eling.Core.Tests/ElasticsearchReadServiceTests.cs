@@ -37,8 +37,8 @@ public sealed class ElasticsearchReadServiceTests
     [Fact]
     public async Task ListIndices_HidesDotIndicesByDefault()
     {
-        var stats = CannedStatsResponse;
-        var (service, handler) = CreateService(_ => JsonResponse(HttpStatusCode.OK, stats));
+        var cat = CannedCatIndicesResponse;
+        var (service, handler) = CreateService(_ => JsonResponse(HttpStatusCode.OK, cat));
 
         var visible = await service.ListIndicesAsync(MakeConnection(), includeSystem: false, CancellationToken.None);
 
@@ -53,7 +53,7 @@ public sealed class ElasticsearchReadServiceTests
         Assert.Equal(48211320, app.StoreSizeBytes);
         Assert.Equal(1, app.PrimaryShards);
         Assert.Equal(1, app.Replicas);
-        Assert.Equal("GET /_stats", Assert.Single(handler.RequestedPaths));
+        Assert.Contains("GET /_cat/indices", Assert.Single(handler.RequestedPaths));
 
         var withSystem = await service.ListIndicesAsync(MakeConnection(), includeSystem: true, CancellationToken.None);
         Assert.Equal(
@@ -643,7 +643,16 @@ public sealed class ElasticsearchReadServiceTests
      }}
     """;
 
-    private sealed class StubClientCache : IElasticsearchClientCache
+    
+
+    private const string CannedCatIndicesResponse = """
+    [
+      {"index":"logs-app-2026","health":"green","status":"open","docs.count":124312,"store.size":48211320,"pri":1,"rep":1},
+      {"index":"logs-sys-2026","health":"red","status":"open","docs.count":555,"store.size":7777,"pri":1,"rep":0},
+      {"index":".kibana","health":"yellow","status":"open","docs.count":10,"store.size":1000,"pri":1,"rep":0}
+    ]
+    """;
+private sealed class StubClientCache : IElasticsearchClientCache
     {
         private readonly ElasticsearchClient _client;
 
