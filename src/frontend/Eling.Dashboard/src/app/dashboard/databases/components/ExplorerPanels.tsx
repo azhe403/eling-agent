@@ -10,6 +10,7 @@ import { SchemaView } from "./schema-view/SchemaView"
 import { DataGrid } from "./data-grid/DataGrid"
 import { SqlEditor } from "./sql-editor/SqlEditor"
 import { RedisBrowser } from "./redis-browser/RedisBrowser"
+import { ElasticsearchIndexPanel } from "./elasticsearch/ElasticsearchIndexPanel"
 import { ExplorerTabBar } from "./ExplorerTabBar"
 import type { BrowseFilter, BrowseSort } from "@/app/dashboard/databases/filter-model"
 
@@ -324,8 +325,16 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
           <p className="text-sm text-muted-foreground">Select a table from the tree to view its data.</p>
         ) : null}
 
-        {/* The Elasticsearch index panel itself is Task 12; the tree rows and the tab
-            wiring land here, and the data area stays empty for ES tabs for now. */}
+        {/* The Elasticsearch index panel: one Discover view per index tab. */}
+        {activeIsEsIndex && rightTab === "data" && activeTable?.kind === "elasticsearch-index" ? (
+          <ElasticsearchIndexPanel
+            key={tabKey(activeTable)}
+            conns={conns}
+            connId={activeTable.connId}
+            index={activeTable.index ?? ""}
+            isWide={isWide}
+          />
+        ) : null}
         {!activeIsRedis && !activeIsEsIndex && rightTab === "data" && activeTable ? (
           <DataGrid
             key={tabKey(activeTable)}
