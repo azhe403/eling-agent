@@ -54,6 +54,31 @@ public sealed class DatabaseQueryTool
             throw new InvalidOperationException(RedisRequirement.NotSql(row, "use redis_scan"));
         }
 
+        if (string.IsNullOrWhiteSpace(database)
+            && DatabaseConnectionStringFactory.IsServerLevel(row.Provider, row.ConnectionString))
+        {
+            // The stored connection names no database, so MySQL/PostgreSQL
+            // open it fine but the statement itself has nothing to run against.
+            // Say so plainly (and list what the server holds) instead of the
+            // provider's raw "No database selected".
+            IReadOnlyList<string>? databases = null;
+            try
+            {
+                databases = await _readService.ListDatabasesAsync(row, cancellationToken, preferCache: true);
+            }
+            catch (Exception ex)
+            {
+                // Best-effort list; the agent still learns that `database` is required.
+                _logger?.LogWarning(ex, "ListDatabasesAsync failed while preparing db_query message for {Id}", connectionId);
+            }
+
+            var available = databases is { Count: > 0 }
+                ? $" Databases on this server: {string.Join(", ", databases)}."
+                : string.Empty;
+            throw new InvalidOperationException(
+                $"connection is server-level and has no default database; pass the 'database' parameter.{available}");
+        }
+
         var classification = SqlSafety.Classify(sql);
         if (classification.Verdict != SqlVerdict.ReadOnly)
         {

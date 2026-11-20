@@ -209,6 +209,7 @@ public sealed class ElasticsearchReadService : IElasticsearchReadService
         {
             ["size"] = sizeClamped,
             ["from"] = fromClamped,
+            ["sort"] = new JsonArray(new JsonObject { ["_doc"] = new JsonObject { ["order"] = "asc" } }),
             ["track_total_hits"] = true,
             ["query"] = BuildQueryNode(q, start, end, dateField, compiled),
         };

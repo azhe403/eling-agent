@@ -33,6 +33,10 @@ public static class RedisKeyRoute
         {
             return Result.NotFound(httpContext, id);
         }
+        if (row.Provider == DatabaseProvider.Elasticsearch)
+        {
+            return Result.BadRequest(ElasticsearchRequirement.NotSql(row, "use es_mapping / es_search"));
+        }
         if (row.Provider != DatabaseProvider.Redis)
         {
             return Result.BadRequest(RedisRequirement.NotRedis(row, "key browsing"));

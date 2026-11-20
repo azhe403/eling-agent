@@ -101,6 +101,7 @@ public static class DatabaseEndpoints
             IDatabaseReadCache readCache,
             IRedisReadCache redisReadCache,
             IRedisConnectionPool redisPool,
+            IElasticsearchClientCache esClientCache,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
@@ -131,6 +132,9 @@ public static class DatabaseEndpoints
                 // new password: the pooled multiplexer still points at the
                 // old credentials, so it has to go with the old row.
                 redisPool.Invalidate(id);
+                // The pooled ES client still points at the old credentials
+                // too, so it goes with the edited row as well.
+                esClientCache.Invalidate(id);
                 return Results.Ok(ToView(updated));
             }
             catch (ArgumentException ex)
@@ -140,7 +144,7 @@ public static class DatabaseEndpoints
             }
         });
 
-        group.MapDelete("/{id}", async (string id, HttpContext httpContext, IDatabaseConnectionStore store, IDatabaseReadCache readCache, IRedisReadCache redisReadCache, IRedisConnectionPool redisPool, CancellationToken ct) =>
+        group.MapDelete("/{id}", async (string id, HttpContext httpContext, IDatabaseConnectionStore store, IDatabaseReadCache readCache, IRedisReadCache redisReadCache, IRedisConnectionPool redisPool, IElasticsearchClientCache esClientCache, CancellationToken ct) =>
         {
             var ok = await store.RemoveAsync(id, ct);
             if (!ok) return ConnectionNotFoundResult.Create(id, httpContext);
@@ -149,6 +153,8 @@ public static class DatabaseEndpoints
             // The row is gone; any pooled multiplexer it left behind would
             // otherwise sit in memory until the idle evictor gets it.
             redisPool.Invalidate(id);
+            // Same for the pooled ES client.
+            esClientCache.Invalidate(id);
             return Results.NoContent();
         });
 
@@ -179,6 +185,13 @@ public static class DatabaseEndpoints
                 return Results.BadRequest(ex.Message);
             }
 
+            // An Elasticsearch cluster has no databases to list; the closest
+            // question is "which indices exist".
+            if (conn.Provider == DatabaseProvider.Elasticsearch)
+            {
+                return Results.BadRequest(ElasticsearchRequirement.NotSql(conn, "use /es/indices"));
+            }
+
             var adapterResult = TryCreateAdapter(conn, logger);
             if (adapterResult.Error is not null) return adapterResult.Error;
             var adapter = adapterResult.Adapter!;
@@ -201,6 +214,7 @@ public static class DatabaseEndpoints
             CreateDatabaseConnectionRequest req,
             ILoggerFactory loggerFactory,
             IRedisConnectionPool redisPool,
+            IElasticsearchReadService esService,
             CancellationToken ct = default) =>
         {
             var logger = loggerFactory.CreateLogger("Database");
@@ -220,6 +234,15 @@ public static class DatabaseEndpoints
             {
                 logger.LogWarning(ex, "Test connection validation failed");
                 return Results.BadRequest(ex.Message);
+            }
+
+            // The ES branch sits above the adapter seam on purpose: the adapter
+            // factory throws for Elasticsearch, so anything below it would
+            // answer 400 instead of testing the cluster.
+            if (conn.Provider == DatabaseProvider.Elasticsearch)
+            {
+                var tested = await TestElasticsearchAsync(esService, conn, logger, ct);
+                return Results.Ok(tested);
             }
 
             var adapterResult = TryCreateAdapter(conn, logger);
@@ -250,6 +273,7 @@ public static class DatabaseEndpoints
             IDatabaseConnectionStore store,
             ILoggerFactory loggerFactory,
             IRedisConnectionPool redisPool,
+            IElasticsearchReadService esService,
             CancellationToken ct = default) =>
         {
             var logger = loggerFactory.CreateLogger("Database");
@@ -272,6 +296,21 @@ public static class DatabaseEndpoints
                     logger.LogWarning(ex, "Test connection validation failed for {Id}", id);
                     return Results.BadRequest(ex.Message);
                 }
+            }
+
+            // The ES branch sits above the adapter seam on purpose: the adapter
+            // factory throws for Elasticsearch, so anything below it would
+            // answer 400 instead of testing the cluster. The Redis branches
+            // keep their existing order (unchanged this round).
+            if (row.Provider == DatabaseProvider.Elasticsearch)
+            {
+                var conn2 = row with { ConnectionString = connectionString };
+                var testedEs = await TestElasticsearchAsync(esService, conn2, logger, ct);
+                if (testedEs.Ok)
+                {
+                    await store.MarkConnectedAsync(id, DateTimeOffset.UtcNow, ct);
+                }
+                return Results.Ok(testedEs);
             }
 
             var adapterResult = TryCreateAdapter(row with { ConnectionString = connectionString }, logger);
@@ -320,6 +359,10 @@ public static class DatabaseEndpoints
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
             if (row is null) return ConnectionNotFoundResult.Create(id, httpContext);
+            if (row.Provider == DatabaseProvider.Elasticsearch)
+            {
+                return Results.BadRequest(ElasticsearchRequirement.NotSql(row, "use /es/index for the mapping or /es/indices for the index list"));
+            }
             if (row.Provider == DatabaseProvider.Redis)
             {
                 return Results.BadRequest(RedisRequirement.NotSql(row, "use /keys"));
@@ -446,6 +489,10 @@ public static class DatabaseEndpoints
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
             if (row is null) return ConnectionNotFoundResult.Create(id, httpContext);
+            if (row.Provider == DatabaseProvider.Elasticsearch)
+            {
+                return Results.BadRequest(ElasticsearchRequirement.NotSql(row, "use /es/documents"));
+            }
             if (row.Provider == DatabaseProvider.Redis)
             {
                 return Results.BadRequest(RedisRequirement.NotSql(row, "use /keys"));
@@ -674,6 +721,10 @@ public static class DatabaseEndpoints
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
             if (row is null) return ConnectionNotFoundResult.Create(id, httpContext);
+            if (row.Provider == DatabaseProvider.Elasticsearch)
+            {
+                return Results.BadRequest(ElasticsearchRequirement.NotSql(row, "use /es/search"));
+            }
             if (row.Provider == DatabaseProvider.Redis)
             {
                 return Results.BadRequest(RedisRequirement.NotSql(row, "use /keys"));
@@ -752,6 +803,10 @@ public static class DatabaseEndpoints
             var logger = loggerFactory.CreateLogger("Database");
             var row = await store.FindAsync(id, ct);
             if (row is null) return ConnectionNotFoundResult.Create(id, httpContext);
+            if (row.Provider == DatabaseProvider.Elasticsearch)
+            {
+                return Results.BadRequest(ElasticsearchRequirement.NotSql(row, "ES connections are read-only"));
+            }
             if (row.Provider == DatabaseProvider.Redis)
             {
                 return Results.BadRequest(RedisRequirement.NotSql(row, "mutations are not supported"));
@@ -979,6 +1034,37 @@ public static class DatabaseEndpoints
         }
 
         return DatabaseConnectionStringFactory.Build(provider, manual);
+    }
+
+    /// <summary>
+    /// Tests an Elasticsearch connection: reach the cluster, then ask it for
+    /// its version. An ES 7 answer is a refusal with the reason, not a generic
+    /// failure — the fix is an ES 8 cluster. Everything else that comes out of
+    /// the service is logged and answered with "connection failed", the same
+    /// shape as the Redis test.
+    /// </summary>
+    private static async Task<DatabaseTestResponse> TestElasticsearchAsync(
+        IElasticsearchReadService service,
+        DatabaseConnection connection,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        try
+        {
+            var ping = await service.PingAsync(connection, ct);
+            return new DatabaseTestResponse(true, ping.Version, ping.LatencyMs);
+        }
+        catch (NotSupportedException ex)
+        {
+            // Our own message (e.g. the ES 7 refusal); safe to show verbatim.
+            logger.LogWarning(ex, "Elasticsearch test refused for {Id}", connection.Id);
+            return new DatabaseTestResponse(false, ex.Message, 0);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Elasticsearch test failed for {Id}", connection.Id);
+            return new DatabaseTestResponse(false, "connection failed", 0);
+        }
     }
 
     /// <summary>

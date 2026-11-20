@@ -165,6 +165,15 @@ public static class DashboardServices
             sp.GetRequiredService<IRedisReadCache>(),
             sp.GetRequiredService<ILogger<RedisKeyReadService>>()));
 
+        // ES gets the Redis treatment (pooled transport + service), minus a
+        // read cache: cluster data is never cached in v1. The client cache is
+        // invalidated on PUT/DELETE of the connection, like the Redis pool.
+        services.AddSingleton<IElasticsearchClientCache>(sp =>
+            new ElasticsearchClientCache(logger: sp.GetService<ILogger<ElasticsearchClientCache>>()));
+        services.AddSingleton<IElasticsearchReadService>(sp => new ElasticsearchReadService(
+            sp.GetRequiredService<IElasticsearchClientCache>(),
+            sp.GetRequiredService<ILogger<ElasticsearchReadService>>()));
+
         services.AddSingleton(sp => new AppSettingsConnectionScanner(
             AppSettingsSourceResolver.Resolve(sp.GetRequiredService<IHostEnvironment>().ContentRootPath),
             sp.GetRequiredService<ILogger<AppSettingsConnectionScanner>>()));

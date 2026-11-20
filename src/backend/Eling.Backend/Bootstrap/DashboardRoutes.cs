@@ -85,6 +85,9 @@ public static class DashboardRoutes
         app.MapCodebaseRoutes();
         app.MapDatabaseEndpoints();
         app.MapDatabaseKeyEndpoints();
+        // The ES routes live in their own file to keep it reviewable; the URL
+        // shape is the same /api/databases/{id}/es/... either way.
+        app.MapDatabaseElasticsearchEndpoints();
         app.MapAuditRoutes();
         app.MapControllers();
         app.MapFallbackToFile("index.html");

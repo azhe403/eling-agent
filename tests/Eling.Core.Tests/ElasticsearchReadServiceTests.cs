@@ -229,6 +229,38 @@ public sealed class ElasticsearchReadServiceTests
     }
 
     [Fact]
+    public async Task Documents_RequestBody_PinsDocOrderAndTrackTotalHits()
+    {
+        var (service, handler) = CreateService(_ => JsonResponse(HttpStatusCode.OK, CannedSearchResponse));
+
+        await service.DocumentsAsync(
+            MakeConnection(),
+            index: "logs-app-2026",
+            from: 0,
+            size: 25,
+            q: null,
+            start: null,
+            end: null,
+            field: null,
+            filters: null,
+            logic: null,
+            CancellationToken.None);
+
+        // The documents route pins `_doc` order and track_total_hits on the wire
+        // (spec §4, route behavior for /es/documents). The body must round-trip
+        // through the ES client's typed SearchRequest (DeserializeBody), which
+        // models the _doc sort as FieldSort{Field = "_doc", Order = Asc} — on
+        // the wire that is [{"_doc": {"order": "asc"}}].
+        var body = JsonNode.Parse(handler.Bodies.Single())!.AsObject();
+        Assert.True(body["track_total_hits"]!.GetValue<bool>());
+        // The ES .NET client serializes FieldSort{Field = "_doc", Order = Asc}
+        // on the wire as {"_doc": {"order": "asc"}}.
+        Assert.True(JsonNode.DeepEquals(
+            JsonNode.Parse("""{"_doc":{"order":"asc"}}"""),
+            body["sort"]!));
+    }
+
+    [Fact]
     public async Task Histogram_NonDateField_Throws400Shaped()
     {
         var (service, handler) = CreateService(_ => throw new InvalidOperationException("the handler must not be called"));

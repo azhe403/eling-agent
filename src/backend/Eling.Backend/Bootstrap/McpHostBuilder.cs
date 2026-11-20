@@ -107,6 +107,13 @@ public static class McpHostBuilder
                 sp.GetRequiredService<IRedisConnectionPool>(),
                 sp.GetRequiredService<IRedisReadCache>(),
                 sp.GetRequiredService<ILogger<RedisKeyReadService>>()));
+            // ES: same shape as HTTP host (curated/peer hosts serve the MCP
+            // tools too). No read cache — cluster data is never cached in v1.
+            services.AddSingleton<IElasticsearchClientCache>(sp =>
+                new ElasticsearchClientCache(logger: sp.GetService<ILogger<ElasticsearchClientCache>>()));
+            services.AddSingleton<IElasticsearchReadService>(sp => new ElasticsearchReadService(
+                sp.GetRequiredService<IElasticsearchClientCache>(),
+                sp.GetRequiredService<ILogger<ElasticsearchReadService>>()));
             // The resolver hands back the workspace directory when it holds any
             // appsettings file, so the scanner sees appsettings.json AND the
             // environment files next to it. It used to point at appsettings.json
