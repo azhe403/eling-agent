@@ -6,7 +6,8 @@ import { RefreshCw, Plus } from "lucide-react"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { Button } from "@/components/ui/button"
 
-import { DbTab, isRedisTab, tabKey, persistableTab, sanitizePersistedTab } from "./db-tabs"
+import { DbTab, isRedisTab, isElasticsearchIndexTab, tabKey, persistableTab, sanitizePersistedTab } from "./db-tabs"
+import { fetchEsIndices } from "./es-client"
 import { serializeBrowseParam, parseBrowseParam } from "./filter-model"
 import { effectiveBrowseLimit, effectiveBrowsePage } from "./utils/browse-paging"
 import { toggleSortColumn, type BrowseFilter, type BrowseSort } from "./filter-model"
@@ -23,7 +24,7 @@ import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { XL_BREAKPOINT } from "@/lib/constants"
 
-import type { DbConn, Detected, QueryResult } from "./types"
+import type { DbConn, Detected, QueryResult, ElasticsearchIndexInfo } from "./types"
 import { API } from "./utils"
 import { apiFetch } from "@/lib/api"
 
@@ -123,7 +124,9 @@ export function Databases() {
   // Schemas
   //
   // A Redis connection is not a table store: /schema refuses it, so the schema
-  // hook is told which connections it may ask about. A connection that is not
+  // hook is told which connections it may ask about. An Elasticsearch
+  // connection is refused too - its routes answer SQL-only operations with a
+  // refusal (see ElasticsearchRequirement.NotSql). A connection that is not
   // in the list yet is still allowed through - `conns` loads asynchronously,
   // and refusing an unknown id would skip the one read that matters when the
   // list is empty on first paint.
@@ -131,7 +134,7 @@ export function Databases() {
   useEffect(() => { connsRef.current = conns }, [conns])
   const isSqlConnection = useCallback((connId: string) => {
     const conn = connsRef.current.find((c) => c.id === connId)
-    return conn ? conn.provider !== "Redis" : true
+    return conn ? conn.provider !== "Redis" && conn.provider !== "Elasticsearch" : true
   }, [])
 
   // A 404 from /schema can only mean the connection is gone from the registry
@@ -244,6 +247,51 @@ export function Databases() {
   })
 
   const activeRedisDb = isRedisTab(activeTable ?? null) ? (activeTable?.redisDb ?? 0) : 0
+
+  // Elasticsearch
+  const [esIndices, setEsIndices] = useState<Record<string, ElasticsearchIndexInfo[]>>({})
+  /** Connections with the ".system indices" toggle on: the tree shows their system indices. */
+  const [esSystemVisible, setEsSystemVisible] = useState<Set<string>>(new Set())
+
+  const loadEsIndices = useCallback(
+    async (connId: string, includeSystem = false) => {
+      try {
+        const list = await fetchEsIndices(connId, includeSystem)
+        setEsIndices((prev) => ({ ...prev, [connId]: list }))
+      } catch (e: unknown) {
+        notifyDb("error", "Elasticsearch indices failed", e instanceof Error ? e.message : String(e))
+      }
+    },
+    [notifyDb]
+  )
+
+  /** Turns the ".system indices" toggle of one connection on or off. */
+  const toggleEsSystem = useCallback(
+    (connId: string) => {
+      const show = !esSystemVisible.has(connId)
+      setEsSystemVisible((prev) => {
+        const next = new Set(prev)
+        if (show) next.add(connId)
+        else next.delete(connId)
+        return next
+      })
+      void loadEsIndices(connId, show)
+    },
+    [esSystemVisible, loadEsIndices]
+  )
+
+  /** Opens one index of a connection in a tab of its own. */
+  const openEsIndex = useCallback(
+    (connId: string, index: string) => {
+      const tab: DbTab = { connId, table: index, kind: "elasticsearch-index", index }
+      setOpenTabs((prev) => (prev.some((t) => tabKey(t) === tabKey(tab)) ? prev : [...prev, tab]))
+      setActiveTable(tab)
+      activeTableRef.current = tab
+      setSelectedId(connId)
+      setRightTab("data")
+    },
+    [setOpenTabs, setActiveTable, setSelectedId, setRightTab]
+  )
 
   // SQL
   const [sql, setSql] = useState("SELECT 1")
@@ -369,8 +417,10 @@ export function Databases() {
     for (const id of expandedConns) {
       const conn = conns.find((c) => c.id === id)
       if (conn?.provider === "Redis" && !redisDbs[id]) void loadRedisDatabases(id)
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- loading the connection's indices is the effect's job, like the schema loads above.
+      if (conn?.provider === "Elasticsearch" && !esIndices[id]) void loadEsIndices(id, esSystemVisible.has(id))
     }
-  }, [expandedConns, conns, redisDbs, loadRedisDatabases])
+  }, [expandedConns, conns, redisDbs, esIndices, loadRedisDatabases, loadEsIndices, esSystemVisible])
 
   /* ---------------------------------------------------------------- the grid */
 
@@ -559,6 +609,20 @@ export function Databases() {
     [expandedConns, ensureSchema]
   )
 
+  const toggleEsConn = useCallback(
+    (id: string) => {
+      const wasExpanded = expandedConns.has(id)
+      setExpandedConns((prev) => {
+        const next = new Set(prev)
+        if (wasExpanded) next.delete(id)
+        else next.add(id)
+        return next
+      })
+      if (!wasExpanded) void loadEsIndices(id, esSystemVisible.has(id))
+    },
+    [expandedConns, loadEsIndices, esSystemVisible]
+  )
+
   const toggleDb = useCallback(
     (connId: string, database: string) => {
       const key = `${connId}:${database}`
@@ -718,6 +782,13 @@ export function Databases() {
           // so a refresh looked like the browser had lost the keys.
           void fetchRedisPrefix(connId, db, "")
         })()
+      } else if (connId && table && savedTab?.kind === "elasticsearch-index" && savedTab.connId === connId) {
+        // An Elasticsearch index tab is in-memory + localStorage only: no URL
+        // state, so the restore path is localStorage, not the address bar.
+        const restored: DbTab = { connId, table, kind: "elasticsearch-index", index: savedTab.index ?? "" }
+        setActiveTable(restored)
+        activeTableRef.current = restored
+        setOpenTabs((prev) => (prev.some((t) => tabKey(t) === tabKey(restored)) ? prev : [...prev, restored]))
       } else if (connId && table) {
         autoScrollPendingRef.current = true
         // URL overrides localStorage for the active tab's committed filter set;
@@ -790,7 +861,9 @@ export function Databases() {
       )
       const params = new URLSearchParams()
       if (schemaConnId) params.set("connectionId", schemaConnId)
-      if (activeTable?.table) params.set("table", activeTable.table)
+      // The Elasticsearch index tab is in-memory + localStorage only: it never
+      // writes the address bar, so a copied link stays a SQL/Redis one.
+      if (activeTable?.table && !isElasticsearchIndexTab(activeTable)) params.set("table", activeTable.table)
       if (activeTable?.database) params.set("database", activeTable.database)
       if (rightTab) params.set("tab", rightTab)
       const browseParam = serializeBrowseParam({
@@ -1062,6 +1135,7 @@ export function Databases() {
                 void ensureSchema(id, { force: true, bypass: true })
                 const conn = conns.find((c) => c.id === id)
                 if (conn?.provider === "Redis") void loadRedisDatabases(id)
+                if (conn?.provider === "Elasticsearch") void loadEsIndices(id, esSystemVisible.has(id))
               }
             }}
           >
@@ -1091,6 +1165,11 @@ export function Databases() {
           connSchemas={connSchemas}
           dbSchemas={dbSchemas}
           redisDbs={redisDbs}
+          esIndices={esIndices}
+          esSystemVisible={esSystemVisible}
+          onToggleEsSystem={toggleEsSystem}
+          onToggleEsConn={toggleEsConn}
+          onOpenEsIndex={openEsIndex}
           activeTable={activeTable}
           openTabs={openTabs}
           onActivateTab={activateTab}

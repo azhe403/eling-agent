@@ -79,6 +79,7 @@ export const ConnectionFormFields = ({
         <SelectItem value="MySql">MySql</SelectItem>
         <SelectItem value="Redis">Redis</SelectItem>
         <SelectItem value="PostgreSql">PostgreSql</SelectItem>
+        <SelectItem value="Elasticsearch">Elasticsearch</SelectItem>
       </SelectContent>
     </Select>
   )
@@ -125,7 +126,27 @@ export const ConnectionFormFields = ({
         {modeToggle}
       </div>
 
-      {provider === "Sqlite" ? (
+      {provider === "Elasticsearch" ? (
+        /* An Elasticsearch cluster has no database or file path: the fields
+           it names are the endpoint and the account. TLS: only raw mode
+           speaks https today. */
+        <div className="space-y-2">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Input placeholder="host" value={host} onChange={(e) => onHostChange(e.target.value)} />
+            <Input placeholder="port" value={port} onChange={(e) => onPortChange(e.target.value)} aria-invalid={portInvalid} />
+            <Input placeholder="username" value={username} onChange={(e) => onUsernameChange(e.target.value)} />
+            <Input
+              type="password"
+              placeholder={passwordKeepsStored ? "password (leave empty to keep the stored one)" : "password"}
+              value={password}
+              onChange={(e) => onPasswordChange(e.target.value)}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            No TLS in manual mode — use raw connection string mode for `https://`.
+          </p>
+        </div>
+      ) : provider === "Sqlite" ? (
         <div className="flex gap-2">
           <Input
             placeholder="database file"

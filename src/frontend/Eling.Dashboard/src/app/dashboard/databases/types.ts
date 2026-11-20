@@ -133,7 +133,7 @@ export type ManualPayload = {
 }
 
 /** Provider identifiers. */
-export type Provider = "Sqlite" | "MySql" | "Redis" | "PostgreSql"
+export type Provider = "Sqlite" | "MySql" | "Redis" | "PostgreSql" | "Elasticsearch"
 
 export type ConnMode = "manual" | "raw"
 
@@ -147,4 +147,114 @@ export type Detected = {
   provider: string | null
   rejectionReason: string | null
   sourceFile?: string | null
+}
+
+/* --------------------------------------------------------- Elasticsearch */
+
+/**
+ * Elasticsearch: the dashboard reads the cluster's indices. These are the
+ * wire shapes of the /api/databases/{id}/es/... routes; the backend
+ * serializes them camelCase.
+ */
+
+/** One index of the cluster, as the indices route reports it. */
+export type ElasticsearchIndexInfo = {
+  name: string
+  health: string
+  status: string
+  docsCount: number
+  storeSizeBytes: number
+  primaryShards: number
+  replicas: number
+}
+
+/** The mappings and settings of one index, verbatim from the cluster. */
+export type ElasticsearchIndexDetail = {
+  name: string
+  /** The raw mappings payload. */
+  mappings: unknown
+  /** The raw settings payload. */
+  settings: unknown
+  docsCount: number
+  storeSizeBytes: number
+}
+
+/** One hit of a documents or search page. */
+export type ElasticsearchHit = {
+  index: string
+  id: string
+  /** Null when the hit has no score. */
+  score: number | null
+  /** The _source of the hit, verbatim. */
+  source: unknown
+}
+
+/** The page a documents fetch returns. */
+export type ElasticsearchDocumentPage = {
+  total: number
+  from: number
+  size: number
+  tookMs: number
+  hits: ElasticsearchHit[]
+}
+
+/** One bucket of the histogram the endpoint answers. */
+export type ElasticsearchHistogramBucket = {
+  keyMs: number
+  docCount: number
+}
+
+/** The histogram answer: the field it histograms, the width, and the buckets. */
+export type ElasticsearchHistogram = {
+  field: string
+  /** The width the cluster chose, when it reports one. */
+  interval: string | null
+  buckets: ElasticsearchHistogramBucket[]
+}
+
+/** One search page of the DSL console: totals, hits and aggregations verbatim. */
+export type ElasticsearchSearchResult = {
+  total: number
+  tookMs: number
+  hits: ElasticsearchHit[]
+  aggregations: unknown
+}
+
+/** The answer to a count: how many documents the query matched. */
+export type ElasticsearchCountResult = {
+  count: number
+  tookMs: number
+}
+
+/** The options of the documents fetch. */
+export type EsDocumentsOpts = {
+  from: number
+  size: number
+  q?: string | null
+  start?: string | null
+  end?: string | null
+  field?: string | null
+  filters?: string | null
+  logic?: string | null
+}
+
+/** The options of the histogram fetch: the same filters, plus the bucket count. */
+export type EsHistogramOpts = {
+  buckets?: number
+  q?: string | null
+  start?: string | null
+  end?: string | null
+  field?: string | null
+  filters?: string | null
+  logic?: string | null
+}
+
+/** The body of the search fetch; the index travels as the second argument. */
+export type EsSearchBody = {
+  query?: unknown
+  sort?: unknown
+  aggs?: unknown
+  size?: number
+  from?: number
+  sourceIncludes?: string[] | null
 }

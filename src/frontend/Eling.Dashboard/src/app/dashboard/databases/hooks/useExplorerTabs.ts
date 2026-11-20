@@ -2,7 +2,7 @@
 
 import { useCallback } from "react"
 import type { DbTab, QueryResult, SchemaInfo, RedisInspect } from "../types"
-import { isRedisTab, tabKey } from "../db-tabs"
+import { isRedisTab, isElasticsearchIndexTab, tabKey } from "../db-tabs"
 import { defaultBrowseLimit } from "../utils/browse-paging"
 import { redisPageKey, type RedisPage } from "../redis-browser"
 
@@ -141,8 +141,9 @@ export function useExplorerTabs({
   /** Brings a tab back on screen. */
   const activateTabEntry = useCallback(
     (t: DbTab) => {
-      // Auto-scroll the tree to show the selected table.
-      autoScrollPendingRef.current = !isRedisTab(t)
+      // Auto-scroll the tree to show the selected table. An Elasticsearch
+      // index tab has no tree item of its own and no SQL schema to load.
+      autoScrollPendingRef.current = !isRedisTab(t) && !isElasticsearchIndexTab(t)
       if (isRedisTab(t)) {
         setSelectedId(t.connId)
         setSchemaConnId(t.connId)
@@ -153,6 +154,12 @@ export function useExplorerTabs({
         const db = t.redisDb ?? 0
         const rootKey = redisPageKey(t.connId, db, "")
         if (!redisPages[rootKey]) void fetchRedisPrefix(t.connId, db, "")
+        return
+      }
+      if (isElasticsearchIndexTab(t)) {
+        setSelectedId(t.connId)
+        setActiveTable(t)
+        activeTableRef.current = t
         return
       }
       // Reuse selectTreeTable to load schema/data for the tab.

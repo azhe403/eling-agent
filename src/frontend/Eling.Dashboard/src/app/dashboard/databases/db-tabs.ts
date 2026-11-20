@@ -12,14 +12,17 @@ export const REDIS_TAB_TABLE = "Redis keys"
 
 import type { BrowseFilter, BrowseSort } from "./filter-model"
 import { sanitizeBrowseFilters, sanitizeBrowseSort, sanitizeManualCondition } from "./filter-model"
+import { esTabKey } from "./es-browser"
 
 export type DbTab = {
   connId: string
   table: string
   database?: string | null
-  kind?: "redis"
+  kind?: "redis" | "elasticsearch-index"
   /** The logical Redis database this tab shows. Only set for a Redis tab. */
   redisDb?: number
+  /** The Elasticsearch index this tab shows. Only set for an Elasticsearch tab. */
+  index?: string
   /**
    * How many rows the Data tab fetches. Session view state: lives on the tab
    * so switching tabs keeps each tab's choice, never persisted.
@@ -51,13 +54,29 @@ export const isRedisTab = (tab?: { table?: string; kind?: string } | null): bool
   tab?.kind === "redis" || tab?.table === REDIS_TAB_TABLE
 
 /**
- * The identity of a Redis tab: the connection and the database.
+ * Whether a tab is an Elasticsearch index.
  *
- * Two databases of one connection are two different views and must be two
- * different tabs.
+ * The kind is the whole answer: an Elasticsearch tab restored from localStorage
+ * is still one, and must not fall through to the SQL path (which the backend
+ * refuses for Elasticsearch connections).
+ */
+export const isElasticsearchIndexTab = (tab?: { table?: string; kind?: string } | null): boolean =>
+  tab?.kind === "elasticsearch-index"
+
+/**
+ * The identity of a tab: a Redis tab by connection and database, an
+ * Elasticsearch tab by connection and index, and a SQL tab by connection,
+ * database and table.
+ *
+ * Two databases of one server are two different views and must be two
+ * different tabs; the same holds for two indices of one cluster.
  */
 export const tabKey = (tab: DbTab): string =>
-  isRedisTab(tab) ? redisTabKey(tab) : `sql:${tab.connId}:${tab.database ?? ""}:${tab.table}`
+  isElasticsearchIndexTab(tab)
+    ? esTabKey(tab.connId, tab.index ?? "")
+    : isRedisTab(tab)
+      ? redisTabKey(tab)
+      : `sql:${tab.connId}:${tab.database ?? ""}:${tab.table}`
 
 export const redisTabKey = (tab: DbTab): string => `${tab.connId}:${tab.redisDb ?? 0}`
 
@@ -83,6 +102,10 @@ export const sanitizePersistedTab = (t: unknown): DbTab | null => {
   if (typeof raw.database === "string") tab.database = raw.database
   if (raw.kind === "redis") tab.kind = "redis"
   if (typeof raw.redisDb === "number") tab.redisDb = raw.redisDb
+  if (raw.kind === "elasticsearch-index" && typeof raw.index === "string" && raw.index.length > 0) {
+    tab.kind = "elasticsearch-index"
+    tab.index = raw.index
+  }
   // Session view state: keep whatever the reader committed before the reload.
   tab.browseFilters = sanitizeBrowseFilters(raw.browseFilters)
   tab.browseSort = sanitizeBrowseSort(raw.browseSort)

@@ -3,7 +3,7 @@ import { DbTab, DbConn, QueryResult, SchemaInfo, RedisInspect } from "@/app/dash
 import { useEffect, useState } from "react"
 import { List } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { isRedisTab, tabKey } from "@/app/dashboard/databases/db-tabs"
+import { isRedisTab, isElasticsearchIndexTab, tabKey } from "@/app/dashboard/databases/db-tabs"
 import type { RedisPage, RedisPrefixPreview } from "@/app/dashboard/databases/redis-browser"
 import { ConnectionTree } from "./connection-tree/ConnectionTree"
 import { SchemaView } from "./schema-view/SchemaView"
@@ -20,6 +20,9 @@ export interface ExplorerPanelsProps {
   connSchemas: Record<string, SchemaInfo>
   dbSchemas: Record<string, SchemaInfo>
   redisDbs: Record<string, import("@/app/dashboard/databases/redis-browser").RedisDbInfo[]>
+  esIndices: Record<string, import("@/app/dashboard/databases/types").ElasticsearchIndexInfo[]>
+  /** The connections with the ".system indices" toggle on. */
+  esSystemVisible: Set<string>
   activeTable: DbTab | null
   openTabs: DbTab[]
   onActivateTab: (idx: number) => void
@@ -76,6 +79,9 @@ export interface ExplorerPanelsProps {
   onToggleDb: (connId: string, database: string) => void
   onSelectTreeTable: (connId: string, table: string, database?: string | null) => void
   onOpenRedisDb: (connId: string, dbIndex: number) => void
+  onOpenEsIndex: (connId: string, index: string) => void
+  onToggleEsConn: (id: string) => void
+  onToggleEsSystem: (connId: string) => void
   onTreeContextMenu: (e: React.MouseEvent, connId: string, table?: string, database?: string) => void
   onRegisterTreeItem: (key: string, el: HTMLButtonElement | null) => void
   onRightTabChange: (tab: "data" | "schema" | "sql") => void
@@ -132,7 +138,7 @@ export interface ExplorerPanelsProps {
  */
 export const ExplorerPanels = (props: ExplorerPanelsProps) => {
   const {
-    conns, expandedConns, expandedDbs, connSchemas, dbSchemas, redisDbs, activeTable, openTabs,
+    conns, expandedConns, expandedDbs, connSchemas, dbSchemas, redisDbs, esIndices, esSystemVisible, activeTable, openTabs,
     rightTab, connSort, connOrder, loading, isFading, schemaConnId, schemaInfo, schemaLoading,
     selectedId, selectedIsReadOnly, selectedIsRedis, browseResult, browseTotal, browseLoading, browseLimit, browsePage,
     browseFilters, browseSort, manualCondition, manualEnabled, filterOpen, onFilterOpenChange,
@@ -145,6 +151,7 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
 
   const [connectionsOpen, setConnectionsOpen] = useState(false)
   const activeIsRedis = isRedisTab(activeTable)
+  const activeIsEsIndex = isElasticsearchIndexTab(activeTable)
 
   // Escape closes the overlay; no-op when it is closed.
   useEffect(() => {
@@ -183,6 +190,14 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
       }}
       onOpenRedisDb={(connId, dbIndex) => {
         props.onOpenRedisDb(connId, dbIndex)
+        setConnectionsOpen(false)
+      }}
+      esIndices={esIndices}
+      esSystemVisible={esSystemVisible}
+      onToggleEsSystem={props.onToggleEsSystem}
+      onToggleEsConn={props.onToggleEsConn}
+      onOpenEsIndex={(connId, index) => {
+        props.onOpenEsIndex(connId, index)
         setConnectionsOpen(false)
       }}
       onContextMenu={props.onTreeContextMenu}
@@ -237,12 +252,12 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
           <Button size="sm" variant={rightTab === "data" ? "default" : "outline"} onClick={() => props.onRightTabChange("data")}>
             Data
           </Button>
-          {!activeIsRedis ? (
+          {!activeIsRedis && !activeIsEsIndex ? (
             <Button size="sm" variant={rightTab === "schema" ? "default" : "outline"} onClick={() => props.onRightTabChange("schema")}>
               Schema
             </Button>
           ) : null}
-          {!activeIsRedis ? (
+          {!activeIsRedis && !activeIsEsIndex ? (
             <Button size="sm" variant={rightTab === "sql" ? "default" : "outline"} onClick={() => props.onRightTabChange("sql")}>
               SQL
             </Button>
@@ -309,7 +324,9 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
           <p className="text-sm text-muted-foreground">Select a table from the tree to view its data.</p>
         ) : null}
 
-        {!activeIsRedis && rightTab === "data" && activeTable ? (
+        {/* The Elasticsearch index panel itself is Task 12; the tree rows and the tab
+            wiring land here, and the data area stays empty for ES tabs for now. */}
+        {!activeIsRedis && !activeIsEsIndex && rightTab === "data" && activeTable ? (
           <DataGrid
             key={tabKey(activeTable)}
             activeTable={activeTable}

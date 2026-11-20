@@ -1,10 +1,11 @@
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, ArrowUp, ArrowDown } from "lucide-react"
-import { DbConn, DbTab, SchemaInfo, RedisDbInfo } from "@/app/dashboard/databases/types"
-import { isRedisTab } from "@/app/dashboard/databases/db-tabs"
+import { DbConn, DbTab, SchemaInfo, RedisDbInfo, ElasticsearchIndexInfo } from "@/app/dashboard/databases/types"
+import { isRedisTab, isElasticsearchIndexTab } from "@/app/dashboard/databases/db-tabs"
 import { CONN_SORT_KEYS, CONN_SORT_COPY, type ConnSortKey, type ConnSortOrder } from "@/app/dashboard/databases/conn-sorting"
 import { dbRowLabel, dbRowCount, dbRowAsOf, visibleRedisDbs } from "@/app/dashboard/databases/redis-browser"
+import { esIndexDocs, esIndexLabel, visibleIndices } from "@/app/dashboard/databases/es-browser"
 
 export interface ConnectionTreeProps {
   conns: DbConn[]
@@ -13,6 +14,9 @@ export interface ConnectionTreeProps {
   connSchemas: Record<string, SchemaInfo>
   dbSchemas: Record<string, SchemaInfo>
   redisDbs: Record<string, RedisDbInfo[]>
+  esIndices: Record<string, ElasticsearchIndexInfo[]>
+  /** The connections with the ".system indices" toggle on: the tree shows the system indices of theirs. */
+  esSystemVisible: Set<string>
   activeTable: DbTab | null
   connSort: ConnSortKey
   connOrder: ConnSortOrder
@@ -24,9 +28,12 @@ export interface ConnectionTreeProps {
   onOrderChange: (order: ConnSortOrder) => void
   onToggleConn: (id: string) => void
   onToggleRedisConn: (id: string) => void
+  onToggleEsConn: (id: string) => void
+  onToggleEsSystem: (connId: string) => void
   onToggleDb: (connId: string, database: string) => void
   onSelectTreeTable: (connId: string, table: string, database?: string | null) => void
   onOpenRedisDb: (connId: string, dbIndex: number) => void
+  onOpenEsIndex: (connId: string, index: string) => void
   onContextMenu: (e: React.MouseEvent, connId: string, table?: string, database?: string) => void
   onRegisterTreeItem: (key: string, el: HTMLButtonElement | null) => void
 }
@@ -38,6 +45,8 @@ export const ConnectionTree = ({
   connSchemas,
   dbSchemas,
   redisDbs,
+  esIndices,
+  esSystemVisible,
   activeTable,
   connSort,
   connOrder,
@@ -48,13 +57,17 @@ export const ConnectionTree = ({
   onOrderChange,
   onToggleConn,
   onToggleRedisConn,
+  onToggleEsConn,
+  onToggleEsSystem,
   onToggleDb,
   onSelectTreeTable,
   onOpenRedisDb,
+  onOpenEsIndex,
   onContextMenu,
   onRegisterTreeItem,
 }: ConnectionTreeProps) => {
   const isActiveRedis = isRedisTab(activeTable)
+  const isActiveEsIndex = isElasticsearchIndexTab(activeTable)
 
   return (
     <Card>
@@ -111,7 +124,13 @@ export const ConnectionTree = ({
             <button
               className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-sm hover:bg-accent"
             title={c.name}
-              onClick={() => (c.provider === "Redis" ? onToggleRedisConn(c.id) : onToggleConn(c.id))}
+              onClick={() =>
+                c.provider === "Elasticsearch"
+                  ? onToggleEsConn(c.id)
+                  : c.provider === "Redis"
+                    ? onToggleRedisConn(c.id)
+                    : onToggleConn(c.id)
+              }
               onContextMenu={(e) => {
                 e.preventDefault()
                 onContextMenu(e, c.id)
@@ -123,7 +142,42 @@ export const ConnectionTree = ({
 
             {expandedConns.has(c.id) ? (
               <div className="ml-3 space-y-0.5">
-                {c.provider === "Redis" ? (
+                {c.provider === "Elasticsearch" ? (
+                  <>
+                    {/* The system-index toggle: system indices are usually noise in
+                        an everyday cluster, and the backend answers includeSystem for them. */}
+                    <button
+                      type="button"
+                      className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs hover:bg-accent ${esSystemVisible.has(c.id) ? "text-foreground" : "text-muted-foreground"}`}
+                      aria-pressed={esSystemVisible.has(c.id)}
+                      title={esSystemVisible.has(c.id) ? "Hide system indices" : "Show system indices"}
+                      onClick={() => onToggleEsSystem(c.id)}
+                    >
+                      <span aria-hidden="true">{esSystemVisible.has(c.id) ? "☑" : "☐"}</span>
+                      <span className="truncate">system indices</span>
+                    </button>
+                    {esIndices[c.id] ? (
+                      visibleIndices(esIndices[c.id] ?? [], esSystemVisible.has(c.id)).map((index) => {
+                        const isActive =
+                          isActiveEsIndex && activeTable?.connId === c.id && activeTable?.index === index.name
+                        return (
+                          <button
+                            key={index.name}
+                            type="button"
+                            className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs hover:bg-accent ${isActive ? "bg-accent font-medium" : ""}`}
+                            onClick={() => onOpenEsIndex(c.id, index.name)}
+                          >
+                            <span>🗃</span>
+                            <span className="min-w-0 flex-1 truncate">{esIndexLabel(index.name)}</span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">{esIndexDocs(index.docsCount)}</span>
+                          </button>
+                        )
+                      })
+                    ) : (
+                      <p className="ml-2 text-xs text-muted-foreground">Loading.</p>
+                    )}
+                  </>
+                ) : c.provider === "Redis" ? (
                   redisDbs[c.id] ? (
                     visibleRedisDbs(
                       redisDbs[c.id],
