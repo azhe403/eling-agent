@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Eling.Backend.Endpoints;
+using Eling.Backend.Mcp.Tools;
 using Eling.Core.Audit;
 using Eling.Core.Database;
 using Microsoft.AspNetCore.Builder;
@@ -246,6 +247,27 @@ public sealed class DatabaseRefusalElasticsearchTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("Redis", body);
+    }
+
+    [Fact]
+    public async Task AgentGetSchema_ForAnEsConnection_NamesElasticsearchAndTheEsTools()
+    {
+        // The MCP tool path: db_get_schema on an ES connection must refuse with
+        // the provider's own words, not fall through to a generic
+        // "Provider 'Elasticsearch' is not supported."
+        var id = await RegisterConnection("es@local", DatabaseProvider.Elasticsearch, "http://127.0.0.1:9200/");
+
+        var tool = new DatabaseGetSchemaTool(
+            _store,
+            new DatabaseReadService(new JsonDatabaseReadCache(Path.Combine(_root, "cache"))),
+            NullLogger<DatabaseGetSchemaTool>.Instance);
+
+        var thrown = await Record.ExceptionAsync(() => tool.GetSchemaAsync(id));
+
+        var error = Assert.IsType<InvalidOperationException>(thrown);
+        Assert.Contains("Elasticsearch", error.Message);
+        Assert.Contains("es_mapping", error.Message);
+        Assert.Contains("es_search", error.Message);
     }
 
     private async Task<string> RegisterConnection(string name, DatabaseProvider provider, string connectionString)

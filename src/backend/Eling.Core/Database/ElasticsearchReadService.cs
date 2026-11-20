@@ -325,6 +325,20 @@ public sealed class ElasticsearchReadService : IElasticsearchReadService
             body["aggs"] = JsonNode.Parse(aggsElement.GetRawText());
         }
 
+        // The read-only surface refuses script-bearing keys anywhere in the
+        // user-supplied bodies, before anything reaches the cluster. The
+        // exception's message is safe to show as the 400 reason.
+        try
+        {
+            EnsureNoScriptKeys(body["query"], "query");
+            EnsureNoScriptKeys(body["sort"], "sort");
+            EnsureNoScriptKeys(body["aggs"], "aggs");
+        }
+        catch (ElasticsearchScriptException ex)
+        {
+            throw new ElasticsearchApiException(400, ex.Message);
+        }
+
         if (sourceIncludes is { Count: > 0 })
         {
             body["_source"] = new JsonObject
@@ -570,6 +584,76 @@ public sealed class ElasticsearchReadService : IElasticsearchReadService
             // ES treats an absent index as "every index on the cluster"; for an
             // agent-facing read tool that is a footgun, not a feature.
             throw new ElasticsearchApiException(400, "index must not be blank");
+        }
+    }
+
+    /// <summary>
+    /// The script-bearing keys the read-only surface refuses anywhere inside a
+    /// DSL body. A <c>scripted_metric</c> <c>map_script</c> runs arbitrary
+    /// Painless on the coordinating node with cluster privileges, so
+    /// "read-only" must be enforced on the payload, not merely on the route.
+    /// </summary>
+    private static readonly HashSet<string> BannedScriptKeys =
+        [
+            "scripted_metric",
+            "script",
+            "script_fields",
+            "script_score",
+            "runtime_mappings",
+        ];
+
+    /// <summary>
+    /// Rejects a DSL body that names a script-bearing key anywhere in its
+    /// nesting. Called on the user-supplied <c>query</c>, <c>sort</c> and
+    /// <c>aggs</c> before a search reaches the cluster.
+    /// </summary>
+    private static void EnsureNoScriptKeys(JsonNode? body, string part)
+    {
+        if (body is null)
+        {
+            return;
+        }
+
+        foreach (var (key, value) in EnumerateKeys(body, part))
+        {
+            if (BannedScriptKeys.Contains(key))
+            {
+                throw new ElasticsearchScriptException(key);
+            }
+
+            if (value is JsonNode nested)
+            {
+                EnsureNoScriptKeys(nested, $"{part} > {key}");
+            }
+        }
+    }
+
+    private static IEnumerable<(string Key, JsonNode? Value)> EnumerateKeys(JsonNode node, string part)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                foreach (var (key, value) in obj)
+                {
+                    yield return (key, value);
+                }
+                break;
+            case JsonArray arr:
+                var i = 0;
+                foreach (var item in arr)
+                {
+                    if (item is JsonNode nested)
+                    {
+                        i++;
+                        // Array elements have no key of their own; their
+                        // children are enumerated under the parent part.
+                        foreach (var child in EnumerateKeys(nested, part))
+                        {
+                            yield return child;
+                        }
+                    }
+                }
+                break;
         }
     }
 

@@ -44,6 +44,11 @@ public sealed class DatabaseGetSchemaTool
         {
             throw new InvalidOperationException(RedisRequirement.NotSql(row, "use redis_scan"));
         }
+        if (row.Provider == DatabaseProvider.Elasticsearch)
+        {
+            throw new InvalidOperationException(
+                ElasticsearchRequirement.NotSql(row, "use es_mapping / es_search"));
+        }
 
         var sw = Stopwatch.StartNew();
         try

@@ -1054,6 +1054,16 @@ public static class DatabaseEndpoints
             var ping = await service.PingAsync(connection, ct);
             return new DatabaseTestResponse(true, ping.Version, ping.LatencyMs);
         }
+        catch (ElasticsearchUnauthenticatedException ex)
+        {
+            // A 401/403 is an actionable credential problem, not a reachability
+            // one: the cluster answered, it refused the account.
+            logger.LogWarning(ex, "Elasticsearch test unauthenticated for {Id}", connection.Id);
+            return new DatabaseTestResponse(
+                false,
+                "authentication failed (401): the cluster requires valid credentials",
+                0);
+        }
         catch (NotSupportedException ex)
         {
             // Our own message (e.g. the ES 7 refusal); safe to show verbatim.

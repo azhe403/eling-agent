@@ -454,6 +454,75 @@ public sealed class ElasticsearchReadServiceTests
     }
 
     [Fact]
+    public async Task Search_RefusesScriptedMetricInAggs()
+    {
+        var (service, _) = CreateService(_ => JsonResponse(HttpStatusCode.OK,
+            """{"took":1,"hits":{"total":{"value":0,"relation":"eq"},"hits":[]}}"""));
+        var aggs = JsonNode.Parse("""{"m":{"scripted_metric":{"map_script":"ctx._source.foo = 1"}}}""")!.AsObject();
+
+        var ex = await Assert.ThrowsAsync<ElasticsearchApiException>(() =>
+            service.SearchAsync(
+                MakeConnection(),
+                index: "logs-app-2026",
+                query: null,
+                sort: null,
+                aggs: aggs.Deserialize<JsonElement>(),
+                size: 25,
+                from: 0,
+                sourceIncludes: null,
+                CancellationToken.None));
+
+        Assert.Equal(400, ex.Status);
+        Assert.Contains("scripted_metric", ex.Message);
+    }
+
+    [Fact]
+    public async Task Search_RefusesScriptInQuery()
+    {
+        var (service, _) = CreateService(_ => JsonResponse(HttpStatusCode.OK,
+            """{"took":1,"hits":{"total":{"value":0,"relation":"eq"},"hits":[]}}"""));
+        var query = JsonNode.Parse("""{"script_score":{"query":{"match_all":{}},"script":"doc['n'] * 2"}}""")!.AsObject();
+
+        var ex = await Assert.ThrowsAsync<ElasticsearchApiException>(() =>
+            service.SearchAsync(
+                MakeConnection(),
+                index: "logs-app-2026",
+                query: query.Deserialize<JsonElement>(),
+                sort: null,
+                aggs: null,
+                size: 25,
+                from: 0,
+                sourceIncludes: null,
+                CancellationToken.None));
+
+        Assert.Equal(400, ex.Status);
+        Assert.Contains("script_score", ex.Message);
+    }
+
+    [Fact]
+    public async Task Search_AllowsPlainAggsThroughTheGate()
+    {
+        // A plain terms agg must still pass the gate: the deny-list is
+        // scoped to script-bearing keys, not to aggregations in general.
+        var canned = """
+        {"took":9,"hits":{"total":{"value":812,"relation":"eq"},"max_score":null,"hits":[]},"aggregations":{"terms#r":{"buckets":[]}}}
+        """;
+        var (service, _) = CreateService(_ => JsonResponse(HttpStatusCode.OK, canned));
+        var aggs = JsonNode.Parse("""{"r":{"terms":{"field":"level"}}}""")!.AsObject();
+
+        await service.SearchAsync(
+            MakeConnection(),
+            index: "logs-app-2026",
+            query: null,
+            sort: null,
+            aggs: aggs.Deserialize<JsonElement>(),
+            size: 25,
+            from: 0,
+            sourceIncludes: null,
+            CancellationToken.None);
+    }
+
+    [Fact]
     public async Task Timeout_SurfacesAsUnavailableException()
     {
         var (service, _) = CreateService(_ => throw new TaskCanceledException("request timed out"));

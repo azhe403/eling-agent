@@ -267,7 +267,7 @@ Response: `{ "total": 812, "tookMs": 9, "hits": [ { "index": "logs-app-2026", "i
 - `query`, `sort`, and `sourceIncludes` are raw `JsonElement` passed through to `_search` — **except** ES control keys (`size`, `from`, `index`, `request_cache`) are taken from the envelope, never from inside `query`/`sort` (they are siblings of `query` in the ES body; the envelope fields win and are clamped).
 - Missing `query` = `match_all`. No `index` = 400.
 - **Aggregations are supported** as a top-level `aggs` object (raw passthrough, sibling of `query`), returned as `aggregations` (raw `JsonElement`) alongside `hits`. Aggregations are the most valuable read-only ES feature for an agent and cannot mutate anything.
-- Scripts inside queries (`script` aggs, Painless field scripts) execute server-side but cannot write to the index; they are allowed. The audit log records the full request body (truncated to 4 KB) for every `es/search` call.
+- **Scripts are refused, not tolerated** (amended 2026-11-20): the DSL passthrough bodies (`query`, `sort`, `aggs`) are scanned recursively and any of `scripted_metric`, `script`, `script_fields`, `script_score`, `runtime_mappings` is rejected with 400 naming the offending key. Rationale: `scripted_metric`'s `map_script` runs arbitrary Painless on the coordinating node with cluster privileges and can reach transport-level write APIs — "read-only by construction" would otherwise be a claim about the routes, not about what the cluster executes. The earlier draft's "scripts … cannot write to the index, they are allowed" was wrong and is superseded. The audit log records the full request body (truncated to 4 KB) for every `es/search` call.
 
 ### 4.7 `POST /{id}/es/count`
 
