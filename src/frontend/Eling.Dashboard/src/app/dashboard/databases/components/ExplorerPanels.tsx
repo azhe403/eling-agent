@@ -1,10 +1,11 @@
 import { Button } from "@/components/ui/button"
-import { DbTab, DbConn, QueryResult, SchemaInfo, RedisInspect } from "@/app/dashboard/databases/types"
+import { DbTab, DbConn, QueryResult, SchemaInfo, RedisInspect, EsInspect, ElasticsearchIndexInfo } from "@/app/dashboard/databases/types"
 import { useEffect, useState } from "react"
-import { List } from "lucide-react"
+import { List, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { isRedisTab, isElasticsearchIndexTab, tabKey } from "@/app/dashboard/databases/db-tabs"
 import type { RedisPage, RedisPrefixPreview } from "@/app/dashboard/databases/redis-browser"
+import { visibleIndices } from "@/app/dashboard/databases/es-browser"
 import { ConnectionTree } from "./connection-tree/ConnectionTree"
 import { SchemaView } from "./schema-view/SchemaView"
 import { DataGrid } from "./data-grid/DataGrid"
@@ -70,6 +71,8 @@ export interface ExplorerPanelsProps {
   redisMutating: boolean
   redisPrefixPreviewOpen: boolean
   redisPrefixPreviewTarget: string | null
+  /** Elasticsearch index being inspected in split-view (like Redis). */
+  esInspect: import("@/app/dashboard/databases/types").EsInspect | null
   isWide: boolean
   /** The countdown a schema read shows while it retries, or null. */
   retryLabel: (key: string) => string | null
@@ -117,6 +120,8 @@ export interface ExplorerPanelsProps {
   onConfirmDeletePrefix: (connId: string, db: number, prefix: string) => void
   onAutoRefreshChange: (enabled: boolean) => void
   onAutoRefreshMsChange: (ms: number) => void
+  /** Called when the ES inspect target changes (split-view like Redis). */
+  onEsInspectChange: (inspect: import("@/app/dashboard/databases/types").EsInspect | null) => void
   /** Effective per-tab view state, computed by the page. */
   browseLimit: number
   browsePage: number
@@ -147,7 +152,9 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
     activeRedisDb, redisPrefix, redisRootPrefix, redisPages, redisExpanded, redisInspectKey,
     redisLoading, redisInspect, redisInspectOpen,
     redisDeleteTarget, redisDeleteOpen, redisPreview, redisPreviewLoading, redisMutating,
-    redisPrefixPreviewOpen, redisPrefixPreviewTarget, redisAutoRefresh, redisAutoRefreshMs, isWide, retryLabel,
+    redisPrefixPreviewOpen, redisPrefixPreviewTarget, redisAutoRefresh, redisAutoRefreshMs,
+    esInspect, onEsInspectChange,
+    isWide, retryLabel,
   } = props
 
   const [connectionsOpen, setConnectionsOpen] = useState(false)
@@ -199,6 +206,10 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
       onToggleEsConn={props.onToggleEsConn}
       onOpenEsIndex={(connId, index) => {
         props.onOpenEsIndex(connId, index)
+        setConnectionsOpen(false)
+      }}
+      onEsInspectChange={(inspect) => {
+        props.onEsInspectChange(inspect)
         setConnectionsOpen(false)
       }}
       onContextMenu={props.onTreeContextMenu}
@@ -327,13 +338,74 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
 
         {/* The Elasticsearch index panel: one Discover view per index tab. */}
         {activeIsEsIndex && rightTab === "data" && activeTable?.kind === "elasticsearch-index" ? (
-          <ElasticsearchIndexPanel
-            key={tabKey(activeTable)}
-            conns={conns}
-            connId={activeTable.connId}
-            index={activeTable.index ?? ""}
-            isWide={isWide}
-          />
+          ((() => {
+            const connId = activeTable.connId
+            const index = activeTable.index ?? ""
+            const inspectMatches = esInspect?.connId === connId && esInspect?.index === index
+
+            // Split view: index tree on left, panel on right (like Redis)
+            if (isWide && esInspect && inspectMatches) {
+              return (
+                <div className="grid min-h-0 flex-1 grid-rows-[1fr] gap-2 xl:grid-cols-[360px_minmax(0,1fr)]">
+                  {/* Left: Index tree for this connection */}
+                  <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border p-3">
+                    <div className="flex shrink-0 items-center justify-between gap-2">
+                      <p className="text-xs text-muted-foreground">{connId} indices</p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="size-6 shrink-0 p-0"
+                        aria-label="Close index inspector"
+                        onClick={() => onEsInspectChange(null)}
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-y-auto pr-1" style={{ scrollbarGutter: "stable" }}>
+                      {esIndices[connId] ? (
+                        visibleIndices(esIndices[connId] ?? [], esSystemVisible.has(connId)).map((idx) => (
+                          <button
+                            key={idx.name}
+                            type="button"
+                            className={`w-full text-left px-2 py-1 text-xs rounded hover:bg-muted ${
+                              idx.name === index ? "bg-muted font-medium" : ""
+                            }`}
+                            onClick={() => onEsInspectChange({ connId, index: idx.name })}
+                          >
+                            {idx.name}
+                          </button>
+                        ))
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No indices loaded.</p>
+                      )}
+                    </div>
+                  </div>
+                  {/* Right: Elasticsearch panel */}
+                  <div className="flex min-h-0 flex-col rounded-md border p-3">
+                    <ElasticsearchIndexPanel
+                      key={tabKey(activeTable)}
+                      conns={conns}
+                      connId={connId}
+                      index={index}
+                      isWide={false}
+                      showFieldSidebar={true}
+                    />
+                  </div>
+                </div>
+              )
+            }
+
+            // Full-width panel (default)
+            return (
+              <ElasticsearchIndexPanel
+                key={tabKey(activeTable)}
+                conns={conns}
+                connId={connId}
+                index={index}
+                isWide={isWide}
+              />
+            )
+          }))()
         ) : null}
         {!activeIsRedis && !activeIsEsIndex && rightTab === "data" && activeTable ? (
           <DataGrid

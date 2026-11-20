@@ -258,3 +258,12 @@ export type EsSearchBody = {
   from?: number
   sourceIncludes?: string[] | null
 }
+
+/** Elasticsearch index being inspected in split-view (like RedisInspect). */
+export type EsInspect = {
+  connId: string
+  index: string
+  /** True when the answer painted from the snapshot; the server has not confirmed it yet. */
+  fromCache?: boolean
+  cachedAt?: string | null
+}

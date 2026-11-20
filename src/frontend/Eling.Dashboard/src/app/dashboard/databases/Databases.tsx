@@ -24,7 +24,7 @@ import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { XL_BREAKPOINT } from "@/lib/constants"
 
-import type { DbConn, Detected, QueryResult, ElasticsearchIndexInfo } from "./types"
+import type { DbConn, Detected, QueryResult, ElasticsearchIndexInfo, EsInspect } from "./types"
 import { API } from "./utils"
 import { apiFetch } from "@/lib/api"
 
@@ -280,6 +280,9 @@ export function Databases() {
     [esSystemVisible, loadEsIndices]
   )
 
+  /** Elasticsearch split-view inspect state (like Redis). */
+  const [esInspect, setEsInspect] = useState<EsInspect | null>(null)
+
   /** Opens one index of a connection in a tab of its own. */
   const openEsIndex = useCallback(
     (connId: string, index: string) => {
@@ -292,6 +295,20 @@ export function Databases() {
     },
     [setOpenTabs, setActiveTable, setSelectedId, setRightTab]
   )
+
+  /** Opens an index in split-view (index tree on left, viewer on right). */
+  const openEsIndexInSplitView = useCallback(
+    (connId: string, index: string) => {
+      setEsInspect({ connId, index })
+      setRightTab("data")
+    },
+    [setRightTab]
+  )
+
+  /** Closes the ES split-view inspector. */
+  const closeEsInspect = useCallback(() => {
+    setEsInspect(null)
+  }, [])
 
   // SQL
   const [sql, setSql] = useState("SELECT 1")
@@ -1229,6 +1246,8 @@ export function Databases() {
           redisMutating={redisMutating}
           redisPrefixPreviewOpen={redisPrefixPreviewOpen}
           redisPrefixPreviewTarget={redisPrefixPreviewTarget}
+          esInspect={esInspect}
+          onEsInspectChange={setEsInspect}
           isWide={isWide}
           retryLabel={retryLabel}
           onSortChange={setConnSort}

@@ -1,7 +1,7 @@
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, ArrowUp, ArrowDown } from "lucide-react"
-import { DbConn, DbTab, SchemaInfo, RedisDbInfo, ElasticsearchIndexInfo } from "@/app/dashboard/databases/types"
+import { DbConn, DbTab, SchemaInfo, RedisDbInfo, ElasticsearchIndexInfo, EsInspect } from "@/app/dashboard/databases/types"
 import { isRedisTab, isElasticsearchIndexTab } from "@/app/dashboard/databases/db-tabs"
 import { CONN_SORT_KEYS, CONN_SORT_COPY, type ConnSortKey, type ConnSortOrder } from "@/app/dashboard/databases/conn-sorting"
 import { dbRowLabel, dbRowCount, dbRowAsOf, visibleRedisDbs } from "@/app/dashboard/databases/redis-browser"
@@ -34,6 +34,8 @@ export interface ConnectionTreeProps {
   onSelectTreeTable: (connId: string, table: string, database?: string | null) => void
   onOpenRedisDb: (connId: string, dbIndex: number) => void
   onOpenEsIndex: (connId: string, index: string) => void
+  /** Called when an ES index should be opened in split-view (like Redis inspect). */
+  onEsInspectChange: (inspect: EsInspect | null) => void
   onContextMenu: (e: React.MouseEvent, connId: string, table?: string, database?: string) => void
   onRegisterTreeItem: (key: string, el: HTMLButtonElement | null) => void
 }
@@ -63,6 +65,7 @@ export const ConnectionTree = ({
   onSelectTreeTable,
   onOpenRedisDb,
   onOpenEsIndex,
+  onEsInspectChange,
   onContextMenu,
   onRegisterTreeItem,
 }: ConnectionTreeProps) => {
@@ -165,7 +168,19 @@ export const ConnectionTree = ({
                             key={index.name}
                             type="button"
                             className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs hover:bg-accent ${isActive ? "bg-accent font-medium" : ""}`}
-                            onClick={() => onOpenEsIndex(c.id, index.name)}
+                            onClick={(e) => {
+                              // Ctrl/Cmd+Click opens in split-view, regular click opens in tab
+                              if (e.ctrlKey || e.metaKey) {
+                                onEsInspectChange({ connId: c.id, index: index.name })
+                              } else {
+                                onOpenEsIndex(c.id, index.name)
+                              }
+                            }}
+                            onContextMenu={(e) => {
+                              e.preventDefault()
+                              onEsInspectChange({ connId: c.id, index: index.name })
+                            }}
+                            title="Click to open in tab • Ctrl/Cmd+Click or Right-click for split view"
                           >
                             <span>🗃</span>
                             <span className="min-w-0 flex-1 truncate">{esIndexLabel(index.name)}</span>
@@ -278,3 +293,4 @@ export const ConnectionTree = ({
     </Card>
   )
 }
+

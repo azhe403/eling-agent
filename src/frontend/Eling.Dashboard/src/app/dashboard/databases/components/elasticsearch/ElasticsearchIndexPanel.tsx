@@ -34,6 +34,8 @@ export interface ElasticsearchIndexPanelProps {
   connId: string
   index: string
   isWide: boolean
+  /** Show field sidebar on the left in Discover tab (split view). */
+  showFieldSidebar?: boolean
 }
 
 type PanelTab = "discover" | "mapping" | "query"
@@ -174,7 +176,7 @@ const cellText = (value: unknown): string => {
 }
 
 export const ElasticsearchIndexPanel = (_props: ElasticsearchIndexPanelProps) => {
-  const { conns, connId, index } = _props
+  const { conns, connId, index, isWide, showFieldSidebar = false } = _props
   const connName = useMemo(() => conns.find((c) => c.id === connId)?.name ?? "", [conns, connId])
 
   const [tab, setTab] = useState<PanelTab>("discover")
@@ -240,7 +242,12 @@ export const ElasticsearchIndexPanel = (_props: ElasticsearchIndexPanelProps) =>
   }, [connId, index, mode, rows, logic, preset, luceneQuery, selectedFields])
 
   // The mapping answers two questions at once: the date fields for the time
-  // selector, and the property list for the column picker.
+  // selector, and the property list for the column picker. Computed before
+  // the envelope so the envelope can reference it without a forward use.
+  const dateFields = useMemo(
+    () => dateFieldsOf(detail?.mappings),
+    [detail],
+  )
   useEffect(() => {
     let alive = true
     fetchEsIndex(connId, index)
@@ -264,12 +271,38 @@ export const ElasticsearchIndexPanel = (_props: ElasticsearchIndexPanelProps) =>
   //
   // A clicked bucket wins over the preset until it is cleared: the reader
   // picked a slice of time, and the grid below must show that slice.
-  const envelope = useCallback(() => {
+  const envelope = useCallback((): {
+    q: string | null
+    filters: string | null
+    logic: "and" | "or" | null
+    start: string | null
+    end: string | null
+    field: string | null
+  } => {
+    // An index with no date-typed field cannot be ranged or histogrammed:
+    // sending a default "@timestamp" would 400 and hide the whole view, so
+    // the range stays open and no field is named.
+    const hasDates = dateFields.length > 0
     const range = zoom ?? presetRange(preset, Date.now())
+    const field = hasDates ? dateField : null
     return mode === "filter"
-      ? { q: null, filters: filtersPayload(rows), logic: rows.length > 0 ? logic : null, start: range.start, end: range.end, field: dateField }
-      : { q: luceneQuery.trim() ? luceneQuery.trim() : null, filters: null, logic: null, start: range.start, end: range.end, field: dateField }
-  }, [mode, rows, logic, luceneQuery, preset, dateField, zoom])
+      ? {
+          q: null,
+          filters: filtersPayload(rows),
+          logic: rows.length > 0 ? logic : null,
+          start: hasDates ? range.start : null,
+          end: hasDates ? range.end : null,
+          field,
+        }
+      : {
+          q: luceneQuery.trim() ? luceneQuery.trim() : null,
+          filters: null,
+          logic: null,
+          start: hasDates ? range.start : null,
+          end: hasDates ? range.end : null,
+          field,
+        }
+  }, [mode, rows, logic, luceneQuery, preset, dateField, zoom, dateFields])
 
   // One refresh of the histogram and the first page of documents.
   const refresh = useCallback(async () => {
@@ -363,7 +396,6 @@ export const ElasticsearchIndexPanel = (_props: ElasticsearchIndexPanelProps) =>
     }
   }, [connId, index, dsl, dslAggs, dslSize])
 
-  const dateFields = useMemo(() => dateFieldsOf(detail?.mappings), [detail])
   const propertyNames = useMemo(() => propertyNamesOf(detail?.mappings), [detail])
   const columns = useMemo(() => {
     const chosen = selectedFields && selectedFields.length > 0 ? selectedFields : scalarFieldNames(detail?.mappings).slice(0, 6)
@@ -395,308 +427,367 @@ export const ElasticsearchIndexPanel = (_props: ElasticsearchIndexPanelProps) =>
       {detailError ? <p className="text-sm text-destructive">{detailError.message}</p> : null}
 
       {tab === "discover" ? (
-        <div className="flex min-h-0 flex-1 flex-col gap-2">
-          {/* Mode toggle + time range. */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex overflow-hidden rounded border text-xs">
-              <button
-                type="button"
-                onClick={() => setMode("filter")}
-                className={`px-2 py-1 ${mode === "filter" ? "bg-muted font-medium" : "text-muted-foreground"}`}
-              >
-                Filter
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("lucene")}
-                className={`px-2 py-1 ${mode === "lucene" ? "bg-muted font-medium" : "text-muted-foreground"}`}
-              >
-                Lucene
-              </button>
-            </div>
-
-            {dateFields.length > 0 ? (
-              <select
-                aria-label="Time range"
-                className="rounded border bg-transparent px-2 py-1 text-xs"
-                value={preset}
-                onChange={(e) => setPreset(e.target.value as RangePreset)}
-              >
-                {RANGE_PRESETS.map((p) => (
-                  <option key={p.value} value={p.value}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-
-            {dateFields.length > 1 ? (
-              <select
-                aria-label="Date field"
-                className="rounded border bg-transparent px-2 py-1 text-xs"
-                value={dateField}
-                onChange={(e) => setDateField(e.target.value)}
-              >
-                {dateFields.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-
-            <button
-              type="button"
-              onClick={() => {
-                setZoom(null)
-                void refresh()
-              }}
-              className="ml-auto rounded border px-2 py-1 text-xs"
-              disabled={loading}
-            >
-              {loading ? "Loading…" : "Refresh"}
-            </button>
-            {zoom ? (
-              <button
-                type="button"
-                onClick={() => setZoom(null)}
-                className="rounded border px-2 py-1 text-xs"
-                title={zoom.start}
-              >
-                zoomed ✕
-              </button>
-            ) : null}
-          </div>
-
-          {/* The query builder itself. */}
-          {mode === "filter" ? (
-            <div className="flex flex-col gap-1 rounded border p-2">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Match</span>
+        ((() => {
+          // Discover content as a reusable function
+          const DiscoverContent = () => (
+            <div className="flex min-h-0 flex-1 flex-col gap-2">
+              {/* Mode toggle + time range. */}
+              <div className="flex flex-wrap items-center gap-2">
                 <div className="flex overflow-hidden rounded border text-xs">
                   <button
                     type="button"
-                    onClick={() => setLogic("and")}
-                    className={`px-2 py-0.5 ${logic === "and" ? "bg-muted font-medium" : "text-muted-foreground"}`}
+                    onClick={() => setMode("filter")}
+                    className={`px-2 py-1 ${mode === "filter" ? "bg-muted font-medium" : "text-muted-foreground"}`}
                   >
-                    AND
+                    Filter
                   </button>
                   <button
                     type="button"
-                    onClick={() => setLogic("or")}
-                    className={`px-2 py-0.5 ${logic === "or" ? "bg-muted font-medium" : "text-muted-foreground"}`}
+                    onClick={() => setMode("lucene")}
+                    className={`px-2 py-1 ${mode === "lucene" ? "bg-muted font-medium" : "text-muted-foreground"}`}
                   >
-                    OR
+                    Lucene
                   </button>
                 </div>
+
+                {dateFields.length > 0 ? (
+                  <select
+                    aria-label="Time range"
+                    className="rounded border bg-transparent px-2 py-1 text-xs"
+                    value={preset}
+                    onChange={(e) => setPreset(e.target.value as RangePreset)}
+                  >
+                    {RANGE_PRESETS.map((p) => (
+                      <option key={p.value} value={p.value}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+
+                {dateFields.length > 1 ? (
+                  <select
+                    aria-label="Date field"
+                    className="rounded border bg-transparent px-2 py-1 text-xs"
+                    value={dateField}
+                    onChange={(e) => setDateField(e.target.value)}
+                  >
+                    {dateFields.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+
                 <button
                   type="button"
-                  onClick={() => setRows((r) => [...r, { field: propertyNames[0] ?? "", op: "is", value: "" }])}
-                  className="ml-auto rounded border px-2 py-0.5 text-xs"
+                  onClick={() => {
+                    setZoom(null)
+                    void refresh()
+                  }}
+                  className="ml-auto rounded border px-2 py-1 text-xs"
+                  disabled={loading}
                 >
-                  + add filter
+                  {loading ? "Loading…" : "Refresh"}
                 </button>
-              </div>
-              {rows.map((row, i) => (
-                <div key={i} className="flex flex-wrap items-center gap-1 text-xs">
-                  <select
-                    aria-label={`Field ${i + 1}`}
-                    className="min-w-0 flex-1 rounded border bg-transparent px-1 py-1"
-                    value={row.field}
-                    onChange={(e) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, field: e.target.value } : r)))}
-                  >
-                    {propertyNames.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    aria-label={`Operator ${i + 1}`}
-                    className="rounded border bg-transparent px-1 py-1"
-                    value={row.op}
-                    onChange={(e) =>
-                      setRows((rs) => rs.map((r, j) => (j === i ? { ...r, op: e.target.value as FilterOp } : r)))
-                    }
-                  >
-                    {FILTER_OPS.map((op) => (
-                      <option key={op.value} value={op.value}>
-                        {op.label}
-                      </option>
-                    ))}
-                  </select>
-                  {row.op !== "exists" ? (
-                    <input
-                      aria-label={`Value ${i + 1}`}
-                      className="min-w-0 flex-1 rounded border bg-transparent px-1 py-1"
-                      placeholder={RANGE_OPS.has(row.op) ? "ISO-8601 or number" : "value"}
-                      value={row.value}
-                      onChange={(e) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, value: e.target.value } : r)))}
-                    />
-                  ) : null}
+                {zoom ? (
                   <button
                     type="button"
-                    aria-label={`Remove filter ${i + 1}`}
-                    onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}
-                    className="rounded border px-1.5 py-1"
+                    onClick={() => setZoom(null)}
+                    className="rounded border px-2 py-1 text-xs"
+                    title={zoom.start}
                   >
-                    ×
+                    zoomed ✕
                   </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <input
-                aria-label="Query"
-                className="min-w-0 flex-1 rounded border bg-transparent px-2 py-1 font-mono text-xs"
-                placeholder="Lucene query_string syntax — e.g. level:error AND message:timeout"
-                value={luceneQuery}
-                onChange={(e) => setLuceneQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void refresh()
-                }}
-              />
-            </div>
-          )}
-
-          {/* Histogram. */}
-          <div className="rounded border p-1">
-            {histogramError ? <p className="text-xs text-destructive">{histogramError.message}</p> : null}
-            {!histogramError && (!histogram || histogram.buckets.length === 0) ? (
-              <p className="text-xs text-muted-foreground">no hits in range</p>
-            ) : null}
-            {histogram && histogram.buckets.length > 0 ? (
-              <div className="flex h-16 items-end gap-px" role="img" aria-label="Hit histogram">
-                {histogram.buckets.map((bucket, bi) => {
-                  const max = Math.max(1, ...histogram.buckets.map((b) => b.docCount))
-                  const height = Math.round((bucket.docCount / max) * 100)
-                  // A click narrows the time range to this bucket: from its own
-                  // start to the next bucket's start, or an hour past it for
-                  // the last bucket (the cluster picked the width, so the tail
-                  // is an estimate - the grid is still the truth).
-                  const next = histogram.buckets[bi + 1]
-                  const endMs = next ? next.keyMs : bucket.keyMs + 60 * 60 * 1000
-                  return (
-                    <div
-                      key={bucket.keyMs}
-                      title={`${new Date(bucket.keyMs).toISOString()} — ${bucket.docCount} hits`}
-                      className="min-w-0 flex-1 cursor-pointer rounded-sm bg-primary/60 hover:bg-primary"
-                      style={{ height: `${Math.max(2, height)}%` }}
-                      onClick={() => {
-                        setZoom({
-                          start: new Date(bucket.keyMs).toISOString(),
-                          end: new Date(endMs).toISOString(),
-                        })
-                      }}
-                    />
-                  )
-                })}
+                ) : null}
               </div>
-            ) : null}
-          </div>
 
-          {/* Selected fields picker + results grid. */}
-          <div className="flex items-center gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() => setPickerOpen((o) => !o)}
-              className="rounded border px-2 py-1"
-            >
-              {columns.length > 0 ? `${columns.length} fields` : "fields"}
-              {pickerOpen ? " ▴" : " ▾"}
-            </button>
-            <span className="text-muted-foreground">
-              {documents ? `${total} hits` : ""} · page {Math.floor(from / PAGE_SIZE) + 1} of {pageCount}
-            </span>
-            <div className="ml-auto flex gap-1">
-              <button
-                type="button"
-                onClick={() => void goToPage(Math.max(0, from - PAGE_SIZE))}
-                disabled={from === 0 || loading}
-                className="rounded border px-2 py-1 disabled:opacity-40"
-              >
-                Previous
-              </button>
-              <button
-                type="button"
-                onClick={() => void goToPage(from + PAGE_SIZE)}
-                disabled={(from + PAGE_SIZE) >= total || loading}
-                className="rounded border px-2 py-1 disabled:opacity-40"
-              >
-                Next
-              </button>
-            </div>
-          </div>
-
-          {pickerOpen ? (
-            <div className="flex flex-wrap gap-1 rounded border p-2">
-              {propertyNames.map((name) => {
-                const chosen = columns.includes(name)
-                return (
-                  <label key={name} className="flex items-center gap-1 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={chosen}
-                      onChange={() =>
-                        setSelectedFields(
-                          chosen
-                            ? columns.filter((c) => c !== name)
-                            : [...columns, name],
-                        )
-                      }
-                    />
-                    {name}
-                  </label>
-                )
-              })}
-            </div>
-          ) : null}
-
-          {documentsError ? <p className="text-sm text-destructive">{documentsError.message}</p> : null}
-
-          <div className="min-h-0 flex-1 overflow-auto rounded border">
-            <table className="w-full border-collapse text-xs">
-              <thead className="sticky top-0 bg-muted/60">
-                <tr>
-                  <th className="border-b px-2 py-1 text-left font-mono">_id</th>
-                  {columns.map((c) => (
-                    <th key={c} className="border-b px-2 py-1 text-left font-medium">
-                      {c}
-                    </th>
+              {/* The query builder itself. */}
+              {mode === "filter" ? (
+                <div className="flex flex-col gap-1 rounded border p-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Match</span>
+                    <div className="flex overflow-hidden rounded border text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setLogic("and")}
+                        className={`px-2 py-0.5 ${logic === "and" ? "bg-muted font-medium" : "text-muted-foreground"}`}
+                      >
+                        AND
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLogic("or")}
+                        className={`px-2 py-0.5 ${logic === "or" ? "bg-muted font-medium" : "text-muted-foreground"}`}
+                      >
+                        OR
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setRows((r) => [...r, { field: propertyNames[0] ?? "", op: "is", value: "" }])}
+                      className="ml-auto rounded border px-2 py-0.5 text-xs"
+                    >
+                      + add filter
+                    </button>
+                  </div>
+                  {rows.map((row, i) => (
+                    <div key={i} className="flex flex-wrap items-center gap-1 text-xs">
+                      <select
+                        aria-label={`Field ${i + 1}`}
+                        className="min-w-0 flex-1 rounded border bg-transparent px-1 py-1"
+                        value={row.field}
+                        onChange={(e) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, field: e.target.value } : r)))}
+                      >
+                        {propertyNames.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        aria-label={`Operator ${i + 1}`}
+                        className="rounded border bg-transparent px-1 py-1"
+                        value={row.op}
+                        onChange={(e) =>
+                          setRows((rs) => rs.map((r, j) => (j === i ? { ...r, op: e.target.value as FilterOp } : r)))
+                        }
+                      >
+                        {FILTER_OPS.map((op) => (
+                          <option key={op.value} value={op.value}>
+                            {op.label}
+                          </option>
+                        ))}
+                      </select>
+                      {row.op !== "exists" ? (
+                        <input
+                          aria-label={`Value ${i + 1}`}
+                          className="min-w-0 flex-1 rounded border bg-transparent px-1 py-1"
+                          placeholder={RANGE_OPS.has(row.op) ? "ISO-8601 or number" : "value"}
+                          value={row.value}
+                          onChange={(e) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, value: e.target.value } : r)))}
+                        />
+                      ) : null}
+                      <button
+                        type="button"
+                        aria-label={`Remove filter ${i + 1}`}
+                        onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}
+                        className="rounded border px-1.5 py-1"
+                      >
+                        ×
+                      </button>
+                    </div>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(documents?.hits ?? []).map((hit, i) => (
-                  <tr
-                    key={`${hit.index}:${hit.id}`}
-                    className="cursor-pointer hover:bg-muted/40"
-                    onClick={() => setExpandedHit(expandedHit === i ? null : i)}
-                  >
-                    <td className="border-b px-2 py-1 font-mono">{hit.id}</td>
-                    {columns.map((c) => (
-                      <td key={c} className="max-w-64 truncate border-b px-2 py-1">
-                        {cellText((hit.source as Record<string, unknown> | null)?.[c])}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!loading && documents && documents.hits.length === 0 ? (
-              <p className="px-2 py-3 text-xs text-muted-foreground">No documents match.</p>
-            ) : null}
-          </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    aria-label="Query"
+                    className="min-w-0 flex-1 rounded border bg-transparent px-2 py-1 font-mono text-xs"
+                    placeholder="Lucene query_string syntax — e.g. level:error AND message:timeout"
+                    value={luceneQuery}
+                    onChange={(e) => setLuceneQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void refresh()
+                    }}
+                  />
+                </div>
+              )}
 
-          {expandedHit !== null && documents?.hits[expandedHit] ? (
-            <div className="max-h-64 overflow-auto rounded border bg-muted/30 p-2">
-              <pre className="whitespace-pre-wrap break-words font-mono text-xs">
-                {JSON.stringify(documents.hits[expandedHit].source, null, 2)}
-              </pre>
+              {/* Histogram. */}
+              <div className="rounded border p-1">
+                {dateFields.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    no date field in this index — the histogram and time range are unavailable
+                  </p>
+                ) : null}
+                {dateFields.length > 0 && histogramError ? (
+                  <p className="text-xs text-destructive">{histogramError.message}</p>
+                ) : null}
+                {dateFields.length > 0 && !histogramError && (!histogram || histogram.buckets.length === 0) ? (
+                  <p className="text-xs text-muted-foreground">no hits in range</p>
+                ) : null}
+                {histogram && histogram.buckets.length > 0 ? (
+                  <div className="flex h-16 items-end gap-px" role="img" aria-label="Hit histogram">
+                    {histogram.buckets.map((bucket, bi) => {
+                      const max = Math.max(1, ...histogram.buckets.map((b) => b.docCount))
+                      const height = Math.round((bucket.docCount / max) * 100)
+                      // A click narrows the time range to this bucket: from its own
+                      // start to the next bucket's start, or an hour past it for
+                      // the last bucket (the cluster picked the width, so the tail
+                      // is an estimate - the grid is still the truth).
+                      const next = histogram.buckets[bi + 1]
+                      const endMs = next ? next.keyMs : bucket.keyMs + 60 * 60 * 1000
+                      return (
+                        <div
+                          key={bucket.keyMs}
+                          title={`${new Date(bucket.keyMs).toISOString()} — ${bucket.docCount} hits`}
+                          className="min-w-0 flex-1 cursor-pointer rounded-sm bg-primary/60 hover:bg-primary"
+                          style={{ height: `${Math.max(2, height)}%` }}
+                          onClick={() => {
+                            setZoom({
+                              start: new Date(bucket.keyMs).toISOString(),
+                              end: new Date(endMs).toISOString(),
+                            })
+                          }}
+                        />
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Selected fields picker + results grid. */}
+              {!showFieldSidebar && (
+                <div className="flex items-center gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen((o) => !o)}
+                    className="rounded border px-2 py-1"
+                  >
+                    {columns.length > 0 ? `${columns.length} fields` : "fields"}
+                    {pickerOpen ? " ▴" : " ▾"}
+                  </button>
+                  <span className="text-muted-foreground">
+                    {documents ? `${total} hits` : ""} · page {Math.floor(from / PAGE_SIZE) + 1} of {pageCount}
+                  </span>
+                  <div className="ml-auto flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => void goToPage(Math.max(0, from - PAGE_SIZE))}
+                      disabled={from === 0 || loading}
+                      className="rounded border px-2 py-1 disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void goToPage(from + PAGE_SIZE)}
+                      disabled={(from + PAGE_SIZE) >= total || loading}
+                      className="rounded border px-2 py-1 disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!showFieldSidebar && pickerOpen ? (
+                <div className="flex flex-wrap gap-1 rounded border p-2">
+                  {propertyNames.map((name) => {
+                    const chosen = columns.includes(name)
+                    return (
+                      <label key={name} className="flex items-center gap-1 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={chosen}
+                          onChange={() =>
+                            setSelectedFields(
+                              chosen
+                                ? columns.filter((c) => c !== name)
+                                : [...columns, name],
+                            )
+                          }
+                        />
+                        {name}
+                      </label>
+                    )
+                  })}
+                </div>
+              ) : null}
+
+              {documentsError ? <p className="text-sm text-destructive">{documentsError.message}</p> : null}
+
+              <div className="min-h-0 flex-1 overflow-auto rounded border">
+                <table className="w-full border-collapse text-xs">
+                  <thead className="sticky top-0 bg-muted/60">
+                    <tr>
+                      <th className="border-b px-2 py-1 text-left font-mono">_id</th>
+                      {columns.map((c) => (
+                        <th key={c} className="border-b px-2 py-1 text-left font-medium">
+                          {c}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(documents?.hits ?? []).map((hit, i) => (
+                      <tr
+                        key={`${hit.index}:${hit.id}`}
+                        className="cursor-pointer hover:bg-muted/40"
+                        onClick={() => setExpandedHit(expandedHit === i ? null : i)}
+                      >
+                        <td className="border-b px-2 py-1 font-mono">{hit.id}</td>
+                        {columns.map((c) => (
+                          <td key={c} className="max-w-64 truncate border-b px-2 py-1">
+                            {cellText((hit.source as Record<string, unknown> | null)?.[c])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {!loading && documents && documents.hits.length === 0 ? (
+                  <p className="px-2 py-3 text-xs text-muted-foreground">No documents match.</p>
+                ) : null}
+              </div>
+
+              {expandedHit !== null && documents?.hits[expandedHit] ? (
+                <div className="max-h-64 overflow-auto rounded border bg-muted/30 p-2">
+                  <pre className="whitespace-pre-wrap break-words font-mono text-xs">
+                    {JSON.stringify(documents.hits[expandedHit].source, null, 2)}
+                  </pre>
+                </div>
+              ) : null}
             </div>
-          ) : null}
-        </div>
+          )
+
+          // Split view: field sidebar on left (360px), content on right
+          if (showFieldSidebar) {
+            return (
+              <div className="grid min-h-0 flex-1 grid-rows-[1fr] gap-2 xl:grid-cols-[360px_minmax(0,1fr)]">
+                {/* Left: Field sidebar */}
+                <div className="flex min-h-0 flex-col overflow-hidden rounded-md border p-3">
+                  <div className="flex shrink-0 items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-muted-foreground">Fields</p>
+                    <span className="text-xs text-muted-foreground">{propertyNames.length} total</span>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto pr-1" style={{ scrollbarGutter: "stable" }}>
+                    <div className="flex flex-col gap-1">
+                      {propertyNames.map((name) => {
+                        const chosen = columns.includes(name)
+                        return (
+                          <label key={name} className="flex items-center gap-1 text-xs hover:bg-muted/50 px-1 py-0.5 rounded">
+                            <input
+                              type="checkbox"
+                              checked={chosen}
+                              onChange={() =>
+                                setSelectedFields(
+                                  chosen
+                                    ? columns.filter((c) => c !== name)
+                                    : [...columns, name],
+                                )
+                              }
+                            />
+                            <span className="truncate font-mono">{name}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+                {/* Right: Discover content */}
+                <div className="flex min-h-0 flex-col gap-2">
+                  <DiscoverContent />
+                </div>
+              </div>
+            )
+          }
+
+          // Full-width view (default)
+          return <div className="flex min-h-0 flex-1 flex-col gap-2"><DiscoverContent /></div>
+        }))()
       ) : null}
 
       {tab === "mapping" ? (
