@@ -177,30 +177,3 @@ public sealed class DocScopeResolver
         return null;
     }
 }
-
-/// <summary>
-/// Result of resolving a document path to its scope properties.
-/// </summary>
-public sealed record DocScopeResolution(
-    DocOwnership Ownership,
-    DocOrigin Origin,
-    string RelativePath,
-    string RootPath);
-
-/// <summary>
-/// Minimal scope decision for index placement (reuses memory's decision enum).
-/// </summary>
-public sealed class DocScopeDecision
-{
-    public ScopeDecision Decision { get; set; } = ScopeDecision.Ask;
-}
-
-/// <summary>
-/// Scope decision from memory (reused here).
-/// </summary>
-public enum ScopeDecision
-{
-    Ask = 0,
-    Disabled = 1,
-    Clear = 2,
-}

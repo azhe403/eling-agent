@@ -105,7 +105,10 @@ public sealed class DocsService
 
                     // Parse document
                     var content = await File.ReadAllTextAsync(file, ct);
-                    var (doc, sections, refs) = await ParseDocumentAsync(file, relPath, content, fileHash, mtime, ct);
+                    var parseResult = await ParseDocumentAsync(file, relPath, content, fileHash, mtime, ct);
+                    var doc = parseResult.Doc;
+                    var sections = parseResult.Sections;
+                    var refs = parseResult.Refs;
 
                     if (doc != null)
                     {
@@ -149,7 +152,7 @@ public sealed class DocsService
     /// <summary>
     /// Parses a document file into Doc, sections, and references.
     /// </summary>
-    public async Task<(Doc? Doc, IReadOnlyList<DocSection> Sections, IReadOnlyList<DocRef> Refs)> ParseDocumentAsync(
+    public async Task<DocParseResult> ParseDocumentAsync(
         string absolutePath,
         string relPath,
         string content,
@@ -167,11 +170,11 @@ public sealed class DocsService
 
         if (resolution.Ownership == DocOwnership.Managed)
         {
-            var (fm, remaining, error) = DocFrontMatterParser.Parse(content);
-            frontMatter = fm;
-            remainingContent = remaining;
-            frontMatterError = error != null;
-            frontMatterErrorMsg = error;
+            var parseResult = DocFrontMatterParser.Parse(content, _logger);
+            frontMatter = parseResult.FrontMatter;
+            remainingContent = parseResult.RemainingContent;
+            frontMatterError = parseResult.ErrorMessage != null;
+            frontMatterErrorMsg = parseResult.ErrorMessage;
         }
 
         // Determine kind, topic, status, order
@@ -206,7 +209,9 @@ public sealed class DocsService
         var title = ExtractTitle(remainingContent) ?? Path.GetFileNameWithoutExtension(relPath);
 
         // Chunk sections
-        var (sectionChunks, preamble) = HeadingChunker.Chunk(remainingContent);
+        var chunkResult = HeadingChunker.Chunk(remainingContent);
+        var sectionChunks = chunkResult.Sections;
+        var preamble = chunkResult.Preamble;
 
         // Convert SectionChunk to DocSection
         var sections = new List<DocSection>();
@@ -240,7 +245,9 @@ public sealed class DocsService
         // Count checkboxes for plans
         if (kind == DocKind.Plan)
         {
-            (stepsTotal, stepsDone) = PlanCheckboxCounter.Count(remainingContent);
+            var checkboxCounts = PlanCheckboxCounter.Count(remainingContent);
+            stepsTotal = checkboxCounts.Total;
+            stepsDone = checkboxCounts.Done;
             // Also count per section
             var perSection = PlanCheckboxCounter.CountPerSection(remainingContent, sectionChunks);
             for (int i = 0; i < sections.Count; i++)
@@ -301,7 +308,7 @@ public sealed class DocsService
                 s.StepsDone);
         }).ToList();
 
-        return (doc, updatedSections, refs);
+        return new DocParseResult(doc, updatedSections, refs);
     }
 
     /// <summary>
@@ -328,7 +335,10 @@ public sealed class DocsService
         var fileHash = ComputeHash(content);
         var mtime = DateTimeOffset.UtcNow;
 
-        var (doc, sections, refs) = await ParseDocumentAsync(absolutePath, relPath, content, fileHash, mtime, ct);
+        var parseResult = await ParseDocumentAsync(absolutePath, relPath, content, fileHash, mtime, ct);
+        var doc = parseResult.Doc;
+        var sections = parseResult.Sections;
+        var refs = parseResult.Refs;
         if (doc == null) throw new InvalidOperationException("Failed to parse document");
 
         await _index.IndexAsync(doc, sections, refs);
@@ -359,7 +369,10 @@ public sealed class DocsService
         var mtime = DateTimeOffset.UtcNow;
         var absolutePath = Path.Combine(_scopeResolver.WorkspaceRoot, existing.RelPath);
 
-        var (doc, sections, refs) = await ParseDocumentAsync(absolutePath, existing.RelPath, content, fileHash, mtime, ct);
+        var parseResult = await ParseDocumentAsync(absolutePath, existing.RelPath, content, fileHash, mtime, ct);
+        var doc = parseResult.Doc;
+        var sections = parseResult.Sections;
+        var refs = parseResult.Refs;
         if (doc == null) return null;
 
         // Create new doc with same ID
@@ -477,7 +490,7 @@ public sealed class DocsService
     public async Task<bool> AnnotateSectionAsync(
         string docId,
         string anchor,
-        DocStatusValue status,
+        int status,
         string? annotation,
         string actor = "docs_service",
         CancellationToken ct = default)
@@ -493,6 +506,7 @@ public sealed class DocsService
         var section = await _index.GetSectionAsync(docId, anchor);
         if (section == null) return false;
 
+        var statusValue = new DocStatusValue(existing.Kind, status);
         var beforeJson = SerializeSection(section);
         var updatedSection = new DocSection(
             section.DocId,
@@ -501,7 +515,7 @@ public sealed class DocsService
             section.Level,
             section.LineStart,
             section.LineEnd,
-            status,
+            statusValue,
             annotation,
             section.StepsTotal,
             section.StepsDone);
@@ -735,7 +749,10 @@ public sealed class DocsService
             {
                 return System.Text.Json.JsonSerializer.Deserialize<CoveragePolicy>(policy.Value)!;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to deserialize coverage policy, using defaults");
+            }
         }
         return new CoveragePolicy
         {
@@ -810,14 +827,6 @@ public sealed class DocsService
         using var sha256 = SHA256.Create();
         using var stream = File.OpenRead(filePath);
         var hash = sha256.ComputeHash(stream);
-        return Convert.ToHexString(hash).ToLowerInvariant();
-    }
-
-    private string ComputeHash(string content)
-    {
-        using var sha256 = SHA256.Create();
-        var bytes = Encoding.UTF8.GetBytes(content);
-        var hash = sha256.ComputeHash(bytes);
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
@@ -996,26 +1005,6 @@ public sealed class DocsService
         await WriteAuditAsync(docId, action, beforeJson, afterJson, actor, ct);
     }
 
-    private async Task WriteAuditAsync(
-        string docId,
-        string action,
-        string? beforeJson,
-        string? afterJson,
-        string actor,
-        CancellationToken ct = default)
-    {
-        var entry = new DocAuditEntry(
-            Ulid.NewUlid().ToString(),
-            docId,
-            actor,
-            action,
-            beforeJson,
-            afterJson,
-            DateTimeOffset.UtcNow);
-
-        await _index.WriteAuditAsync(entry);
-    }
-
     private string SerializeDoc(Doc doc)
     {
         return System.Text.Json.JsonSerializer.Serialize(new
@@ -1050,5 +1039,85 @@ public sealed class DocsService
             section.Status,
             section.Annotation
         });
+    }
+
+    /// <summary>
+    /// Gets the current coverage policy from the index.
+    /// </summary>
+    public async Task<CoveragePolicy> GetCoveragePolicyAsync(CancellationToken ct = default)
+    {
+        var policy = await _index.GetPolicyAsync("coverage");
+        if (policy != null)
+        {
+            try
+            {
+                return System.Text.Json.JsonSerializer.Deserialize<CoveragePolicy>(policy.Value)!;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to deserialize coverage policy, using defaults");
+            }
+        }
+        return new CoveragePolicy
+        {
+            Include = new[] { "docs/**", ".eling/docs/**" },
+            Exclude = Array.Empty<string>()
+        };
+    }
+
+    /// <summary>
+    /// Sets the coverage policy and optional decision in the index.
+    /// </summary>
+    public async Task SetCoveragePolicyAsync(CoveragePolicy policy, string? decision = null, CancellationToken ct = default)
+    {
+        var policyJson = System.Text.Json.JsonSerializer.Serialize(policy);
+        await _index.SetPolicyAsync(new DocPolicy("coverage", policyJson, DateTimeOffset.UtcNow));
+
+        if (!string.IsNullOrWhiteSpace(decision))
+        {
+            var decisionPolicy = new DocPolicy("decision", decision.Trim().ToLowerInvariant(), DateTimeOffset.UtcNow);
+            await _index.SetPolicyAsync(decisionPolicy);
+        }
+    }
+
+    /// <summary>
+    /// Indexes an external document (bypasses managed document checks).
+    /// </summary>
+    public async Task IndexExternalAsync(Doc doc, IReadOnlyList<DocSection> sections, IReadOnlyList<DocRef> refs, CancellationToken ct = default)
+    {
+        await _index.IndexAsync(doc, sections, refs);
+    }
+
+    /// <summary>
+    /// Gets the workspace root directory.
+    /// </summary>
+    public string GetWorkspaceRoot() => _scopeResolver.WorkspaceRoot;
+
+    /// <summary>
+    /// Computes SHA256 hash of content.
+    /// </summary>
+    public string ComputeHash(string content)
+    {
+        using var sha256 = SHA256.Create();
+        var bytes = Encoding.UTF8.GetBytes(content);
+        var hash = sha256.ComputeHash(bytes);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Writes an audit entry directly.
+    /// </summary>
+    public async Task WriteAuditAsync(string docId, string action, string? beforeJson, string? afterJson, string actor, CancellationToken ct = default)
+    {
+        var entry = new DocAuditEntry(
+            Ulid.NewUlid().ToString(),
+            docId,
+            actor,
+            action,
+            beforeJson,
+            afterJson,
+            DateTimeOffset.UtcNow);
+
+        await _index.WriteAuditAsync(entry);
     }
 }

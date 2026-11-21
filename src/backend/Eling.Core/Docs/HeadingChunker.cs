@@ -20,9 +20,9 @@ public static class HeadingChunker
 
     /// <summary>
     /// Chunks the document content into sections.
-    /// Returns (sections, preambleContent).
+    /// Returns a ChunkResult containing sections and preamble content.
     /// </summary>
-    public static (IReadOnlyList<SectionChunk> Sections, string Preamble) Chunk(string content)
+    public static ChunkResult Chunk(string content)
     {
         var sections = new List<SectionChunk>();
         var lines = content.Split('\n');
@@ -30,7 +30,7 @@ public static class HeadingChunker
         var fenceChar = '\0';
 
         // First pass: find all headings with their line numbers, skipping fenced code
-        var headings = new List<(int Level, string Text, int LineIndex)>();
+        var headings = new List<HeadingInfo>();
         for (int i = 0; i < lines.Length; i++)
         {
             var line = lines[i];
@@ -61,7 +61,7 @@ public static class HeadingChunker
                 {
                     var level = match.Groups[1].Value.Length;
                     var text = match.Groups[2].Value.Trim();
-                    headings.Add((level, text, i));
+                    headings.Add(new HeadingInfo(level, text, i));
                 }
             }
         }
@@ -73,7 +73,7 @@ public static class HeadingChunker
         if (headings.Count == 0)
         {
             // No headings: entire document is preamble
-            return (sections.AsReadOnly(), content.Trim());
+            return new ChunkResult(sections.AsReadOnly(), content.Trim());
         }
 
         // Preamble: content before first heading
@@ -84,25 +84,25 @@ public static class HeadingChunker
         // Sections from headings
         for (int i = 0; i < headings.Count; i++)
         {
-            var (level, text, lineIndex) = headings[i];
-            var startLine = lineIndex + 1; // 1-based, content starts after heading
+            var heading = headings[i];
+            var startLine = heading.LineIndex + 1; // 1-based, content starts after heading
             var endLine = (i + 1 < headings.Count) ? headings[i + 1].LineIndex : lineCount;
 
-            var anchor = Slugify(text, anchorCounts);
-            var headingLine = $"{"#".PadRight(level, '#')} {text}";
+            var anchor = Slugify(heading.Text, anchorCounts);
+            var headingLine = $"{"#".PadRight(heading.Level, '#')} {heading.Text}";
             
             sections.Add(new SectionChunk
             {
                 Anchor = anchor,
                 Heading = headingLine,
-                Level = level,
+                Level = heading.Level,
                 LineStart = startLine,
                 LineEnd = endLine,
-                RawHeadingText = text,
+                RawHeadingText = heading.Text,
             });
         }
 
-        return (sections.AsReadOnly(), preamble);
+        return new ChunkResult(sections.AsReadOnly(), preamble);
     }
 
     private static string Slugify(string text, Dictionary<string, int> counts)
@@ -121,15 +121,4 @@ public static class HeadingChunker
         counts[slug] = 1; // First duplicate will be -2
         return slug;
     }
-}
-
-/// <summary>Result of chunking a section.</summary>
-public sealed class SectionChunk
-{
-    public string Anchor { get; set; } = "";
-    public string Heading { get; set; } = "";
-    public int Level { get; set; }
-    public int LineStart { get; set; }
-    public int LineEnd { get; set; }
-    public string RawHeadingText { get; set; } = "";
 }

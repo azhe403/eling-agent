@@ -56,6 +56,7 @@ public sealed class ToolCatalogTests
     [InlineData("diagnostics")]
     [InlineData("database")]
     [InlineData("skills")]
+    [InlineData("docs")]
     public void MembersOf_KnownGroups_ReturnNonEmptyToolLists(string group)
     {
         var members = ToolCatalog.MembersOf(group);
@@ -73,6 +74,7 @@ public sealed class ToolCatalogTests
             ToolCatalog.DiagnosticsGroup,
             ToolCatalog.DatabaseGroup,
             ToolCatalog.SkillsGroup,
+            ToolCatalog.DocsGroup,
         };
 
         foreach (var tool in ToolCatalog.All)

@@ -15,7 +15,7 @@ public static class ExternalDocInference
     /// <summary>
     /// Infers kind, topic, status, and read_order for an external document.
     /// </summary>
-    public static (DocKind Kind, string Topic, DocStatusValue Status, int Order) Infer(
+    public static ExternalDocInferenceResult Infer(
         string relativePath,
         string content,
         string? explicitKind = null)
@@ -39,7 +39,7 @@ public static class ExternalDocInference
         // Order from filename (numeric prefix) or 0
         var order = InferOrderFromFilename(relativePath);
 
-        return (kind, topic, status, order);
+        return new ExternalDocInferenceResult(kind, topic, status, order);
     }
 
     private static DocKind InferKindFromPath(string relativePath)

@@ -18,7 +18,11 @@ public class SqliteDocsIndexTests : IDisposable
 
     public void Dispose()
     {
-        try { File.Delete(_dbPath); } catch { }
+        try { File.Delete(_dbPath); }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to delete test database: {ex.Message}");
+        }
     }
 
     private static Doc CreateTestDoc(

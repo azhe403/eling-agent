@@ -13,6 +13,7 @@ public static class ToolCatalog
     public const string DiagnosticsGroup = "diagnostics";
     public const string DatabaseGroup = "database";
     public const string SkillsGroup = "skills";
+    public const string DocsGroup = "docs";
 
     public static readonly IReadOnlyList<ToolDefinition> All = new List<ToolDefinition>
     {
@@ -74,6 +75,18 @@ public static class ToolCatalog
         new("skill_delete", SkillsGroup, "Move a skill to the catalog trash (works for external skills too; restorable)."),
         new("skill_restore", SkillsGroup, "Restore a trashed skill back into the active catalog."),
         new("skill_adopt", SkillsGroup, "Adopt an externally-supplied skill in place, making it Eling-managed (explicit, permanent)."),
+        new("doc_search", DocsGroup, "Search documents using FTS5 with filters for ownership, origin, kind, topic, pathPrefix."),
+        new("doc_read", DocsGroup, "Read a document by ID with modes: full, section, map."),
+        new("doc_list", DocsGroup, "List documents grouped by topic with filters."),
+        new("doc_staleness", DocsGroup, "Generate staleness report for unresolved refs, superseded docs, stale drafts, untouched docs."),
+        new("doc_audit", DocsGroup, "Get audit entries for a document or scope."),
+        new("doc_relation", DocsGroup, "Read spec↔plan relations (Implements, Supersedes, References)."),
+        new("doc_save", DocsGroup, "Create or update a managed document; promote to external with promote: true."),
+        new("doc_annotate", DocsGroup, "Annotate a section of a managed document with status and annotation."),
+        new("doc_promote", DocsGroup, "Promote a managed document to external (writes to docs/)."),
+        new("doc_index", DocsGroup, "Trigger incremental rescan within allowed scope."),
+        new("doc_scope_policy", DocsGroup, "Inspect or change coverage policy and decision (ask/disabled/clear)."),
+        new("doc_offer_managed", DocsGroup, "Read or answer the managed docs offer policy (unasked/accepted/declined/never)."),
     }.AsReadOnly();
 
     public static bool Exists(string toolName)

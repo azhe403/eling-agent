@@ -291,4 +291,30 @@ public sealed class RecallServiceChainTests
         Assert.Equal(4, result.RecallMemories.Count);
         Assert.Null(result.OverflowMemories);
     }
+
+    [Fact]
+    public async Task Recall_Unlimited_ReturnsAllHitsAndNoOverflow()
+    {
+        var (scoped, child, _, _) = Build();
+        for (var i = 0; i < 25; i++)
+        {
+            await child.SaveAsync(new Memory.Memory(MemoryType.Fact, $"topic item {i}"));
+        }
+
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
+        var result = await service.RecallAsync(new RecallContext(["topic"], null, null), recallLimit: -1);
+
+        Assert.Equal(25, result.RecallMemories.Count);
+        Assert.Null(result.OverflowMemories);
+    }
+
+    [Fact]
+    public async Task Recall_NegativeLimitBelowMinusOne_Throws()
+    {
+        var (scoped, _, _, _) = Build();
+        var service = new RecallService(scoped, new EmptyIntentionStorage());
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => service.RecallAsync(new RecallContext(["topic"], null, null), recallLimit: -2));
+    }
 }

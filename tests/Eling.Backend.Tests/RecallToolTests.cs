@@ -92,6 +92,24 @@ public sealed class RecallToolTests : IDisposable
         Assert.Contains("\"skills\":[]", json, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Recall_with_recallLimit_minus_one_skips_recallSummary()
+    {
+        var dummyHit = new RecallHit(
+            new Eling.Core.Memory.Memory(Eling.Core.Memory.MemoryType.Fact, "test overflow item"),
+            ["porter"], 1.0, 0.0, "and");
+        var resultWithOverflow = new RecallResult(
+            [], [], [], new RecallStats(0, 0, 0, 0, 0),
+            OverflowMemories: [dummyHit]);
+        var tool = new RecallTool(new StubRecallService(resultWithOverflow), cwd: _root);
+
+        var response = await tool.RecallAsync(
+            new RecallContextInput { Topics = ["anything"] },
+            recallLimit: -1);
+
+        Assert.Null(response.RecallSummary);
+    }
+
     public void Dispose()
     {
         try

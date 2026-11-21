@@ -17,9 +17,8 @@ public static class PlanCheckboxCounter
 
     /// <summary>
     /// Counts total and done checkboxes in the content.
-    /// Returns (total, done).
     /// </summary>
-    public static (int Total, int Done) Count(string content)
+    public static CheckboxCounts Count(string content)
     {
         // Remove fenced code blocks
         var withoutFences = FenceRegex.Replace(content, "");
@@ -34,18 +33,18 @@ public static class PlanCheckboxCounter
                 done++;
             }
         }
-        return (total, done);
+        return new CheckboxCounts(total, done);
     }
 
     /// <summary>
     /// Counts checkboxes per section.
     /// </summary>
-    public static IReadOnlyDictionary<string, (int Total, int Done)> CountPerSection(
+    public static IReadOnlyDictionary<string, SectionCheckboxCounts> CountPerSection(
         string content,
         IReadOnlyList<SectionChunk> sections)
     {
         var lines = content.Split('\n');
-        var result = new Dictionary<string, (int Total, int Done)>();
+        var result = new Dictionary<string, SectionCheckboxCounts>();
 
         foreach (var section in sections)
         {
@@ -66,7 +65,7 @@ public static class PlanCheckboxCounter
                 if (m.Groups[1].Value.Equals("x", StringComparison.OrdinalIgnoreCase))
                     done++;
             }
-            result[section.Anchor] = (total, done);
+            result[section.Anchor] = new SectionCheckboxCounts(section.Anchor, total, done);
         }
 
         return result;

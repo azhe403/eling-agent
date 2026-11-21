@@ -616,7 +616,7 @@ public sealed class SqliteDocsIndex : IDocsIndex
     private async Task DeleteSectionsAndRefsOnlyAsync(SqliteConnection connection, SqliteTransaction transaction, string docId)
     {
         // Get sections for FTS delete (contentless FTS5 requires manual delete)
-        var sections = new List<(long RowId, string Heading)>();
+        var sections = new List<SectionRowIdHeading>();
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
@@ -625,7 +625,7 @@ public sealed class SqliteDocsIndex : IDocsIndex
             await using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
-                sections.Add((reader.GetInt64(0), reader.GetString(1)));
+                sections.Add(new SectionRowIdHeading(reader.GetInt64(0), reader.GetString(1)));
             }
         }
 
