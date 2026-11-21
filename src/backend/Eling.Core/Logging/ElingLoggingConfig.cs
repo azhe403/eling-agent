@@ -64,6 +64,8 @@ public static class ElingLoggingConfig
             .Enrich.WithProperty("ProjectId", effectiveProjectId)
             .Enrich.WithProperty("CorrelationId", "-")
             .Enrich.With<AspNetEnvironmentEnricher>()
-            .WriteTo.Sink(sink);
+            // The generic host's duplicate "Hosting failed to start" bind-race
+            // Error is demoted to Warning here; HttpLoop owns the real signal.
+            .WriteTo.Sink(new HostingFailureDemotingSink(sink));
     }
 }

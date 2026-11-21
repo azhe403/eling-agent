@@ -15,6 +15,8 @@ public static class AgentChatEndpoints
         var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Agent.Chat");
 
         var chats = app.MapGroup("/api/agent/chats");
+        chats.MapDelete("/{id}", (BackendChatStore store, string id) =>
+            store.Delete(id) ? Results.NoContent() : Results.NotFound());
         chats.MapGet("/", (BackendChatStore store, string workspace) =>
             TypedResults.Ok(store.List(workspace)));
         chats.MapGet("/{id}", (BackendChatStore store, string id) =>

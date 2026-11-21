@@ -168,7 +168,7 @@ public sealed class RecallService : IRecallService
         }
 
         // Skills: an FTS pass over the machine-global catalog, origin-agnostic,
-        // capped at the standing-baseline limit. Hits are referenced by path
+        // capped at SkillRecallLimit. Hits are referenced by path
         // only - the body is never inlined (context inflation). A missing or
         // failing skill service degrades recall to memory-only, never to an error.
         var skills = new List<SkillRecallHit>();
@@ -179,14 +179,14 @@ public sealed class RecallService : IRecallService
             {
                 try
                 {
-                    var hits = await _skills.SearchAsync(skillQuery, origin: null, limit: StandingBaselineLimit);
+                    var hits = await _skills.SearchAsync(skillQuery, origin: null, limit: SkillRecallLimit);
                     if (hits.Count > 0)
                     {
                         // Hits carry name/description/origin/path — no catalog
-                        // hydration pass needed for the standing-baseline block.
+                        // hydration pass needed for the skills block.
                         foreach (var hit in hits)
                         {
-                            if (skills.Count >= StandingBaselineLimit) break;
+                            if (skills.Count >= SkillRecallLimit) break;
                             skills.Add(new SkillRecallHit(hit.Name, hit.Description, hit.Origin, hit.Path));
                         }
                     }
@@ -244,8 +244,11 @@ public sealed class RecallService : IRecallService
         return new RecallResult(recall, recent, intentionResults, stats, standing, overflow.Count > 0 ? overflow : null, skills.Count > 0 ? skills : null);
     }
 
-    /// <summary>Cap on the standing baseline and the referenced-skills block so a broad payload never swamps the topic hits.</summary>
+    /// <summary>Cap on the standing baseline so a broad payload never swamps the topic hits.</summary>
     private const int StandingBaselineLimit = 5;
+
+    /// <summary>Cap on the referenced-skills block in recall. Kept separate from the standing baseline: skills are cheap (path-only references) but the catalog is broad, so the cap trades candidate coverage against noise.</summary>
+    private const int SkillRecallLimit = 10;
 
     /// <summary>
     /// How many relevant hits beyond <c>recallLimit</c> to fetch for the

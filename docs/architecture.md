@@ -17,6 +17,7 @@ Single-binary ownership: first launcher wins, peers skip Kestrel.
 
 ## Feature map → detailed docs
 
+- Artifact subsystems compared (Memory, Intention, Skill, Snippet, Docs) and why the boundaries fall where they do: [artifact-subsystems.md](artifact-subsystems.md)
 - Memory recall engine (hybrid FTS + RRF, overflow summaries): [recall-architecture.md](recall-architecture.md)
 - Semantic judge (dedup, merges, fallback posture): [semantic-judge-architecture.md](semantic-judge-architecture.md)
 - Agent host setup & MCP registration: [agent-setup.md](agent-setup.md)

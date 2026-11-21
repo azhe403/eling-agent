@@ -59,6 +59,34 @@ public sealed class BackendChatStore
         }
     }
 
+    public bool Delete(string id)
+    {
+        lock (_gate)
+        {
+            if (!Directory.Exists(_dir))
+            {
+                return false;
+            }
+
+            var match = Directory.EnumerateFiles(_dir, "*-" + id + ".json").FirstOrDefault();
+            if (match is null)
+            {
+                return false;
+            }
+
+            try
+            {
+                File.Delete(match);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to delete chat {Id}", id);
+                return false;
+            }
+        }
+    }
+
     public IReadOnlyList<ChatSummary> List(string workspace)
     {
         lock (_gate)
@@ -101,14 +129,31 @@ public sealed class BackendChatStore
         lock (_gate)
         {
             chat.Messages.Add(message);
-            if (chat.Title == "New chat" && message.Role == AgentRole.User && !string.IsNullOrWhiteSpace(message.Text))
+            if (ShouldRenameToUserMessage(chat, message))
             {
-                chat.Title = message.Text.Length > 60 ? message.Text[..60] : message.Text;
+                chat.Title = AutoTitle(message.Text);
             }
 
             chat.UpdatedAt = DateTimeOffset.UtcNow;
             Save(chat);
         }
+    }
+
+    private static bool ShouldRenameToUserMessage(ChatRecord chat, AgentMessage message)
+        => message.Role == AgentRole.User
+           && !string.IsNullOrWhiteSpace(message.Text)
+           && string.Equals(chat.Title, "New chat", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Auto-title for a new chat: the first user message, whitespace-collapsed to a
+    /// single line, capped at 60 characters with an ellipsis marker. Empty/whitespace
+    /// text and multi-line formats stay sanitised; the user can still name a chat
+    /// later, but nothing but the auto title exists to display until then.
+    /// </summary>
+    private static string AutoTitle(string text)
+    {
+        var collapsed = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+        return collapsed.Length > 60 ? collapsed[..60] + "…" : collapsed;
     }
 
     private void Save(ChatRecord chat)

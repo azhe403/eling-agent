@@ -601,7 +601,7 @@ public sealed class SkillService : ISkillService
 
         if (input.Description.Length > Skill.MaxDescriptionLength)
         {
-            throw new SkillValidationException($"Description must be at most {Skill.MaxDescriptionLength} characters.");
+            throw new SkillValidationException($"Description must be at most {Skill.MaxDescriptionLength} characters (got {input.Description.Length}).");
         }
 
         if (string.IsNullOrWhiteSpace(input.Body))

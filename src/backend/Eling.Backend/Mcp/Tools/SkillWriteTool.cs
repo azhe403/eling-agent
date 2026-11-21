@@ -61,7 +61,7 @@ public sealed class SkillWriteTool
 
             if (description.Length > Skill.MaxDescriptionLength)
             {
-                throw new SkillValidationException($"Description must be at most {Skill.MaxDescriptionLength} characters.");
+                throw new SkillValidationException($"Description must be at most {Skill.MaxDescriptionLength} characters (got {description.Length}).");
             }
 
             if (string.IsNullOrWhiteSpace(body))

@@ -143,7 +143,8 @@ public sealed class LogFormatSwitcher : IDisposable
             .Enrich.WithProperty("ProjectId", effectiveProjectId)
             .Enrich.WithProperty("CorrelationId", "-")
             .Enrich.With<AspNetEnvironmentEnricher>()
-            .WriteTo.Sink(fileSink)
+            // Same demotion as ElingLoggingConfig.ConfigureElingDefaults - keep in step.
+            .WriteTo.Sink(new HostingFailureDemotingSink(fileSink))
             .WriteTo.Console(
                 outputTemplate: ElingLoggingConfig.DefaultOutputTemplate,
                 standardErrorFromLevel: LogEventLevel.Verbose);

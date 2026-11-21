@@ -538,6 +538,11 @@ public class MemoryToolsTests
         Assert.Contains("up front", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("before the work starts", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("for this run", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("EVERY incoming request", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("including one-word commands", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("the scoping signal is the description, never the name", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("the most specific", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("load queue", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.True(
             options.ServerInstructions.IndexOf("Skills (workflows)", StringComparison.OrdinalIgnoreCase) is var skillsIndex and >= 0
             && options.ServerInstructions.IndexOf("Codebase:", StringComparison.OrdinalIgnoreCase) is var codebaseIndex and >= 0

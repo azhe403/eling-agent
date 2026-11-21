@@ -10,7 +10,15 @@ namespace Eling.Backend.Agent.Infrastructure.Ai;
 
 public sealed class MeaiChatGateway(ProviderStore store, ILogger<MeaiChatGateway> logger) : IChatGateway
 {
-    private static readonly TimeSpan StreamFirstByteTimeout = TimeSpan.FromSeconds(20);
+    /// <summary>
+    /// How long a streaming turn may go without its first byte before falling back to
+    /// single-shot. Reasoning models routinely think past 20s before emitting their
+    /// first content token, so the budget is 60s. A timeout is per turn: the next turn
+    /// tries streaming again — an earlier version marked the endpoint dead for the
+    /// whole process lifetime, which silently turned every later turn into
+    /// non-streaming after one slow first byte.
+    /// </summary>
+    public TimeSpan StreamFirstByteTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// The agent gateway routes a request by session and answers
@@ -106,7 +114,6 @@ public sealed class MeaiChatGateway(ProviderStore store, ILogger<MeaiChatGateway
         return options;
     }
 
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> StreamingBrokenByEndpoint = new(StringComparer.OrdinalIgnoreCase);
     public async Task<SingleShotResult> CompleteAsync(SingleShotRequest request, CancellationToken ct)
     {
         if (!store.TryGetConfig(out var baseUrl, out _, out var apiKey))
@@ -151,12 +158,6 @@ public sealed class MeaiChatGateway(ProviderStore store, ILogger<MeaiChatGateway
             throw new InvalidOperationException("Provider is not configured.");
         }
 
-        var endpointKey = baseUrl.TrimEnd('/').ToLowerInvariant();
-        if (StreamingBrokenByEndpoint.ContainsKey(endpointKey))
-        {
-            throw new IOException("Streaming is disabled for this endpoint after a previous timeout; using single-shot fallback.");
-        }
-
         var client = CreateChatClient(request, baseUrl, apiKey);
         var messages = BuildMessages(request);
         var options = BuildOptions(request);
@@ -177,8 +178,7 @@ using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
-                    StreamingBrokenByEndpoint[endpointKey] = true;
-                    logger.LogWarning("Provider stream produced no data within {Seconds}s; endpoint marked non-streaming", StreamFirstByteTimeout.TotalSeconds);
+                    logger.LogWarning("Provider stream produced no data within {Seconds}s; falling back to single-shot for this turn only", StreamFirstByteTimeout.TotalSeconds);
                     throw new IOException("Provider stream timed out waiting for data.");
                 }
 

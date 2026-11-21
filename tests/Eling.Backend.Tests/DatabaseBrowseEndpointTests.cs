@@ -59,6 +59,10 @@ public sealed class DatabaseBrowseEndpointTests : IAsyncLifetime
             sp.GetRequiredService<IDatabaseReadCache>(),
             sp.GetRequiredService<ILogger<DatabaseReadService>>()));
         builder.Services.AddSingleton<IRedisConnectionPool>(new RedisConnectionPool());
+        // The route table binds the ES read service and client cache as handler
+        // parameters; a host without them cannot build it.
+        builder.Services.AddSingleton<IElasticsearchReadService>(new StubElasticsearchReadService());
+        builder.Services.AddSingleton<IElasticsearchClientCache>(new ElasticsearchClientCache(TimeSpan.FromDays(30)));
         builder.Services.AddSingleton<IRedisReadCache>(sp => new JsonRedisReadCache(
             _root,
             sp.GetRequiredService<ILogger<JsonRedisReadCache>>()));

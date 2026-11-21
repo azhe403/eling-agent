@@ -45,6 +45,8 @@ public sealed class DomainCodeEndpointTests : IAsyncLifetime
             sp.GetRequiredService<IDatabaseReadCache>(),
             sp.GetRequiredService<ILogger<DatabaseReadService>>()));
         builder.Services.AddSingleton<IRedisConnectionPool>(new RedisConnectionPool());
+        builder.Services.AddSingleton<IElasticsearchReadService>(new StubElasticsearchReadService());
+        builder.Services.AddSingleton<IElasticsearchClientCache>(new ElasticsearchClientCache(TimeSpan.FromDays(30)));
         builder.Services.AddSingleton<IRedisReadCache>(sp => new JsonRedisReadCache(
             _root,
             sp.GetRequiredService<ILogger<JsonRedisReadCache>>()));

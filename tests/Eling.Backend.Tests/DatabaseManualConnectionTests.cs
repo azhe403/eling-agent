@@ -54,6 +54,8 @@ public sealed class DatabaseManualConnectionTests : IAsyncLifetime
         // The test routes take the Redis pool from DI, the way the real host
         // registers it; a test host without it cannot bind the route at all.
         builder.Services.AddSingleton<IRedisConnectionPool>(new RedisConnectionPool());
+        builder.Services.AddSingleton<IElasticsearchReadService>(new StubElasticsearchReadService());
+        builder.Services.AddSingleton<IElasticsearchClientCache>(new ElasticsearchClientCache(TimeSpan.FromDays(30)));
         builder.Services.AddSingleton<IRedisReadCache>(sp => new JsonRedisReadCache(
             _root,
             sp.GetRequiredService<ILogger<JsonRedisReadCache>>()));

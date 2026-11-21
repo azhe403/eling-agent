@@ -133,7 +133,7 @@ public class Skill
         if (description.Length > MaxDescriptionLength)
         {
             throw new ArgumentException(
-                $"Skill description must be at most {MaxDescriptionLength} characters.",
+                $"Skill description must be at most {MaxDescriptionLength} characters (got {description.Length}).",
                 nameof(description));
         }
     }

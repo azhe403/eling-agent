@@ -147,12 +147,12 @@ public sealed class RecallTests : IDisposable
     }
 
     [Fact]
-    public async Task Recall_caps_skills_at_standing_baseline_limit()
+    public async Task Recall_caps_skills_at_skill_recall_limit()
     {
         var child = new FakeRecallMemoryService();
         var global = new FakeRecallMemoryService();
         var skills = NewSkillService();
-        for (var i = 1; i <= 7; i++)
+        for (var i = 1; i <= 12; i++)
         {
             await skills.SaveAsync(new SkillSaveInput(
                 $"widget-helper-{i:00}",
@@ -163,7 +163,7 @@ public sealed class RecallTests : IDisposable
         var service = new RecallService(BuildScoped(child, global), new EmptyIntentionStorage(), skills: skills);
         var result = await service.RecallAsync(new RecallContext(["widget"], null, null));
 
-        Assert.Equal(5, result.Skills!.Count);
+        Assert.Equal(10, result.Skills!.Count);
     }
 
     [Fact]
