@@ -89,7 +89,6 @@ export interface ExplorerPanelsProps {
   onTreeContextMenu: (e: React.MouseEvent, connId: string, table?: string, database?: string) => void
   onRegisterTreeItem: (key: string, el: HTMLButtonElement | null) => void
   onRightTabChange: (tab: "data" | "schema" | "sql") => void
-  onSchemaClose: () => void
   onSchemaTableSelect: (table: string) => void
   onRefreshData: () => void
   onAddRow: () => void
@@ -284,7 +283,6 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
             activeTable={activeTable}
             conns={conns}
             retryLabel={retryLabel}
-            onClose={props.onSchemaClose}
             onSelectTable={props.onSchemaTableSelect}
           />
         ) : null}

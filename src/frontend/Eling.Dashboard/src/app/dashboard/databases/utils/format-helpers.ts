@@ -27,3 +27,37 @@ export const isStaleCache = (cachedAt?: string | null): boolean => {
   const ms = Date.now() - new Date(cachedAt).getTime()
   return Number.isFinite(ms) && ms > 24 * 60 * 60 * 1000
 }
+
+/**
+ * A column's type with its declared length, "varchar" and 50 giving
+ * "varchar(50)". A type that already carries the length in its text - SQLite
+ * reports the whole declared type as one string - is left alone rather than
+ * given a second copy, and a column with no declared type stays blank instead
+ * of showing a length on its own.
+ */
+export const formatColumnType = (dataType?: string | null, maxLength?: number | null): string => {
+  const type = dataType ?? ""
+  if (!type || !maxLength || maxLength <= 0 || type.includes("(")) return type
+  return `${type}(${maxLength})`
+}
+
+/**
+ * Format cache expiration time for display. Returns "expires in X" or "expired".
+ * The TTL is typically 7 days from cachedAt.
+ */
+export const formatCacheExpiry = (cachedAt?: string | null, ttlSeconds?: number | null): string => {
+  if (!cachedAt) return ""
+  const cached = new Date(cachedAt).getTime()
+  if (!Number.isFinite(cached)) return ""
+  const ttl = ttlSeconds ?? 7 * 24 * 60 * 60 // default 7 days
+  const expiresAt = cached + ttl * 1000
+  const now = Date.now()
+  const diff = expiresAt - now
+  if (diff <= 0) return "expired"
+  const days = Math.floor(diff / (24 * 60 * 60 * 1000))
+  const hours = Math.floor((diff % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000))
+  const mins = Math.floor((diff % (60 * 60 * 1000)) / (60 * 1000))
+  if (days > 0) return `expires in ${days}d ${hours}h`
+  if (hours > 0) return `expires in ${hours}h ${mins}m`
+  return `expires in ${mins}m`
+}

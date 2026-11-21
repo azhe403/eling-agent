@@ -36,6 +36,7 @@ export type QueryResult = {
   fromCache?: boolean
   cachedAt?: string | null
   source?: "live" | "offline"
+  cacheTtlSeconds?: number
 }
 
 /** Schema information from the backend. */
@@ -46,6 +47,8 @@ export type SchemaInfo = {
   cachedAt?: string | null
   /** How the answer was obtained: live, cached, or offline when the snapshot answered. */
   source?: "live" | "cached" | "offline"
+  /** TTL in seconds for the cached schema (typically 7 days). */
+  cacheTtlSeconds?: number
 }
 
 /** One table in a schema. */
@@ -58,6 +61,11 @@ export type TableSchema = {
     referencesTable: string
     referencesColumn: string
   }[]
+  indexes?: {
+    name: string
+    isUnique: boolean
+    columns: string[]
+  }[]
 }
 
 /** One column in a table schema. */
@@ -66,6 +74,8 @@ export type ColumnSchema = {
   dataType: string
   isNullable: boolean
   isPrimaryKey: boolean
+  /** Declared length of a char/varchar/binary column; absent for other types. */
+  maxLength?: number | null
 }
 
 /** Redis logical database info. Re-exported from redis-browser for convenience. */

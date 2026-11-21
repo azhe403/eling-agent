@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCallback, useMemo } from "react"
 import { ListFilter, ArrowUp, ArrowDown } from "lucide-react"
 import { DbTab, QueryResult, SchemaInfo, ColumnSchema } from "@/app/dashboard/databases/types"
-import { formatCacheAge, isStaleCache } from "@/app/dashboard/databases/utils/format-helpers"
+import { formatCacheAge, formatCacheExpiry, isStaleCache } from "@/app/dashboard/databases/utils/format-helpers"
 import { BROWSE_LIMIT_OPTIONS, totalPages } from "@/app/dashboard/databases/utils/browse-paging"
 import {
   activeCount,
@@ -173,39 +173,34 @@ export const DataGrid = ({
     <Card className="flex min-h-0 flex-1 flex-col">
       <CardHeader className="shrink-0">
         <CardTitle className="flex items-center gap-2">
-          Data - {activeTable?.table}
-          {browseResult?.fromCache ? (
+          Data · {activeTable?.table}
+          {browseResult ? (
             <Badge
               variant="outline"
               className={
                 isStaleCache(browseResult.cachedAt)
                   ? "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-400"
-                  : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                  : browseResult.fromCache
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                  : "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
               }
+              title={formatCacheExpiry(browseResult.cachedAt, browseResult.cacheTtlSeconds)}
             >
-              {isStaleCache(browseResult.cachedAt) ? "stale" : "cached"} · {formatCacheAge(browseResult.cachedAt)}
-            </Badge>
-          ) : browseResult ? (
-            <Badge variant="outline" className="border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400">
-              live
+              {browseResult.fromCache ? (isStaleCache(browseResult.cachedAt) ? "stale" : "cached") : "live"} · {formatCacheAge(browseResult.cachedAt)}
+              {formatCacheExpiry(browseResult.cachedAt, browseResult.cacheTtlSeconds) && (
+                <> · {formatCacheExpiry(browseResult.cachedAt, browseResult.cacheTtlSeconds)}</>
+              )}
             </Badge>
           ) : null}
+          {selectedIsReadOnly && (
+            <Badge variant="outline" className="border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-400">
+              read-only
+            </Badge>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col space-y-2">
-          {selectedIsReadOnly && !browseResult?.fromCache ? (
-            <p className="text-xs text-muted-foreground">
-              Read-only connection - cells can be edited, but never persisted.
-            </p>
-          ) : null}
-          {browseResult?.fromCache ? (
-            <p className="text-xs text-amber-700 dark:text-amber-400">
-              Cached data - the database is unreachable, so edits are disabled.
-            </p>
-          ) : null}
-
-          <div className="mb-2 flex shrink-0 items-center gap-3">
+        <div className="flex min-h-0 flex-1 flex-col space-y-2">          <div className="mb-2 flex shrink-0 items-center gap-3">
             <Button
               size="sm"
               variant="outline"
@@ -546,3 +541,5 @@ export const DataGrid = ({
     </Card>
   )
 }
+
+

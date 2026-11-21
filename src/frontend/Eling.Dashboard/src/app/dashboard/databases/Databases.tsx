@@ -1263,7 +1263,6 @@ export function Databases() {
           }}
           onRegisterTreeItem={registerTreeItem}
           onRightTabChange={setRightTab}
-          onSchemaClose={() => setSchemaConnId(null)}
           onSchemaTableSelect={(table) => {
             setActiveTable({ connId: schemaConnId!, table })
             setBrowseTable(table)
