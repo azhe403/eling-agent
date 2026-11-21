@@ -15,28 +15,30 @@
 
 ---
 
-## Phase 1 — Eling.Core/Docs Domain
+## Phase 1 — Eling.Core/Docs Domain ✅ **COMPLETED**
 
 **Target:** `src/backend/Eling.Core/Docs/` — pure domain, no infrastructure beyond `Ulid`, `YamlDotNet`, `Microsoft.Data.Sqlite`
 
-- [ ] 1.1 `DocId` (ULID + ownership/origin encoding) — `struct`, `ToString()`, `Parse()`
-- [ ] 1.2 `DocOwnership` enum (`Managed`, `External`)
-- [ ] 1.3 `DocOrigin` enum (`Current`, `Ancestor`, `Shard`, `Global`)
-- [ ] 1.4 `DocKind` enum (`Spec`, `Plan`, `Doc`, `Scratch`)
-- [ ] 1.5 `DocStatus` per kind — `SpecStatus`, `PlanStatus`, `DocStatus`, `ScratchStatus`
-- [ ] 1.6 `Doc` entity — id, ownership, origin, rel_path, kind, title, status, topic, order, superseded_by, steps_total, steps_done, file_hash, mtime
-- [ ] 1.7 `DocSection` entity — doc_id, anchor, heading, level, line_start, line_end, status, annotation
-- [ ] 1.8 `DocRef` entity — doc_id, anchor, raw_text, resolved_path, resolved_line, resolved
-- [ ] 1.9 `DocRelation` entity — source_id, target_id, kind (`Implements`, `Supersedes`, `References`)
-- [ ] 1.10 Front-matter parser (`DocFrontMatterParser`) — `kind`, `topic`, `order`, `status`, `supersededBy`, `spec`, `sections{}`, **malformed = non-fatal finding**
-- [ ] 1.11 External metadata inference (`ExternalDocInference`) — `kind` from folder, `topic` from parent folder, `status` default per kind, `read_order` from filename/heading — **never writes front-matter**
-- [ ] 1.12 Heading chunker — ATX headings, `_preamble` section, fenced code never splits, GitHub-flavoured anchors with `-1`/`-2` dedupe
-- [ ] 1.13 Plan checkbox counter — `- [ ]` / `- [x]` per section and per document, **fenced code excluded**
-- [ ] 1.14 Unit tests:
-    - [ ] Nested headings + fences + duplicate slugs + preamble
-    - [ ] Front-matter: present / absent / malformed
-    - [ ] Checkbox counting with fenced-code exclusion
-    - [ ] External inference produces kind/topic/status without writing front-matter
+- [x] 1.1 `DocId` (ULID + ownership/origin encoding) — `struct`, `ToString()`, `Parse()`
+- [x] 1.2 `DocOwnership` enum (`Managed`, `External`)
+- [x] 1.3 `DocOrigin` enum (`Current`, `Ancestor`, `Shard`, `Global`)
+- [x] 1.4 `DocKind` enum (`Spec`, `Plan`, `Doc`, `Scratch`)
+- [x] 1.5 `DocStatus` per kind — `SpecStatus`, `PlanStatus`, `DocStatus`, `ScratchStatus`
+- [x] 1.6 `Doc` entity — id, ownership, origin, rel_path, kind, title, status, topic, order, superseded_by, steps_total, steps_done, file_hash, mtime
+- [x] 1.7 `DocSection` entity — doc_id, anchor, heading, level, line_start, line_end, status, annotation
+- [x] 1.8 `DocRef` entity — doc_id, anchor, raw_text, resolved_path, resolved_line, resolved
+- [x] 1.9 `DocRelation` entity — source_id, target_id, kind (`Implements`, `Supersedes`, `References`)
+- [x] 1.10 Front-matter parser (`DocFrontMatterParser`) — `kind`, `topic`, `order`, `status`, `supersededBy`, `spec`, `sections{}`, **malformed = non-fatal finding**
+- [x] 1.11 External metadata inference (`ExternalDocInference`) — `kind` from folder, `topic` from parent folder, `status` default per kind, `read_order` from filename/heading — **never writes front-matter**
+- [x] 1.12 Heading chunker — ATX headings, `_preamble` section, fenced code never splits, GitHub-flavoured anchors with `-1`/`-2` dedupe
+- [x] 1.13 Plan checkbox counter — `- [ ]` / `- [x]` per section and per document, **fenced code excluded**
+- [x] 1.14 Unit tests:
+    - [x] Nested headings + fences + duplicate slugs + preamble
+    - [x] Front-matter: present / absent / malformed / empty
+    - [x] Checkbox counting with fenced-code exclusion
+    - [x] External inference produces kind/topic/status without writing front-matter
+
+**Verification:** All 1067 tests pass, build succeeds, no new warnings in Docs domain.
 
 ---
 
