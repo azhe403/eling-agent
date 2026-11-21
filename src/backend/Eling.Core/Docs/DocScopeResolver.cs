@@ -12,6 +12,12 @@ public sealed class DocScopeResolver
     private readonly string _canonicalRoot;
     private readonly string _projectLocalDocsDir;
 
+    /// <summary>Gets the workspace root directory.</summary>
+    public string WorkspaceRoot => _workspaceRoot;
+
+    /// <summary>Gets the canonical project root directory.</summary>
+    public string CanonicalRoot => _canonicalRoot;
+
     public DocScopeResolver(string? workspaceRoot = null)
     {
         _workspaceRoot = string.IsNullOrWhiteSpace(workspaceRoot)

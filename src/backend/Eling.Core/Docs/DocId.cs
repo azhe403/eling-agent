@@ -61,4 +61,9 @@ public readonly record struct DocId
             return false;
         }
     }
+
+    /// <summary>
+    /// An empty DocId placeholder.
+    /// </summary>
+    public static DocId Empty => new DocId(DocOwnership.Managed, DocOrigin.Current, "0000000000000000000000000000000000000000");
 }

@@ -13,6 +13,8 @@ public sealed class DocSection
     public int LineEnd { get; }
     public DocStatusValue Status { get; set; }
     public string? Annotation { get; set; }
+    public int StepsTotal { get; set; }
+    public int StepsDone { get; set; }
 
     public DocSection(
         DocId docId,
@@ -22,7 +24,9 @@ public sealed class DocSection
         int lineStart,
         int lineEnd,
         DocStatusValue status,
-        string? annotation = null)
+        string? annotation = null,
+        int stepsTotal = 0,
+        int stepsDone = 0)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(anchor);
         ArgumentException.ThrowIfNullOrWhiteSpace(heading);
@@ -35,6 +39,8 @@ public sealed class DocSection
         LineEnd = lineEnd;
         Status = status;
         Annotation = annotation;
+        StepsTotal = stepsTotal;
+        StepsDone = stepsDone;
     }
 
     public bool HasAnnotation => !string.IsNullOrWhiteSpace(Annotation);

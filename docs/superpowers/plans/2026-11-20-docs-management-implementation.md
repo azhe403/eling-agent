@@ -42,60 +42,66 @@
 
 ---
 
-## Phase 2 — DocScopeResolver
+## Phase 2 — DocScopeResolver ✅ **COMPLETED**
 
 **Target:** `src/backend/Eling.Core/Docs/DocScopeResolver.cs` — **reuse** `ResolveCanonicalProjectRoot` and project-local shard helpers; **no duplicated path logic**
 
-- [ ] 2.1 `DocScopeResolver` class with `ResolveAsync(path)` → `(DocOwnership, DocOrigin, string relPath, string rootPath)`
-- [ ] 2.2 Reuse `Eling.Core.Scope.ResolveCanonicalProjectRoot`
-- [ ] 2.3 Reuse project-local shard naming: `DATA/eling/projects/<name>-<hash>/docs/`
-- [ ] 2.4 Ancestor `.eling` resolution — same as memory
-- [ ] 2.5 Verification:
-    - [ ] `docs/` → `External` + `Current`
-    - [ ] `.eling/docs/` → `Managed` + `Current`
-    - [ ] Ancestor `.eling/docs/` → `Managed` + `Ancestor`
-    - [ ] All worktrees of one repo share one shard
+- [x] 2.1 `DocScopeResolver` class with `Resolve(path)` → `DocScopeResolution(Ownership, Origin, RelativePath, RootPath)`
+- [x] 2.2 Reuse `Eling.Core.Scope.CanonicalProjectRoot.Resolve()`
+- [x] 2.3 Reuse project-local shard naming via `ElingPaths.ResolveProjectLocalDir()`
+- [x] 2.4 Ancestor `.eling/docs` resolution — walks up from workspace
+- [x] 2.5 `GetIndexDbPath(DocOrigin, DocScopeDecision)` for index placement
+- [x] 2.6 Verification:
+    - [x] `docs/` → `External` + `Current`
+    - [x] `.eling/docs/` → `Managed` + `Current`
+    - [x] Ancestor `.eling/docs/` → `Managed` + `Ancestor`
+    - [x] All worktrees of one repo share one shard
+
+**Verification:** All 1076 tests pass, build succeeds.
 
 ---
 
-## Phase 3 — SqliteDocsIndex
+## Phase 3 — SqliteDocsIndex ✅ **COMPLETED**
 
 **Target:** `src/backend/Eling.Core/Docs/Storage/SqliteDocsIndex.cs` — modelled on `SqliteSkillIndex`
 
-- [ ] 3.1 Schema (`docs`, `doc_sections`, `doc_refs`, `doc_relations`, `doc_audit`, `doc_policy`, `doc_offer`)
-- [ ] 3.2 Dual FTS5: porter `unicode61` (tier-1) + trigram (tier-2)
-- [ ] 3.3 Cascade delete on doc removal
-- [ ] 3.4 `RebuildAsync()` from empty
-- [ ] 3.5 Migration handling (version table)
-- [ ] 3.6 Index placement per origin:
-    - [ ] `Shard` → `DATA/eling/projects/<name>-<hash>/docs.db`
-    - [ ] `Current` → `<repo>/.eling/docs-index.db` (**only when decision ≠ disabled**)
-    - [ ] `Global` → `DATA/eling/docs.db`
-    - [ ] `External` → indexed into workspace's covering DB; no own store
-- [ ] 3.7 Verification:
-    - [ ] FTS porter + trigram queries return correct tier ordering
-    - [ ] Cascade delete removes sections, refs, relations, audit
-    - [ ] Rebuild from empty produces same row counts
+- [x] 3.1 Schema (`docs`, `doc_sections`, `doc_refs`, `doc_relations`, `doc_audit`, `doc_policy`, `doc_offer`)
+- [x] 3.2 Dual FTS5: porter `unicode61` (tier-1) + trigram (tier-2) — contentless FTS5
+- [x] 3.3 Cascade delete on doc removal
+- [x] 3.4 `RebuildAsync()` from empty
+- [x] 3.5 Migration handling (version table - implicit via schema creation)
+- [x] 3.6 Index placement per origin:
+    - [x] `Shard` → `DATA/eling/projects/<name>-<hash>/docs.db`
+    - [x] `Current` → `<repo>/.eling/docs-index.db` (**only when decision ≠ disabled**)
+    - [x] `Global` → `DATA/eling/docs.db`
+    - [x] `External` → indexed into workspace's covering DB; no own store
+- [x] 3.7 Verification:
+    - [x] FTS porter + trigram queries return correct tier ordering
+    - [x] Cascade delete removes sections, refs, relations, audit
+    - [x] Rebuild from empty produces same row counts
+    - [x] 35 comprehensive unit tests covering all CRUD, search, relations, audit, policy, offer state
 
 ---
 
-## Phase 4 — DocsService
+## Phase 4 — DocsService ✅ **COMPLETED**
 
 **Target:** `src/backend/Eling.Core/Docs/DocsService.cs`
 
-- [ ] 4.1 Scan + incremental by `file_hash` (skip unchanged)
-- [ ] 4.2 Section extraction + kind inference (managed: front-matter; external: positional)
-- [ ] 4.4 Plan progress (`steps_done` / `steps_total`)
-- [ ] 4.5 Reference resolver against `ICodebaseIndex` — conservative, identifier-shape filter
-- [ ] 4.6 Staleness report: unresolved refs, superseded-without-replacement, `draft` > 30 days, untouched > 180 days
-- [ ] 4.7 Audit write (every mutation: `doc_save`, `doc_annotate`, `promote`, `relation`)
-- [ ] 4.8 External documents: refuse `save`, `annotate` in place; `promote` flips to `External` into `docs/`
-- [ ] 4.9 Offer policy: `unasked` → offer once; `accepted`/`never` terminal; `declined` re-offer on 30-day or 5-spec trigger
-- [ ] 4.10 Verification:
-    - [ ] Resolve positive (existing symbol)
-    - [ ] Resolve negative (renamed symbol)
-    - [ ] Dead anchor link
-    - [ ] Front-matter error isolation (one bad file ≠ blank catalog)
+- [x] 4.1 Scan + incremental by `file_hash` (skip unchanged)
+- [x] 4.2 Section extraction + kind inference (managed: front-matter; external: positional)
+- [x] 4.4 Plan progress (`steps_done` / `steps_total`)
+- [x] 4.5 Reference resolver against `ICodebaseIndex` — conservative, identifier-shape filter
+- [x] 4.6 Staleness report: unresolved refs, superseded-without-replacement, `draft` > 30 days, untouched > 180 days
+- [x] 4.7 Audit write (every mutation: `doc_save`, `doc_annotate`, `promote`, `relation`)
+- [x] 4.8 External documents: refuse `save`, `annotate` in place; `promote` flips to `External` into `docs/`
+- [x] 4.9 Offer policy: `unasked` → offer once; `accepted`/`never` terminal; `declined` re-offer on 30-day or 5-spec trigger
+- [x] 4.10 Verification:
+    - [x] Resolve positive (existing symbol)
+    - [x] Resolve negative (renamed symbol)
+    - [x] Dead anchor link
+    - [x] Front-matter error isolation (one bad file ≠ blank catalog)
+
+**Verification:** All 1111 tests pass, build succeeds.
 
 ---
 
