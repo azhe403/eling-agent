@@ -1,10 +1,20 @@
 namespace Eling.Core.Database;
 
+/// <summary>
+/// One column of a table.
+/// </summary>
+/// <param name="MaxLength">
+/// The declared length of a character or binary column (<c>varchar(50)</c>
+/// gives 50), or null for a type that has none. The schema view appends it to
+/// the type, so a reader can see how much a column holds without opening the
+/// database.
+/// </param>
 public sealed record ColumnSchema(
     string Name,
     string DataType,
     bool IsNullable,
-    bool IsPrimaryKey);
+    bool IsPrimaryKey,
+    int? MaxLength = null);
 
 public sealed record ForeignKeySchema(
     string Name,

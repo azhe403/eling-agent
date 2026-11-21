@@ -191,7 +191,7 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
             var columns = new List<ColumnSchema>();
             await using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = $"SELECT column_name, data_type, is_nullable, column_key FROM information_schema.columns WHERE {schemaFilter} AND table_name = @t ORDER BY ordinal_position;";
+                cmd.CommandText = $"SELECT column_name, data_type, is_nullable, column_key, character_maximum_length FROM information_schema.columns WHERE {schemaFilter} AND table_name = @t ORDER BY ordinal_position;";
                 cmd.CommandTimeout = 30;
                 AddSchemaParameter(cmd, database);
                 cmd.Parameters.AddWithValue("@t", tname);
@@ -202,7 +202,10 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
                     var dataType = reader.GetString(1);
                     var nullable = reader.GetString(2);
                     var key = reader.GetString(3);
-                    columns.Add(new ColumnSchema(name, dataType, string.Equals(nullable, "YES", StringComparison.OrdinalIgnoreCase), string.Equals(key, "PRI", StringComparison.OrdinalIgnoreCase)));
+                    var maxLength = HasDeclaredLength(dataType) && !reader.IsDBNull(4)
+                        ? (int)reader.GetInt64(4)
+                        : (int?)null;
+                    columns.Add(new ColumnSchema(name, dataType, string.Equals(nullable, "YES", StringComparison.OrdinalIgnoreCase), string.Equals(key, "PRI", StringComparison.OrdinalIgnoreCase), maxLength));
                 }
             }
 
@@ -269,6 +272,18 @@ public sealed class MySqlDatabaseAdapter : IDatabaseAdapter
             cmd.Parameters.AddWithValue("@schema", database);
         }
     }
+
+    /// <summary>
+    /// Whether a type carries a declared length a reader means by "length".
+    /// A text/blob column also reports a maximum length, but that is its
+    /// storage capacity, not something anyone declared - and the largest of
+    /// them overflows an int.
+    /// </summary>
+    private static bool HasDeclaredLength(string dataType) =>
+        dataType.Equals("varchar", StringComparison.OrdinalIgnoreCase)
+        || dataType.Equals("char", StringComparison.OrdinalIgnoreCase)
+        || dataType.Equals("varbinary", StringComparison.OrdinalIgnoreCase)
+        || dataType.Equals("binary", StringComparison.OrdinalIgnoreCase);
 
     private static string Categorize(Exception ex)
     {

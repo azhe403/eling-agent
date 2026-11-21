@@ -176,7 +176,11 @@ public sealed class SqliteDatabaseAdapter : IDatabaseAdapter
                     var type = reader.IsDBNull(2) ? "" : reader.GetString(2);
                     var notnull = reader.GetInt32(3);
                     var pk = reader.GetInt32(5);
-                    columns.Add(new ColumnSchema(name, type, notnull == 0, pk > 0));
+                    // SQLite keeps the length inside the declared type text -
+                    // "varchar(50)" - so PRAGMA reports the whole thing as the
+                    // type and there is no separate length to read.
+                    var maxLength = DeclaredLength(type);
+                    columns.Add(new ColumnSchema(name, type, notnull == 0, pk > 0, maxLength));
                 }
             }
 
@@ -232,5 +236,37 @@ public sealed class SqliteDatabaseAdapter : IDatabaseAdapter
         }
 
         return new DatabaseSchemaInfo(tables);
+    }
+
+    /// <summary>
+    /// The length written into a declared type, <c>varchar(50)</c> giving 50,
+    /// or null when the type carries none. SQLite only keeps the type as a
+    /// string, so this is the one place the length has to be read back out of
+    /// the text rather than reported alongside it.
+    /// </summary>
+    private static int? DeclaredLength(string declaredType)
+    {
+        var open = declaredType.IndexOf('(');
+        if (open < 0) return null;
+        var close = declaredType.IndexOf(')', open + 1);
+        if (close < 0) return null;
+
+        // Only a character or binary type declares a length. An int(11) is a
+        // display width and a decimal(10,2) is precision and scale - neither
+        // is how much text the column holds, and neither belongs in the
+        // length the schema view prints.
+        var token = declaredType.Substring(0, open).Trim();
+        var lengthBearing =
+            token.Equals("char", StringComparison.OrdinalIgnoreCase)
+            || token.Equals("character", StringComparison.OrdinalIgnoreCase)
+            || token.Equals("binary", StringComparison.OrdinalIgnoreCase)
+            || token.StartsWith("varchar", StringComparison.OrdinalIgnoreCase)
+            || token.StartsWith("character ", StringComparison.OrdinalIgnoreCase)
+            || token.StartsWith("varbinary", StringComparison.OrdinalIgnoreCase);
+        if (!lengthBearing) return null;
+
+        var inner = declaredType.Substring(open + 1, close - open - 1);
+        if (inner.Contains(',')) return null;
+        return int.TryParse(inner.Trim(), out var length) && length > 0 ? length : null;
     }
 }

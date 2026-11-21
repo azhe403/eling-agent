@@ -199,7 +199,7 @@ public sealed class PostgreSqlDatabaseAdapter : IDatabaseAdapter
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText =
-                    "SELECT column_name, data_type, is_nullable FROM information_schema.columns "
+                    "SELECT column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns "
                     + "WHERE table_schema = current_schema() AND table_name = @t ORDER BY ordinal_position;";
                 cmd.CommandTimeout = 30;
                 cmd.Parameters.AddWithValue("@t", tname);
@@ -209,11 +209,15 @@ public sealed class PostgreSqlDatabaseAdapter : IDatabaseAdapter
                     var name = reader.GetString(0);
                     var dataType = reader.GetString(1);
                     var nullable = reader.GetString(2);
+                    // character_maximum_length is only set when the type declares
+                    // a length - a bare "character varying" has none, so it stays null.
+                    var maxLength = reader.IsDBNull(3) ? (int?)null : (int)reader.GetInt32(3);
                     columns.Add(new ColumnSchema(
                         name,
                         dataType,
                         string.Equals(nullable, "YES", StringComparison.OrdinalIgnoreCase),
-                        pkColumns.Contains(name)));
+                        pkColumns.Contains(name),
+                        maxLength));
                 }
             }
 
