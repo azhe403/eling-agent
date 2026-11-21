@@ -66,6 +66,14 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="models:SidebarRow">
                             <Border CornerRadius="4" Padding="8,5" Margin="0,1">
+                                <Border.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Delete chat…"
+                                                  IsVisible="{Binding IsChat}"
+                                                  Command="{Binding $parent[ListBox].((vm:ChatViewModel)DataContext).PromptDeleteChatCommand}"
+                                                  CommandParameter="{Binding .}"/>
+                                    </ContextMenu>
+                                </Border.ContextMenu>
                                 <TextBlock Text="{Binding ItemDisplay}"
                                            FontSize="{Binding FontSize}"
                                            FontWeight="{Binding FontWeight}"
@@ -86,7 +94,7 @@
             <Border Grid.Row="0" Background="#161616" BorderBrush="#2a2a2a" BorderThickness="1" CornerRadius="6" Padding="12,8" Margin="0,0,0,8">
                 <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <TextBlock Text="≡ƒôü" FontSize="12" VerticalAlignment="Center"/>
+                        <TextBlock Text="📁" FontSize="12" VerticalAlignment="Center"/>
                         <TextBlock Text="{Binding FolderDisplayName}" FontSize="13" FontWeight="SemiBold" Foreground="#e5e7eb" VerticalAlignment="Center"/>
                         <TextBlock Text="{Binding ActiveWorkspace, StringFormat='({0})'}" FontSize="11" Foreground="#6b7280" VerticalAlignment="Center" Margin="4,0,0,0" TextTrimming="CharacterEllipsis" MaxWidth="350"/>
                     </StackPanel>
@@ -105,11 +113,14 @@
                               ItemsSource="{Binding Messages}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="models:ChatMessageRow">
-                            <Border Classes="memory-card" Margin="0,3,0,6">
+                            <Border Classes="chat-row" Margin="0,2,0,3"
+                                    HorizontalAlignment="{Binding RowHorizontalAlignment}"
+                                    MinWidth="{Binding RowMinWidth}"
+                                    MaxWidth="{Binding RowMaxWidth}">
                                 <Grid RowDefinitions="Auto,Auto,Auto">
                                     <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
                                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
-                                            <Border Background="{Binding HeaderColor}" CornerRadius="4" Padding="8,2">
+                                            <Border Background="{Binding HeaderColor}" CornerRadius="4" Padding="6,1">
                                                 <TextBlock Text="{Binding HeaderDisplay}" FontSize="11" FontWeight="SemiBold" Foreground="White"/>
                                             </Border>
                                             <TextBlock Text="{Binding ArgumentsDisplay, StringFormat='args: {0}'}"
@@ -137,14 +148,14 @@
                                                     Padding="6,2"/>
                                         </StackPanel>
                                     </Grid>
-                                <Border Grid.Row="1" Height="1" Background="#2a2a2a" Margin="0,8,0,8"
-                                        IsVisible="{Binding IsExpanded}"/>
+                                <Border Grid.Row="1" Height="1" Background="#2a2a2a" Margin="0,4,0,4"
+                                        IsVisible="{Binding ShowBody}"/>
 
                                 <!-- Message content body: parsed markdown blocks -->
                                 <ScrollViewer Grid.Row="2"
                                               MaxHeight="{Binding BodyMaxHeight}"
                                               VerticalScrollBarVisibility="Auto"
-                                              IsVisible="{Binding IsExpanded}">
+                                              IsVisible="{Binding ShowBody}">
                                     <Grid>
                                         <ItemsControl ItemsSource="{Binding TreeNodes}"
                                                       ItemTemplate="{StaticResource JsonNodeTemplate}"
@@ -170,7 +181,7 @@
                                                         CornerRadius="6"
                                                         Padding="10,8"
                                                         Margin="0,4,0,4">
-                                                    <Grid RowDefinitions="Auto,*">
+                                                    <Grid RowDefinitions="Auto,Auto,*">
                                                         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,6">
                                                             <TextBlock Grid.Column="0"
                                                                        Text="{Binding LanguageDisplay}"
@@ -179,19 +190,20 @@
                                                                        Foreground="#94a3b8"
                                                                        VerticalAlignment="Center"/>
                                                             <Button Grid.Column="1"
-                                                                    Content="≡ƒôï Copy"
+                                                                    Content="📋 Copy"
                                                                     Command="{Binding CopyToClipboard}"
                                                                     Classes="subtle"
                                                                     FontSize="10"
                                                                     Padding="6,2"/>
                                                         </Grid>
-                                                        <Border Grid.Row="0" Height="1" Background="#27272a" Margin="0,22,0,0"/>
-                                                        <SelectableTextBlock Grid.Row="1"
+                                                        <Border Grid.Row="1" Height="1" Background="#27272a" Margin="0,4,0,4"/>
+                                                        <SelectableTextBlock Grid.Row="2"
                                                                              Text="{Binding Content}"
                                                                              FontSize="12"
                                                                              FontFamily="Cascadia Code,Consolas,Menlo,monospace"
                                                                              Foreground="#e2e8f0"
-                                                                             TextWrapping="Wrap"/>
+                                                                             TextWrapping="Wrap"
+                                                                             VerticalAlignment="Top"/>
                                                     </Grid>
                                                 </Border>
                                             </Panel>
@@ -207,6 +219,24 @@
                 </ItemsControl>
             </ScrollViewer>
 
+            <!-- Delete confirmation overlay -->
+            <Border Grid.Row="1" IsVisible="{Binding IsDeletePromptOpen}" Background="#99000000">
+                <Panel>
+                    <Border VerticalAlignment="Center" HorizontalAlignment="Center"
+                            Background="#242424" BorderBrush="#3f3f46" BorderThickness="1"
+                            CornerRadius="8" Padding="18,14" MinWidth="340" MaxWidth="440">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="Delete chat" FontSize="13" FontWeight="SemiBold" Foreground="#e5e7eb"/>
+                            <TextBlock Text="{Binding DeletePromptText}" FontSize="12" Foreground="#cbd5e1" TextWrapping="Wrap"/>
+                            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="0,4,0,0">
+                                <Button Content="Cancel" Classes="subtle" Padding="12,5" Command="{Binding CancelDeleteChatCommand}"/>
+                                <Button Content="Delete" Padding="12,5" Background="#dc2626" Foreground="White" CornerRadius="6" Command="{Binding ConfirmDeleteChatCommand}"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </Panel>
+            </Border>
+
             <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,8,0,0">
                 <TextBox Grid.Column="0" x:Name="InputBox" Text="{Binding Input}" PlaceholderText="Ask about the project... (Enter to send, Shift+Enter for new line)"
                          AcceptsReturn="True" TextWrapping="Wrap"/>
@@ -214,8 +244,13 @@
                         Classes="primary" Margin="8,0,0,0" IsEnabled="{Binding !IsBusy}"/>
             </Grid>
 
-            <TextBlock Grid.Row="3" Text="{Binding StatusText}" FontSize="11" Foreground="#6b7280" Margin="0,4,0,0"
-                       IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+            <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="10" Margin="0,6,0,0" VerticalAlignment="Center">
+                <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" Width="110" Height="4" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#6b7280" VerticalAlignment="Center"
+                           IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                <Button Content="Retry" FontSize="11" Padding="8,2" Margin="8,0,0,0" Classes="subtle"
+                        IsVisible="{Binding HasRetry}" Command="{Binding RetryCommand}"/>
+            </StackPanel>
         </Grid>
     </Grid>
 

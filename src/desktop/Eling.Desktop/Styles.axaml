@@ -111,6 +111,15 @@
         <Setter Property="Background" Value="Transparent"/>
     </Style>
 
+    <!-- Chat row: the memory-card look with a fraction of the chrome -->
+    <Style Selector="Border.chat-row">
+        <Setter Property="Background" Value="#1a1a1a"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="10,7"/>
+        <Setter Property="BorderBrush" Value="#262626"/>
+        <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+
     <!-- Memory Card Styles -->
     <Style Selector="Border.memory-card">
         <Setter Property="Background" Value="#1c1c1c"/>

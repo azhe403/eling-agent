@@ -26,6 +26,17 @@ public class ChatViewModel : ViewModelBase, IDisposable
     private string _statusText = "";
     private SidebarRow? _selectedRow;
     private string _selectedModel = "";
+    private Avalonia.Threading.DispatcherTimer? _elapsedTimer;
+    private DateTime _turnStartedUtc;
+    private BusyPhase _phase = BusyPhase.Idle;
+
+    /// <summary>Workspaces whose sidebar chat list is expanded beyond the default five.</summary>
+    private readonly HashSet<string> _expandedSidebarWorkspaces = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Last fetched chat list per workspace, so expanding/collapsing the sidebar does not hit the network.</summary>
+    private readonly Dictionary<string, List<ChatSummaryDto>> _sidebarChatByWorkspace = new(StringComparer.OrdinalIgnoreCase);
+
+    private enum BusyPhase { Idle, Waiting, Tool, Writing, Done }
 
     public string SelectedModel
     {
@@ -70,6 +81,11 @@ public class ChatViewModel : ViewModelBase, IDisposable
         {
             this.RaiseAndSetIfChanged(ref _selectedRow, value);
             if (value == null) return;
+            if (value.IsMoreRow)
+            {
+                ToggleSidebarMore(value.Workspace);
+                return;
+            }
             if (value.IsChat && value.ChatId != null)
             {
                 SwitchToChat(value.Workspace, value.ChatId);
@@ -83,8 +99,12 @@ public class ChatViewModel : ViewModelBase, IDisposable
 
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> LoadCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> SendCommand { get; }
+    public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> RetryCommand { get; }
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> NewChatCommand { get; }
     public ReactiveCommand<string, System.Reactive.Unit> NewChatInWorkspaceCommand { get; }
+    public ReactiveCommand<SidebarRow, System.Reactive.Unit> PromptDeleteChatCommand { get; }
+    public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> ConfirmDeleteChatCommand { get; }
+    public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> CancelDeleteChatCommand { get; }
 
     public ChatViewModel(
         ElingApiClient apiClient,
@@ -114,6 +134,7 @@ public class ChatViewModel : ViewModelBase, IDisposable
 
         LoadCommand = ReactiveCommand.CreateFromTask(() => LoadAsync());
         SendCommand = ReactiveCommand.CreateFromTask(() => SendAsync());
+        RetryCommand = ReactiveCommand.CreateFromTask(RetryAsync);
         NewChatCommand = ReactiveCommand.Create(() =>
         {
             StartChatIn(ActiveWorkspace);
@@ -121,6 +142,13 @@ public class ChatViewModel : ViewModelBase, IDisposable
         NewChatInWorkspaceCommand = ReactiveCommand.Create<string>(workspace =>
         {
             StartChatIn(workspace);
+        });
+        PromptDeleteChatCommand = ReactiveCommand.Create<SidebarRow>(PromptDeleteChat);
+        ConfirmDeleteChatCommand = ReactiveCommand.CreateFromTask(ConfirmDeleteChatAsync);
+        CancelDeleteChatCommand = ReactiveCommand.Create(() =>
+        {
+            _pendingDeleteRow = null;
+            IsDeletePromptOpen = false;
         });
     }
 
@@ -195,7 +223,6 @@ public class ChatViewModel : ViewModelBase, IDisposable
             SidebarItems.Clear();
             foreach (var root in roots)
             {
-                SidebarItems.Add(new SidebarRow(true, FolderNameOf(root), root));
                 IReadOnlyList<ChatSummaryDto> chats = [];
                 try
                 {
@@ -206,12 +233,11 @@ public class ChatViewModel : ViewModelBase, IDisposable
                     _logger.LogWarning(ex, "Failed to load chats for {Workspace}", root);
                 }
 
-                foreach (var chat in chats)
-                {
-                    SidebarItems.Add(new SidebarRow(false, chat.Title, root, chat.Id, chat));
-                }
+                _sidebarChatByWorkspace[root] = chats.ToList();
             }
 
+            PruneSidebarCache(roots);
+            RebuildSidebarFromCache();
             this.RaisePropertyChanged(nameof(FolderDisplayName));
         }
         catch (Exception ex)
@@ -291,7 +317,14 @@ public class ChatViewModel : ViewModelBase, IDisposable
                     // History arrives collapsed: one large chat can carry megabytes of
                     // tool output, and expanding every row on open built a visual for
                     // all of it at once.
-                    session.Items.Add(new ChatMessageRow(message.Role, message.Text, message.ToolName, startsExpanded: false));
+                    // Tool payloads can carry megabytes of JSON; they stay collapsed.
+                    // User and assistant text is the conversation itself — loading it
+                    // collapsed after a restart read as "everything went blank".
+                    session.Items.Add(new ChatMessageRow(
+                        message.Role,
+                        message.Text,
+                        message.ToolName,
+                        startsExpanded: !string.Equals(message.Role, "Tool", StringComparison.OrdinalIgnoreCase)));
                 }
             }
 
@@ -360,6 +393,102 @@ public class ChatViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private void PruneSidebarCache(IReadOnlyList<string> roots)
+    {
+        var live = new HashSet<string>(roots, StringComparer.OrdinalIgnoreCase);
+        foreach (var key in _sidebarChatByWorkspace.Keys.ToList())
+        {
+            if (!live.Contains(key))
+            {
+                _sidebarChatByWorkspace.Remove(key);
+            }
+        }
+    }
+
+    internal void RebuildSidebarFromCache()
+    {
+        var previousChatId = _selectedRow?.ChatId;
+        SidebarItems.Clear();
+        foreach (var root in Workspaces)
+        {
+            SidebarItems.Add(new SidebarRow(true, FolderNameOf(root), root));
+            var chats = _sidebarChatByWorkspace.TryGetValue(root, out var cached) ? cached : [];
+            var expanded = _expandedSidebarWorkspaces.Contains(root);
+            foreach (var chat in expanded ? chats : chats.Take(5))
+            {
+                SidebarItems.Add(new SidebarRow(false, chat.Title, root, chat.Id, chat));
+            }
+
+            if (chats.Count > 5)
+            {
+                SidebarItems.Add(new SidebarRow(false, expanded
+                    ? "Show less"
+                    : $"+ {chats.Count - 5} more…", root, isMoreRow: true));
+            }
+        }
+
+        _selectedRow = previousChatId is null
+            ? null
+            : SidebarItems.FirstOrDefault(r => r.IsChat && r.ChatId == previousChatId);
+        this.RaisePropertyChanged(nameof(SelectedRow));
+    }
+
+    internal void ToggleSidebarMore(string workspace)
+    {
+        if (!_expandedSidebarWorkspaces.Remove(workspace))
+        {
+            _expandedSidebarWorkspaces.Add(workspace);
+        }
+
+        RebuildSidebarFromCache();
+    }
+
+    private void SetRetry(ChatSession session, string workspace, string text)
+    {
+        _pendingRetry = () =>
+        {
+            RemoveTrailingUnansweredUserRow(session);
+            return SendCoreAsync(session, workspace, text);
+        };
+        HasRetry = true;
+    }
+
+    /// <summary>
+    /// Removes the trailing run of rows from the last unanswered user row onward,
+    /// so a retry re-sends the message instead of duplicating it. Stops if an
+    /// assistant row sits after the user row (the turn already produced an
+    /// answer; retrying is a new turn there).
+    /// </summary>
+    private static void RemoveTrailingUnansweredUserRow(ChatSession session)
+    {
+        for (var i = session.Items.Count - 1; i >= 0; i--)
+        {
+            if (session.Items[i].IsAssistant)
+            {
+                return;
+            }
+
+            if (session.Items[i].IsUser)
+            {
+                while (session.Items.Count > i)
+                {
+                    session.Items.RemoveAt(session.Items.Count - 1);
+                }
+
+                return;
+            }
+        }
+    }
+
+    private async Task RetryAsync()
+    {
+        var pending = _pendingRetry;
+        _pendingRetry = null;
+        HasRetry = false;
+        if (pending is null) return;
+        await pending();
+    }
+
     private void SetStatus(ChatSession session, string text)
     {
         session.Status = text;
@@ -386,15 +515,27 @@ public class ChatViewModel : ViewModelBase, IDisposable
         var session = _current;
         var workspace = string.IsNullOrEmpty(session.Workspace) ? ActiveWorkspace : session.Workspace;
         if (session.IsBusy || string.IsNullOrWhiteSpace(Input) || string.IsNullOrEmpty(workspace)) return;
+        var text = Input.Trim();
+        _pendingRetry = () => SendCoreAsync(session, workspace, text);
+        await SendCoreAsync(session, workspace, text);
+    }
+
+    private async Task SendCoreAsync(ChatSession session, string workspace, string text)
+    {
         session.BeginTurn();
         var token = session.Cts!.Token;
-        var text = Input.Trim();
         Input = "";
+        _pendingRetry = null;
+        HasRetry = false;
         _logger.LogInformation("Chat send chatId={ChatId} messageLength={Length}", session.ChatId ?? "(new)", text.Length);
         this.RaisePropertyChanged(nameof(IsBusy));
 
         try
         {
+            _turnStartedUtc = DateTime.UtcNow;
+            _phase = BusyPhase.Waiting;
+            StartElapsedTimer(session);
+            SetStatus(session, "Menunggu model… 0s");
             session.Items.Add(new ChatMessageRow("User", text, null));
             ChatMessageRow? live = null;
             var toolCount = 0;
@@ -404,6 +545,12 @@ public class ChatViewModel : ViewModelBase, IDisposable
             {
                 void Apply()
                 {
+                    if (_phase != BusyPhase.Writing)
+                    {
+                        _phase = BusyPhase.Writing;
+                        StatusText = "Menulis…";
+                    }
+
                     if (live == null)
                     {
                         live = new ChatMessageRow("Assistant", delta, null);
@@ -430,7 +577,8 @@ public class ChatViewModel : ViewModelBase, IDisposable
                     case StreamStarted started:
                         session.ChatId = started.ChatId;
                         _sessions[started.ChatId] = session;
-                        SetStatus(session, "");
+                        _phase = BusyPhase.Waiting;
+                        SetStatus(session, $"Menunggu model… {ElapsedSeconds()}s");
                         break;
                     case StreamDelta delta:
                         AppendDelta(delta.Delta);
@@ -438,16 +586,21 @@ public class ChatViewModel : ViewModelBase, IDisposable
                     case StreamTool tool:
                         toolCount++;
                         live = null;
+                        _phase = BusyPhase.Tool;
+                        SetStatus(session, $"Menjalankan tool: {tool.Name}…");
                         var preview = tool.Arguments.Length > 160 ? tool.Arguments[..160] + "..." : tool.Arguments;
                         void AddTool()
                         {
                             var row = new ChatMessageRow("Tool", tool.Name + " " + preview, tool.Name, tool.Arguments);
                             session.Items.Add(row);
                             pendingTools.Enqueue(row);
+                            CollapseEarlierToolRows(session, row);
                         }
                         _uiDispatcher(AddTool);
                         break;
                     case StreamToolResult result:
+                        _phase = BusyPhase.Waiting;
+                        SetStatus(session, $"Menunggu model… {ElapsedSeconds()}s");
                         void ApplyResult()
                         {
                             var args = (string?)null;
@@ -462,6 +615,7 @@ public class ChatViewModel : ViewModelBase, IDisposable
                             updated.IsExpanded = true;
                             if (index >= 0) session.Items[index] = updated;
                             else session.Items.Add(updated);
+                            CollapseEarlierToolRows(session, updated);
                         }
                         _uiDispatcher(ApplyResult);
                         break;
@@ -490,12 +644,15 @@ public class ChatViewModel : ViewModelBase, IDisposable
                         }
                         _uiDispatcher(FinalizeAssistant);
 
-                        SetStatus(session, toolCount > 0 ? $"Completed with {toolCount} tool call(s)" : "");
+                        _phase = BusyPhase.Done;
+                        SetStatus(session, toolCount > 0 ? $"Selesai — {toolCount} tool call(s)" : "");
                         break;
                     }
                     case StreamFailed failed:
                         _logger.LogError("Chat stream failed: {Message}", failed.Message);
-                        SetStatus(session, failed.Message);
+                        _phase = BusyPhase.Done;
+                        SetStatus(session, $"Send failed: {failed.Message}");
+                        SetRetry(session, workspace, text);
                         break;
                 }
             }
@@ -512,9 +669,12 @@ public class ChatViewModel : ViewModelBase, IDisposable
         {
             _logger.LogError(ex, "Failed to send chat");
             SetStatus(session, $"Send failed: {ex.Message}");
+            SetRetry(session, workspace, text);
         }
         finally
         {
+            StopElapsedTimer();
+            _phase = BusyPhase.Idle;
             session.EndTurn();
             this.RaisePropertyChanged(nameof(IsBusy));
         }
@@ -522,6 +682,7 @@ public class ChatViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        StopElapsedTimer();
         foreach (var session in _sessions.Values)
         {
             session.CancelTurn();
@@ -530,7 +691,104 @@ public class ChatViewModel : ViewModelBase, IDisposable
         _current.CancelTurn();
         LoadCommand.Dispose();
         SendCommand.Dispose();
+        RetryCommand.Dispose();
         NewChatCommand.Dispose();
         NewChatInWorkspaceCommand.Dispose();
+        PromptDeleteChatCommand.Dispose();
+        ConfirmDeleteChatCommand.Dispose();
+        CancelDeleteChatCommand.Dispose();
+    }
+
+    private bool _isDeletePromptOpen;
+    private SidebarRow? _pendingDeleteRow;
+    private Func<Task>? _pendingRetry;
+    private bool _hasRetry;
+
+    public bool HasRetry
+    {
+        get => _hasRetry;
+        set => this.RaiseAndSetIfChanged(ref _hasRetry, value);
+    }
+
+    public bool IsDeletePromptOpen
+    {
+        get => _isDeletePromptOpen;
+        set => this.RaiseAndSetIfChanged(ref _isDeletePromptOpen, value);
+    }
+
+    public string DeletePromptText => _pendingDeleteRow is null
+        ? ""
+        : $"Delete chat “{_pendingDeleteRow.DisplayName}”? This can’t be undone.";
+
+    private void PromptDeleteChat(SidebarRow? row)
+    {
+        if (row is null || !row.IsChat || row.ChatId is null)
+        {
+            return;
+        }
+
+        _pendingDeleteRow = row;
+        IsDeletePromptOpen = true;
+        this.RaisePropertyChanged(nameof(DeletePromptText));
+    }
+
+    private async Task ConfirmDeleteChatAsync()
+    {
+        var row = _pendingDeleteRow;
+        _pendingDeleteRow = null;
+        IsDeletePromptOpen = false;
+        if (row?.ChatId is null)
+        {
+            return;
+        }
+
+        var ok = await _apiClient.DeleteChatAsync(row.ChatId);
+        if (!ok)
+        {
+            SetStatus(_current, "Chat delete failed — the backend probably does not have this endpoint yet (deploy needed).");
+            return;
+        }
+
+        _sessions.Remove(row.ChatId);
+        if (_current.ChatId == row.ChatId)
+        {
+            StartChatIn(ActiveWorkspace);
+        }
+
+        await RefreshSidebarAsync();
+        SetStatus(_current, "Chat deleted.");
+    }
+
+    private int ElapsedSeconds() => (int)(DateTime.UtcNow - _turnStartedUtc).TotalSeconds;
+
+    private static void CollapseEarlierToolRows(ChatSession session, ChatMessageRow keep)
+    {
+        foreach (var item in session.Items)
+        {
+            if (item.IsTool && !ReferenceEquals(item, keep) && item.IsExpanded)
+            {
+                item.IsExpanded = false;
+            }
+        }
+    }
+
+    private void StartElapsedTimer(ChatSession session)
+    {
+        StopElapsedTimer();
+        _elapsedTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _elapsedTimer.Tick += (_, _) =>
+        {
+            if (_phase == BusyPhase.Waiting && ReferenceEquals(session, _current))
+            {
+                StatusText = $"Menunggu model… {ElapsedSeconds()}s";
+            }
+        };
+        _elapsedTimer.Start();
+    }
+
+    private void StopElapsedTimer()
+    {
+        _elapsedTimer?.Stop();
+        _elapsedTimer = null;
     }
 }

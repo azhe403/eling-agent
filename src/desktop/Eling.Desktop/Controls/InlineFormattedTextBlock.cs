@@ -99,11 +99,19 @@ public sealed class InlineFormattedTextBlock : TextBlock
                 Text = value,
                 FontFamily = new FontFamily("Cascadia Code,Consolas,Menlo,monospace"),
                 FontSize = 12,
-                Foreground = new SolidColorBrush(Color.Parse("#a5d6a7"))
+                Foreground = new SolidColorBrush(Color.Parse("#a5d6a7")),
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top
             }
         };
 
-        return new InlineUIContainer(border);
+        var container = new InlineUIContainer(border)
+        {
+            // Inline UI containers can sit a few pixels above the text baseline on
+            // some renderers; anchoring to the text bottom keeps inline `code`
+            // from "floating" off the surrounding line.
+            BaselineAlignment = Avalonia.Media.BaselineAlignment.TextBottom
+        };
+        return container;
     }
 
     private static Run BuildEmphasised(string value, bool bold) => new(value)

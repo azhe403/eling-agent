@@ -817,6 +817,25 @@ public sealed class ElingApiClient
         return [];
     }
 
+    public async Task<bool> DeleteChatAsync(string id, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var client = GetClient();
+            var response = await client.DeleteAsync($"api/agent/chats/{id}", cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Chat delete for {Id} returned {StatusCode}", id, (int)response.StatusCode);
+            }
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting chat");
+            return false;
+        }
+    }
+
     public async Task<IReadOnlyList<ChatMessageDto>> GetChatAsync(string id, CancellationToken cancellationToken = default)
     {
         try

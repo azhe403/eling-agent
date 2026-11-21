@@ -27,6 +27,17 @@ public class ChatMessageRow : ReactiveObject
     public bool IsUser => string.Equals(Role, "User", StringComparison.OrdinalIgnoreCase);
     public bool IsAssistant => string.Equals(Role, "Assistant", StringComparison.OrdinalIgnoreCase);
     public bool IsTool => string.Equals(Role, "Tool", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>User rows are chat bubbles aligned right; everything else stretches.</summary>
+    public Avalonia.Layout.HorizontalAlignment RowHorizontalAlignment =>
+        IsUser ? Avalonia.Layout.HorizontalAlignment.Right : Avalonia.Layout.HorizontalAlignment.Stretch;
+
+    public double RowMaxWidth => IsUser ? 560 : double.PositiveInfinity;
+
+    public double RowMinWidth => IsUser ? 180 : 0;
+
+    /// <summary>Body visibility mirrors IsExpanded; the waiting state lives in the bottom busy bar, not in a row.</summary>
+    public bool ShowBody => IsExpanded;
     public bool IsToolError => IsTool && ToolOutputFormatter.IsError(Text);
 
     public string HeaderDisplay => IsUser ? "You" : IsAssistant ? "Eling" : $"🔧 Tool: {ToolName ?? "Execution"}";
