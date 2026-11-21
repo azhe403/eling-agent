@@ -1,0 +1,187 @@
+# Docs Management Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **Source spec:** [docs/superpowers/specs/2026-11-20-docs-management-design.md](../specs/2026-11-20-docs-management-design.md)
+> **Status:** `Proposed` → will become `In Progress` on first commit
+
+---
+
+## Phase 0 — Baseline & Guardrails
+
+- [ ] Run baseline build: `dotnet build --tl` (capture duration)
+- [ ] Verify no pre-existing `Eling.Core/Docs/` or `Mcp/Tools/Docs*.cs` or `Endpoints/DocsEndpoints.cs`
+- [ ] Record commit baseline: `git log -1 --oneline`
+
+---
+
+## Phase 1 — Eling.Core/Docs Domain
+
+**Target:** `src/backend/Eling.Core/Docs/` — pure domain, no infrastructure beyond `Ulid`, `YamlDotNet`, `Microsoft.Data.Sqlite`
+
+- [ ] 1.1 `DocId` (ULID + ownership/origin encoding) — `struct`, `ToString()`, `Parse()`
+- [ ] 1.2 `DocOwnership` enum (`Managed`, `External`)
+- [ ] 1.3 `DocOrigin` enum (`Current`, `Ancestor`, `Shard`, `Global`)
+- [ ] 1.4 `DocKind` enum (`Spec`, `Plan`, `Doc`, `Scratch`)
+- [ ] 1.5 `DocStatus` per kind — `SpecStatus`, `PlanStatus`, `DocStatus`, `ScratchStatus`
+- [ ] 1.6 `Doc` entity — id, ownership, origin, rel_path, kind, title, status, topic, order, superseded_by, steps_total, steps_done, file_hash, mtime
+- [ ] 1.7 `DocSection` entity — doc_id, anchor, heading, level, line_start, line_end, status, annotation
+- [ ] 1.8 `DocRef` entity — doc_id, anchor, raw_text, resolved_path, resolved_line, resolved
+- [ ] 1.9 `DocRelation` entity — source_id, target_id, kind (`Implements`, `Supersedes`, `References`)
+- [ ] 1.10 Front-matter parser (`DocFrontMatterParser`) — `kind`, `topic`, `order`, `status`, `supersededBy`, `spec`, `sections{}`, **malformed = non-fatal finding**
+- [ ] 1.11 External metadata inference (`ExternalDocInference`) — `kind` from folder, `topic` from parent folder, `status` default per kind, `read_order` from filename/heading — **never writes front-matter**
+- [ ] 1.12 Heading chunker — ATX headings, `_preamble` section, fenced code never splits, GitHub-flavoured anchors with `-1`/`-2` dedupe
+- [ ] 1.13 Plan checkbox counter — `- [ ]` / `- [x]` per section and per document, **fenced code excluded**
+- [ ] 1.14 Unit tests:
+    - [ ] Nested headings + fences + duplicate slugs + preamble
+    - [ ] Front-matter: present / absent / malformed
+    - [ ] Checkbox counting with fenced-code exclusion
+    - [ ] External inference produces kind/topic/status without writing front-matter
+
+---
+
+## Phase 2 — DocScopeResolver
+
+**Target:** `src/backend/Eling.Core/Docs/DocScopeResolver.cs` — **reuse** `ResolveCanonicalProjectRoot` and project-local shard helpers; **no duplicated path logic**
+
+- [ ] 2.1 `DocScopeResolver` class with `ResolveAsync(path)` → `(DocOwnership, DocOrigin, string relPath, string rootPath)`
+- [ ] 2.2 Reuse `Eling.Core.Scope.ResolveCanonicalProjectRoot`
+- [ ] 2.3 Reuse project-local shard naming: `DATA/eling/projects/<name>-<hash>/docs/`
+- [ ] 2.4 Ancestor `.eling` resolution — same as memory
+- [ ] 2.5 Verification:
+    - [ ] `docs/` → `External` + `Current`
+    - [ ] `.eling/docs/` → `Managed` + `Current`
+    - [ ] Ancestor `.eling/docs/` → `Managed` + `Ancestor`
+    - [ ] All worktrees of one repo share one shard
+
+---
+
+## Phase 3 — SqliteDocsIndex
+
+**Target:** `src/backend/Eling.Core/Docs/Storage/SqliteDocsIndex.cs` — modelled on `SqliteSkillIndex`
+
+- [ ] 3.1 Schema (`docs`, `doc_sections`, `doc_refs`, `doc_relations`, `doc_audit`, `doc_policy`, `doc_offer`)
+- [ ] 3.2 Dual FTS5: porter `unicode61` (tier-1) + trigram (tier-2)
+- [ ] 3.3 Cascade delete on doc removal
+- [ ] 3.4 `RebuildAsync()` from empty
+- [ ] 3.5 Migration handling (version table)
+- [ ] 3.6 Index placement per origin:
+    - [ ] `Shard` → `DATA/eling/projects/<name>-<hash>/docs.db`
+    - [ ] `Current` → `<repo>/.eling/docs-index.db` (**only when decision ≠ disabled**)
+    - [ ] `Global` → `DATA/eling/docs.db`
+    - [ ] `External` → indexed into workspace's covering DB; no own store
+- [ ] 3.7 Verification:
+    - [ ] FTS porter + trigram queries return correct tier ordering
+    - [ ] Cascade delete removes sections, refs, relations, audit
+    - [ ] Rebuild from empty produces same row counts
+
+---
+
+## Phase 4 — DocsService
+
+**Target:** `src/backend/Eling.Core/Docs/DocsService.cs`
+
+- [ ] 4.1 Scan + incremental by `file_hash` (skip unchanged)
+- [ ] 4.2 Section extraction + kind inference (managed: front-matter; external: positional)
+- [ ] 4.4 Plan progress (`steps_done` / `steps_total`)
+- [ ] 4.5 Reference resolver against `ICodebaseIndex` — conservative, identifier-shape filter
+- [ ] 4.6 Staleness report: unresolved refs, superseded-without-replacement, `draft` > 30 days, untouched > 180 days
+- [ ] 4.7 Audit write (every mutation: `doc_save`, `doc_annotate`, `promote`, `relation`)
+- [ ] 4.8 External documents: refuse `save`, `annotate` in place; `promote` flips to `External` into `docs/`
+- [ ] 4.9 Offer policy: `unasked` → offer once; `accepted`/`never` terminal; `declined` re-offer on 30-day or 5-spec trigger
+- [ ] 4.10 Verification:
+    - [ ] Resolve positive (existing symbol)
+    - [ ] Resolve negative (renamed symbol)
+    - [ ] Dead anchor link
+    - [ ] Front-matter error isolation (one bad file ≠ blank catalog)
+
+---
+
+## Phase 5 — Eleven MCP Tools
+
+**Target:** `src/backend/Eling.Backend/Mcp/Tools/Docs*.cs` + `ToolCatalog` registration
+
+- [ ] 5.1 `doc_search` — section-level FTS, filters `ownership`, `origin`, `kind`, `topic`, `status`, `pathPrefix`
+- [ ] 5.2 `doc_read` — section / whole doc / `mode: map` heading tree
+- [ ] 5.3 `doc_list` — grouped by topic, ordered by `read_order`, with ownership, origin, kind, plan progress
+- [ ] 5.4 `doc_save` — create/update managed doc, auto front-matter; `promote: true` writes to `docs/`
+- [ ] 5.5 `doc_annotate` — per-section status + annotation on managed; refused for external
+- [ ] 5.6 `doc_staleness` — findings; covers external too
+- [ ] 5.7 `doc_audit` — entries per managed doc or scope; empty for external
+- [ ] 5.8 `doc_index` — incremental rescan within allowed scope
+- [ ] 5.9 `doc_relation` — read/write spec↔plan edges both directions; write only between managed
+- [ ] 5.10 `doc_scope_policy` — inspect/change coverage + decision; include requires approval
+- [ ] 5.11 `doc_offer_managed` — read/raise/answer offer policy; project-scoped state
+- [ ] 5.12 Tool schema tests, scope defaulting, `promote` path safety, policy change refused without approval
+
+---
+
+## Phase 6 — Scope Policy + Offer Policy Stores
+
+**Target:** `src/backend/Eling.Core/Docs/Policy/` + `SqliteDocsIndex` policy tables
+
+- [ ] 6.1 `DocScopePolicyStore` — include/exclude patterns, `decision` (`ask`/`disabled`/`clear`), machine-local JSON
+- [ ] 6.2 Pattern matcher — default scans only `docs/**` and `.eling/docs/**`; `exclude` overrides `include`
+- [ ] 6.3 `DocOfferPolicyStore` — `unasked`/`accepted`/`declined`/`never`, `askedAt`, `answeredAt`, `specsSinceAsk`
+- [ ] 6.4 `.superpowers/sdd/` verified **absent** from default scan
+- [ ] 6.5 `decision: disabled` verified: **zero repo footprint** — no `.eling/docs/`, no `.eling/docs-index.db`, `doc_save` lands in shard, `docs/**` remains indexed
+- [ ] 6.6 Offer fires once when `unasked`; `accepted`/`never` terminal; re-raises on 30-day or 5-spec trigger; silent under `decision: disabled`
+- [ ] 6.7 Opt-in adds scratch as `archived` by default
+
+---
+
+## Phase 7 — Spec ↔ Plan Relation
+
+**Target:** `DocsService` relation methods + `DocRelation` entity
+
+- [ ] 7.1 Front-matter `spec:` field → forward edge `Implements`
+- [ ] 7.2 `**Spec:**` header in plan → reverse edge
+- [ ] 7.3 Inline link `[Spec](...)` → edge `References`
+- [ ] 7.4 `doc_relation` tool reads both directions
+- [ ] 7.5 Verification: plan→spec and spec→plans both resolve; `Implements` vs `Supersedes` distinguished
+
+---
+
+## Phase 8 — Watcher + SSE
+
+**Target:** `src/backend/Eling.Backend/Mcp/Tools/DocsWatcher.cs` + SSE publication
+
+- [ ] 8.1 `FileSystemWatcher` on indexed paths
+- [ ] 8.2 Changed-file-only reindex + debounce (500ms)
+- [ ] 8.3 SSE event shape parity with Skills (`docs.changed`, `docs.indexed`)
+- [ ] 8.4 Verification: edit a managed doc → SSE fires → `doc_search` reflects change
+
+---
+
+## Phase 9 — REST Endpoints + Dashboard Docs Tab
+
+**Target:** `src/backend/Eling.Backend/Endpoints/DocsEndpoints.cs` + `eling-dashboard/src/app/docs/`
+
+- [ ] 9.1 Reads: `GET /api/docs/tree`, `/doc`, `/search`, `/staleness`, `/audit`, `/policy`, `/offer`
+- [ ] 9.2 Mutations: `POST /api/docs`, `PUT /api/docs/{id}`, `DELETE /api/docs/{id}`, `POST /api/docs/{id}/annotate`, `/promote`, `/relation`
+- [ ] 9.3 Policy: `PUT /api/docs/policy`, `PUT /api/docs/offer` (full replacement)
+- [ ] 9.4 `POST /api/docs/reindex`
+- [ ] 9.5 Every mutation via `DocsService` → external target = 409 `doc_read_only`; managed = audit row with actor
+- [ ] 9.6 Dashboard: topic tree with ownership badge (`Managed`/`External`), origin badge (`Ancestor`), kind chip, plan progress, spec approval, section TOC, editor for managed, read-only for external, stale-refs panel, audit drawer (managed only)
+- [ ] 9.7 `pnpm --filter eling-dashboard exec tsc --noEmit` passes; **no `pnpm build` while dev server runs on 4427**
+
+---
+
+## Definition of Done (per phase)
+
+- [ ] All unit tests pass (`dotnet test --filter PhaseX`)
+- [ ] `dotnet build --tl` passes with no new warnings
+- [ ] No `TODO` or `throw new NotImplementedException()` left in the phase's files
+- [ ] Commit message follows conventional format with phase scope
+
+---
+
+## Final Verification (after Phase 9)
+
+- [ ] Full test suite: `dotnet test`
+- [ ] Build: `dotnet build --tl` — no warnings
+- [ ] Dashboard type-check: `pnpm --filter eling-dashboard exec tsc --noEmit`
+- [ ] Integration smoke: create managed spec → promote → verify external in `docs/` → search finds it → annotate refused → audit trail exists
+- [ ] Offer policy: decline → write 5 specs → offer reappears → accept → no more offers
+- [ ] `decision: disabled` → verify zero `.eling/docs/` footprint, shard used, `docs/**` still indexed
+- [ ] Commit spec + comparison + plan together: `git add docs/superpowers/specs/2026-11-20-docs-management-design.md docs/artifact-subsystems.md docs/superpowers/plans/2026-11-20-docs-management-implementation.md && git commit -m "docs: add docs management spec, subsystem comparison, and implementation plan"`
