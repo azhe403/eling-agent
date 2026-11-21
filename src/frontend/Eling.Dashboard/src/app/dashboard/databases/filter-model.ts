@@ -165,6 +165,7 @@ export interface BrowseResponse {
   total: number | null
   fromCache?: boolean
   cachedAt?: string | null
+  cacheTtlSeconds?: number
 }
 
 const firstWord = (dataType: string): string => {
