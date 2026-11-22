@@ -14,9 +14,9 @@ using Eling.Core.Scope;
 /// </summary>
 public sealed class DocsService
 {
-    private readonly IDocsIndex _currentIndex;
-    private readonly IDocsIndex _shardIndex;
-    private readonly IDocsIndex _globalIndex;
+    private readonly IDocsIndex _docsCurrentIndex;
+    private readonly IDocsIndex _docsShardIndex;
+    private readonly IDocsIndex _docsGlobalIndex;
     private readonly DocScopeResolver _docResolver;
     private readonly ICodebaseIndex? _codebaseIndex;
     private readonly ILogger<DocsService> _logger;
@@ -30,9 +30,9 @@ public sealed class DocsService
         ICodebaseIndex? codebaseIndex = null,
         ILogger<DocsService>? logger = null)
     {
-        _currentIndex = currentIndex ?? throw new ArgumentNullException(nameof(currentIndex));
-        _shardIndex = shardIndex ?? throw new ArgumentNullException(nameof(shardIndex));
-        _globalIndex = globalIndex ?? throw new ArgumentNullException(nameof(globalIndex));
+        _docsCurrentIndex = currentIndex ?? throw new ArgumentNullException(nameof(currentIndex));
+        _docsShardIndex = shardIndex ?? throw new ArgumentNullException(nameof(shardIndex));
+        _docsGlobalIndex = globalIndex ?? throw new ArgumentNullException(nameof(globalIndex));
         _docResolver = scopeResolver ?? throw new ArgumentNullException(nameof(scopeResolver));
         _codebaseIndex = codebaseIndex;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<DocsService>.Instance;
@@ -49,16 +49,16 @@ public sealed class DocsService
             var decision = await GetScopeDecisionAsync(ct);
             if (decision == ScopeDecision.Disabled)
             {
-                return _shardIndex;
+                return _docsShardIndex;
             }
-            return _currentIndex;
+            return _docsCurrentIndex;
         }
         return origin switch
         {
-            DocOrigin.Shard => _shardIndex,
-            DocOrigin.Global => _globalIndex,
-            DocOrigin.Ancestor => _shardIndex, // Ancestor uses shard for now
-            _ => _shardIndex
+            DocOrigin.Shard => _docsShardIndex,
+            DocOrigin.Global => _docsGlobalIndex,
+            DocOrigin.Ancestor => _docsShardIndex, // Ancestor uses shard for now
+            _ => _docsShardIndex
         };
     }
 
@@ -624,16 +624,16 @@ public sealed class DocsService
     public async Task<StalenessReport> GetStalenessReportAsync(CancellationToken ct = default)
     {
         // Use shard index which contains all managed documents
-        var allDocs = await _shardIndex.ListAsync();
+        var allDocs = await _docsShardIndex.ListAsync();
         var findings = new List<StalenessFinding>();
 
         foreach (var docItem in allDocs)
         {
-            var doc = await _shardIndex.GetAsync(docItem.DocId);
+            var doc = await _docsShardIndex.GetAsync(docItem.DocId);
             if (doc == null) continue;
 
             // Check unresolved references
-            var refs = await _shardIndex.GetRefsAsync(doc.Id.Value);
+            var refs = await _docsShardIndex.GetRefsAsync(doc.Id.Value);
             foreach (var refItem in refs)
             {
                 if (!refItem.Resolved)
@@ -651,7 +651,7 @@ public sealed class DocsService
             // Check superseded without replacement
             if (!string.IsNullOrEmpty(doc.SupersededBy))
             {
-                var replacement = await _shardIndex.GetAsync(DocId.Create(doc.Ownership, doc.Origin, doc.SupersededBy!).Value);
+                var replacement = await _docsShardIndex.GetAsync(DocId.Create(doc.Ownership, doc.Origin, doc.SupersededBy!).Value);
                 if (replacement == null)
                 {
                     findings.Add(new StalenessFinding(
@@ -701,7 +701,7 @@ public sealed class DocsService
     public async Task<IReadOnlyList<DocAuditEntry>> GetAuditAsync(string? docId = null, int limit = 100, CancellationToken ct = default)
     {
         // Use shard index for audit (contains all managed docs)
-        return await _shardIndex.GetAuditAsync(docId, limit);
+        return await _docsShardIndex.GetAuditAsync(docId, limit);
     }
 
     /// <summary>
@@ -810,7 +810,7 @@ public sealed class DocsService
     public async Task<ScopeDecision> GetScopeDecisionAsync(CancellationToken ct = default)
     {
         // Use shard index for policy (always available)
-        var policy = await _shardIndex.GetPolicyAsync("decision");
+        var policy = await _docsShardIndex.GetPolicyAsync("decision");
         if (policy != null)
         {
             try
@@ -836,7 +836,7 @@ public sealed class DocsService
     private async Task<CoveragePolicy> GetEffectiveCoverageAsync(CancellationToken ct)
     {
         // Use shard index for policy (always available)
-        var policy = await _shardIndex.GetPolicyAsync("coverage");
+        var policy = await _docsShardIndex.GetPolicyAsync("coverage");
         if (policy != null)
         {
             try
@@ -1141,7 +1141,7 @@ public sealed class DocsService
     public async Task<CoveragePolicy> GetCoveragePolicyAsync(CancellationToken ct = default)
     {
         // Use shard index for policy (always available)
-        var policy = await _shardIndex.GetPolicyAsync("coverage");
+        var policy = await _docsShardIndex.GetPolicyAsync("coverage");
         if (policy != null)
         {
             try
@@ -1167,12 +1167,12 @@ public sealed class DocsService
     {
         var policyJson = System.Text.Json.JsonSerializer.Serialize(policy);
         // Use shard index for policy (always available)
-        await _shardIndex.SetPolicyAsync(new DocPolicy("coverage", policyJson, DateTimeOffset.UtcNow));
+        await _docsShardIndex.SetPolicyAsync(new DocPolicy("coverage", policyJson, DateTimeOffset.UtcNow));
 
         if (decision.HasValue)
         {
             var decisionPolicy = new DocPolicy("decision", decision.Value.ToString().ToLowerInvariant(), DateTimeOffset.UtcNow);
-            await _shardIndex.SetPolicyAsync(decisionPolicy);
+            await _docsShardIndex.SetPolicyAsync(decisionPolicy);
         }
     }
 
@@ -1216,6 +1216,6 @@ public sealed class DocsService
             DateTimeOffset.UtcNow);
 
         // Use shard index for audit (always available)
-        await _shardIndex.WriteAuditAsync(entry);
+        await _docsShardIndex.WriteAuditAsync(entry);
     }
 }
