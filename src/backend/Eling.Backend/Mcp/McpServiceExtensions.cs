@@ -22,6 +22,8 @@ using Eling.Core.Scope;
 using Eling.Core.Skill;
 using Eling.Core.Skill.Scanning;
 using Eling.Core.Skill.Storage;
+using Eling.Core.Docs;
+using Eling.Core.Docs.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -56,6 +58,10 @@ public static class McpServiceExtensions
 
         // Skill subsystem: machine-global catalog, dedicated index.
         AddSkillServices(services);
+
+        // Docs subsystem: document catalog with FTS5, scope policy, offer policy.
+        var chain = new ScopeChain(projectScope.Root, [projectScope]);
+        AddDocsServices(services, chain);
 
         // Scope policy & merger — application layer owns scope decisions
         services.AddSingleton<IMemoryScopePolicy, MemoryScopePolicy>();
@@ -132,6 +138,9 @@ public static class McpServiceExtensions
 
         // Skill subsystem: machine-global catalog, dedicated index.
         AddSkillServices(services);
+
+        // Docs subsystem: document catalog with FTS5, scope policy, offer policy.
+        AddDocsServices(services, chain);
 
         // Scope policy & merger — application layer owns scope decisions
         services.AddSingleton<IMemoryScopePolicy, MemoryScopePolicy>();
@@ -267,6 +276,34 @@ public static class McpServiceExtensions
         // Fire-and-forget reconciliation at host start; never blocks boot and
         // never takes the host down on a scan failure (see the service).
         services.AddHostedService<Eling.Backend.Bootstrap.SkillCatalogScanHostedService>();
+    }
+
+    /// <summary>
+    /// Registers the docs subsystem: document catalog with dual FTS5 (porter + trigram),
+    /// scope policy (coverage patterns + decision), offer policy, and audit trail.
+    /// The index placement respects the scope decision (ask/disabled/clear).
+    /// </summary>
+    private static void AddDocsServices(IServiceCollection services, ScopeChain chain)
+    {
+        var localCanonicalRoot = CanonicalProjectRoot.Resolve(chain.Cwd);
+        var scopeResolver = new DocScopeResolver(localCanonicalRoot);
+
+        // Index paths per origin — decision affects Current origin at runtime via GetScopeDecisionAsync
+        var currentDbPath = Path.Combine(localCanonicalRoot, ElingPaths.DotElingDirName, "docs-index.db");
+        var shardDbPath = Path.Combine(ElingPaths.ResolveProjectLocalDir(localCanonicalRoot), "docs.db");
+        var globalDbPath = Path.Combine(ElingPaths.ResolveDataDir(), "docs.db");
+
+        // Always register all three origins as keyed services for cross-origin queries
+        services.TryAddKeyedSingleton<IDocsIndex>("current", (sp, _) => new SqliteDocsIndex(currentDbPath));
+        services.TryAddKeyedSingleton<IDocsIndex>("shard", (sp, _) => new SqliteDocsIndex(shardDbPath));
+        services.TryAddKeyedSingleton<IDocsIndex>("global", (sp, _) => new SqliteDocsIndex(globalDbPath));
+
+        // Register the primary index as the shard (always available); DocsService will
+        // resolve the appropriate origin at runtime based on the scope decision.
+        services.TryAddSingleton<IDocsIndex>(sp => sp.GetRequiredKeyedService<IDocsIndex>("shard"));
+
+        services.AddSingleton(scopeResolver);
+        services.AddScoped<DocsService>();
     }
 
     private static void AddShellConfigStore(IServiceCollection services, UserScope userScope)

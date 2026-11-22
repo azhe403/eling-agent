@@ -12,12 +12,12 @@ namespace Eling.Backend.Mcp.Tools;
 [McpServerToolType]
 public sealed class DocsWriteTool
 {
-    private readonly DocsService _service;
+    private readonly DocsService _docsService;
     private readonly ILogger<DocsWriteTool>? _logger;
 
     public DocsWriteTool(DocsService service, ILogger<DocsWriteTool>? logger = null)
     {
-        _service = service ?? throw new ArgumentNullException(nameof(service));
+        _docsService = service ?? throw new ArgumentNullException(nameof(service));
         _logger = logger;
     }
 
@@ -65,7 +65,7 @@ public sealed class DocsWriteTool
             }
 
             // Create managed document
-            var doc = await _service.CreateDocumentAsync(trimmedRelPath, content, docKind, topic, statusValue, order ?? 0);
+            var doc = await _docsService.CreateDocumentAsync(trimmedRelPath, content, docKind, topic, statusValue, order ?? 0);
 
             _logger?.LogInformation("doc_save created managed doc '{Id}' at '{RelPath}'", doc.Id.Value, doc.RelPath);
             return DocSaveResponse.From(doc, "created");
@@ -103,7 +103,7 @@ public sealed class DocsWriteTool
             }
 
             var id = DocId.Parse(docId);
-            var success = await _service.AnnotateSectionAsync(id.Value, anchor.Trim(), status ?? 0, annotation?.Trim(), actor);
+            var success = await _docsService.AnnotateSectionAsync(id.Value, anchor.Trim(), status ?? 0, annotation?.Trim(), actor);
 
             _logger?.LogInformation("doc_annotate {Success} for '{DocId}' anchor '{Anchor}'", success, docId, anchor);
             return new DocAnnotateResponse(success);
@@ -133,7 +133,7 @@ public sealed class DocsWriteTool
             }
 
             var id = DocId.Parse(docId);
-            var promoted = await _service.PromoteDocumentAsync(id.Value, actor);
+            var promoted = await _docsService.PromoteDocumentAsync(id.Value, actor);
 
             if (promoted == null)
             {
@@ -181,7 +181,7 @@ public sealed class DocsWriteTool
             var target = DocId.Parse(targetId);
             var relationKind = ParseRelationKind(kind);
 
-            await _service.AddRelationAsync(source.Value, target.Value, relationKind, actor);
+            await _docsService.AddRelationAsync(source.Value, target.Value, relationKind, actor);
 
             _logger?.LogInformation("doc_relation added {Kind} {Source} -> {Target}", kind, sourceId, targetId);
             return new DocRelationResponse(true);
@@ -205,7 +205,7 @@ public sealed class DocsWriteTool
     {
         try
         {
-            var result = await _service.ScanAsync(full, paths?.Select(p => p.Trim().Replace('\\', '/')).ToList());
+            var result = await _docsService.ScanAsync(full, paths?.Select(p => p.Trim().Replace('\\', '/')).ToList());
 
             _logger?.LogInformation("doc_index {Full} indexed={Indexed} skipped={Skipped} deleted={Deleted} errors={Errors}", full, result.Indexed, result.Skipped, result.Deleted, result.Errors);
             return DocIndexResponse.From(result);
@@ -232,7 +232,7 @@ public sealed class DocsWriteTool
             if (trimmedAction == "get")
             {
                 // Get current policy from index
-                var policy = await _service.GetCoveragePolicyAsync();
+                var policy = await _docsService.GetCoveragePolicyAsync();
                 return ScopePolicyResponse.From(policy);
             }
 
@@ -249,7 +249,20 @@ public sealed class DocsWriteTool
                     Exclude = exclude?.Select(p => p.Trim().Replace('\\', '/')).ToArray() ?? Array.Empty<string>()
                 };
 
-                await _service.SetCoveragePolicyAsync(newPolicy, decision?.Trim().ToLowerInvariant());
+                // Parse decision string to enum
+                ScopeDecision? decisionEnum = null;
+                if (!string.IsNullOrWhiteSpace(decision))
+                {
+                    var trimmed = decision.Trim().ToLowerInvariant();
+                    decisionEnum = trimmed switch
+                    {
+                        "disabled" => ScopeDecision.Disabled,
+                        "clear" => ScopeDecision.Clear,
+                        _ => ScopeDecision.Ask
+                    };
+                }
+
+                await _docsService.SetCoveragePolicyAsync(newPolicy, decisionEnum);
 
                 _logger?.LogInformation("doc_scope_policy set include={Include} exclude={Exclude} decision={Decision}", 
                     string.Join(",", newPolicy.Include), string.Join(",", newPolicy.Exclude), decision ?? "none");
@@ -277,7 +290,7 @@ public sealed class DocsWriteTool
 
             if (trimmedAction == "check")
             {
-                var result = await _service.CheckOfferPolicyAsync();
+                var result = await _docsService.CheckOfferPolicyAsync();
                 return OfferResponse.FromCheck(result);
             }
 
@@ -289,7 +302,7 @@ public sealed class DocsWriteTool
                 }
 
                 var answerState = ParseOfferState(answer);
-                await _service.AnswerOfferAsync(answerState);
+                await _docsService.AnswerOfferAsync(answerState);
 
                 _logger?.LogInformation("doc_offer_managed answered '{Answer}'", answer);
                 return OfferResponse.FromAnswer(answerState);
@@ -315,7 +328,7 @@ public sealed class DocsWriteTool
     {
         // This is a simplified external creation - in reality would use the service's promote logic
         // For now, we'll use the index directly since it's external
-        var fileHash = _service.ComputeHash(content);
+        var fileHash = _docsService.ComputeHash(content);
         var mtime = DateTimeOffset.UtcNow;
         
         // We'll create a minimal external doc
@@ -347,7 +360,7 @@ public sealed class DocsWriteTool
             mtime);
 
         // Write file to docs/
-        var absolutePath = Path.Combine(_service.GetWorkspaceRoot(), relPath);
+        var absolutePath = Path.Combine(_docsService.GetWorkspaceRoot(), relPath);
         Directory.CreateDirectory(Path.GetDirectoryName(absolutePath)!);
         await File.WriteAllTextAsync(absolutePath, content);
 
@@ -355,7 +368,7 @@ public sealed class DocsWriteTool
         var sections = new List<Eling.Core.Docs.DocSection>();
         var refs = new List<Eling.Core.Docs.DocRef>();
         
-        await _service.IndexExternalAsync(doc, sections, refs);
+        await _docsService.IndexExternalAsync(doc, sections, refs);
 
         var afterJson = System.Text.Json.JsonSerializer.Serialize(new
         {
@@ -375,7 +388,7 @@ public sealed class DocsWriteTool
             doc.MTime
         });
 
-        await _service.WriteAuditAsync(doc.Id.Value, "promote", null, afterJson, actor);
+        await _docsService.WriteAuditAsync(doc.Id.Value, "promote", null, afterJson, actor);
 
         return doc;
     }

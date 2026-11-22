@@ -3,6 +3,7 @@ namespace Eling.Core.Docs;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Security.Cryptography;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Eling.Core.Codebase;
 using Eling.Core.Scope;
@@ -13,23 +14,59 @@ using Eling.Core.Scope;
 /// </summary>
 public sealed class DocsService
 {
-    private readonly IDocsIndex _index;
-    private readonly DocScopeResolver _scopeResolver;
+    private readonly IDocsIndex _currentIndex;
+    private readonly IDocsIndex _shardIndex;
+    private readonly IDocsIndex _globalIndex;
+    private readonly DocScopeResolver _docResolver;
     private readonly ICodebaseIndex? _codebaseIndex;
     private readonly ILogger<DocsService> _logger;
     private readonly SemaphoreSlim _scanGate = new(1, 1);
 
     public DocsService(
-        IDocsIndex index,
+        [FromKeyedServices("current")] IDocsIndex currentIndex,
+        [FromKeyedServices("shard")] IDocsIndex shardIndex,
+        [FromKeyedServices("global")] IDocsIndex globalIndex,
         DocScopeResolver scopeResolver,
         ICodebaseIndex? codebaseIndex = null,
         ILogger<DocsService>? logger = null)
     {
-        _index = index ?? throw new ArgumentNullException(nameof(index));
-        _scopeResolver = scopeResolver ?? throw new ArgumentNullException(nameof(scopeResolver));
+        _currentIndex = currentIndex ?? throw new ArgumentNullException(nameof(currentIndex));
+        _shardIndex = shardIndex ?? throw new ArgumentNullException(nameof(shardIndex));
+        _globalIndex = globalIndex ?? throw new ArgumentNullException(nameof(globalIndex));
+        _docResolver = scopeResolver ?? throw new ArgumentNullException(nameof(scopeResolver));
         _codebaseIndex = codebaseIndex;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<DocsService>.Instance;
     }
+
+    /// <summary>
+    /// Gets the index for the given origin, respecting the scope decision.
+    /// When decision is Disabled, Current origin routes to Shard.
+    /// </summary>
+    private async Task<IDocsIndex> GetIndexForOriginAsync(DocOrigin origin, CancellationToken ct = default)
+    {
+        if (origin == DocOrigin.Current)
+        {
+            var decision = await GetScopeDecisionAsync(ct);
+            if (decision == ScopeDecision.Disabled)
+            {
+                return _shardIndex;
+            }
+            return _currentIndex;
+        }
+        return origin switch
+        {
+            DocOrigin.Shard => _shardIndex,
+            DocOrigin.Global => _globalIndex,
+            DocOrigin.Ancestor => _shardIndex, // Ancestor uses shard for now
+            _ => _shardIndex
+        };
+    }
+
+    /// <summary>
+    /// Gets the index for a document's origin.
+    /// </summary>
+    private async Task<IDocsIndex> GetIndexForDocAsync(Doc doc, CancellationToken ct = default)
+        => await GetIndexForOriginAsync(doc.Origin, ct);
 
     /// <summary>
     /// Scans the workspace for documents and indexes them incrementally.
@@ -47,7 +84,7 @@ public sealed class DocsService
 
         try
         {
-            var workspaceRoot = _scopeResolver.WorkspaceRoot;
+            var workspaceRoot = _docResolver.WorkspaceRoot;
             var coverage = await GetEffectiveCoverageAsync(ct);
 
             // Determine files to scan
@@ -72,7 +109,8 @@ public sealed class DocsService
             var existingDocs = new HashSet<string>();
             if (!full)
             {
-                var allDocs = await _index.ListAsync();
+                var index = await GetIndexForOriginAsync(DocOrigin.Current, ct);
+                var allDocs = await index.ListAsync();
                 foreach (var doc in allDocs)
                 {
                     existingDocs.Add(doc.RelPath);
@@ -94,7 +132,8 @@ public sealed class DocsService
                     // Check if already indexed with same hash
                     if (!full)
                     {
-                        var existing = await _index.GetAsync(DocId.Create(DocOwnership.Managed, DocOrigin.Current, relPath).Value);
+                        var index = await GetIndexForOriginAsync(DocOrigin.Current, ct);
+                        var existing = await index.GetAsync(DocId.Create(DocOwnership.Managed, DocOrigin.Current, relPath).Value);
                         if (existing?.FileHash == fileHash)
                         {
                             skipped++;
@@ -112,7 +151,8 @@ public sealed class DocsService
 
                     if (doc != null)
                     {
-                        await _index.IndexAsync(doc, sections, refs);
+                        var index = await GetIndexForOriginAsync(DocOrigin.Current, ct);
+                        await index.IndexAsync(doc, sections, refs);
                         indexed++;
                         existingDocs.Remove(relPath);
                     }
@@ -136,7 +176,8 @@ public sealed class DocsService
                 foreach (var deletedRelPath in existingDocs)
                 {
                     var docId = DocId.Create(DocOwnership.Managed, DocOrigin.Current, deletedRelPath).Value;
-                    await _index.DeleteAsync(docId);
+                    var index = await GetIndexForOriginAsync(DocOrigin.Current, ct);
+                    await index.DeleteAsync(docId);
                     deleted++;
                 }
             }
@@ -160,7 +201,7 @@ public sealed class DocsService
         DateTimeOffset mtime,
         CancellationToken ct = default)
     {
-        var resolution = _scopeResolver.Resolve(absolutePath);
+        var resolution = _docResolver.Resolve(absolutePath);
 
         // Parse front-matter if managed
         DocFrontMatter? frontMatter = null;
@@ -323,9 +364,9 @@ public sealed class DocsService
         int order = 0,
         CancellationToken ct = default)
     {
-        var workspaceRoot = _scopeResolver.WorkspaceRoot;
+        var workspaceRoot = _docResolver.WorkspaceRoot;
         var absolutePath = Path.Combine(workspaceRoot, relPath);
-        var resolution = _scopeResolver.Resolve(absolutePath);
+        var resolution = _docResolver.Resolve(absolutePath);
 
         if (resolution.Ownership != DocOwnership.Managed)
         {
@@ -341,7 +382,8 @@ public sealed class DocsService
         var refs = parseResult.Refs;
         if (doc == null) throw new InvalidOperationException("Failed to parse document");
 
-        await _index.IndexAsync(doc, sections, refs);
+        var index = await GetIndexForOriginAsync(resolution.Origin, ct);
+        await index.IndexAsync(doc, sections, refs);
         await WriteAuditDocAsync(doc.Id.Value, "create", null, doc, "docs_service");
 
         return doc;
@@ -355,7 +397,8 @@ public sealed class DocsService
         string content,
         CancellationToken ct = default)
     {
-        var existing = await _index.GetAsync(docId);
+        var index = await GetIndexForOriginAsync(DocOrigin.Current, ct); // First get any index to retrieve the doc
+        var existing = await index.GetAsync(docId);
         if (existing == null) return null;
 
         if (existing.IsExternal)
@@ -367,7 +410,7 @@ public sealed class DocsService
 
         var fileHash = ComputeHash(content);
         var mtime = DateTimeOffset.UtcNow;
-        var absolutePath = Path.Combine(_scopeResolver.WorkspaceRoot, existing.RelPath);
+        var absolutePath = Path.Combine(_docResolver.WorkspaceRoot, existing.RelPath);
 
         var parseResult = await ParseDocumentAsync(absolutePath, existing.RelPath, content, fileHash, mtime, ct);
         var doc = parseResult.Doc;
@@ -395,7 +438,8 @@ public sealed class DocsService
             doc.FrontMatterError,
             doc.FrontMatterErrorMessage);
 
-        await _index.IndexAsync(updatedDoc, sections, refs);
+        var writeIndex = await GetIndexForDocAsync(existing, ct);
+        await writeIndex.IndexAsync(updatedDoc, sections, refs);
         await WriteAuditDocAsync(docId, "update", beforeJson, updatedDoc, "docs_service");
 
         return updatedDoc;
@@ -406,7 +450,8 @@ public sealed class DocsService
     /// </summary>
     public async Task<bool> ArchiveDocumentAsync(string docId, string actor = "docs_service", CancellationToken ct = default)
     {
-        var existing = await _index.GetAsync(docId);
+        var index = await GetIndexForOriginAsync(DocOrigin.Current, ct); // First get any index to retrieve the doc
+        var existing = await index.GetAsync(docId);
         if (existing == null) return false;
 
         if (existing.IsExternal)
@@ -415,7 +460,8 @@ public sealed class DocsService
         }
 
         var beforeJson = SerializeDoc(existing);
-        await _index.DeleteAsync(docId);
+        var writeIndex = await GetIndexForDocAsync(existing, ct);
+        await writeIndex.DeleteAsync(docId);
         await WriteAuditAsync(docId, "delete", beforeJson, null, actor);
 
         return true;
@@ -426,7 +472,8 @@ public sealed class DocsService
     /// </summary>
     public async Task<Doc?> PromoteDocumentAsync(string docId, string actor = "docs_service", CancellationToken ct = default)
     {
-        var existing = await _index.GetAsync(docId);
+        var index = await GetIndexForOriginAsync(DocOrigin.Current, ct); // First get any index to retrieve the doc
+        var existing = await index.GetAsync(docId);
         if (existing == null) return null;
 
         if (existing.IsExternal)
@@ -435,7 +482,7 @@ public sealed class DocsService
         }
 
         // Read current content
-        var absolutePath = Path.Combine(_scopeResolver.WorkspaceRoot, existing.RelPath);
+        var absolutePath = Path.Combine(_docResolver.WorkspaceRoot, existing.RelPath);
         var content = await File.ReadAllTextAsync(absolutePath, ct);
 
         // Determine target path in docs/
@@ -445,7 +492,7 @@ public sealed class DocsService
             targetRelPath = Path.Combine("docs", targetRelPath).Replace('\\', '/');
         }
 
-        var targetAbsolutePath = Path.Combine(_scopeResolver.WorkspaceRoot, targetRelPath);
+        var targetAbsolutePath = Path.Combine(_docResolver.WorkspaceRoot, targetRelPath);
 
         // Ensure directory exists
         var targetDir = Path.GetDirectoryName(targetAbsolutePath)!;
@@ -475,8 +522,11 @@ public sealed class DocsService
             existing.FrontMatterError,
             existing.FrontMatterErrorMessage);
 
-        await _index.DeleteAsync(docId);
-        await _index.IndexAsync(promotedDoc, await _index.GetSectionsAsync(docId), await _index.GetRefsAsync(docId));
+        var writeIndex = await GetIndexForDocAsync(existing, ct);
+        await writeIndex.DeleteAsync(docId);
+        var sections = await writeIndex.GetSectionsAsync(docId);
+        var refs = await writeIndex.GetRefsAsync(docId);
+        await writeIndex.IndexAsync(promotedDoc, sections, refs);
 
         var afterJson = SerializeDoc(promotedDoc);
         await WriteAuditAsync(docId, "promote", beforeJson, afterJson, actor);
@@ -495,7 +545,8 @@ public sealed class DocsService
         string actor = "docs_service",
         CancellationToken ct = default)
     {
-        var existing = await _index.GetAsync(docId);
+        var index = await GetIndexForOriginAsync(DocOrigin.Current, ct);
+        var existing = await index.GetAsync(docId);
         if (existing == null) return false;
 
         if (existing.IsExternal)
@@ -503,7 +554,7 @@ public sealed class DocsService
             throw new InvalidOperationException("Cannot annotate external document");
         }
 
-        var section = await _index.GetSectionAsync(docId, anchor);
+        var section = await index.GetSectionAsync(docId, anchor);
         if (section == null) return false;
 
         var statusValue = new DocStatusValue(existing.Kind, status);
@@ -521,10 +572,11 @@ public sealed class DocsService
             section.StepsDone);
 
         // Re-index the whole doc to update the section
-        var allSections = await _index.GetSectionsAsync(docId);
+        var allSections = await index.GetSectionsAsync(docId);
         var updatedSections = allSections.Select(s => s.Anchor == anchor ? updatedSection : s).ToList();
 
-        await _index.IndexAsync(existing, updatedSections, await _index.GetRefsAsync(docId));
+        var writeIndex = await GetIndexForDocAsync(existing, ct);
+        await writeIndex.IndexAsync(existing, updatedSections, await writeIndex.GetRefsAsync(docId));
 
         var afterJson = SerializeSection(updatedSection);
         await WriteAuditAsync(docId, "annotate", beforeJson, afterJson, actor);
@@ -542,8 +594,9 @@ public sealed class DocsService
         string actor = "docs_service",
         CancellationToken ct = default)
     {
-        var source = await _index.GetAsync(sourceId);
-        var target = await _index.GetAsync(targetId);
+        var index = await GetIndexForOriginAsync(DocOrigin.Current, ct); // First get any index to retrieve the docs
+        var source = await index.GetAsync(sourceId);
+        var target = await index.GetAsync(targetId);
 
         if (source == null || target == null)
         {
@@ -560,7 +613,8 @@ public sealed class DocsService
             DocId.Parse(targetId),
             kind);
 
-        await _index.UpsertRelationAsync(relation);
+        var writeIndex = await GetIndexForDocAsync(source, ct);
+        await writeIndex.UpsertRelationAsync(relation);
         await WriteAuditAsync(sourceId, "relate", null, $"relation:{kind}:{targetId}", actor);
     }
 
@@ -569,16 +623,17 @@ public sealed class DocsService
     /// </summary>
     public async Task<StalenessReport> GetStalenessReportAsync(CancellationToken ct = default)
     {
-        var allDocs = await _index.ListAsync();
+        // Use shard index which contains all managed documents
+        var allDocs = await _shardIndex.ListAsync();
         var findings = new List<StalenessFinding>();
 
         foreach (var docItem in allDocs)
         {
-            var doc = await _index.GetAsync(docItem.DocId);
+            var doc = await _shardIndex.GetAsync(docItem.DocId);
             if (doc == null) continue;
 
             // Check unresolved references
-            var refs = await _index.GetRefsAsync(doc.Id.Value);
+            var refs = await _shardIndex.GetRefsAsync(doc.Id.Value);
             foreach (var refItem in refs)
             {
                 if (!refItem.Resolved)
@@ -596,7 +651,7 @@ public sealed class DocsService
             // Check superseded without replacement
             if (!string.IsNullOrEmpty(doc.SupersededBy))
             {
-                var replacement = await _index.GetAsync(DocId.Create(doc.Ownership, doc.Origin, doc.SupersededBy!).Value);
+                var replacement = await _shardIndex.GetAsync(DocId.Create(doc.Ownership, doc.Origin, doc.SupersededBy!).Value);
                 if (replacement == null)
                 {
                     findings.Add(new StalenessFinding(
@@ -645,7 +700,8 @@ public sealed class DocsService
     /// </summary>
     public async Task<IReadOnlyList<DocAuditEntry>> GetAuditAsync(string? docId = null, int limit = 100, CancellationToken ct = default)
     {
-        return await _index.GetAuditAsync(docId, limit);
+        // Use shard index for audit (contains all managed docs)
+        return await _shardIndex.GetAuditAsync(docId, limit);
     }
 
     /// <summary>
@@ -653,14 +709,22 @@ public sealed class DocsService
     /// </summary>
     public async Task<OfferCheckResult> CheckOfferPolicyAsync(CancellationToken ct = default)
     {
-        var projectHash = ComputeProjectHash(_scopeResolver.CanonicalRoot);
-        var offerState = await _index.GetOfferStateAsync(projectHash);
+        // Check scope decision first - silent under disabled
+        var decision = await GetScopeDecisionAsync(ct);
+        if (decision == ScopeDecision.Disabled)
+        {
+            return new OfferCheckResult(false, OfferState.Never, "Scope decision is disabled");
+        }
+
+        var projectHash = ComputeProjectHash(_docResolver.CanonicalRoot);
+        var index = await GetIndexForOriginAsync(DocOrigin.Current, ct);
+        var offerState = await index.GetOfferStateAsync(projectHash);
 
         if (offerState == null)
         {
             // First time - create unasked state
             offerState = new DocOfferState(projectHash, OfferState.Unasked, null, null, 0);
-            await _index.SetOfferStateAsync(offerState);
+            await index.SetOfferStateAsync(offerState);
             return new OfferCheckResult(true, OfferState.Unasked, "Offer available");
         }
 
@@ -689,7 +753,7 @@ public sealed class DocsService
             if (shouldReoffer)
             {
                 offerState = new DocOfferState(projectHash, OfferState.Unasked, null, null, 0);
-                await _index.SetOfferStateAsync(offerState);
+                await index.SetOfferStateAsync(offerState);
                 return new OfferCheckResult(true, OfferState.Unasked, reason);
             }
 
@@ -705,8 +769,9 @@ public sealed class DocsService
     /// </summary>
     public async Task AnswerOfferAsync(OfferState answer, CancellationToken ct = default)
     {
-        var projectHash = ComputeProjectHash(_scopeResolver.CanonicalRoot);
-        var offerState = await _index.GetOfferStateAsync(projectHash) ?? new DocOfferState(projectHash, OfferState.Unasked, null, null, 0);
+        var projectHash = ComputeProjectHash(_docResolver.CanonicalRoot);
+        var index = await GetIndexForOriginAsync(DocOrigin.Current, ct);
+        var offerState = await index.GetOfferStateAsync(projectHash) ?? new DocOfferState(projectHash, OfferState.Unasked, null, null, 0);
 
         var newState = new DocOfferState(
             projectHash,
@@ -715,7 +780,7 @@ public sealed class DocsService
             DateTimeOffset.UtcNow,
             0);
 
-        await _index.SetOfferStateAsync(newState);
+        await index.SetOfferStateAsync(newState);
     }
 
     /// <summary>
@@ -723,8 +788,9 @@ public sealed class DocsService
     /// </summary>
     public async Task IncrementSpecsCounterAsync(CancellationToken ct = default)
     {
-        var projectHash = ComputeProjectHash(_scopeResolver.CanonicalRoot);
-        var offerState = await _index.GetOfferStateAsync(projectHash);
+        var projectHash = ComputeProjectHash(_docResolver.CanonicalRoot);
+        var index = await GetIndexForOriginAsync(DocOrigin.Current, ct);
+        var offerState = await index.GetOfferStateAsync(projectHash);
         if (offerState != null && offerState.State == OfferState.Declined)
         {
             var newState = new DocOfferState(
@@ -734,15 +800,43 @@ public sealed class DocsService
                 offerState.AnsweredAt,
                 offerState.SpecsSinceAsk + 1);
 
-            await _index.SetOfferStateAsync(newState);
+            await index.SetOfferStateAsync(newState);
         }
+    }
+
+    /// <summary>
+    /// Gets the current scope decision (ask/disabled/clear).
+    /// </summary>
+    public async Task<ScopeDecision> GetScopeDecisionAsync(CancellationToken ct = default)
+    {
+        // Use shard index for policy (always available)
+        var policy = await _shardIndex.GetPolicyAsync("decision");
+        if (policy != null)
+        {
+            try
+            {
+                var decision = policy.Value.Trim().ToLowerInvariant();
+                return decision switch
+                {
+                    "disabled" => ScopeDecision.Disabled,
+                    "clear" => ScopeDecision.Clear,
+                    _ => ScopeDecision.Ask
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to deserialize scope decision, using defaults");
+            }
+        }
+        return ScopeDecision.Ask;
     }
 
     // Private helper methods
 
     private async Task<CoveragePolicy> GetEffectiveCoverageAsync(CancellationToken ct)
     {
-        var policy = await _index.GetPolicyAsync("coverage");
+        // Use shard index for policy (always available)
+        var policy = await _shardIndex.GetPolicyAsync("coverage");
         if (policy != null)
         {
             try
@@ -757,7 +851,7 @@ public sealed class DocsService
         return new CoveragePolicy
         {
             Include = new[] { "docs/**", ".eling/docs/**" },
-            Exclude = Array.Empty<string>()
+            Exclude = new[] { ".superpowers/sdd/**" }
         };
     }
 
@@ -965,7 +1059,7 @@ public sealed class DocsService
             else if (refItem.RefKind == ReferenceKind.Path)
             {
                 // Check if file exists
-                var workspaceRoot = _scopeResolver.WorkspaceRoot;
+                var workspaceRoot = _docResolver.WorkspaceRoot;
                 var fullPath = Path.Combine(workspaceRoot, refItem.RawText);
                 if (File.Exists(fullPath))
                 {
@@ -1046,7 +1140,8 @@ public sealed class DocsService
     /// </summary>
     public async Task<CoveragePolicy> GetCoveragePolicyAsync(CancellationToken ct = default)
     {
-        var policy = await _index.GetPolicyAsync("coverage");
+        // Use shard index for policy (always available)
+        var policy = await _shardIndex.GetPolicyAsync("coverage");
         if (policy != null)
         {
             try
@@ -1061,22 +1156,23 @@ public sealed class DocsService
         return new CoveragePolicy
         {
             Include = new[] { "docs/**", ".eling/docs/**" },
-            Exclude = Array.Empty<string>()
+            Exclude = new[] { ".superpowers/sdd/**" }
         };
     }
 
     /// <summary>
     /// Sets the coverage policy and optional decision in the index.
     /// </summary>
-    public async Task SetCoveragePolicyAsync(CoveragePolicy policy, string? decision = null, CancellationToken ct = default)
+    public async Task SetCoveragePolicyAsync(CoveragePolicy policy, ScopeDecision? decision = null, CancellationToken ct = default)
     {
         var policyJson = System.Text.Json.JsonSerializer.Serialize(policy);
-        await _index.SetPolicyAsync(new DocPolicy("coverage", policyJson, DateTimeOffset.UtcNow));
+        // Use shard index for policy (always available)
+        await _shardIndex.SetPolicyAsync(new DocPolicy("coverage", policyJson, DateTimeOffset.UtcNow));
 
-        if (!string.IsNullOrWhiteSpace(decision))
+        if (decision.HasValue)
         {
-            var decisionPolicy = new DocPolicy("decision", decision.Trim().ToLowerInvariant(), DateTimeOffset.UtcNow);
-            await _index.SetPolicyAsync(decisionPolicy);
+            var decisionPolicy = new DocPolicy("decision", decision.Value.ToString().ToLowerInvariant(), DateTimeOffset.UtcNow);
+            await _shardIndex.SetPolicyAsync(decisionPolicy);
         }
     }
 
@@ -1085,13 +1181,14 @@ public sealed class DocsService
     /// </summary>
     public async Task IndexExternalAsync(Doc doc, IReadOnlyList<DocSection> sections, IReadOnlyList<DocRef> refs, CancellationToken ct = default)
     {
-        await _index.IndexAsync(doc, sections, refs);
+        var index = await GetIndexForOriginAsync(doc.Origin, ct);
+        await index.IndexAsync(doc, sections, refs);
     }
 
     /// <summary>
     /// Gets the workspace root directory.
     /// </summary>
-    public string GetWorkspaceRoot() => _scopeResolver.WorkspaceRoot;
+    public string GetWorkspaceRoot() => _docResolver.WorkspaceRoot;
 
     /// <summary>
     /// Computes SHA256 hash of content.
@@ -1118,6 +1215,7 @@ public sealed class DocsService
             afterJson,
             DateTimeOffset.UtcNow);
 
-        await _index.WriteAuditAsync(entry);
+        // Use shard index for audit (always available)
+        await _shardIndex.WriteAuditAsync(entry);
     }
 }
