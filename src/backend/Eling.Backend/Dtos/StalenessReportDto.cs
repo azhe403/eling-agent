@@ -1,3 +1,5 @@
+using Eling.Core.Docs;
+
 namespace Eling.Backend.Dtos;
 
 /// <summary>
@@ -5,4 +7,10 @@ namespace Eling.Backend.Dtos;
 /// </summary>
 public sealed record StalenessReportDto(
     IReadOnlyList<StalenessFindingDto> Findings,
-    DateTimeOffset GeneratedAt);
+    DateTimeOffset GeneratedAt)
+{
+    public static StalenessReportDto From(StalenessReport report) => new(
+        report.Findings.Select(StalenessFindingDto.From).ToList().AsReadOnly(),
+        report.GeneratedAt
+    );
+}

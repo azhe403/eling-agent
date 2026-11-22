@@ -1,12 +1,13 @@
 namespace Eling.Core.Docs;
 
 /// <summary>
-/// Result of parsing a document into Doc, sections, and references.
+/// Result of parsing a document into Doc, sections, references, and relations.
 /// </summary>
 public sealed record DocParseResult(
     Doc? Doc,
     IReadOnlyList<DocSection> Sections,
-    IReadOnlyList<DocRef> Refs);
+    IReadOnlyList<DocRef> Refs,
+    IReadOnlyList<DocRelation> Relations);
 
 /// <summary>
 /// Result of heading chunking.

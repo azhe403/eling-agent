@@ -92,24 +92,45 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store, ILo
             """, cancellationToken);
 
         // Migration: older audit-index.db files predate the verb/truncated columns.
-        // CREATE TABLE IF NOT EXISTS won't add them, so ALTER (ignoring "duplicate
-        // column name" on already-migrated databases).
-        foreach (var colDecl in new[] { "verb TEXT NULL", "truncated INTEGER NULL" })
+        // CREATE TABLE IF NOT EXISTS won't add them, so ALTER (checking existence
+        // first via PRAGMA table_info to avoid exceptions on already-migrated databases).
+        var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var pragmaCmd = connection.CreateCommand())
         {
+            pragmaCmd.CommandText = "PRAGMA table_info(audit_events);";
+            await using var reader = await pragmaCmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                existingColumns.Add(reader.GetString(1)); // column name is at index 1
+            }
+        }
+
+        var migrations = new[]
+        {
+            new AuditColumnMigration("verb", "TEXT NULL"),
+            new AuditColumnMigration("truncated", "INTEGER NULL")
+        };
+
+        foreach (var migration in migrations)
+        {
+            var colName = migration.Name;
+            var colType = migration.Definition;
+            if (existingColumns.Contains(colName))
+            {
+                _logger?.LogDebug("Audit index column {Column} already exists; migration skipped", colName);
+                continue;
+            }
+
             try
             {
-                await ExecuteAsync(connection, $"ALTER TABLE audit_events ADD COLUMN {colDecl};", cancellationToken);
-            }
-            catch (SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
-            {
-                // Column already exists — nothing to do.
-                _logger?.LogDebug(ex, "Audit index column {Column} already exists; migration skipped", colDecl);
+                await ExecuteAsync(connection, $"ALTER TABLE audit_events ADD COLUMN {colName} {colType};", cancellationToken);
+                _logger?.LogInformation("Audit index migrated: added column {Column}", colName);
             }
             catch (SqliteException ex)
             {
                 // Not a duplicate-column failure: a real migration error, but the
                 // index is a rebuildable cache — log loudly, don't break startup.
-                _logger?.LogWarning(ex, "Audit index column {Column} migration failed", colDecl);
+                _logger?.LogWarning(ex, "Audit index column {Column} migration failed", colName);
             }
         }
     }
@@ -612,4 +633,12 @@ public sealed class SqliteAuditIndex(string auditRoot, AuditFileStore store, ILo
         await pragma.ExecuteNonQueryAsync(cancellationToken);
         return connection;
     }
+
+    /// <summary>
+    /// One column the audit schema adds to databases created before it existed.
+    /// A named record rather than a tuple, per the repo's code-organization rule.
+    /// </summary>
+    private sealed record AuditColumnMigration(
+        string Name,
+        string Definition);
 }

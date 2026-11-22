@@ -148,11 +148,17 @@ public sealed class DocsService
                     var doc = parseResult.Doc;
                     var sections = parseResult.Sections;
                     var refs = parseResult.Refs;
+                    var relations = parseResult.Relations;
 
                     if (doc != null)
                     {
                         var index = await GetIndexForOriginAsync(DocOrigin.Current, ct);
                         await index.IndexAsync(doc, sections, refs);
+                        // Upsert relations
+                        foreach (var relation in relations)
+                        {
+                            await index.UpsertRelationAsync(relation);
+                        }
                         indexed++;
                         existingDocs.Remove(relPath);
                     }
@@ -312,6 +318,9 @@ public sealed class DocsService
             refs = await ResolveReferencesAsync(refs, ct);
         }
 
+        // Extract relations (spec: front-matter, **Spec:** header, inline links)
+        var relations = ExtractRelations(frontMatter, remainingContent, relPath, resolution.Ownership, resolution.Origin, kind);
+
         // Create Doc entity
         var docId = DocId.Create(resolution.Ownership, resolution.Origin, relPath);
         var doc = new Doc(
@@ -349,7 +358,7 @@ public sealed class DocsService
                 s.StepsDone);
         }).ToList();
 
-        return new DocParseResult(doc, updatedSections, refs);
+        return new DocParseResult(doc, updatedSections, refs, relations);
     }
 
     /// <summary>
@@ -380,10 +389,16 @@ public sealed class DocsService
         var doc = parseResult.Doc;
         var sections = parseResult.Sections;
         var refs = parseResult.Refs;
+        var relations = parseResult.Relations;
         if (doc == null) throw new InvalidOperationException("Failed to parse document");
 
         var index = await GetIndexForOriginAsync(resolution.Origin, ct);
         await index.IndexAsync(doc, sections, refs);
+        // Upsert relations
+        foreach (var relation in relations)
+        {
+            await index.UpsertRelationAsync(relation);
+        }
         await WriteAuditDocAsync(doc.Id.Value, "create", null, doc, "docs_service");
 
         return doc;
@@ -416,6 +431,7 @@ public sealed class DocsService
         var doc = parseResult.Doc;
         var sections = parseResult.Sections;
         var refs = parseResult.Refs;
+        var relations = parseResult.Relations;
         if (doc == null) return null;
 
         // Create new doc with same ID
@@ -440,6 +456,11 @@ public sealed class DocsService
 
         var writeIndex = await GetIndexForDocAsync(existing, ct);
         await writeIndex.IndexAsync(updatedDoc, sections, refs);
+        // Upsert relations
+        foreach (var relation in relations)
+        {
+            await writeIndex.UpsertRelationAsync(relation);
+        }
         await WriteAuditDocAsync(docId, "update", beforeJson, updatedDoc, "docs_service");
 
         return updatedDoc;
@@ -586,6 +607,10 @@ public sealed class DocsService
 
     /// <summary>
     /// Adds a relation between two managed documents.
+    /// Validates that the relation is appropriate for the document kinds:
+    /// - Implements: source must be Plan, target must be Spec
+    /// - Supersedes: both documents must be same kind
+    /// - References: any combination allowed
     /// </summary>
     public async Task AddRelationAsync(
         string sourceId,
@@ -608,6 +633,9 @@ public sealed class DocsService
             throw new InvalidOperationException("Cannot create relation involving external document");
         }
 
+        // Validate relation based on document kinds
+        ValidateRelation(source.Kind, target.Kind, kind);
+
         var relation = new DocRelation(
             DocId.Parse(sourceId),
             DocId.Parse(targetId),
@@ -616,6 +644,42 @@ public sealed class DocsService
         var writeIndex = await GetIndexForDocAsync(source, ct);
         await writeIndex.UpsertRelationAsync(relation);
         await WriteAuditAsync(sourceId, "relate", null, $"relation:{kind}:{targetId}", actor);
+    }
+
+    /// <summary>
+    /// Validates that a relation is appropriate for the given document kinds.
+    /// </summary>
+    private static void ValidateRelation(DocKind sourceKind, DocKind targetKind, RelationKind relationKind)
+    {
+        switch (relationKind)
+        {
+            case RelationKind.Implements:
+                // Plan implements Spec
+                if (sourceKind != DocKind.Plan)
+                {
+                    throw new InvalidOperationException($"Implements relation requires source to be Plan, got {sourceKind}");
+                }
+                if (targetKind != DocKind.Spec)
+                {
+                    throw new InvalidOperationException($"Implements relation requires target to be Spec, got {targetKind}");
+                }
+                break;
+
+            case RelationKind.Supersedes:
+                // Supersedes: same kind
+                if (sourceKind != targetKind)
+                {
+                    throw new InvalidOperationException($"Supersedes relation requires both documents to be same kind (got {sourceKind} and {targetKind})");
+                }
+                break;
+
+            case RelationKind.References:
+                // References: any combination allowed
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(relationKind), relationKind, "Unknown relation kind");
+        }
     }
 
     /// <summary>
@@ -1087,6 +1151,70 @@ public sealed class DocsService
         return resolved;
     }
 
+    /// <summary>
+    /// Extracts spec↔plan relations from front-matter, **Spec:** header, and inline links.
+    /// </summary>
+    private List<DocRelation> ExtractRelations(
+        DocFrontMatter? frontMatter,
+        string content,
+        string relPath,
+        DocOwnership ownership,
+        DocOrigin origin,
+        DocKind currentKind)
+    {
+        var relations = new List<DocRelation>();
+        var currentDocId = DocId.Create(ownership, origin, relPath);
+
+        // 1. Front-matter spec: and supersedes: (highest precedence)
+        if (frontMatter != null)
+        {
+            // Only create Implements relation if current document is a Plan
+            if (!string.IsNullOrWhiteSpace(frontMatter.Spec) && currentKind == DocKind.Plan)
+            {
+                var targetId = DocId.Create(DocOwnership.Managed, origin, frontMatter.Spec.Trim());
+                relations.Add(new DocRelation(currentDocId, targetId, RelationKind.Implements));
+            }
+            // Supersedes can be created for any kind (target kind validated later)
+            if (!string.IsNullOrWhiteSpace(frontMatter.SupersededBy))
+            {
+                var targetId = DocId.Create(DocOwnership.Managed, origin, frontMatter.SupersededBy.Trim());
+                relations.Add(new DocRelation(currentDocId, targetId, RelationKind.Supersedes));
+            }
+        }
+
+        // 2. **Spec:** header in content - only for Plans
+        if (currentKind == DocKind.Plan)
+        {
+            var specHeaderMatch = Regex.Match(content, @"^\*\*Spec:\*\*\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+            if (specHeaderMatch.Success)
+            {
+                var specPath = specHeaderMatch.Groups[1].Value.Trim();
+                var targetId = DocId.Create(DocOwnership.Managed, origin, specPath);
+                relations.Add(new DocRelation(currentDocId, targetId, RelationKind.Implements));
+            }
+        }
+
+        // 3. Inline links to spec documents (lower precedence)
+        // Match [text](path) where path ends with .md and target is a spec
+        var linkRegex = new Regex(@"\[([^\]]+)\]\(([^)]+\.md(?:#\S+)?)\)");
+        var linkMatches = linkRegex.Matches(content);
+        foreach (Match match in linkMatches)
+        {
+            var linkTarget = match.Groups[2].Value;
+            // Remove anchor fragment for target resolution
+            var targetPath = linkTarget.Split('#')[0];
+            
+            // Check if the linked path looks like a spec path
+            if (targetPath.Contains("/specs/") || targetPath.StartsWith("specs/", StringComparison.OrdinalIgnoreCase))
+            {
+                var targetId = DocId.Create(DocOwnership.Managed, origin, targetPath);
+                relations.Add(new DocRelation(currentDocId, targetId, RelationKind.References));
+            }
+        }
+
+        return relations;
+    }
+
     private async Task WriteAuditDocAsync(
         string docId,
         string action,
@@ -1217,5 +1345,164 @@ public sealed class DocsService
 
         // Use shard index for audit (always available)
         await _docsShardIndex.WriteAuditAsync(entry);
+    }
+
+    // ---- REST API wrapper methods ----
+
+    /// <summary>
+    /// Lists documents with optional filters.
+    /// </summary>
+    public async Task<IReadOnlyList<DocListItem>> ListAsync(
+        string? kind = null,
+        string? topic = null,
+        string? ownership = null,
+        string? origin = null,
+        CancellationToken ct = default)
+    {
+        DocKind? kindFilter = null;
+        if (!string.IsNullOrEmpty(kind) && Enum.TryParse<DocKind>(kind, ignoreCase: true, out var parsedKind))
+            kindFilter = parsedKind;
+
+        DocOwnership? ownershipFilter = null;
+        if (!string.IsNullOrEmpty(ownership) && Enum.TryParse<DocOwnership>(ownership, ignoreCase: true, out var parsedOwnership))
+            ownershipFilter = parsedOwnership;
+
+        DocOrigin? originFilter = null;
+        if (!string.IsNullOrEmpty(origin) && Enum.TryParse<DocOrigin>(origin, ignoreCase: true, out var parsedOrigin))
+            originFilter = parsedOrigin;
+
+        // Resolve the appropriate index based on scope decision and origin filter
+        var index = await GetIndexForOriginAsync(originFilter ?? DocOrigin.Current, ct);
+        return await index.ListAsync(ownershipFilter, originFilter, kindFilter, topic);
+    }
+
+    /// <summary>
+    /// Searches documents with optional filters.
+    /// </summary>
+    public async Task<IReadOnlyList<DocSearchResult>> SearchAsync(
+        string query,
+        string? kind = null,
+        string? topic = null,
+        string? ownership = null,
+        string? origin = null,
+        CancellationToken ct = default)
+    {
+        DocKind? kindFilter = null;
+        if (!string.IsNullOrEmpty(kind) && Enum.TryParse<DocKind>(kind, ignoreCase: true, out var parsedKind))
+            kindFilter = parsedKind;
+
+        DocOwnership? ownershipFilter = null;
+        if (!string.IsNullOrEmpty(ownership) && Enum.TryParse<DocOwnership>(ownership, ignoreCase: true, out var parsedOwnership))
+            ownershipFilter = parsedOwnership;
+
+        DocOrigin? originFilter = null;
+        if (!string.IsNullOrEmpty(origin) && Enum.TryParse<DocOrigin>(origin, ignoreCase: true, out var parsedOrigin))
+            originFilter = parsedOrigin;
+
+        // Use shard index which contains all managed documents
+        return await _docsShardIndex.SearchAsync(query, ownershipFilter, originFilter, kindFilter, topic, null, 50);
+    }
+
+    /// <summary>
+    /// Reads a document with optional sections and refs.
+    /// </summary>
+    public async Task<DocReadResult?> ReadAsync(
+        DocId docId,
+        bool includeSections = false,
+        bool includeRefs = false,
+        CancellationToken ct = default,
+        bool includeContent = false)
+    {
+        // Try all origins
+        var doc = await _docsCurrentIndex.GetAsync(docId.Value);
+        if (doc == null) doc = await _docsShardIndex.GetAsync(docId.Value);
+        if (doc == null) doc = await _docsGlobalIndex.GetAsync(docId.Value);
+        if (doc == null) return null;
+
+        IReadOnlyList<DocSection>? sections = null;
+        IReadOnlyList<DocRef>? refs = null;
+        string? content = null;
+
+        if (includeSections)
+        {
+            sections = await _docsShardIndex.GetSectionsAsync(docId.Value);
+        }
+
+        if (includeRefs)
+        {
+            refs = await _docsShardIndex.GetRefsAsync(docId.Value);
+        }
+
+        if (includeContent)
+        {
+            content = await ReadContentAsync(doc, ct);
+        }
+
+        return new DocReadResult(doc, sections, refs, content);
+    }
+
+    /// <summary>
+    /// Reads a document's markdown from disk. The index stores only metadata, so
+    /// the file is the only place the body lives. Returns null rather than
+    /// throwing when the file has been moved or deleted since it was indexed —
+    /// a stale index entry must not turn a read into a 500.
+    /// </summary>
+    private async Task<string?> ReadContentAsync(Doc doc, CancellationToken ct)
+    {
+        var absolutePath = ResolveAbsolutePath(doc);
+        if (absolutePath is null) return null;
+
+        return await File.ReadAllTextAsync(absolutePath, ct);
+    }
+
+    /// <summary>
+    /// Maps an indexed document back to its file on disk.
+    ///
+    /// RelPath is stored workspace-relative by the scanner, but a document can
+    /// also live under an origin root outside the workspace (the project-local
+    /// shard, the global config dir). Both conventions are tried, workspace
+    /// first, and the first path that actually exists wins — so one stale
+    /// convention cannot hide a document that is really there.
+    /// </summary>
+    private string? ResolveAbsolutePath(Doc doc)
+    {
+        var workspaceRoot = _docResolver.WorkspaceRoot;
+        var originRoot = _docResolver.GetRootFor(doc.Ownership, doc.Origin);
+
+        var candidates = new List<string>(2);
+        if (!string.IsNullOrEmpty(workspaceRoot))
+        {
+            candidates.Add(Path.Combine(workspaceRoot, doc.RelPath));
+        }
+        if (!string.IsNullOrEmpty(originRoot))
+        {
+            candidates.Add(Path.Combine(originRoot, doc.RelPath));
+        }
+
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
+    /// <summary>
+    /// Gets sections for a document.
+    /// </summary>
+    public async Task<IReadOnlyList<DocSection>?> GetSectionsAsync(DocId docId, CancellationToken ct = default)
+    {
+        return await _docsShardIndex.GetSectionsAsync(docId.Value);
+    }
+
+    /// <summary>
+    /// Gets references for a document.
+    /// </summary>
+    public async Task<IReadOnlyList<DocRef>?> GetRefsAsync(DocId docId, CancellationToken ct = default)
+    {
+        return await _docsShardIndex.GetRefsAsync(docId.Value);
+    }
+
+    /// <summary>
+    /// Gets relations for a document.
+    /// </summary>
+    public async Task<IReadOnlyList<DocRelation>?> GetRelationsAsync(DocId docId, CancellationToken ct = default)
+    {
+        return await _docsShardIndex.GetRelationsAsync(docId.Value, asSource: true);
     }
 }

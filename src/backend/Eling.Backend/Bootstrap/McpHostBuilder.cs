@@ -84,7 +84,15 @@ public static class McpHostBuilder
             // trail records (design §8). See AddElingAuditTrail for why it is not
             // registered inside AddElingCoreServices.
             services.AddElingAuditTrail();
-            services.AddElingMcpServerStdio();
+
+            // Allow disabling MCP stdio transport for dashboard-only development.
+            // The stdio transport completes immediately on EOF (no CLI client),
+            // which triggers host shutdown before the HTTP host can start.
+            var disableMcpStdio = Environment.GetEnvironmentVariable("ELING_DISABLE_MCP_STDIO");
+            if (string.IsNullOrWhiteSpace(disableMcpStdio) || !bool.TryParse(disableMcpStdio, out var disable) || !disable)
+            {
+                services.AddElingMcpServerStdio();
+            }
 
             // Database connection registry (needed by the db_* MCP tools even in
             // MCP-only/peer hosts; DashboardServices.Register covers the HTTP host).

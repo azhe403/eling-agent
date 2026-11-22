@@ -59,6 +59,7 @@ public static class DashboardRoutes
         app.Services.GetService<AuditDirWatcher>()?.Start();
         app.Services.GetService<DatabaseRegistryWatcher>()?.Start();
         app.Services.GetService<SkillCatalogDirWatcher>()?.Start();
+        app.Services.GetService<DocsDirWatcher>()?.Start();
 
         app.MapGet("/health", () => Results.Ok(HealthPayload()));
         // The same probe under /api, because that is the only prefix the
@@ -89,6 +90,7 @@ public static class DashboardRoutes
         // shape is the same /api/databases/{id}/es/... either way.
         app.MapDatabaseElasticsearchEndpoints();
         app.MapAuditRoutes();
+        app.MapDocRoutes();
         app.MapControllers();
         app.MapFallbackToFile("index.html");
     }
@@ -128,6 +130,13 @@ public static class DashboardRoutes
         {
             var ct = context.RequestAborted;
             return WriteSseAsync(context, broadcaster.SubscribeAsync(ct), item => JsonSerializer.Serialize(item, SseJsonOptions), ct);
+        });
+
+        // Docs changes ride the same topic-name stream pattern
+        app.MapGet("/api/events/docs", (HttpContext context, MemoryChangeBroadcaster broadcaster) =>
+        {
+            var ct = context.RequestAborted;
+            return WriteSseAsync(context, broadcaster.SubscribeAsync(ct), item => item, ct);
         });
     }
 

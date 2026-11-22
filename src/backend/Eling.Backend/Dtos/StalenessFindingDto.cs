@@ -1,3 +1,5 @@
+using Eling.Core.Docs;
+
 namespace Eling.Backend.Dtos;
 
 /// <summary>
@@ -9,4 +11,14 @@ public sealed record StalenessFindingDto(
     string RelPath,
     StalenessKindDto Kind,
     string Message,
-    string? Anchor);
+    string? Anchor)
+{
+    public static StalenessFindingDto From(StalenessFinding finding) => new(
+        finding.DocId,
+        finding.Title,
+        finding.RelPath,
+        finding.Kind.ToDto(),
+        finding.Message,
+        finding.Anchor
+    );
+}

@@ -131,6 +131,28 @@ public sealed class DocScopeResolver
         };
     }
 
+    /// <summary>
+    /// Gets the root directory a document's relative path is anchored to, so a
+    /// stored document can be mapped back to the file on disk.
+    /// Returns null when the origin has no resolvable root in this workspace
+    /// (an ancestor root that no longer exists, for example).
+    /// </summary>
+    public string? GetRootFor(DocOwnership ownership, DocOrigin origin)
+    {
+        return origin switch
+        {
+            DocOrigin.Shard => _projectLocalDocsDir,
+            DocOrigin.Current => ownership == DocOwnership.Managed
+                ? Path.Combine(_canonicalRoot, ElingPaths.DotElingDirName, "docs")
+                : Path.Combine(_canonicalRoot, "docs"),
+            DocOrigin.Global => Path.Combine(ElingPaths.ResolveConfigDir(), "docs"),
+            DocOrigin.Ancestor => ownership == DocOwnership.Managed
+                ? FindAncestorElingDocs(_workspaceRoot)
+                : FindAncestorDocs(_workspaceRoot),
+            _ => null,
+        };
+    }
+
     private static bool IsUnder(string path, string root)
     {
         var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);

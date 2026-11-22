@@ -303,7 +303,14 @@ public static class McpServiceExtensions
         services.TryAddSingleton<IDocsIndex>(sp => sp.GetRequiredKeyedService<IDocsIndex>("shard"));
 
         services.AddSingleton(scopeResolver);
-        services.AddScoped<DocsService>();
+        services.AddSingleton<DocsService>();
+
+        // Watcher for file system changes — singleton so the dashboard owner can start it
+        services.TryAddSingleton(sp => new DocsDirWatcher(
+            sp.GetRequiredService<DocsService>(),
+            sp.GetRequiredService<MemoryChangeBroadcaster>(),
+            chain.Cwd,
+            logger: sp.GetService<ILogger<DocsDirWatcher>>()));
     }
 
     private static void AddShellConfigStore(IServiceCollection services, UserScope userScope)

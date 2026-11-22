@@ -1,3 +1,5 @@
+using Eling.Core.Docs;
+
 namespace Eling.Backend.Dtos;
 
 /// <summary>
@@ -6,4 +8,11 @@ namespace Eling.Backend.Dtos;
 public sealed record OfferCheckResultDto(
     bool ShouldOffer,
     OfferStateDto State,
-    string Reason);
+    string Reason)
+{
+    public static OfferCheckResultDto From(OfferCheckResult result) => new(
+        result.ShouldOffer,
+        result.State.ToDto(),
+        result.Reason
+    );
+}
