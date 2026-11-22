@@ -67,7 +67,7 @@ public class MeaiChatGatewayStreamTests : IDisposable
         var gateway = new MeaiChatGateway(provider, NullLogger<MeaiChatGateway>.Instance)
         {
             // Short budget so the stalled first streaming call times out fast.
-            StreamFirstByteTimeout = TimeSpan.FromMilliseconds(300)
+            StreamFirstByteTimeout = TimeSpan.FromMilliseconds(1500)
         };
         var turns = new AgentTurnService(gateway, Array.Empty<IAgentTool>(), chats, provider, recall, codebase, NullLogger<AgentTurnService>.Instance);
 

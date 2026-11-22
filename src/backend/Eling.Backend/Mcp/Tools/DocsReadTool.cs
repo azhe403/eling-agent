@@ -12,26 +12,27 @@ namespace Eling.Backend.Mcp.Tools;
 [McpServerToolType]
 public sealed class DocsReadTool
 {
-    private readonly IDocsIndex _index;
-    private readonly DocsService? _service;
+    private readonly IDocsIndex _docsIndex;
+    private readonly DocsService? _docsService;
     private readonly ILogger<DocsReadTool>? _logger;
 
     public DocsReadTool(IDocsIndex index, ILogger<DocsReadTool>? logger = null)
     {
-        _index = index ?? throw new ArgumentNullException(nameof(index));
+        _docsIndex = index ?? throw new ArgumentNullException(nameof(index));
         _logger = logger;
     }
 
     public DocsReadTool(DocsService service, ILogger<DocsReadTool>? logger = null)
     {
-        _service = service ?? throw new ArgumentNullException(nameof(service));
+        _docsIndex = null!;
+        _docsService = service ?? throw new ArgumentNullException(nameof(service));
         _logger = logger;
     }
 
     public DocsReadTool(IDocsIndex index, DocsService service, ILogger<DocsReadTool>? logger = null)
     {
-        _index = index ?? throw new ArgumentNullException(nameof(index));
-        _service = service ?? throw new ArgumentNullException(nameof(service));
+        _docsIndex = index ?? throw new ArgumentNullException(nameof(index));
+        _docsService = service ?? throw new ArgumentNullException(nameof(service));
         _logger = logger;
     }
 
@@ -57,7 +58,7 @@ public sealed class DocsReadTool
             var trimmedOrigin = ParseOrigin(origin);
             var trimmedKind = ParseKind(kind);
 
-            var results = await _index.SearchAsync(trimmedQuery, trimmedOwnership, trimmedOrigin, trimmedKind, topic?.Trim(), pathPrefix?.Trim(), limit);
+            var results = await _docsIndex.SearchAsync(trimmedQuery, trimmedOwnership, trimmedOrigin, trimmedKind, topic?.Trim(), pathPrefix?.Trim(), limit);
             var dtos = results.Select(DocSearchResultDto.From).ToList().AsReadOnly();
 
             _logger?.LogInformation("doc_search '{Query}' returned {Count} results", trimmedQuery, dtos.Count);
@@ -84,14 +85,14 @@ public sealed class DocsReadTool
             }
 
             var docId = DocId.Parse(id);
-            var doc = await _index.GetAsync(docId.Value);
+            var doc = await _docsIndex.GetAsync(docId.Value);
             if (doc == null)
             {
                 return null;
             }
 
-            var sections = await _index.GetSectionsAsync(docId.Value);
-            var refs = await _index.GetRefsAsync(docId.Value);
+            var sections = await _docsIndex.GetSectionsAsync(docId.Value);
+            var refs = await _docsIndex.GetRefsAsync(docId.Value);
 
             var trimmedMode = mode.Trim().ToLowerInvariant();
 
@@ -145,7 +146,7 @@ public sealed class DocsReadTool
             var trimmedOrigin = ParseOrigin(origin);
             var trimmedKind = ParseKind(kind);
 
-            var items = await _index.ListAsync(trimmedOwnership, trimmedOrigin, trimmedKind, topic?.Trim(), sort);
+            var items = await _docsIndex.ListAsync(trimmedOwnership, trimmedOrigin, trimmedKind, topic?.Trim(), sort);
             var dtos = items.Select(DocListItemDto.From).ToList().AsReadOnly();
 
             // Group by topic
@@ -170,7 +171,7 @@ public sealed class DocsReadTool
     {
         try
         {
-            var report = await _service!.GetStalenessReportAsync();
+            var report = await _docsService!.GetStalenessReportAsync();
             var findings = report.Findings.Select(f => new StalenessFindingDto(
                 f.DocId, f.Title, f.RelPath, f.Kind.ToDto(), f.Message, f.Anchor)).ToList();
 
@@ -191,7 +192,7 @@ public sealed class DocsReadTool
     {
         try
         {
-            var entries = await _index.GetAuditAsync(docId?.Trim(), limit);
+            var entries = await _docsIndex.GetAuditAsync(docId?.Trim(), limit);
             var dtos = entries.Select(DocAuditEntryDto.From).ToList().AsReadOnly();
 
             _logger?.LogInformation("doc_audit returned {Count} entries (docId={DocId})", dtos.Count, docId ?? "all");
@@ -218,12 +219,12 @@ public sealed class DocsReadTool
 
             var id = DocId.Parse(docId);
             var asSource = direction != "incoming";
-            var relations = await _index.GetRelationsAsync(id.Value, asSource);
+            var relations = await _docsIndex.GetRelationsAsync(id.Value, asSource);
 
             // If direction is both, also get incoming
             if (direction == "both")
             {
-                var incoming = await _index.GetRelationsAsync(id.Value, false);
+                var incoming = await _docsIndex.GetRelationsAsync(id.Value, false);
                 relations = relations.Concat(incoming).DistinctBy(r => (r.SourceId, r.TargetId, r.Kind)).ToList();
             }
 
