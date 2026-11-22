@@ -1,3 +1,5 @@
+"use client"
+
 // Inline script that runs during HTML parsing (before first paint) on hard
 // loads, without triggering React's client-side <script> warning.
 //

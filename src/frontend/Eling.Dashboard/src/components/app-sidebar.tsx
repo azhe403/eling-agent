@@ -17,6 +17,7 @@ import {
   Settings,
   SquareTerminal,
   GitCommitHorizontal,
+  FileStack,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -64,6 +65,11 @@ const navMain = [
     title: "Skills",
     url: "/dashboard/skills",
     icon: <Sparkles className="size-4" />,
+  },
+  {
+    title: "Docs",
+    url: "/dashboard/docs",
+    icon: <FileStack className="size-4" />,
   },
   {
     title: "Audit Trail",

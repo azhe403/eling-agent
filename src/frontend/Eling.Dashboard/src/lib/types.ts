@@ -117,3 +117,138 @@ export type SkillFormData = {
   tags: string[]
   body: string
 }
+
+// --- Docs subsystem (GET /api/docs[...]) ---
+
+export type DocOwnership = "managed" | "external"
+export type DocOrigin = "current" | "ancestor" | "shard" | "global"
+export type DocKind = "spec" | "plan" | "doc" | "scratch"
+export type ReferenceKind = "symbol" | "path" | "anchor_link"
+export type RelationKind = "implements" | "supersedes" | "references"
+
+export type DocKindDto = 0 | 1 | 2 | 3 // Spec, Plan, Doc, Scratch
+export type DocOwnershipDto = 0 | 1 // Managed, External
+export type DocOriginDto = 0 | 1 | 2 | 3 // Current, Ancestor, Shard, Global
+export type ReferenceKindDto = 0 | 1 | 2 // Symbol, Path, AnchorLink
+export type RelationKindDto = 0 | 1 | 2 // Implements, Supersedes, References
+
+export type DocListItem = {
+  /** The wire field from the list endpoint is `docId`; the read endpoint sends `id`. */
+  docId?: string
+  id: string
+  ownership: DocOwnershipDto
+  origin: DocOriginDto
+  relPath: string
+  kind: DocKindDto
+  title: string
+  status: number
+  topic: string
+  order: number
+  supersededBy: string | null
+  stepsTotal: number
+  stepsDone: number
+  fileHash: string
+  mTime: string
+  indexedAt: string
+  frontMatterError: boolean
+  frontMatterErrorMessage: string | null
+}
+
+export type DocTopicGroup = {
+  topic: string
+  documents: DocListItem[]
+}
+
+export type DocListResponse = {
+  topics: DocTopicGroup[]
+}
+
+export type DocSection = {
+  docId: string
+  anchor: string
+  heading: string
+  level: number
+  lineStart: number
+  lineEnd: number
+  status: number
+  annotation: string | null
+  stepsTotal: number
+  stepsDone: number
+}
+
+export type DocRef = {
+  docId: string
+  anchor: string
+  rawText: string
+  refKind: ReferenceKindDto
+  resolved: boolean
+  resolvedPath: string | null
+  resolvedLine: number | null
+  resolvedAt: string | null
+}
+
+export type DocRelation = {
+  sourceId: string
+  targetId: string
+  kind: RelationKindDto
+}
+
+export type DocReadResult = {
+  document: DocListItem
+  sections: DocSection[]
+  references: DocRef[]
+  relations: DocRelation[]
+  /** Raw markdown of the document, when the read endpoint was asked for it. */
+  content?: string | null
+}
+
+export type DocSearchResult = {
+  docId: string
+  ownership: DocOwnershipDto
+  origin: DocOriginDto
+  relPath: string
+  kind: DocKindDto
+  title: string
+  status: number
+  topic: string
+  stepsTotal: number
+  stepsDone: number
+  rank: number
+}
+
+export type StalenessFinding = {
+  docId: string
+  kind: number // StalenessKindDto
+  message: string
+  anchor: string | null
+  reference: string | null
+}
+
+export type StalenessReport = {
+  findings: StalenessFinding[]
+  generatedAt: string
+}
+
+export type DocAuditEntry = {
+  id: string
+  docId: string
+  actor: string
+  action: string
+  beforeJson: string | null
+  afterJson: string | null
+  at: string
+}
+
+export type ScopePolicyResponse = {
+  policy: {
+    include: string[]
+    exclude: string[]
+  }
+  decision: string | null
+}
+
+export type OfferCheckResult = {
+  shouldOffer: boolean
+  state: number // OfferStateDto
+  reason: string
+}
