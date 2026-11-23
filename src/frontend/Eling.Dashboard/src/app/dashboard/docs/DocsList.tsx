@@ -348,7 +348,9 @@ export function DocsList() {
 
               <Select value={kind} onValueChange={(v) => { setOffset(0); setKind(v as KindFilter) }}>
                 <SelectTrigger className="w-[130px]">
-                  <SelectValue placeholder="Kind" />
+                  <SelectValue placeholder="Kind">
+                    {(v) => docKindLabel((v as KindFilter) ?? "all")}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {docKinds().map((k) => (
@@ -359,7 +361,9 @@ export function DocsList() {
 
               <Select value={ownership} onValueChange={(v) => { setOffset(0); setOwnership(v as OwnershipFilter) }}>
                 <SelectTrigger className="w-[140px]">
-                  <SelectValue placeholder="Ownership" />
+                  <SelectValue placeholder="Ownership">
+                    {(v) => docOwnershipLabel((v as OwnershipFilter) ?? "all")}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {docOwnerships().map((o) => (
@@ -370,7 +374,9 @@ export function DocsList() {
 
               <Select value={origin} onValueChange={(v) => { setOffset(0); setOrigin(v as OriginFilter) }}>
                 <SelectTrigger className="w-[140px]">
-                  <SelectValue placeholder="Origin" />
+                  <SelectValue placeholder="Origin">
+                    {(v) => docOriginLabel((v as OriginFilter) ?? "all")}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {docOrigins().map((o) => (
