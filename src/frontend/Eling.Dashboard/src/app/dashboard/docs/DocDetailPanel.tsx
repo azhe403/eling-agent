@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
   ChevronDown,
   ChevronRight,
@@ -279,6 +279,17 @@ export function DocDetailPanel({
       setRelationLoading(false)
     }
   }, [onAddRelation, relationSourceId, relationTargetId, relationKind])
+
+  // Escape closes the panel in view mode only — in create mode the typed work
+  // must not vanish on an accidental Escape (mirrors SkillDetailPanel).
+  useEffect(() => {
+    if (createMode) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [onClose, createMode])
 
   const doc = detail?.document ?? summary
   const isTrashed = trashMode && summary && !detail
@@ -799,7 +810,7 @@ export function DocDetailPanel({
   return (
     <aside
       aria-label="Document detail"
-      className="flex h-full min-h-0 min-w-[380px] flex-1 shrink-0 flex-col border-l bg-background"
+      className="sticky top-16 flex h-[calc(100dvh-4rem)] max-h-[calc(100dvh-4rem)] min-h-0 min-w-[380px] flex-1 shrink-0 flex-col overflow-hidden border-l bg-background"
     >
       <div className="flex shrink-0 flex-col gap-3 border-b border-border/40 p-4">
         {renderHeader()}
@@ -915,16 +926,17 @@ function DocEditor({
     </form>
   )
 
+  // The caller owns the dialog chrome (DocsList renders <Dialog><DialogContent>).
+  // Rendering another Dialog here nests two modals; just return the body plus a
+  // screen-reader title the parent dialog can reference.
   if (variant === "stacked") {
     return (
-      <Dialog open onOpenChange={onCancel}>
-        <DialogContent className="max-h-[85svh] w-[94vw] overflow-hidden p-0 sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{initialData.relPath ? "Edit Document" : "New Document"}</DialogTitle>
-          </DialogHeader>
-          {editor}
-        </DialogContent>
-      </Dialog>
+      <>
+        <DialogTitle className="sr-only">
+          {initialData.relPath ? "Edit Document" : "New Document"}
+        </DialogTitle>
+        {editor}
+      </>
     )
   }
 

@@ -3,7 +3,7 @@
 import { ChevronRight, FileText, AlertCircle, CheckCircle2, Clock } from "lucide-react"
 import { formatDistanceToNowStrict } from "date-fns"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import type { DocListItem, DocKindDto, DocOwnershipDto, DocOriginDto } from "@/lib/types"
 
@@ -75,21 +75,16 @@ export function DocCard({ doc, selected, onSelect }: DocCardProps) {
   const progressPct = hasSteps ? Math.round((doc.stepsDone / doc.stepsTotal) * 100) : 0
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
+      aria-pressed={selected}
+      aria-label={`View document ${doc.title}`}
       onClick={() => onSelect(doc)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault()
-          onSelect(doc)
-        }
-      }}
       className={cn(
-        "group relative flex flex-col rounded-lg border p-3 text-sm cursor-pointer transition-colors",
+        "group relative flex w-full flex-col rounded-lg border p-3 text-start text-sm cursor-pointer transition-colors",
         "hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         selected
-          ? "border-foreground/30 bg-primary/5"
+          ? "border-foreground/30 bg-primary/5 ring-1 ring-foreground/30"
           : "border-border",
       )}
     >
@@ -166,6 +161,6 @@ export function DocCard({ doc, selected, onSelect }: DocCardProps) {
           </div>
         </div>
       </div>
-    </div>
+    </button>
   )
 }

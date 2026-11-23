@@ -1,8 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Plus, RefreshCw, Search, Filter, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from "lucide-react"
+import { useSearchParams } from "next/navigation"
+import { Plus, RefreshCw, Search, ChevronLeft, ChevronRight, ScanSearch, Loader2 } from "lucide-react"
 
 import {
   AlertDialog,
@@ -31,9 +31,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { LoadingBar } from "@/components/ui/loading-bar"
-import { Skeleton } from "@/components/ui/skeleton"
 import { useDocsSse } from "@/hooks/use-docs-sse"
 import { useMediaQuery } from "@/hooks/use-media-query"
+import { usePersistedState } from "@/lib/persisted-state"
 import { XL_BREAKPOINT } from "@/lib/constants"
 import { apiFetch, ApiError } from "@/lib/api"
 import type {
@@ -44,6 +44,7 @@ import type {
   DocOwnershipDto,
   DocOriginDto,
   DocReadResult,
+  RelationKindDto,
 } from "@/lib/types"
 
 import { DocCard } from "./DocCard"
@@ -67,26 +68,27 @@ type OwnershipFilter = (typeof OWNERSHIPS)[number]
 type KindFilter = (typeof KINDS)[number]
 
 export function DocsList() {
-  const router = useRouter()
-  const pathname = usePathname()
   const searchParams = useSearchParams()
 
   const [topics, setTopics] = useState<DocTopicGroup[]>([])
   const [total, setTotal] = useState(0)
   const [matching, setMatching] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [rescanning, setRescanning] = useState(false)
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [kind, setKind] = useState<KindFilter>(() => (searchParams.get("kind") as KindFilter) ?? "all")
-  const [ownership, setOwnership] = useState<OwnershipFilter>(() => (searchParams.get("ownership") as OwnershipFilter) ?? "all")
-  const [origin, setOrigin] = useState<OriginFilter>(() => (searchParams.get("origin") as OriginFilter) ?? "all")
-  const [topic, setTopic] = useState<string | null>(() => searchParams.get("topic"))
+  // Canonical per-page persistence: URL is the source of truth, localStorage
+  // remembers the last position on a bare revisit. Matches Skills/Memories.
+  const [kind, setKind] = usePersistedState<KindFilter>({ page: "docs", param: "kind", defaultValue: "all", allowed: KINDS })
+  const [ownership, setOwnership] = usePersistedState<OwnershipFilter>({ page: "docs", param: "ownership", defaultValue: "all", allowed: OWNERSHIPS })
+  const [origin, setOrigin] = usePersistedState<OriginFilter>({ page: "docs", param: "origin", defaultValue: "all", allowed: ORIGINS })
+  const [topic, setTopic] = usePersistedState<string>({ page: "docs", param: "topic", defaultValue: "" })
   const [limit] = useState(50)
   const [offset, setOffset] = useState(() => parseInt(searchParams.get("offset") ?? "0", 10))
 
   const [selectedDoc, setSelectedDoc] = useState<DocListItem | null>(null)
-  const [detailState, setDetailState] = useState<{ doc: DocReadResult | null; error: string | null; loading: boolean } | null>(null)
+  const [detailState, setDetailState] = useState<{ id: string; doc: DocReadResult | null; error: string | null; loading: boolean } | null>(null)
   const [detailNonce, setDetailNonce] = useState(0)
   const [createMode, setCreateMode] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<DocListItem | null>(null)
@@ -107,25 +109,6 @@ export function DocsList() {
   // is clicked. Scoping the portal (and overlay) to the content column keeps the
   // sidebar mounted, visible and interactive.
   const dialogContainerRef = useRef<HTMLDivElement>(null)
-
-  // URL sync for filters
-  const urlSyncReady = useRef(false)
-  useEffect(() => {
-    if (!urlSyncReady.current) {
-      urlSyncReady.current = true
-      return
-    }
-    const params = new URLSearchParams()
-    if (kind !== "all") params.set("kind", kind)
-    if (ownership !== "all") params.set("ownership", ownership)
-    if (origin !== "all") params.set("origin", origin)
-    if (topic) params.set("topic", topic)
-    if (offset > 0) params.set("offset", String(offset))
-    const qs = params.toString()
-    if (qs !== searchParams.toString()) {
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-    }
-  }, [kind, ownership, origin, topic, offset, pathname, router, searchParams])
 
   // Detail fetch
   const selectedId = selectedDoc?.id ?? null
@@ -171,7 +154,31 @@ export function DocsList() {
     setDetailNonce((n) => n + 1)
   }, [load])
 
-  useDocsSse(handleDocsChanged, ["docs"])
+  const { status: sseStatus } = useDocsSse(handleDocsChanged, ["docs"])
+
+  const handleRescan = useCallback(async () => {
+    setRescanning(true)
+    setError(null)
+    try {
+      await apiFetch("/api/docs/scan", { method: "POST" })
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Rescan failed")
+    } finally {
+      setRescanning(false)
+    }
+  }, [load])
+
+  const handleAddRelation = useCallback(async (sourceId: string, targetId: string, kind: RelationKindDto) => {
+    // Backend expects the enum name, not the numeric DTO value.
+    const kindName = ["Implements", "Supersedes", "References"][kind]
+    await apiFetch(`/api/docs/${encodeURIComponent(sourceId)}/relation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetId, kind: kindName }),
+    })
+    setDetailNonce((n) => n + 1)
+  }, [])
 
   useEffect(() => {
     if (!selectedId) {
@@ -182,17 +189,18 @@ export function DocsList() {
     }
     let cancelled = false
     const run = async () => {
-      setDetailState({ doc: null, error: null, loading: true })
+      setDetailState({ id: selectedId, doc: null, error: null, loading: true })
       try {
         const result = await apiFetch<DocReadResult>(`/api/docs/${encodeURIComponent(selectedId)}`, {
           cache: "no-store",
           headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
         })
         if (cancelled) return
-        setDetailState({ doc: result, error: null, loading: false })
+        setDetailState({ id: selectedId, doc: result, error: null, loading: false })
       } catch (e) {
         if (cancelled) return
         setDetailState({
+          id: selectedId,
           doc: null,
           error: e instanceof ApiError && e.status === 404 ? "Document not found" : e instanceof Error ? e.message : "Failed to load document",
           loading: false,
@@ -203,9 +211,12 @@ export function DocsList() {
     return () => { cancelled = true }
   }, [selectedId, detailNonce])
 
-  const detail = selectedId && detailState?.loading === false ? detailState.doc : null
-  const detailError = selectedId && detailState?.loading === false ? detailState.error : null
-  const detailLoading = selectedId !== null && (detailState?.loading ?? true)
+  // Guard against a stale doc flashing while the selection changes: only trust
+  // the detail once it belongs to the currently selected id (Skill pattern).
+  const detailReady = selectedId !== null && detailState?.id === selectedId && detailState?.loading === false
+  const detail = detailReady ? detailState!.doc : null
+  const detailError = detailReady ? detailState!.error : null
+  const detailLoading = selectedId !== null && (detailState?.id !== selectedId || detailState?.loading !== false)
 
   useEffect(() => {
     let isMounted = true
@@ -292,7 +303,7 @@ export function DocsList() {
       onCreate={handleCreate}
       onDelete={handleDelete}
       onPromote={handlePromote}
-      onAddRelation={async () => {}}
+      onAddRelation={handleAddRelation}
     />
   )
 
@@ -305,9 +316,33 @@ export function DocsList() {
   return (
     <div ref={dialogContainerRef} className="relative flex h-[100dvh] w-full flex-col overflow-hidden">
       <DashboardHeader label="Docs">
+        <div
+          className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium border border-border/50 bg-muted/30"
+          title={sseStatus === "connected" ? "SSE Connected: Live stream active" : "SSE: Connecting..."}
+        >
+          <span className={`inline-block size-2 rounded-full ${
+            sseStatus === "connected" ? "bg-green-500 animate-pulse"
+              : sseStatus === "connecting" ? "bg-amber-500" : "bg-destructive"
+          }`} />
+          <span className="text-muted-foreground">
+            {sseStatus === "connected" ? "Live" : sseStatus === "connecting" ? "Connecting" : "Offline"}
+          </span>
+        </div>
+
         <span className="hidden sm:inline-block text-xs text-muted-foreground font-medium">
           {matching} of {total}
         </span>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void handleRescan()}
+          disabled={rescanning}
+          title="Rescan the docs directories and refresh the index"
+        >
+          {rescanning ? <Loader2 className="size-4 animate-spin" /> : <ScanSearch className="size-4" />}
+          <span className="hidden sm:inline-block">Rescan</span>
+        </Button>
 
         <Button
           variant="outline"
@@ -339,8 +374,9 @@ export function DocsList() {
               <div className={`relative min-w-[200px] flex-1 ${panelOpen ? "basis-full" : ""}`}>
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                 <Input
+                  aria-label="Filter by topic"
                   placeholder="Filter by topic..."
-                  value={topic ?? ""}
+                  value={topic}
                   onChange={(e) => { setOffset(0); setTopic(e.target.value) }}
                   className="pl-9"
                 />
@@ -386,7 +422,7 @@ export function DocsList() {
               </Select>
 
               {availableTopics.length > 0 && (
-                <Select value={topic ?? ""} onValueChange={(v) => { setOffset(0); setTopic(v) }}>
+                <Select value={topic} onValueChange={(v) => { setOffset(0); setTopic(v ?? "") }}>
                   <SelectTrigger className="w-[180px]">
                     <SelectValue placeholder="Topic" />
                   </SelectTrigger>
