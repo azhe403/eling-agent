@@ -556,6 +556,8 @@ public class MemoryToolsTests
         Assert.Contains("immediately before `git commit`", options.ServerInstructions, StringComparison.Ordinal);
         Assert.Contains("commit_lease", options.ServerInstructions, StringComparison.Ordinal);
         Assert.Contains("commit_release", options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("On a FAILED attempt, unstage YOUR OWN staged files before releasing", options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("Never unstage files staged by another session", options.ServerInstructions, StringComparison.Ordinal);
         Assert.Contains("commit_wait", options.ServerInstructions, StringComparison.Ordinal);
         Assert.Contains("staged_without_lease", options.ServerInstructions, StringComparison.Ordinal);
         Assert.Contains("Docs (living docs)", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
