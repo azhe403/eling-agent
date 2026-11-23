@@ -162,6 +162,43 @@ tell them to restart the host to run the new version. This is the only place
 an agent needs to look, which is the point of shipping it as a tool rather
 than as documentation.
 
+### 3.3 User-facing interaction: the "eling update" message
+
+When a user sends the message "eling update", the agent presents exactly
+three choices and takes no action until the user picks one:
+
+1. `Update Eling to the latest release (Recommended)` — download and install
+   the latest stable release (fallback to the latest pre-release), then
+   require a restart or reconnect of the MCP server.
+2. `Check the latest version` — compare the installed version against the
+   latest release without changing anything.
+3. `Do nothing` — close the request with no changes.
+
+The list is deliberately closed: no extra or "related" options are added.
+The user approved this contract on 2026-11-23 after a broader menu was
+rejected for being too long.
+
+**Delivery.** The full contract is carried inline in `ServerInstructions`, in
+one compact paragraph. There is no remote document to fetch: an agent does not
+load a doc automatically, and a fetch would depend on the host having an HTTP
+tool, so a pointer would silently degrade to the inline text anyway while
+adding drift and network failure modes. The install scripts already select
+the latest stable release and fall back to the latest pre-release, so the
+update option needs no extra logic — only the shortcut. No new MCP tool is
+introduced for the menu or the fetch.
+
+The contract is independent of whether `self_update` exists in the running
+binary. Today the first option runs the one-line installer from `INSTALL.md`;
+once the tool ships, the same option calls `self_update` instead. Option 2
+does not imply a `check_update` tool: the update-check design deliberately has
+none, so the comparison is made from GitHub Releases and
+`api/update/status`.
+
+Restarting is not a fourth option. It remains a separate, user-consented act
+governed by §4.6: after option 1 completes, the agent reports the result and
+tells the user to restart the host or reconnect the server. An immediate
+restart is offered only as a follow-up, never as a menu choice.
+
 ---
 
 ## 4. How the update is applied
@@ -398,6 +435,12 @@ The tool exists only in binaries that contain it. A machine running an older
 release updates once by hand — the one-line installer — and every update after
 that is a single tool call.
 
+New users are a separate case: before the binary and MCP server exist, no
+Eling instruction can reach the agent, so "eling update" cannot trigger
+anything. They bootstrap with the one-paste agent-install prompt in `README.md`
+(or the one-line installer). The trigger becomes available only once the MCP
+server is registered.
+
 This is stated in `docs/agent-setup.md` (a new "Update" section) and in the
 tool's own description, so an agent on an old binary still knows the manual
 path. The first release carrying `self_update` is therefore the release that
@@ -511,3 +554,9 @@ check them rather than discover them:
 - The version gate compares against the version on disk, so a swap is not
   repeated on every call, and the update-check stays quiet in the window
   between a swap and a restart.
+- The "eling update" message has a closed three-option confirmation menu
+  (approved 2026-11-23): update to latest, check latest version, or do
+  nothing. No extra options; labels are defined in English. Restart is a
+  follow-up, not a menu item (§3.3).
+- The menu is delivered inline in `ServerInstructions`, with no remote doc,
+  no fetch dependency, and no new MCP tool (§3.3).
