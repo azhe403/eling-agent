@@ -561,5 +561,7 @@ public class MemoryToolsTests
         Assert.Contains("Docs (living docs)", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("created during a session", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("update that doc", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("managed or external", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ask the user", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
     }
 }
