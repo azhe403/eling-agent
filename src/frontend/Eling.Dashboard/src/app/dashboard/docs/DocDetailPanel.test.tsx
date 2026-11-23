@@ -119,6 +119,26 @@ describe("DocDetailPanel hook order", () => {
     expect(getByText(/# Heading/)).toBeDefined()
   })
 
+  it("exposes copy buttons for id, path and topic with the full values", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    })
+
+    const { getByRole } = render(
+      <DocDetailPanel {...baseProps} detailLoading={false} detail={{ ...detail, content: "body" }} />,
+    )
+
+    fireEvent.click(getByRole("button", { name: "Copy document id" }))
+    fireEvent.click(getByRole("button", { name: "Copy document path" }))
+    fireEvent.click(getByRole("button", { name: "Copy document topic" }))
+
+    expect(writeText).toHaveBeenCalledWith("managed:current:abc123")
+    expect(writeText).toHaveBeenCalledWith(".eling/docs/specs/example.md")
+    expect(writeText).toHaveBeenCalledWith("specs")
+  })
+
   it("hides YAML front-matter in Preview but shows it in Source", () => {
     const md = '---\nid: managed:current:abc123\nkind: plan\ntitle: "Plan"\nstatus: 1\n---\n\n# Real Title\n\nBody text.'
     const { container, queryByText, getByText, getByRole } = render(

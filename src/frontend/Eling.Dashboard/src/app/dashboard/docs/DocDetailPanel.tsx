@@ -9,6 +9,8 @@ import {
   AlertCircle,
   Clock,
   Link2,
+  Copy,
+  Check,
   X,
 } from "lucide-react"
 import { formatDistanceToNowStrict } from "date-fns"
@@ -30,6 +32,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { apiFetch } from "@/lib/api"
+import { copyText } from "@/lib/clipboard"
 import type {
   DocListItem,
   DocReadResult,
@@ -73,6 +76,28 @@ function stripFrontMatter(content: string): string {
   if (empty) return content.slice(empty[0].length)
   const block = FRONT_MATTER_BLOCK.exec(content)
   return block ? content.slice(block[0].length) : content
+}
+
+/** Small icon-only copy button with a transient confirmation check. */
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+  const onClick = async () => {
+    const ok = await copyText(value)
+    if (!ok) return
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => void onClick()}
+      aria-label={label}
+      title={label}
+      className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+    >
+      {copied ? <Check className="size-3.5 text-green-500" /> : <Copy className="size-3.5" />}
+    </button>
+  )
 }
 
 export type DocFormData = {
@@ -363,59 +388,73 @@ export function DocDetailPanel({
   function renderHeader() {
     return (
       <div className="flex flex-col gap-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              <Badge variant="outline" className={`text-xs ${kindColor}`}>
-                {kindLabel}
-              </Badge>
-              <Badge variant="outline" className="text-xs bg-muted/50">
-                {ownershipLabel}
-              </Badge>
-              <Badge variant="outline" className="text-xs bg-muted/50">
-                {originLabel}
-              </Badge>
-              <Badge variant="outline" className={`text-xs ${SpecStatusColor(currentDoc.status)}`}>
-                {SpecStatusLabel(currentDoc.kind as DocKindDto, currentDoc.status)}
-              </Badge>
-            </div>
-            <h2 className="truncate text-base font-semibold leading-snug">{currentDoc.title}</h2>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-              <span className="max-w-[220px] truncate font-mono">{currentDoc.relPath}</span>
-              <span aria-hidden>·</span>
-              <span className="font-mono">ID: {currentDoc.id.slice(0, 8)}…</span>
-              {timeAgo && (
-                <>
-                  <span aria-hidden>·</span>
-                  <span>{timeAgo}</span>
-                </>
-              )}
-            </div>
-          </div>
+        {/* ID first, on its own row, with a one-click full-value copy. */}
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="shrink-0">ID</span>
+          <code className="min-w-0 flex-1 truncate font-mono" title={currentDoc.id}>
+            {currentDoc.id}
+          </code>
+          <CopyButton value={currentDoc.id} label="Copy document id" />
           <Button
             variant="ghost"
             size="icon"
             onClick={onClose}
             aria-label="Close document detail"
-            className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+            className="-mr-1 size-6 shrink-0 text-muted-foreground hover:text-foreground"
           >
-            <X className="size-4" />
+            <X className="size-3.5" />
           </Button>
         </div>
 
-        {currentDoc.topic && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>Topic</span>
-            <Badge variant="outline" className="text-xs">{currentDoc.topic}</Badge>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="outline" className={`text-xs ${kindColor}`}>
+              {kindLabel}
+            </Badge>
+            <Badge variant="outline" className="text-xs bg-muted/50">
+              {ownershipLabel}
+            </Badge>
+            <Badge variant="outline" className="text-xs bg-muted/50">
+              {originLabel}
+            </Badge>
+            <Badge variant="outline" className={`text-xs ${SpecStatusColor(currentDoc.status)}`}>
+              {SpecStatusLabel(currentDoc.kind as DocKindDto, currentDoc.status)}
+            </Badge>
           </div>
-        )}
+          <h2 className="text-base font-semibold leading-snug break-words">{currentDoc.title}</h2>
+        </div>
 
-        {currentDoc.supersededBy && (
-          <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
-            <ChevronRight className="size-3 shrink-0" />
-            <span>Superseded by <code className="font-mono">{currentDoc.supersededBy}</code></span>
+        {/* Metadata below the title, one field per row so nothing truncates into
+            an unreadable run, each with its own copy button. */}
+        <dl className="flex flex-col gap-1.5 rounded-lg border border-border/40 bg-muted/20 p-2.5 text-xs">
+          <div className="flex items-center gap-2">
+            <dt className="w-14 shrink-0 text-muted-foreground">path</dt>
+            <dd className="min-w-0 flex-1 truncate font-mono text-[11px]" title={currentDoc.relPath}>
+              {currentDoc.relPath}
+            </dd>
+            <CopyButton value={currentDoc.relPath} label="Copy document path" />
           </div>
-        )}
+          {currentDoc.topic && (
+            <div className="flex items-center gap-2">
+              <dt className="w-14 shrink-0 text-muted-foreground">topic</dt>
+              <dd className="min-w-0 flex-1 truncate text-[11px]">{currentDoc.topic}</dd>
+              <CopyButton value={currentDoc.topic} label="Copy document topic" />
+            </div>
+          )}
+          {timeAgo && (
+            <div className="flex items-center gap-2">
+              <dt className="w-14 shrink-0 text-muted-foreground">updated</dt>
+              <dd className="min-w-0 flex-1 truncate text-[11px]">{timeAgo}</dd>
+            </div>
+          )}
+          {currentDoc.supersededBy && (
+            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+              <dt className="w-14 shrink-0">superseded</dt>
+              <dd className="min-w-0 flex-1 truncate font-mono text-[11px]">{currentDoc.supersededBy}</dd>
+              <CopyButton value={currentDoc.supersededBy} label="Copy superseding document id" />
+            </div>
+          )}
+        </dl>
 
         {currentDoc.frontMatterError && (
           <div className="flex items-start gap-2 text-xs text-destructive">
