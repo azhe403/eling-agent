@@ -56,11 +56,19 @@ export function DocCard({ doc, selected, onSelect }: DocCardProps) {
   const originLabel = ORIGIN_LABELS[doc.origin as DocOriginDto] ?? `Origin ${doc.origin}`
   const statusInfo = STATUS_LABELS[doc.status] ?? { label: `Status ${doc.status}`, icon: <FileText className="size-3" />, color: "bg-gray-500/10 text-gray-600" }
 
+  // The list endpoint sends no mTime, so most cards have nothing to format.
+  // Returning "" (instead of "unknown") lets the meta row drop the separator
+  // and the word entirely rather than printing "· unknown" on every card.
   let timeAgo = ""
-  try {
-    timeAgo = formatDistanceToNowStrict(new Date(doc.mTime), { addSuffix: true })
-  } catch {
-    timeAgo = "unknown"
+  if (doc.mTime) {
+    const parsed = new Date(doc.mTime)
+    if (!Number.isNaN(parsed.getTime())) {
+      try {
+        timeAgo = formatDistanceToNowStrict(parsed, { addSuffix: true })
+      } catch {
+        timeAgo = ""
+      }
+    }
   }
 
   const hasSteps = doc.stepsTotal > 0
@@ -107,13 +115,17 @@ export function DocCard({ doc, selected, onSelect }: DocCardProps) {
               {doc.title}
             </h3>
 
-            <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-2 flex-wrap">
-              <span className="font-mono truncate max-w-[200px]">{doc.relPath}</span>
-              <span>·</span>
-              <span>{timeAgo}</span>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground">
+              <span className="max-w-[240px] truncate font-mono">{doc.relPath}</span>
+              {timeAgo && (
+                <>
+                  <span aria-hidden>·</span>
+                  <span>{timeAgo}</span>
+                </>
+              )}
               {hasSteps && (
                 <>
-                  <span>·</span>
+                  <span aria-hidden>·</span>
                   <span>{doc.stepsDone}/{doc.stepsTotal} steps</span>
                 </>
               )}

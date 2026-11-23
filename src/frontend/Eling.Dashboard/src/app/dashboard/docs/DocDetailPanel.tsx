@@ -8,8 +8,8 @@ import {
   ExternalLink,
   AlertCircle,
   Clock,
-  ChevronLeft,
   Link2,
+  X,
 } from "lucide-react"
 import { formatDistanceToNowStrict } from "date-fns"
 
@@ -147,7 +147,7 @@ function Tabs({ defaultValue, className, children }: { defaultValue: string; cla
 }
 
 function TabsList({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <div className={`flex ${className ?? ""}`} role="tablist">{children}</div>
+  return <div className={className} role="tablist">{children}</div>
 }
 
 function TabsTrigger({
@@ -162,8 +162,10 @@ function TabsTrigger({
       role="tab"
       aria-selected={selected}
       onClick={() => ctx?.setValue(triggerValue)}
-      className={`px-3 py-2 text-sm font-medium transition-colors ${
-        selected ? "text-primary" : "text-muted-foreground hover:text-foreground"
+      className={`-mb-px border-b-2 px-2 py-2.5 text-xs font-medium transition-colors ${
+        selected
+          ? "border-primary text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground"
       } ${className ?? ""}`}
     >
       {children}
@@ -262,7 +264,7 @@ export function DocDetailPanel({
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-medium">Trashed Document</h2>
           <Button variant="ghost" size="sm" onClick={onClose}>
-            <ChevronLeft className="size-4" />
+            <X className="size-4" />
           </Button>
         </div>
         <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
@@ -282,7 +284,7 @@ export function DocDetailPanel({
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-medium">{doc?.title ?? "Document"}</h2>
           <Button variant="ghost" size="sm" onClick={onClose}>
-            <ChevronLeft className="size-4" />
+            <X className="size-4" />
           </Button>
         </div>
         <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
@@ -299,7 +301,7 @@ export function DocDetailPanel({
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-medium animate-pulse">Loading...</h2>
           <Button variant="ghost" size="sm" onClick={onClose}>
-            <ChevronLeft className="size-4" />
+            <X className="size-4" />
           </Button>
         </div>
         <div className="space-y-3">
@@ -319,10 +321,15 @@ export function DocDetailPanel({
   const originLabel = ORIGIN_LABELS[currentDoc.origin as DocOriginDto] ?? `Origin ${currentDoc.origin}`
 
   let timeAgo = ""
-  try {
-    timeAgo = formatDistanceToNowStrict(new Date(currentDoc.mTime), { addSuffix: true })
-  } catch {
-    timeAgo = "unknown"
+  if (currentDoc.mTime) {
+    const parsed = new Date(currentDoc.mTime)
+    if (!Number.isNaN(parsed.getTime())) {
+      try {
+        timeAgo = formatDistanceToNowStrict(parsed, { addSuffix: true })
+      } catch {
+        timeAgo = ""
+      }
+    }
   }
 
   const sections = detail.sections ?? []
@@ -332,10 +339,10 @@ export function DocDetailPanel({
   // Header section
   function renderHeader() {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap mb-2">
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
               <Badge variant="outline" className={`text-xs ${kindColor}`}>
                 {kindLabel}
               </Badge>
@@ -349,42 +356,52 @@ export function DocDetailPanel({
                 {SpecStatusLabel(currentDoc.kind as DocKindDto, currentDoc.status)}
               </Badge>
             </div>
-            <h2 className="text-lg font-medium truncate">{currentDoc.title}</h2>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-              <span className="font-mono truncate max-w-[200px]">{currentDoc.relPath}</span>
-              <span>·</span>
-              <span>ID: {currentDoc.id.slice(0, 8)}...</span>
-              <span>·</span>
-              <span>{timeAgo}</span>
+            <h2 className="truncate text-base font-semibold leading-snug">{currentDoc.title}</h2>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+              <span className="max-w-[220px] truncate font-mono">{currentDoc.relPath}</span>
+              <span aria-hidden>·</span>
+              <span className="font-mono">ID: {currentDoc.id.slice(0, 8)}…</span>
+              {timeAgo && (
+                <>
+                  <span aria-hidden>·</span>
+                  <span>{timeAgo}</span>
+                </>
+              )}
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <ChevronLeft className="size-4" />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            aria-label="Close document detail"
+            className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-4" />
           </Button>
         </div>
 
         {currentDoc.topic && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>Topic:</span>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>Topic</span>
             <Badge variant="outline" className="text-xs">{currentDoc.topic}</Badge>
           </div>
         )}
 
         {currentDoc.supersededBy && (
-          <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
-            <ChevronRight className="size-3" />
-            <span>Superseded by: <code className="font-mono">{currentDoc.supersededBy}</code></span>
+          <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
+            <ChevronRight className="size-3 shrink-0" />
+            <span>Superseded by <code className="font-mono">{currentDoc.supersededBy}</code></span>
           </div>
         )}
 
         {currentDoc.frontMatterError && (
-          <div className="flex items-center gap-2 text-sm text-destructive">
-            <AlertCircle className="size-4" />
+          <div className="flex items-start gap-2 text-xs text-destructive">
+            <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
             <span>Front-matter error: {currentDoc.frontMatterErrorMessage}</span>
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button variant="outline" size="sm" onClick={() => onDelete(currentDoc.id)}>
             Delete
           </Button>
@@ -414,8 +431,8 @@ export function DocDetailPanel({
 
     if (content === undefined || content === null) {
       return (
-        <ScrollArea className="h-[calc(100%-120px)]">
-          <div className="text-center text-muted-foreground py-8">
+        <ScrollArea className="h-full">
+          <div className="px-4 py-12 text-center text-xs text-muted-foreground">
             Content not available for this document.
           </div>
         </ScrollArea>
@@ -424,8 +441,8 @@ export function DocDetailPanel({
 
     if (content.trim().length === 0) {
       return (
-        <ScrollArea className="h-[calc(100%-120px)]">
-          <div className="text-center text-muted-foreground py-8">
+        <ScrollArea className="h-full">
+          <div className="px-4 py-12 text-center text-xs text-muted-foreground">
             This document is empty.
           </div>
         </ScrollArea>
@@ -433,7 +450,7 @@ export function DocDetailPanel({
     }
 
     return (
-      <ScrollArea className="h-[calc(100%-120px)]">
+      <ScrollArea className="h-full">
         <pre className="whitespace-pre-wrap break-words p-4 text-xs leading-relaxed font-mono text-foreground">
           {content}
         </pre>
@@ -444,10 +461,10 @@ export function DocDetailPanel({
   // Sections tab content
   function renderSectionsTab() {
     return (
-      <ScrollArea className="h-[calc(100%-120px)]">
-        <div className="space-y-2 p-2">
+      <ScrollArea className="h-full">
+        <div className="flex flex-col gap-2 p-4">
           {sections.length === 0 ? (
-            <div className="text-center text-muted-foreground py-8">
+            <div className="px-4 py-12 text-center text-xs text-muted-foreground">
               No sections found
             </div>
           ) : (
@@ -493,10 +510,10 @@ export function DocDetailPanel({
   // Refs tab content
   function renderRefsTab() {
     return (
-      <ScrollArea className="h-[calc(100%-120px)]">
-        <div className="space-y-2 p-2">
+      <ScrollArea className="h-full">
+        <div className="flex flex-col gap-2 p-4">
           {refs.length === 0 ? (
-            <div className="text-center text-muted-foreground py-8">
+            <div className="px-4 py-12 text-center text-xs text-muted-foreground">
               No references found
             </div>
           ) : (
@@ -558,8 +575,8 @@ export function DocDetailPanel({
   // Relations tab content
   function renderRelationsTab() {
     return (
-      <ScrollArea className="h-[calc(100%-120px)]">
-        <div className="space-y-2 p-2">
+      <ScrollArea className="h-full">
+        <div className="flex flex-col gap-2 p-4">
           {relations.length > 0 ? (
             relations.map((rel: DocRelation, index: number) => {
               const relKey = `${rel.sourceId}-${rel.targetId}-${index}`
@@ -580,7 +597,7 @@ export function DocDetailPanel({
               )
             })
           ) : (
-            <div className="text-center text-muted-foreground py-8">
+            <div className="px-4 py-12 text-center text-xs text-muted-foreground">
               No relations found
             </div>
           )}
@@ -592,17 +609,17 @@ export function DocDetailPanel({
   // Tabs
   function renderTabs() {
     return (
-      <Tabs defaultValue="content" className="flex-1 flex flex-col min-h-0">
-        <TabsList className="grid w-full grid-cols-4">
+      <Tabs defaultValue="content" className="flex min-h-0 flex-1 flex-col">
+        <TabsList className="grid w-full shrink-0 grid-cols-4 border-b border-border/40 bg-background">
           <TabsTrigger value="content">Content</TabsTrigger>
           <TabsTrigger value="sections">Sections ({sections.length})</TabsTrigger>
           <TabsTrigger value="refs">References ({refs.length})</TabsTrigger>
           <TabsTrigger value="relations">Relations ({relations.length})</TabsTrigger>
         </TabsList>
-        <TabsContent value="content" className="flex-1 min-h-0">{renderContentTab()}</TabsContent>
-        <TabsContent value="sections" className="flex-1 min-h-0">{renderSectionsTab()}</TabsContent>
-        <TabsContent value="refs" className="flex-1 min-h-0">{renderRefsTab()}</TabsContent>
-        <TabsContent value="relations" className="flex-1 min-h-0">{renderRelationsTab()}</TabsContent>
+        <TabsContent value="content" className="flex min-h-0 flex-1 flex-col">{renderContentTab()}</TabsContent>
+        <TabsContent value="sections" className="flex min-h-0 flex-1 flex-col">{renderSectionsTab()}</TabsContent>
+        <TabsContent value="refs" className="flex min-h-0 flex-1 flex-col">{renderRefsTab()}</TabsContent>
+        <TabsContent value="relations" className="flex min-h-0 flex-1 flex-col">{renderRelationsTab()}</TabsContent>
       </Tabs>
     )
   }
@@ -666,28 +683,36 @@ export function DocDetailPanel({
     )
   }
 
-  // Stacked variant (dialog)
+  // Stacked variant: the caller owns the dialog chrome (see DocsList), so this
+  // renders the panel body only — the same split the skills page uses.
   if (variant === "stacked") {
     return (
-      <Dialog open onOpenChange={onClose}>
-        <DialogContent className="max-h-[85svh] w-[94vw] overflow-hidden p-0 sm:max-w-3xl">
-          <div className="flex flex-col h-full">
-            {renderHeader()}
-            {renderTabs()}
-            {renderRelationDialog()}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <div className="flex h-full min-h-0 flex-col bg-background">
+        <div className="flex shrink-0 flex-col gap-3 border-b border-border/40 p-4">
+          {renderHeader()}
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {renderTabs()}
+        </div>
+        {renderRelationDialog()}
+      </div>
     )
   }
 
-  // Aside variant (panel)
+  // Aside variant: docked right-hand column on wide screens.
   return (
-    <div className="flex flex-col h-full min-w-0 bg-card">
-      <div className="flex-shrink-0 border-b p-4">{renderHeader()}</div>
-      <div className="flex-1 min-h-0 overflow-hidden border-l">{renderTabs()}</div>
+    <aside
+      aria-label="Document detail"
+      className="flex h-full min-h-0 min-w-[380px] flex-1 shrink-0 flex-col border-l bg-background"
+    >
+      <div className="flex shrink-0 flex-col gap-3 border-b border-border/40 p-4">
+        {renderHeader()}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {renderTabs()}
+      </div>
       {renderRelationDialog()}
-    </div>
+    </aside>
   )
 }
 

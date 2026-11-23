@@ -16,6 +16,12 @@ import {
 } from "@/components/ui/alert-dialog"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -27,6 +33,8 @@ import {
 import { LoadingBar } from "@/components/ui/loading-bar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useDocsSse } from "@/hooks/use-docs-sse"
+import { useMediaQuery } from "@/hooks/use-media-query"
+import { XL_BREAKPOINT } from "@/lib/constants"
 import { apiFetch, ApiError } from "@/lib/api"
 import type {
   DocListItem,
@@ -277,8 +285,11 @@ export function DocsList() {
     />
   )
 
-  const wide = typeof window !== "undefined" && window.innerWidth >= 1280
-  const panelOpen = wide && (selectedListItem || createMode)
+  const wide = useMediaQuery(`(min-width: ${XL_BREAKPOINT}px)`)
+  const panelOpen = wide && (selectedListItem !== null || createMode)
+  const mainColClass = panelOpen
+    ? "flex h-full min-h-0 w-[420px] shrink-0 flex-col gap-4 overflow-y-auto p-4 pt-0"
+    : "flex h-full min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-0"
 
   return (
     <div className="flex h-[100dvh] w-full flex-col overflow-hidden">
@@ -304,7 +315,7 @@ export function DocsList() {
       </DashboardHeader>
 
       <div className="flex min-h-0 w-full flex-1 overflow-hidden">
-        <div className={`flex min-h-0 ${panelOpen ? "w-[420px] shrink-0" : "flex-1 min-w-0"} flex-col gap-4 overflow-y-auto p-4 pt-0`}>
+        <div className={mainColClass}>
           {error && (
             <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
               {error}
@@ -314,7 +325,7 @@ export function DocsList() {
           {/* Toolbar: filters */}
           <div className="sticky top-0 z-10 flex flex-col gap-2 bg-background pb-2 pt-4">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="relative flex-1 min-w-[200px]">
+              <div className={`relative min-w-[200px] flex-1 ${panelOpen ? "basis-full" : ""}`}>
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                 <Input
                   placeholder="Filter by topic..."
@@ -420,12 +431,35 @@ export function DocsList() {
             )}
           </div>
 
-          {/* Narrow: detail as dialog */}
-          {!wide && (selectedListItem || createMode) && panel("stacked")}
+          {/* Narrow screens: the panel opens as a dialog over the grid. */}
+          {!wide && (selectedListItem || createMode) && (
+            <Dialog
+              open
+              onOpenChange={(open) => {
+                if (!open) {
+                  setSelectedDoc(null)
+                  setCreateMode(false)
+                }
+              }}
+            >
+              <DialogContent
+                showCloseButton={false}
+                className="max-h-[85svh] w-[94vw] overflow-hidden p-0 sm:max-w-3xl"
+              >
+                <DialogTitle className="sr-only">
+                  {createMode ? "New document" : (selectedListItem?.title ?? "Document detail")}
+                </DialogTitle>
+                <DialogDescription className="sr-only">
+                  {createMode ? "Create a new document" : "Document detail panel"}
+                </DialogDescription>
+                {panel("stacked")}
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
 
-        {/* Wide: detail panel aside */}
-        {wide && (selectedListItem || createMode) && panel("aside")}
+        {/* Wide screens: master-detail panel docked on the right. */}
+        {panelOpen && panel("aside")}
       </div>
 
       <AlertDialog
