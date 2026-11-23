@@ -222,7 +222,11 @@ export function DocsList() {
 
   const handleSelect = (doc: DocListItem) => {
     setCreateMode(false)
-    setSelectedDoc(selectedDoc?.id === doc.id ? null : doc)
+    // Selecting is a one-way action: clicking the already-open card keeps its
+    // detail in place. Closing is the panel's explicit X button (or the narrow
+    // dialog's dismiss), never a second click on the card — otherwise a stray
+    // click on the row you're reading makes the detail vanish.
+    setSelectedDoc(doc)
   }
 
   const handleNewDoc = () => {
