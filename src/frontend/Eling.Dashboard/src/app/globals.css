@@ -189,4 +189,28 @@
   html[data-sidebar-collapsed="true"] [data-slot="sidebar-container"] {
     width: var(--sidebar-width-icon, 3rem) !important;
   }
+
+  /* Rendered markdown in the docs viewer. Scoped to .md-preview so it never
+     touches prose elsewhere; uses theme tokens so it follows light/dark. */
+  .md-preview {
+    @apply p-4 text-sm leading-relaxed;
+  }
+  .md-preview h1 { @apply mb-3 mt-5 text-xl font-semibold; }
+  .md-preview h2 { @apply mb-2 mt-5 text-lg font-semibold; }
+  .md-preview h3 { @apply mb-2 mt-4 text-base font-semibold; }
+  .md-preview h4 { @apply mb-2 mt-4 text-sm font-semibold; }
+  .md-preview p { @apply my-2; }
+  .md-preview ul { @apply my-2 list-disc pl-6; }
+  .md-preview ol { @apply my-2 list-decimal pl-6; }
+  .md-preview li { @apply my-0.5; }
+  .md-preview a { @apply text-primary underline underline-offset-2; }
+  .md-preview strong { @apply font-semibold; }
+  .md-preview blockquote { @apply my-3 border-l-2 border-border pl-4 text-muted-foreground; }
+  .md-preview code { @apply rounded bg-muted px-1 py-0.5 font-mono text-xs; }
+  .md-preview pre { @apply my-3 overflow-x-auto rounded-lg bg-muted p-3; }
+  .md-preview pre code { @apply bg-transparent p-0; }
+  .md-preview table { @apply my-3 w-full border-collapse text-xs; }
+  .md-preview th { @apply border border-border bg-muted px-2 py-1 text-left font-medium; }
+  .md-preview td { @apply border border-border px-2 py-1; }
+  .md-preview input[type="checkbox"] { @apply mr-1.5 accent-primary; }
 }

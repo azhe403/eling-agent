@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { render } from "@testing-library/react"
+import { render, fireEvent } from "@testing-library/react"
 
 import { DocDetailPanel } from "./DocDetailPanel"
 import type { DocListItem, DocReadResult } from "@/lib/types"
@@ -84,5 +84,38 @@ describe("DocDetailPanel hook order", () => {
     )
 
     expect(getByText("Content not available for this document.")).toBeDefined()
+  })
+
+  it("renders GFM tables, task checkboxes and code in Preview mode", () => {
+    const md = "| A | B |\n|---|---|\n| 1 | 2 |\n\n- [x] done\n\n```ts\nconst x = 1\n```"
+    const { getByRole, getByText } = render(
+      <DocDetailPanel {...baseProps} detailLoading={false} detail={{ ...detail, content: md }} />,
+    )
+
+    expect(getByRole("table")).toBeDefined()
+    expect(getByRole("checkbox")).toHaveProperty("checked", true)
+    expect(getByText("const x = 1")).toBeDefined()
+  })
+
+  it("escapes raw HTML in Preview mode", () => {
+    const { container } = render(
+      <DocDetailPanel
+        {...baseProps}
+        detailLoading={false}
+        detail={{ ...detail, content: "<script>alert(1)</script>" }}
+      />,
+    )
+
+    expect(container.querySelector("script")).toBeNull()
+  })
+
+  it("keeps raw source text in Source mode", () => {
+    const md = "# Heading\n\n| A | B |\n|---|---|\n| 1 | 2 |"
+    const { getByText, getByRole } = render(
+      <DocDetailPanel {...baseProps} detailLoading={false} detail={{ ...detail, content: md }} />,
+    )
+
+    fireEvent.click(getByRole("button", { name: "Source" }))
+    expect(getByText(/# Heading/)).toBeDefined()
   })
 })

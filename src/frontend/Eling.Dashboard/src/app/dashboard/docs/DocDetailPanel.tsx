@@ -12,6 +12,8 @@ import {
   X,
 } from "lucide-react"
 import { formatDistanceToNowStrict } from "date-fns"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -209,6 +211,11 @@ export function DocDetailPanel({
   const [relationKind, setRelationKind] = useState<RelationKindDto>(0)
   const [relationError, setRelationError] = useState<string | null>(null)
   const [relationLoading, setRelationLoading] = useState(false)
+  // Which rendering of the document body the Content tab shows. Declared
+  // unconditionally so the hook order stays stable across every early return;
+  // DocsList keys this panel by document id, so switching docs remounts it and
+  // the default resets without an effect.
+  const [viewMode, setViewMode] = useState<"preview" | "source">("preview")
 
   // Must run unconditionally: every early return below (no doc, create mode,
   // trashed, error, loading) would otherwise skip this hook and change the
@@ -450,11 +457,43 @@ export function DocDetailPanel({
     }
 
     return (
-      <ScrollArea className="h-full">
-        <pre className="whitespace-pre-wrap break-words p-4 text-xs leading-relaxed font-mono text-foreground">
-          {content}
-        </pre>
-      </ScrollArea>
+      <div className="flex min-h-0 flex-1 flex-col">
+        {/* View-mode switch. Sits above the scroller so it stays put while the
+            document body scrolls, and mirrors the tab bar's underline style. */}
+        <div className="flex shrink-0 items-center gap-1 border-b border-border/40 px-3 py-1.5" role="group" aria-label="Content view mode">
+          {([["preview", "Preview"], ["source", "Source"]] as const).map(([mode, label]) => {
+            const active = viewMode === mode
+            return (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setViewMode(mode)}
+                className={`-mb-px border-b-2 px-2 py-1 text-xs font-medium transition-colors ${
+                  active
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+        <ScrollArea className="h-full flex-1">
+          {viewMode === "preview" ? (
+            // react-markdown v10 removed the `className` prop; scope the styles
+            // through a wrapper instead.
+            <div className="md-preview">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            </div>
+          ) : (
+            <pre className="whitespace-pre-wrap break-words p-4 text-xs leading-relaxed font-mono text-foreground">
+              {content}
+            </pre>
+          )}
+        </ScrollArea>
+      </div>
     )
   }
 
