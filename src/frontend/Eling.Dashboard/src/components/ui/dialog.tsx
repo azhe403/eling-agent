@@ -39,6 +39,8 @@ function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
 
 function DialogContent({
   className,
+  overlayClassName,
+  container,
   children,
   showCloseButton = true,
   onOverlayClick,
@@ -46,10 +48,14 @@ function DialogContent({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
   onOverlayClick?: React.MouseEventHandler<HTMLDivElement>
+  /** Extra classes for the backdrop. Pass `absolute` to scope it to a positioned container. */
+  overlayClassName?: string
+  /** Portal target. When set, the dialog (and its overlay) render inside this element. */
+  container?: DialogPrimitive.Portal.Props["container"]
 }) {
   return (
-    <DialogPortal>
-      <DialogOverlay onClick={onOverlayClick} />
+    <DialogPortal container={container}>
+      <DialogOverlay className={overlayClassName} onClick={onOverlayClick} />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(

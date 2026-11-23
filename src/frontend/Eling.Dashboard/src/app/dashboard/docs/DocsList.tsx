@@ -101,6 +101,13 @@ export function DocsList() {
     return () => clearTimeout(t)
   }, [error])
 
+  // The narrow-screen detail dialog is portaled into this content area instead
+  // of <body>. A body-level portal makes Base UI's modal mark everything else
+  // inert — including the app sidebar — so the sidebar looks closed when a card
+  // is clicked. Scoping the portal (and overlay) to the content column keeps the
+  // sidebar mounted, visible and interactive.
+  const dialogContainerRef = useRef<HTMLDivElement>(null)
+
   // URL sync for filters
   const urlSyncReady = useRef(false)
   useEffect(() => {
@@ -292,7 +299,7 @@ export function DocsList() {
     : "flex h-full min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-0"
 
   return (
-    <div className="flex h-[100dvh] w-full flex-col overflow-hidden">
+    <div ref={dialogContainerRef} className="relative flex h-[100dvh] w-full flex-col overflow-hidden">
       <DashboardHeader label="Docs">
         <span className="hidden sm:inline-block text-xs text-muted-foreground font-medium">
           {matching} of {total}
@@ -444,7 +451,9 @@ export function DocsList() {
             >
               <DialogContent
                 showCloseButton={false}
-                className="max-h-[85svh] w-[94vw] overflow-hidden p-0 sm:max-w-3xl"
+                container={dialogContainerRef}
+                overlayClassName="absolute"
+                className="absolute max-h-[85svh] w-[94vw] overflow-hidden p-0 sm:max-w-3xl"
               >
                 <DialogTitle className="sr-only">
                   {createMode ? "New document" : (selectedListItem?.title ?? "Document detail")}
