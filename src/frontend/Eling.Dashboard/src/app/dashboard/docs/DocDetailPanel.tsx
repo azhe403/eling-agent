@@ -59,6 +59,22 @@ interface DocDetailPanelProps {
   onAddRelation: (sourceId: string, targetId: string, kind: RelationKindDto) => Promise<void>
 }
 
+// YAML front-matter is metadata, not prose. If it reaches a markdown renderer,
+// the closing `---` line turns the whole block into a setext <h2> — the metadata
+// then shows up as a bold paragraph at the top of the document. The backend
+// already separates RemainingContent when indexing; the read endpoint returns
+// the honest raw file, so the Preview path does the same split here. Source
+// mode deliberately keeps the front-matter visible.
+const FRONT_MATTER_BLOCK = /^---[^\S\r\n]*\r?\n[\s\S]*?\r?\n---[^\S\r\n]*(?:\r?\n|$)/
+const EMPTY_FRONT_MATTER_BLOCK = /^---[^\S\r\n]*\r?\n---[^\S\r\n]*(?:\r?\n|$)/
+
+function stripFrontMatter(content: string): string {
+  const empty = EMPTY_FRONT_MATTER_BLOCK.exec(content)
+  if (empty) return content.slice(empty[0].length)
+  const block = FRONT_MATTER_BLOCK.exec(content)
+  return block ? content.slice(block[0].length) : content
+}
+
 export type DocFormData = {
   relPath: string
   content: string
@@ -485,7 +501,9 @@ export function DocDetailPanel({
             // react-markdown v10 removed the `className` prop; scope the styles
             // through a wrapper instead.
             <div className="md-preview">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {stripFrontMatter(content)}
+              </ReactMarkdown>
             </div>
           ) : (
             <pre className="whitespace-pre-wrap break-words p-4 text-xs leading-relaxed font-mono text-foreground">

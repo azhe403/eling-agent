@@ -118,4 +118,20 @@ describe("DocDetailPanel hook order", () => {
     fireEvent.click(getByRole("button", { name: "Source" }))
     expect(getByText(/# Heading/)).toBeDefined()
   })
+
+  it("hides YAML front-matter in Preview but shows it in Source", () => {
+    const md = '---\nid: managed:current:abc123\nkind: plan\ntitle: "Plan"\nstatus: 1\n---\n\n# Real Title\n\nBody text.'
+    const { container, queryByText, getByText, getByRole } = render(
+      <DocDetailPanel {...baseProps} detailLoading={false} detail={{ ...detail, content: md }} />,
+    )
+
+    // Preview must not render the YAML keys as a prose paragraph.
+    expect(queryByText(/id: managed:current/)).toBeNull()
+    expect(getByText("Real Title")).toBeDefined()
+
+    // Source stays honest: the full raw document including front-matter.
+    fireEvent.click(getByRole("button", { name: "Source" }))
+    expect(getByText(/kind: plan/)).toBeDefined()
+    expect(container.querySelector(".md-preview")).toBeNull()
+  })
 })
