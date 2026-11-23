@@ -558,5 +558,8 @@ public class MemoryToolsTests
         Assert.Contains("commit_release", options.ServerInstructions, StringComparison.Ordinal);
         Assert.Contains("commit_wait", options.ServerInstructions, StringComparison.Ordinal);
         Assert.Contains("staged_without_lease", options.ServerInstructions, StringComparison.Ordinal);
+        Assert.Contains("Docs (living docs)", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("created during a session", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("update that doc", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
     }
 }
