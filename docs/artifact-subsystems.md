@@ -16,8 +16,8 @@ is not file size: it is **what the artefact is for, and what a reader does with 
 
 | | **Memory** | **Intention** | **Skill** | **Snippet** | **Docs** |
 |---|---|---|---|---|---|
-| Status | implemented | implemented | implemented | **not implemented** | **proposed** |
-| Code | `Eling.Core/Memory/` | `Eling.Core/Intention/` | `Eling.Core/Skill/` (42 files) | none (`Snippet/` absent) | none yet |
+| Status | implemented | implemented | implemented | **not implemented** | **implemented** (backend + dashboard) |
+| Code | `Eling.Core/Memory/` | `Eling.Core/Intention/` | `Eling.Core/Skill/` (42 files) | none (`Snippet/` absent) | `Eling.Core/Docs/` + `Eling.Backend/Endpoints/DocEndpoints.cs` + `Eling.Dashboard/src/app/dashboard/docs/` |
 | What it is | one fact | a future trigger | a procedure | one code block | a structured document |
 | Typical size | ~700 B | ~300 B | ~5 KB | ~1 KB | 2–40 KB |
 | Sections | no | no | no | no | **yes** |

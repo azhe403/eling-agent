@@ -1,7 +1,8 @@
 # Docs Management Subsystem (Spec, Plan, Scratch) Design Specification
 
 - **Date:** 2026-11-20
-- **Status:** Proposed (awaiting user review)
+- **Status:** Implemented (backend + dashboard), pending the remaining scope-policy / staleness / audit UI phases
+- **Implementation note (2026-11-23):** Backend delivered as `Eling.Core/Docs/` + `Eling.Backend` (REST endpoints, SSE, 11 MCP tools, watcher). Dashboard delivered at `src/frontend/Eling.Dashboard/src/app/dashboard/docs/` with the master-detail layout, a Content tab offering **Preview** (rendered markdown via `react-markdown` + `remark-gfm`, YAML front-matter stripped) and **Source** (raw), copy buttons per metadata field, and live SSE refresh. §3.10's "existing renderer" note is superseded: this subsystem ships its own scoped `.md-preview` renderer. The dedicated follow-up design is `2026-11-23-docs-markdown-viewer-modes-design.md`.
 
 > Paths use placeholders. `DATA/eling` = `~/.local/share/eling`. `CONFIG/eling` = `~/.config/eling`. No machine paths in this document.
 
@@ -527,7 +528,7 @@ A **Docs** tab beside Memories, Intentions, and Skills:
   it came from; `kind` chip (`spec` / `plan` / `doc` / `scratch`).
 - **Plan rows show a progress bar** from `steps_done / steps_total`.
 - **Spec rows show the approval chip** (`draft` / `review` / `approved` / `implemented`).
-- Section TOC sidebar, Markdown body rendered by the existing renderer.
+- Section TOC sidebar, Markdown body rendered by this subsystem's own scoped renderer (`.md-preview`), with a **Preview / Source** switch: Preview renders GFM and hides YAML front-matter; Source shows the raw file including front-matter.
 - Status chips: `active`, `superseded` (muted, with replacement link), `stale: N` (error tone).
 - `external` documents render **read-only**: no edit control, no annotate control, no audit drawer,
   and inferred metadata is labelled as inferred so the reader does not mistake it for declared

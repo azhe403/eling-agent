@@ -1,6 +1,27 @@
 # Docs Viewer — Markdown Preview & Source Modes
 
-Status: Accepted
+Status: Implemented
+
+## Implementation note (2026-11-23)
+
+Shipped across `7ed7f2d` (deps), `63ae75a` (viewer), `376e1d4` (front-matter),
+`0ef5d07` (header copy buttons). Deviations from the original Design below,
+recorded here so the doc matches the code:
+
+- `react-markdown` v10 removed the `className` prop. The renderer is wrapped in
+  `<div className="md-preview">` instead of receiving `className` directly.
+- No reset effect was needed: `DocsList.tsx` keys the panel by document id, so
+  opening a different document remounts it and `viewMode` returns to `preview`.
+- **YAML front-matter is stripped on the Preview path only.** The read endpoint
+  returns the raw file; remark rendered the leading `--- … ---` block as a
+  setext `<h2>`, showing metadata as prose. `stripFrontMatter()` now removes it
+  before `<ReactMarkdown>`; Source keeps the full raw document including
+  front-matter.
+- The detail header was restructured: full ID on the top row, then badges and
+  title, then a metadata list (`path`, `topic`, `updated`, optional
+  `superseded`) one field per line. Each string field has its own copy button
+  using the shared `copyText()` helper (`lib/clipboard.ts`), which handles
+  insecure-context fallback.
 
 ## Intent
 
@@ -54,10 +75,10 @@ style the rendered output with a small scoped CSS block in `globals.css`
 ## Design
 
 - Install `react-markdown` and `remark-gfm` in the dashboard package.
-- In `DocDetailPanel.tsx`, add `const [viewMode, setViewMode] = useState<"preview" | "source">("preview")` and reset it to `"preview"` when `currentDoc.id` changes.
+- In `DocDetailPanel.tsx`, add `const [viewMode, setViewMode] = useState<"preview" | "source">("preview")`. It is declared among the unconditional hooks before all early returns; there is no reset effect because the panel is keyed by document id in `DocsList.tsx`.
 - In `renderContentTab`, keep the unavailable/empty guards. For real content,
   render a small segmented control (`Preview | Source`) above the scroll area,
-  then either `<ReactMarkdown remarkPlugins={[remarkGfm]} className="md-preview">…</ReactMarkdown>` or the existing `<pre>` block.
+  then either `<div className="md-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{stripFrontMatter(content)}</ReactMarkdown></div>` or the existing `<pre>` block with the unmodified `content`.
 - Add `.md-preview` styles to `globals.css` using the existing theme tokens
   (`--border`, `--muted-foreground`, `--primary`, etc.) so it follows light/dark.
 - Keep the existing four top-level tabs unchanged.

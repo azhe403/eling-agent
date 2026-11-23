@@ -1,5 +1,7 @@
 # Docs Viewer Markdown Modes Implementation Plan
 
+> **Status: COMPLETE.** All three tasks executed via inline (Native) execution on 2026-11-23. Commits: `7ed7f2d` (deps), `63ae75a` (viewer + tests + styles), `e822aab` (spec accepted), `56a1e92` (this plan). The step checkboxes below reflect the original plan and were not individually re-ticked; follow-up fixes landed after planning and are recorded in the spec's Implementation note: `376e1d4` (strip YAML front-matter from Preview) and `0ef5d07` (header restructure + per-field copy buttons). Verification: 8/8 panel tests, full suite 302/302, tsc clean, eslint 0 errors, browser-verified at 4427. Independent review found 0 Critical / 0 Important; two deferred Minors (stale comment in `renderContentTab`; Source→Preview round-trip not asserted).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a rendered-markdown **Preview** mode (default) alongside the existing raw **Source** mode in the docs detail panel's Content tab.

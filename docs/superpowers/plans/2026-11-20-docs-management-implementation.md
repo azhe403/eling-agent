@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
 > **Source spec:** [docs/superpowers/specs/2026-11-20-docs-management-design.md](../specs/2026-11-20-docs-management-design.md)
-> **Status:** `Proposed` → will become `In Progress` on first commit
+> **Status:** `In Progress` — backend and the dashboard docs tab are implemented and committed; the scope-policy, staleness, and audit UI phases remain open.
 
 ---
 
@@ -170,8 +170,8 @@
 - [ ] 9.3 Policy: `PUT /api/docs/policy`, `PUT /api/docs/offer` (full replacement)
 - [ ] 9.4 `POST /api/docs/reindex`
 - [ ] 9.5 Every mutation via `DocsService` → external target = 409 `doc_read_only`; managed = audit row with actor
-- [ ] 9.6 Dashboard: topic tree with ownership badge (`Managed`/`External`), origin badge (`Ancestor`), kind chip, plan progress, spec approval, section TOC, editor for managed, read-only for external, stale-refs panel, audit drawer (managed only)
-- [ ] 9.7 `pnpm --filter eling-dashboard exec tsc --noEmit` passes; **no `pnpm build` while dev server runs on 4427**
+- [x] 9.6 Dashboard (partial, 2026-11-23): topic list with ownership/origin/kind badges, plan progress, spec status chip, detail panel with **Preview/Source** markdown view, per-field copy buttons, live SSE refresh. Still open: section TOC navigation, managed-document editor UI, annotate controls, stale-refs panel, audit drawer. See `2026-11-23-docs-markdown-viewer-modes-design.md`.
+- [x] 9.7 `pnpm exec tsc --noEmit` passes from `src/frontend/Eling.Dashboard` (verified 2026-11-23); **no `pnpm build` while dev server runs on 4427**
 
 ---
 
