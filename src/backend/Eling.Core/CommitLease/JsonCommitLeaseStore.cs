@@ -197,7 +197,7 @@ public sealed class JsonCommitLeaseStore : ICommitLeaseStore, IDisposable
         return releasedTarget;
     }
 
-    public async Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, CancellationToken ct = default)
+    public async Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, int? ttlSeconds = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(leaseId) || string.IsNullOrWhiteSpace(callerId)) return false;
         var extended = false;
@@ -213,7 +213,9 @@ public sealed class JsonCommitLeaseStore : ICommitLeaseStore, IDisposable
                 && (string.IsNullOrWhiteSpace(data.Active[idx].LeaseToken)
                     || string.Equals(data.Active[idx].LeaseToken, leaseToken, StringComparison.Ordinal)))
             {
-                data.Active[idx] = data.Active[idx] with { LastHeartbeat = now };
+                data.Active[idx] = ttlSeconds is null
+                    ? data.Active[idx] with { LastHeartbeat = now }
+                    : data.Active[idx] with { LastHeartbeat = now, TtlSeconds = ttlSeconds.Value };
                 extended = true;
                 changed = true;
             }

@@ -194,7 +194,7 @@ public sealed class CommitReleaseToolTests : IDisposable
         public Task<bool> ForceReleaseAsync(string leaseId, CancellationToken ct = default)
             => throw new InvalidOperationException("store is unavailable");
 
-        public Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, CancellationToken ct = default)
+        public Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, int? ttlSeconds = null, CancellationToken ct = default)
             => throw new InvalidOperationException("store is unavailable");
 
         public Task<IReadOnlyList<CommitLeaseRecord>> ListActiveAcrossCheckoutsAsync(string? branch, CancellationToken ct = default)

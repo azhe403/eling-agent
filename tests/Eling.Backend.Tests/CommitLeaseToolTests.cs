@@ -66,7 +66,7 @@ public sealed class CommitLeaseToolTests : IDisposable
         return result.StandardOutput;
     }
 
-    private CommitLeaseTool NewTool(JsonCommitLeaseStore store, string cwd)
+    private CommitLeaseTool NewTool(ICommitLeaseStore store, string cwd)
         => new(store, _clock, cwd);
 
     [Fact]
@@ -706,6 +706,63 @@ public sealed class CommitLeaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task Claim_Reclaim_WithExplicitTtl_RecalculatesTtl()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        // First claim has a deliberately short TTL; the second (valid) claim is
+        // the agent signalling it needs more time for the retry.
+        await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", ttl_seconds: 60);
+        _clock.Advance(TimeSpan.FromSeconds(30));
+
+        await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", ttl_seconds: 900);
+
+        var stored = (await store.ListAllAsync()).Single(l => l.Kind == CommitLeaseKind.Commit);
+        Assert.Equal(900, stored.TtlSeconds);
+    }
+
+    [Fact]
+    public async Task Claim_Reclaim_WithoutExplicitTtl_RecalculatesDefaultTtl()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(store, cwd);
+
+        // History gives a claim-time default well above the first lease's 60s.
+        await SeedReleasedAsync(store, cwd, "ses_test_2_000000000000000000000", heldSeconds: 1800);
+        await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", ttl_seconds: 60);
+        _clock.Advance(TimeSpan.FromSeconds(30));
+
+        await tool.LeaseAsync("ses_test_1_000000000000000000000", "main");
+
+        var stored = Assert.Single(await store.ListActiveAsync(cwd, null));
+        Assert.True(stored.TtlSeconds > 60, "the re-claim must recalculate the TTL from current defaults");
+    }
+
+    [Fact]
+    public async Task Claim_Reclaim_WhenHeartbeatCannotRefresh_FallsBackToFreshClaim()
+    {
+        using var store = NewStore();
+        var cwd = Checkout("a");
+        var tool = NewTool(new StaleBeforeHeartbeatStore(store, _clock), cwd);
+
+        var first = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", ttl_seconds: 60);
+        var firstLeaseId = JsonDocument.Parse(first).RootElement.GetProperty("lease_id").GetString();
+
+        // The re-claim arrives as the old 60s lease crosses its TTL boundary:
+        // the store sweeps it, so the heartbeat cannot refresh it.
+        var second = await tool.LeaseAsync("ses_test_1_000000000000000000000", "main", ttl_seconds: 900);
+
+        using var doc = JsonDocument.Parse(second);
+        Assert.True(doc.RootElement.GetProperty("acquired").GetBoolean(), second);
+        var fresh = Assert.Single(await store.ListActiveAsync(cwd, null));
+        Assert.Equal(900, fresh.TtlSeconds);
+        Assert.NotEqual(firstLeaseId, fresh.LeaseId);
+    }
+
+    [Fact]
     public async Task BlankCallerId_ReturnsError_AndStoresNothing()
     {
         using var store = NewStore();
@@ -790,6 +847,40 @@ public sealed class CommitLeaseToolTests : IDisposable
             Paths = paths,
             Intent = intent,
         });
+
+    /// <summary>Crosses the held lease's TTL boundary right before the heartbeat write, so the store sweeps it and the refresh fails.</summary>
+    private sealed class StaleBeforeHeartbeatStore(ICommitLeaseStore inner, ManualTimeProvider clock) : ICommitLeaseStore
+    {
+        public async Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, int? ttlSeconds = null, CancellationToken ct = default)
+        {
+            clock.Advance(TimeSpan.FromSeconds(120));
+            return await inner.HeartbeatAsync(leaseId, callerId, leaseToken, ttlSeconds, ct);
+        }
+
+        public Task<IReadOnlyList<CommitLeaseRecord>> ListActiveAsync(string checkout, string? branch, CancellationToken ct = default)
+            => inner.ListActiveAsync(checkout, branch, ct);
+
+        public Task<CommitLeaseRecord?> TryLeaseAsync(CommitLeaseRecord candidate, CancellationToken ct = default)
+            => inner.TryLeaseAsync(candidate, ct);
+
+        public Task<bool> ReleaseAsync(string callerId, CommitLeaseKind? kind, string? leaseToken = null, CancellationToken ct = default)
+            => inner.ReleaseAsync(callerId, kind, leaseToken, ct);
+
+        public Task<bool> ForceReleaseAsync(string leaseId, CancellationToken ct = default)
+            => inner.ForceReleaseAsync(leaseId, ct);
+
+        public Task<IReadOnlyList<CommitLeaseRecord>> ListActiveAcrossCheckoutsAsync(string? branch, CancellationToken ct = default)
+            => inner.ListActiveAcrossCheckoutsAsync(branch, ct);
+
+        public Task<IReadOnlyList<CommitLeaseRecord>> ListRecentlyReleasedAsync(string checkout, int limit = 20, CancellationToken ct = default)
+            => inner.ListRecentlyReleasedAsync(checkout, limit, ct);
+
+        public Task<IReadOnlyList<CommitLeaseRecord>> ListRecentlyReleasedAcrossCheckoutsAsync(int limit, CancellationToken ct = default)
+            => inner.ListRecentlyReleasedAcrossCheckoutsAsync(limit, ct);
+
+        public Task<IReadOnlyList<CommitLeaseRecord>> ListAllAsync(CancellationToken ct = default)
+            => inner.ListAllAsync(ct);
+    }
 
     private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider
     {

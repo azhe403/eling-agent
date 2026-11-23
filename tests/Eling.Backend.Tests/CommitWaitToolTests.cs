@@ -190,8 +190,8 @@ public sealed class CommitWaitToolTests : IDisposable
         public Task<bool> ForceReleaseAsync(string leaseId, CancellationToken ct = default)
             => inner.ForceReleaseAsync(leaseId, ct);
 
-        public Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, CancellationToken ct = default)
-            => inner.HeartbeatAsync(leaseId, callerId, leaseToken, ct);
+        public Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, int? ttlSeconds = null, CancellationToken ct = default)
+            => inner.HeartbeatAsync(leaseId, callerId, leaseToken, ttlSeconds, ct);
 
         public Task<IReadOnlyList<CommitLeaseRecord>> ListActiveAcrossCheckoutsAsync(string? branch, CancellationToken ct = default)
             => inner.ListActiveAcrossCheckoutsAsync(branch, ct);

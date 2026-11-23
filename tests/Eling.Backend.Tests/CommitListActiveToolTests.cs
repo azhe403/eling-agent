@@ -199,7 +199,7 @@ public sealed class CommitListActiveToolTests : IDisposable
         public Task<bool> ForceReleaseAsync(string leaseId, CancellationToken ct = default)
             => throw new InvalidOperationException("store is broken");
 
-        public Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, CancellationToken ct = default)
+        public Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, int? ttlSeconds = null, CancellationToken ct = default)
             => throw new InvalidOperationException("store is broken");
 
         public Task<IReadOnlyList<CommitLeaseRecord>> ListActiveAcrossCheckoutsAsync(string? branch, CancellationToken ct = default)

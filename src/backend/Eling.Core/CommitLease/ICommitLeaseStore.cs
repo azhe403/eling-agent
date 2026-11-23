@@ -60,10 +60,14 @@ public interface ICommitLeaseStore
     /// Extends <see cref="CommitLeaseRecord.LastHeartbeat"/> to now, but only when
     /// the lease identified by <paramref name="leaseId"/> is owned by
     /// <paramref name="callerId"/> and, if the stored lease carries a lease
-    /// token, <paramref name="leaseToken"/> matches it. Returns false
-    /// otherwise (and never revives a stale lease that has already been swept).
+    /// token, <paramref name="leaseToken"/> matches it. When
+    /// <paramref name="ttlSeconds"/> is supplied, the lease's
+    /// <see cref="CommitLeaseRecord.TtlSeconds"/> is recalculated to that value
+    /// in the same write, so a valid re-claim can give the agent more time.
+    /// Returns false otherwise (and never revives a stale lease that has
+    /// already been swept).
     /// </summary>
-    Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, CancellationToken ct = default);
+    Task<bool> HeartbeatAsync(string leaseId, string callerId, string? leaseToken = null, int? ttlSeconds = null, CancellationToken ct = default);
 
     /// <summary>
     /// Released leases for <paramref name="checkout"/>, newest first, capped

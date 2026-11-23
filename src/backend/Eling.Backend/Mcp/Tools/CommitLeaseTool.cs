@@ -45,7 +45,8 @@ namespace Eling.Backend.Mcp.Tools;
 /// <para>
 /// Re-claiming your own live lease with the same (or no) intent is idempotent: it succeeds with the same
 /// lease_id rather than reporting a conflict, so a retried commit attempt is not
-/// blocked by its own slot. A different intent against your own live lease returns
+/// blocked by its own slot, and its TTL is recalculated from the current claim
+/// arguments (the agent signalling it needs more time). A different intent against your own live lease returns
 /// an intent_mismatch error instead of silently handing back the old lease. <c>staged_without_lease</c> is a warning, not a hard
 /// error: it is true when files are staged while the caller holds no live commit
 /// lease of its own.
@@ -94,7 +95,7 @@ public sealed class CommitLeaseTool
     // Parameter names below use snake_case deliberately: the MCP host passes
     // C# parameter names through to the wire schema unchanged, and the
     // commit_* tool surface is snake_case end to end.
-    [McpServerTool(Name = "commit_lease"), Description("Take the commit lease on this checkout and branch before staging or committing. The conflict check is folded in: verdict 'green' and acquired: true - stage. verdict 'red' and acquired: false - do not stage; a foreign live commit lease holds the slot. verdict 'red' on an acquired lease means foreign file leases collide with your paths - stage nothing until they clear. Returns { acquired, lease_id?, since?, verdict, staged_without_lease, conflicting_file_leases? }; when acquired: false, holder info is in { holder_caller_id, since, lease_age_seconds, intent }. Re-claiming your own live lease with the same (or no) intent is idempotent (succeeds with the same lease_id, and extends the lease's heartbeat). A different intent against your own live lease returns an intent_mismatch error (lease unchanged). branch is optional and is discovered via git when omitted. The claim issues a lease_token that this session must present to commit_release to end the claim; if this session did not supply one, callers holding a lease will receive a missing_lease_token error from commit_release. Call commit_release once the commit lands - and just the same when the attempt fails. ttl_seconds sets the lease lifetime; when omitted, the default is computed from this checkout's recently-released commit leases (p75 held x2, clamped to 300-1800; explicit ttl_seconds is clamped to 60-3600).")]
+    [McpServerTool(Name = "commit_lease"), Description("Take the commit lease on this checkout and branch before staging or committing. The conflict check is folded in: verdict 'green' and acquired: true - stage. verdict 'red' and acquired: false - do not stage; a foreign live commit lease holds the slot. verdict 'red' on an acquired lease means foreign file leases collide with your paths - stage nothing until they clear. Returns { acquired, lease_id?, since?, verdict, staged_without_lease, conflicting_file_leases? }; when acquired: false, holder info is in { holder_caller_id, since, lease_age_seconds, intent }. Re-claiming your own live lease with the same (or no) intent is idempotent (succeeds with the same lease_id, refreshes the heartbeat and recalculates the lease's TTL from the current claim arguments - pass ttl_seconds for a longer retry window). A different intent against your own live lease returns an intent_mismatch error (lease unchanged). branch is optional and is discovered via git when omitted. The claim issues a lease_token that this session must present to commit_release to end the claim; if this session did not supply one, callers holding a lease will receive a missing_lease_token error from commit_release. Call commit_release once the commit lands - and just the same when the attempt fails. ttl_seconds sets the lease lifetime; when omitted, the default is computed from this checkout's recently-released commit leases (p75 held x2, clamped to 300-1800; explicit ttl_seconds is clamped to 60-3600).")]
     public async Task<string> LeaseAsync(
         [Description("The caller's stable identifier. Any non-blank string of at least 24 characters you choose - a slug, a UUID, or your host's session id; pass the same value on every call. If your identifier carries a date, put the date FIRST (e.g. 2026-11-15-...), never last, so plain lexical sorting matches chronological order. The format is not validated.")] string caller_id,
         [Description("Current branch of the checkout. Optional; discovered via git when omitted. Pass it to skip discovery (e.g. when git is unavailable).")] string? branch = null,
@@ -222,23 +223,36 @@ public sealed class CommitLeaseTool
                     });
                 }
 
-                // Extending the slot's liveness is the whole point of a
-                // re-claim during a long commit: without this the slot drifts
-                // toward its TTL boundary with no way back except a fresh
-                // claim after it expires. The intent-mismatch return above
-                // keeps the lease literally unchanged, heartbeat included, so
-                // the refresh stays off that path.
-                await _leaseStore.HeartbeatAsync(ownCommitLease.LeaseId, caller, ownCommitLease.LeaseToken, cancellationToken);
-                return CommitLeaseToolHelpers.Serialize(new CommitLeaseSuccess
+                // Refreshing the slot is the whole point of a re-claim during
+                // a long commit: without this the slot drifts toward its TTL
+                // boundary with no way back except a fresh claim after it
+                // expires. The freshly computed ttl is applied too - a second
+                // valid claim is the agent signalling it needs more time, so
+                // the lease's TTL is recalculated in the same write. The
+                // intent-mismatch return above keeps the lease literally
+                // unchanged, heartbeat included, so the refresh stays off
+                // that path.
+                var refreshed = await _leaseStore.HeartbeatAsync(ownCommitLease.LeaseId, caller, ownCommitLease.LeaseToken, ttl, cancellationToken);
+                if (refreshed)
                 {
-                    Acquired = true,
-                    LeaseId = ownCommitLease.LeaseId,
-                    LeaseToken = ownCommitLease.LeaseToken,
-                    Since = ownCommitLease.Since,
-                    Verdict = verdict,
-                    StagedWithoutLease = stagedWithoutLease,
-                    ConflictingFileLeases = conflictItems,
-                });
+                    return CommitLeaseToolHelpers.Serialize(new CommitLeaseSuccess
+                    {
+                        Acquired = true,
+                        LeaseId = ownCommitLease.LeaseId,
+                        LeaseToken = ownCommitLease.LeaseToken,
+                        Since = ownCommitLease.Since,
+                        Verdict = verdict,
+                        StagedWithoutLease = stagedWithoutLease,
+                        ConflictingFileLeases = conflictItems,
+                    });
+                }
+
+                // The lease was swept as stale between the read and the write,
+                // or its token no longer matches. Reporting the old slot as
+                // acquired would hand the agent a lease that is not live, so
+                // fall through to a fresh claim carrying the recalculated ttl.
+                // TryLeaseAsync reports a conflict if another live lease owns
+                // the seat after all.
             }
 
             // Foreign seat conflict — the fail-safe scope is every branch when
