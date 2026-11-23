@@ -18,15 +18,44 @@ if [ "$SKIP_HOOK" = "1" ]; then
   exit 1
 fi
 
-# Anti-lock: every dotnet invocation below builds/tests under a disposable
-# per-run root (.bin-hook-<pid>), so it can never collide with the dev
-# server (.bin), manual runs (.bin-test), MCP hosts, or another hook
-# running concurrently. NOTE: plain `export ELING_OUTPUT_ROOT` does not
-# work here — package.json scripts hardcode it via cross-env — so the
-# dotnet calls below set it inline (same precedent as scripts/ci-check.sh).
-# Already gitignored (.bin*) and auto-cleaned by scripts/clean-bin.ps1.
-HOOK_ROOT=".bin-hook-$$"
-trap 'rm -rf "$HOOK_ROOT"' EXIT INT TERM
+# Build roots: stable per layer so MSBuild outputs survive between commits
+# (a fresh .bin-hook-<pid> every time forced a full restore/copy each run).
+# A lock keeps two hook runs out of the same roots; a lock whose owner is
+# dead is reclaimed. If the lock stays busy, fall back to per-run roots and
+# clean those up, so a commit is never blocked by another session's hook.
+# NOTE: plain `export ELING_OUTPUT_ROOT` does not work here — package.json
+# scripts hardcode it via cross-env — so the dotnet calls below set it inline
+# (same precedent as scripts/ci-check.sh). Already gitignored (.bin*).
+HOOK_ROOT=".bin-hook"
+CORE_ROOT=".bin-hook-core"
+API_ROOT=".bin-hook-api"
+LOCK_DIR=".bin-hook.lock"
+
+acquire_hook_lock() {
+  attempt=1
+  while [ "$attempt" -le 60 ]; do
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+      echo $$ > "$LOCK_DIR/pid"
+      return 0
+    fi
+    if [ -f "$LOCK_DIR/pid" ] && ! kill -0 "$(cat "$LOCK_DIR/pid")" 2>/dev/null; then
+      rm -rf "$LOCK_DIR"
+      continue
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+  return 1
+}
+
+if acquire_hook_lock; then
+  trap 'rm -rf "$LOCK_DIR"' EXIT INT TERM
+else
+  echo "→ hook lock busy; using disposable roots for this run" >&2
+  CORE_ROOT=".bin-hook-core-$$"
+  API_ROOT=".bin-hook-api-$$"
+  trap 'rm -rf "$CORE_ROOT" "$API_ROOT"' EXIT INT TERM
+fi
 
 # Record that this commit's tree passed the checks, so post-commit can tell
 # a vetted commit from one that bypassed the hook with --no-verify.
@@ -48,11 +77,15 @@ mark_vetted() {
 # Runs under $HOOK_ROOT (see above) so retries never meet a locked output.
 # Defined before FULL_CHECK because that block calls it.
 run_core_tests() {
+  root="$1"
   attempt=1
   while [ "$attempt" -le 3 ]; do
     echo "→ core tests (attempt $attempt/3)"
-    if ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj; then
-      return 0
+    # Retries only re-run a known-good build; rebuilding three times was pure waste.
+    if [ "$attempt" -eq 1 ]; then
+      ELING_OUTPUT_ROOT="$root" dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj && return 0
+    else
+      ELING_OUTPUT_ROOT="$root" dotnet test tests/Eling.Core.Tests/Eling.Core.Tests.csproj --no-build --no-restore && return 0
     fi
     attempt=$((attempt + 1))
     if [ "$attempt" -le 3 ]; then sleep 3; fi
@@ -67,7 +100,7 @@ if [ "$FULL_CHECK" = "1" ]; then
   pnpm lint:frontend || exit 1
   pnpm typecheck:frontend || exit 1
   pnpm validate:backend || exit 1
-  run_core_tests || exit 1
+  run_core_tests "$HOOK_ROOT" || exit 1
   echo "→ api layer: test:backend:api"
   ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests || exit 1
   echo "→ desktop layer: test:backend:desktop"
@@ -174,13 +207,25 @@ else
   echo "→ skip frontend (no src/frontend/)"
 fi
 
-if [ "$NEED_CORE" = "1" ]; then
-  run_core_tests || exit 1
-fi
+if [ "$NEED_CORE" = "1" ] && [ "$NEED_API" = "1" ]; then
+  echo "→ core + api layers in parallel (roots $CORE_ROOT / $API_ROOT)"
+  run_core_tests "$CORE_ROOT" &
+  CORE_PID=$!
+  ELING_OUTPUT_ROOT="$API_ROOT" dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests &
+  API_PID=$!
+  wait "$CORE_PID"; CORE_STATUS=$?
+  wait "$API_PID"; API_STATUS=$?
+  [ "$CORE_STATUS" -eq 0 ] || exit 1
+  [ "$API_STATUS" -eq 0 ] || exit 1
+else
+  if [ "$NEED_CORE" = "1" ]; then
+    run_core_tests "$CORE_ROOT" || exit 1
+  fi
 
-if [ "$NEED_API" = "1" ]; then
-  echo "→ api layer: test:backend:api (isolated output $HOOK_ROOT)"
-  ELING_OUTPUT_ROOT="$HOOK_ROOT" dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests || exit 1
+  if [ "$NEED_API" = "1" ]; then
+    echo "→ api layer: test:backend:api (root $API_ROOT)"
+    ELING_OUTPUT_ROOT="$API_ROOT" dotnet test tests/Eling.Backend.Tests/Eling.Backend.Tests.csproj --filter FullyQualifiedName!~DashboardLifecycleTests || exit 1
+  fi
 fi
 
 if [ "$NEED_DESKTOP" = "1" ]; then
