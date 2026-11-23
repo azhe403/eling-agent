@@ -82,7 +82,7 @@ public sealed class RecallToolProjectScopeTests : IDisposable
     {
         public Task<RecallResult> RecallAsync(
             RecallContext? context,
-            int recallLimit = 10,
+            int recallLimit = -1,
             int recentLimit = 10,
             string? scope = null,
             CancellationToken cancellationToken = default)

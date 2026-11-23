@@ -31,7 +31,7 @@ public sealed class RecallToolOverflowSummaryTests : IDisposable
         var summarizer = new StubSummarizer(new MemorySummary(["digest paragraph one", "digest paragraph two"], "judge"));
         var tool = new RecallTool(new OverflowRecallService(ResultWithOverflow(12)), cwd: _root, summarizer: summarizer);
 
-        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] });
+        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] }, recallLimit: 10);
 
         Assert.NotNull(response.RecallSummary);
         Assert.Equal(12, response.RecallSummary!.ItemCount);
@@ -50,7 +50,7 @@ public sealed class RecallToolOverflowSummaryTests : IDisposable
             cwd: _root,
             summarizer: new StubSummarizer(throwing: true));
 
-        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] });
+        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] }, recallLimit: 10);
 
         Assert.Equal("heuristic", response.RecallSummary!.Source);
         Assert.Contains("judge-failed", response.RecallSummary.Note);
@@ -65,7 +65,7 @@ public sealed class RecallToolOverflowSummaryTests : IDisposable
             cwd: _root,
             summarizer: new StubSummarizer(new MemorySummary([], "judge")));
 
-        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] });
+        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] }, recallLimit: 10);
 
         Assert.Equal("heuristic", response.RecallSummary!.Source);
         Assert.Contains("no usable summary", response.RecallSummary.Note);
@@ -76,7 +76,7 @@ public sealed class RecallToolOverflowSummaryTests : IDisposable
     {
         var tool = new RecallTool(new OverflowRecallService(ResultWithOverflow(3)), cwd: _root);
 
-        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] });
+        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] }, recallLimit: 10);
 
         Assert.Equal("heuristic", response.RecallSummary!.Source);
         Assert.Contains("judge not configured", response.RecallSummary.Note);
@@ -90,7 +90,7 @@ public sealed class RecallToolOverflowSummaryTests : IDisposable
             cwd: _root,
             summarizer: new StubSummarizer(new MemorySummary(["x"], "judge")));
 
-        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] }, summarizeOverflow: false);
+        var response = await tool.RecallAsync(new RecallContextInput { Topics = ["any"] }, recallLimit: 10, summarizeOverflow: false);
 
         Assert.Null(response.RecallSummary);
     }
@@ -120,7 +120,7 @@ public sealed class RecallToolOverflowSummaryTests : IDisposable
     {
         public Task<RecallResult> RecallAsync(
             RecallContext? context,
-            int recallLimit = 10,
+            int recallLimit = -1,
             int recentLimit = 10,
             string? scope = null,
             CancellationToken cancellationToken = default)

@@ -44,12 +44,15 @@ public sealed class RecallService : IRecallService
 
     public async Task<RecallResult> RecallAsync(
         RecallContext? context,
-        int recallLimit = 10,
+        int recallLimit = -1,
         int recentLimit = 10,
         string? scope = null,
         CancellationToken cancellationToken = default)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(recallLimit);
+        if (recallLimit < -1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(recallLimit), recallLimit, "recallLimit must be >= -1 (-1 = unlimited).");
+        }
         ArgumentOutOfRangeException.ThrowIfNegative(recentLimit);
 
         var now = DateTimeOffset.UtcNow;
@@ -87,15 +90,15 @@ public sealed class RecallService : IRecallService
         // and resolve the ranked IDs back to full Memory payloads. We rely
         // on SearchAsync's ranking (SQLite FTS5 BM25) to order results, so
         // no client-side re-ranking is needed.
-        var recall = new List<RecallHit>(recallLimit);
+        var recall = recallLimit > 0 ? new List<RecallHit>(recallLimit) : new List<RecallHit>();
         var overflow = new List<RecallHit>(OverflowWindow);
         var topics = context?.Topics ?? [];
-        if (topics.Count > 0 && recallLimit > 0)
+        if (topics.Count > 0 && (recallLimit > 0 || recallLimit == -1))
         {
             var query = string.Join(' ', topics.Where(t => !string.IsNullOrWhiteSpace(t)));
             if (!string.IsNullOrWhiteSpace(query))
             {
-                var hits = await _scoped.SearchAsync(query, scope, recallLimit);
+                var hits = await _scoped.SearchAsync(query, scope, recallLimit > 0 ? recallLimit : null);
                 // De-duplicate by memory id; search may return the same id
                 // across project/global when scope = "merged".
                 var seen = new HashSet<MemoryId>();
@@ -127,7 +130,7 @@ public sealed class RecallService : IRecallService
                             scoped.Scope,
                             scoped.ProjectRoot));
                     }
-                    if (recall.Count >= recallLimit) break;
+                    if (recallLimit > 0 && recall.Count >= recallLimit) break;
                 }
 
                 // Overflow can only exist once the cap is filled, so the wider
@@ -135,7 +138,7 @@ public sealed class RecallService : IRecallService
                 // window from the start would weaken the interleave guarantee
                 // the primary list depends on (a level with hits is guaranteed
                 // a slot within the first N).
-                if (recall.Count >= recallLimit)
+                if (recallLimit > 0 && recall.Count >= recallLimit)
                 {
                     var known = recall.Select(h => h.Memory.Id).ToHashSet();
                     var wideHits = await _scoped.SearchAsync(query, scope, recallLimit + OverflowWindow);

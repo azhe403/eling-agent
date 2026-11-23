@@ -65,7 +65,7 @@ public sealed class RecallTool
     [McpServerTool(Name = "recall"), Description("Call this BEFORE answering or acting, not after. On the first user turn of any session, on every step progression/subtask transition, and whenever the topic shifts, call this first — with a BROAD topic set: topics derived from the current step or message AND topics covering other relevant areas (standing rules and preferences, standing decisions, lessons and known gotchas, workflow and repo conventions, recently touched work); never anchor solely on the opening message's subject. Pass topics as `context: { topics: [...] }` — a top-level `topics` array is also accepted and, when non-empty, replaces `context.topics`. It costs ~500ms and prevents wrong assumptions about project conventions and past decisions. After a session-start call, check `stats.recallCount`: if it is 0, the call was mis-shaped or matched nothing — re-issue with `context: { topics: [...] }` and broader terms before proceeding (bounded retries). Also triggers on 'eling <topic>'. When topic recall returns more than `recallLimit` items, the response also carries `recallSummary` — digest paragraphs of the overflowing items (the ones the limit would drop); pass `summarizeOverflow: false` to skip it, and read `source` to tell a judge-written digest ('judge') from a deterministic one ('heuristic'). Every response also carries `standingMemories` — a topic-independent baseline of standing rules/preferences, standing decisions, and lessons (project-first, capped); read it on session start even when your topic call was narrow, because it is the server-enforced consistency spine. Returns topic-relevant full memories (search-based recall), the most recently updated active memories (so writes from other agents are visible), the standing baseline, the overflow digest, outstanding intentions with their trigger-match state, the project-scope posture (posture, policy, adoptable) so the agent can offer onboarding only when adoptable, codebase status (file/chunk counts, freshness, watcher state), and lightweight stats.")]
     public async Task<RecallResponse> RecallAsync(
         [Description("Current task context (filePath, topics, project). Optional.")] RecallContextInput? context = null,
-        [Description("Max recalled memories (default 10).")] int recallLimit = 10,
+        [Description("Max recalled memories (default -1, -1 = unlimited).")] int recallLimit = -1,
         [Description("Max recent memories (default 10).")] int recentLimit = 10,
         [Description("project | global | merged (default merged).")] string scope = "merged",
         [Description("Alias for context.topics: a top-level topic array. When non-empty, these topics replace context.topics.")] string[]? topics = null,
@@ -118,7 +118,9 @@ public sealed class RecallTool
                 }
             };
 
-            response.RecallSummary = await BuildRecallSummaryAsync(result.OverflowMemories, summarizeOverflow, cancellationToken);
+            response.RecallSummary = recallLimit == -1
+                ? null
+                : await BuildRecallSummaryAsync(result.OverflowMemories, summarizeOverflow, cancellationToken);
 
             await AttachCodebaseStatusAsync(response, cancellationToken);
             await AttachUpdateNoticeAsync(response, cancellationToken);

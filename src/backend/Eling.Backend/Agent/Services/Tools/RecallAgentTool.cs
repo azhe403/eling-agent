@@ -31,7 +31,7 @@ public sealed class RecallAgentTool(RecallTool tool) : IAgentTool
             "topics": { "type": "array", "items": { "type": "string" } }
           }
         },
-        "recallLimit": { "type": "integer", "description": "Max recalled memories (default 10)." },
+        "recallLimit": { "type": "integer", "description": "Max recalled memories (default -1, -1 = unlimited)." },
         "recentLimit": { "type": "integer", "description": "Max recent memories (default 10)." },
         "scope": { "type": "string", "description": "project | global | merged (default merged)." },
         "topics": {
@@ -58,7 +58,7 @@ public sealed class RecallAgentTool(RecallTool tool) : IAgentTool
             context = JsonSerializer.Deserialize<RecallContextInput>(ctxElem.GetRawText(), JsonOptions);
         }
 
-        var recallLimit = root.TryGetProperty("recallLimit", out var rlElem) && rlElem.TryGetInt32(out var rl) ? rl : 10;
+        var recallLimit = root.TryGetProperty("recallLimit", out var rlElem) && rlElem.TryGetInt32(out var rl) ? rl : -1;
         var recentLimit = root.TryGetProperty("recentLimit", out var rcElem) && rcElem.TryGetInt32(out var rc) ? rc : 10;
         var scope = root.TryGetProperty("scope", out var scElem) && scElem.ValueKind == JsonValueKind.String ? scElem.GetString() ?? "merged" : "merged";
 
