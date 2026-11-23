@@ -78,6 +78,17 @@ describe("DocDetailPanel hook order", () => {
     expect(getByText(/Body paragraph\./)).toBeDefined()
   })
 
+  it("keeps the real header in the loading state instead of a bare Loading box", () => {
+    const { getByText, queryByText, container } = render(
+      <DocDetailPanel {...baseProps} detailLoading={true} detail={null} />,
+    )
+
+    expect(getByText("Example Spec")).toBeDefined()
+    expect(queryByText("Loading...")).toBeNull()
+    // Skeleton rows mirror the panel shape rather than three random bars.
+    expect(container.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0)
+  })
+
   it("says content is unavailable instead of rendering nothing", () => {
     const { getByText } = render(
       <DocDetailPanel {...baseProps} detailLoading={false} detail={detail} />,

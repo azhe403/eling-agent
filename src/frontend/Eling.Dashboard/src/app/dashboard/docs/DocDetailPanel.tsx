@@ -19,6 +19,7 @@ import remarkGfm from "remark-gfm"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Collapsible,
   CollapsibleContent,
@@ -294,6 +295,31 @@ export function DocDetailPanel({
   const doc = detail?.document ?? summary
   const isTrashed = trashMode && summary && !detail
 
+  // Derived header values live above every early return so the loading state
+  // can reuse the real header (title/path/badges are already in `summary`)
+  // instead of replacing the whole panel with a bare "Loading..." box.
+  const currentDoc = doc as DocListItem
+  const kindLabel = KIND_LABELS[currentDoc?.kind as DocKindDto] ?? `Kind ${currentDoc?.kind}`
+  const kindColor = KIND_COLORS[currentDoc?.kind as DocKindDto] ?? "bg-gray-500/10 text-gray-600"
+  const ownershipLabel = OWNERSHIP_LABELS[currentDoc?.ownership as DocOwnershipDto] ?? `Ownership ${currentDoc?.ownership}`
+  const originLabel = ORIGIN_LABELS[currentDoc?.origin as DocOriginDto] ?? `Origin ${currentDoc?.origin}`
+
+  let timeAgo = ""
+  if (currentDoc?.mTime) {
+    const parsed = new Date(currentDoc.mTime)
+    if (!Number.isNaN(parsed.getTime())) {
+      try {
+        timeAgo = formatDistanceToNowStrict(parsed, { addSuffix: true })
+      } catch {
+        timeAgo = ""
+      }
+    }
+  }
+
+  const sections = detail?.sections ?? []
+  const refs = detail?.references ?? []
+  const relations = detail?.relations ?? []
+
   if (!doc && !createMode) return null
 
   // Handle create mode
@@ -353,47 +379,37 @@ export function DocDetailPanel({
     )
   }
 
-  // Loading view
+  // Loading view. The header is already known from `summary`, so show it for
+  // real and skeleton only what the detail fetch must supply (the tab bar and
+  // the body). This keeps the panel's shape stable instead of flashing a bare
+  // "Loading..." box with three random bars.
   if (detailLoading || !detail) {
     return (
-      <div className="flex flex-col gap-4 h-full">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-medium animate-pulse">Loading...</h2>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <X className="size-4" />
-          </Button>
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex shrink-0 flex-col gap-3 border-b border-border/40 p-4">
+          {renderHeader()}
         </div>
-        <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-8 bg-muted animate-pulse rounded" />
-          ))}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center gap-4 border-b border-border/40 px-4 py-2.5">
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-4 w-20" />
+            <Skeleton className="h-4 w-20" />
+            <Skeleton className="h-4 w-20" />
+          </div>
+          <div className="flex flex-1 flex-col gap-3 p-4">
+            <Skeleton className="h-6 w-2/3" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-5/6" />
+            <div className="mt-2 space-y-2 rounded-lg border border-border/40 bg-muted/20 p-4">
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-4 w-3/5" />
+            </div>
+          </div>
         </div>
       </div>
     )
   }
-
-  // At this point, doc is guaranteed to exist
-  const currentDoc = doc as DocListItem
-  const kindLabel = KIND_LABELS[currentDoc.kind as DocKindDto] ?? `Kind ${currentDoc.kind}`
-  const kindColor = KIND_COLORS[currentDoc.kind as DocKindDto] ?? "bg-gray-500/10 text-gray-600"
-  const ownershipLabel = OWNERSHIP_LABELS[currentDoc.ownership as DocOwnershipDto] ?? `Ownership ${currentDoc.ownership}`
-  const originLabel = ORIGIN_LABELS[currentDoc.origin as DocOriginDto] ?? `Origin ${currentDoc.origin}`
-
-  let timeAgo = ""
-  if (currentDoc.mTime) {
-    const parsed = new Date(currentDoc.mTime)
-    if (!Number.isNaN(parsed.getTime())) {
-      try {
-        timeAgo = formatDistanceToNowStrict(parsed, { addSuffix: true })
-      } catch {
-        timeAgo = ""
-      }
-    }
-  }
-
-  const sections = detail.sections ?? []
-  const refs = detail.references ?? []
-  const relations = detail.relations ?? []
 
   // Header section
   function renderHeader() {
