@@ -18,6 +18,8 @@ public class ChatViewModel : ViewModelBase, IDisposable
     private readonly ElingApiClient _apiClient;
     private readonly ILogger<ChatViewModel> _logger;
     private readonly Func<Action, bool> _uiDispatcher;
+    /// <summary>One live session per workspace. Switching away must not orphan an in-flight turn; coming back restores its transcript and progress.</summary>
+    private readonly Dictionary<string, ChatSession> _workspaceSessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ChatSession> _sessions = [];
     private ChatSession _current;
 
@@ -256,13 +258,27 @@ public class ChatViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(SelectedRow));
 
         var newSession = new ChatSession(workspace, null);
+        _workspaceSessions[workspace] = newSession;
         SwitchToSession(newSession);
     }
 
     public void SwitchToWorkspace(string workspace)
     {
         _logger.LogInformation("Chat sidebar folder selected {Workspace}", workspace);
-        StartChatIn(workspace);
+        ActiveWorkspace = workspace;
+
+        // Returning to a workspace must restore its existing conversation —
+        // including a turn still streaming — instead of starting a fresh session
+        // and orphaning the one that is still running in the background.
+        if (_workspaceSessions.TryGetValue(workspace, out var existing))
+        {
+            SwitchToSession(existing);
+        }
+        else
+        {
+            StartChatIn(workspace);
+        }
+
         _selectedRow = SidebarItems.FirstOrDefault(r => r.IsFolder && r.Workspace == workspace) ?? _selectedRow;
         this.RaisePropertyChanged(nameof(SelectedRow));
     }
@@ -277,6 +293,9 @@ public class ChatViewModel : ViewModelBase, IDisposable
             _sessions[chatId] = session;
         }
 
+        // Switching to a specific chat makes it that workspace's live session, so
+        // returning via the folder row restores this chat rather than a stale one.
+        _workspaceSessions[workspace] = session;
         SwitchToSession(session);
         _selectedRow = SidebarItems.FirstOrDefault(r => r.IsChat && r.ChatId == chatId) ?? _selectedRow;
         this.RaisePropertyChanged(nameof(SelectedRow));
@@ -416,7 +435,8 @@ public class ChatViewModel : ViewModelBase, IDisposable
             var expanded = _expandedSidebarWorkspaces.Contains(root);
             foreach (var chat in expanded ? chats : chats.Take(5))
             {
-                SidebarItems.Add(new SidebarRow(false, chat.Title, root, chat.Id, chat));
+                SidebarItems.Add(new SidebarRow(false, chat.Title, root,
+                    string.IsNullOrEmpty(chat.Id) ? null : chat.Id, chat));
             }
 
             if (chats.Count > 5)
@@ -441,6 +461,36 @@ public class ChatViewModel : ViewModelBase, IDisposable
         }
 
         RebuildSidebarFromCache();
+    }
+
+    private void ShowPendingChatRow(ChatSession session, string workspace, string text)
+    {
+        if (!session.IsNewChat || !_sidebarChatByWorkspace.TryGetValue(workspace, out var chats))
+        {
+            return;
+        }
+
+        var title = text.Length > 60 ? text[..60] : text;
+        var pending = new ChatSummaryDto("", workspace, title, DateTimeOffset.UtcNow);
+        // Insert at the top of this workspace's chat list.
+        chats.Insert(0, pending);
+        RebuildSidebarFromCache();
+    }
+
+    private void PromotePendingChatRow(string chatId, string title)
+    {
+        foreach (var chats in _sidebarChatByWorkspace.Values)
+        {
+            var index = chats.FindIndex(c => c.Id.Length == 0);
+            if (index < 0)
+            {
+                continue;
+            }
+
+            chats[index] = chats[index] with { Id = chatId, Title = title };
+            RebuildSidebarFromCache();
+            return;
+        }
     }
 
     private void SetRetry(ChatSession session, string workspace, string text)
@@ -530,6 +580,10 @@ public class ChatViewModel : ViewModelBase, IDisposable
         _logger.LogInformation("Chat send chatId={ChatId} messageLength={Length}", session.ChatId ?? "(new)", text.Length);
         this.RaisePropertyChanged(nameof(IsBusy));
 
+        // A brand-new chat gets an optimistic row immediately — the backend only
+        // assigns a ChatId after it has started the turn, which can take seconds.
+        _uiDispatcher(() => ShowPendingChatRow(session, workspace, text));
+
         try
         {
             _turnStartedUtc = DateTime.UtcNow;
@@ -577,8 +631,16 @@ public class ChatViewModel : ViewModelBase, IDisposable
                     case StreamStarted started:
                         session.ChatId = started.ChatId;
                         _sessions[started.ChatId] = session;
+                        _workspaceSessions[session.Workspace] = session;
                         _phase = BusyPhase.Waiting;
                         SetStatus(session, $"Menunggu model… {ElapsedSeconds()}s");
+                        // Promote the optimistic row to the real ChatId, then refresh
+                        // so the title from the backend (first message) is in sync.
+                        _uiDispatcher(() =>
+                        {
+                            PromotePendingChatRow(started.ChatId, text.Length > 60 ? text[..60] : text);
+                            _ = RefreshSidebarAsync();
+                        });
                         break;
                     case StreamDelta delta:
                         AppendDelta(delta.Delta);
@@ -683,12 +745,17 @@ public class ChatViewModel : ViewModelBase, IDisposable
     public void Dispose()
     {
         StopElapsedTimer();
-        foreach (var session in _sessions.Values)
+        var sessions = new HashSet<ChatSession>(_sessions.Values);
+        foreach (var session in _workspaceSessions.Values)
+        {
+            sessions.Add(session);
+        }
+
+        sessions.Add(_current);
+        foreach (var session in sessions)
         {
             session.CancelTurn();
         }
-
-        _current.CancelTurn();
         LoadCommand.Dispose();
         SendCommand.Dispose();
         RetryCommand.Dispose();

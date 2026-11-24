@@ -20,6 +20,7 @@ public sealed class ChatSession
     public string? ChatId { get; set; }
     public ObservableCollection<ChatMessageRow> Items { get; } = [];
     public bool HistoryRequested { get; set; }
+    public bool IsNewChat => string.IsNullOrEmpty(ChatId);
     public string Status { get; set; } = "";
     public CancellationTokenSource? Cts { get; private set; }
     public bool IsBusy => Cts is not null;
