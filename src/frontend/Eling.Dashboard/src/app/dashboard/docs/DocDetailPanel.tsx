@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dialog"
 import { apiFetch } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
+import { usePersistedState } from "@/lib/persisted-state"
 import type {
   DocListItem,
   DocReadResult,
@@ -253,11 +254,15 @@ export function DocDetailPanel({
   const [relationKind, setRelationKind] = useState<RelationKindDto>(0)
   const [relationError, setRelationError] = useState<string | null>(null)
   const [relationLoading, setRelationLoading] = useState(false)
-  // Which rendering of the document body the Content tab shows. Declared
-  // unconditionally so the hook order stays stable across every early return;
-  // DocsList keys this panel by document id, so switching docs remounts it and
-  // the default resets without an effect.
-  const [viewMode, setViewMode] = useState<"preview" | "source">("preview")
+  // Which rendering of the document body the Content tab shows. Persisted so
+  // the choice survives reload and a bare revisit (persisted-state.md); declared
+  // unconditionally so the hook order stays stable across every early return.
+  const [viewMode, setViewMode] = usePersistedState<"preview" | "source">({
+    page: "docs",
+    param: "view",
+    defaultValue: "preview",
+    allowed: ["preview", "source"],
+  })
 
   // Must run unconditionally: every early return below (no doc, create mode,
   // trashed, error, loading) would otherwise skip this hook and change the
