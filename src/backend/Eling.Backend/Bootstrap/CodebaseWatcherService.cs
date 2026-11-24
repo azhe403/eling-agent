@@ -12,7 +12,7 @@ namespace Eling.Backend.Bootstrap;
 /// Registered on the dashboard owner of a real, non-excluded project
 /// session, so it runs by default and there is no opt-out flag: the
 /// registration gate in <c>DashboardServices</c> is the only control.
-/// File events are batched for 900ms and applied as a scoped incremental
+/// File events are batched for 1200ms and applied as a scoped incremental
 /// index pass. Paths the indexer never covers (excluded dirs, outside the
 /// root) are dropped at enqueue time so build output never pollutes the
 /// index. A watcher buffer overflow triggers a full incremental rescan.
@@ -20,7 +20,7 @@ namespace Eling.Backend.Bootstrap;
 /// </summary>
 public sealed class CodebaseWatcherService : BackgroundService
 {
-    private static readonly TimeSpan DebounceWindow = TimeSpan.FromMilliseconds(900);
+    private static readonly TimeSpan DebounceWindow = TimeSpan.FromMilliseconds(1200);
 
     private readonly CodebaseIndexService _svc;
     private readonly IMemoryChangeNotifier _notifier;
@@ -62,6 +62,7 @@ public sealed class CodebaseWatcherService : BackgroundService
             {
                 IncludeSubdirectories = true,
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName,
+                InternalBufferSize = 65536, // 64KB max buffer to reduce overflow during burst changes
             };
             _watcher.Created += (_, e) => Enqueue(e.FullPath, "created");
             _watcher.Changed += (_, e) => Enqueue(e.FullPath, "changed");
