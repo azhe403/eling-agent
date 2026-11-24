@@ -6,17 +6,16 @@
         "type": "local",
         "command": [
           "dotnet",
-          "watch",
-          "--no-launch-profile",
-          "--project",
-          "src/backend/Eling.Backend/Eling.Backend.csproj"
+          "run",
+          "--artifacts-path",
+          ".bin-relay",
+          "--file",
+          "scripts/DevRelay.cs"
         ],
         "cwd": ".",
         "environment": {
-          "ELING_OUTPUT_ROOT": ".bin-opencode",
           "ELING_DASHBOARD_PORT": "4417",
           "ELING_WATCH_DASHBOARD": "1",
-          "DOTNET_WATCH_RESTART_ON_RUDE_EDIT": "1",
           "ASPNETCORE_ENVIRONMENT": "Development"
         },
         "disabled": false,
