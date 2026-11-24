@@ -366,6 +366,21 @@ public sealed class ElasticsearchEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ForbiddenCluster_Answers502With403DetailAndNoAccountName()
+    {
+        var id = await RegisterConnection("es@local", DatabaseProvider.Elasticsearch, "http://127.0.0.1:9200/");
+        _es.Error = new ElasticsearchUnauthenticatedException(403,
+            "authentication failed (403): action [indices:monitor/stats] is unauthorized for user [bbone.recdriver]");
+
+        var response = await _client.GetAsync($"/api/databases/{id}/es/indices");
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("(403)", body);
+        Assert.DoesNotContain("bbone.recdriver", body);
+    }
+
+    [Fact]
     public async Task IndexDetail_ForAMissingIndex_Answers404()
     {
         var id = await RegisterConnection("es@local", DatabaseProvider.Elasticsearch, "http://127.0.0.1:9200/");

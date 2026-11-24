@@ -431,6 +431,32 @@ public sealed class ElasticsearchReadServiceTests
     }
 
     [Fact]
+    public async Task Forbidden_SurfacesAs403ShapedException()
+    {
+        var (service, _) = CreateService(_ => JsonResponse(HttpStatusCode.Forbidden,
+            """{"error":{"type":"security_exception","reason":"action [indices:monitor/stats] is unauthorized for user [someone]","root_cause":[{"type":"security_exception","reason":"unauthorized"}]},"status":403}"""));
+
+        var exception = await Assert.ThrowsAsync<ElasticsearchUnauthenticatedException>(
+            () => service.DocumentsAsync(
+                MakeConnection(),
+                index: "logs-app-2026",
+                from: 0,
+                size: 25,
+                q: null,
+                start: null,
+                end: null,
+                field: null,
+                filters: null,
+                logic: null,
+                CancellationToken.None));
+
+        Assert.Equal(403, exception.Status);
+        Assert.Contains("authentication failed (403)", exception.Message);
+        Assert.DoesNotContain("someone", exception.CallerSafeDetail);
+        Assert.Contains("(403)", exception.CallerSafeDetail);
+    }
+
+    [Fact]
     public async Task WildcardIndex_IsSentVerbatim()
     {
         var (service, handler) = CreateService(_ => JsonResponse(HttpStatusCode.OK,

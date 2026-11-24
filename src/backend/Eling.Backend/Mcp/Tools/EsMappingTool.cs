@@ -91,8 +91,8 @@ public sealed class EsMappingTool
             => new InvalidOperationException($"elasticsearch rejected the request ({api.Status}): {api.Reason}"),
         ElasticsearchApiException api
             => new InvalidOperationException($"elasticsearch answered with status {api.Status}"),
-        ElasticsearchUnauthenticatedException
-            => new InvalidOperationException("authentication failed (401): the cluster requires credentials"),
+        ElasticsearchUnauthenticatedException unauthenticated
+            => new InvalidOperationException(unauthenticated.CallerSafeDetail),
         _ => new InvalidOperationException("elasticsearch unavailable"),
     };
 }

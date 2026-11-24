@@ -851,6 +851,7 @@ public sealed class ElasticsearchReadService : IElasticsearchReadService
         if (failure.Status is 401 or 403)
         {
             throw new ElasticsearchUnauthenticatedException(
+                failure.Status.Value,
                 $"authentication failed ({failure.Status}): {failure.ServerReason ?? "the cluster requires credentials"}");
         }
 

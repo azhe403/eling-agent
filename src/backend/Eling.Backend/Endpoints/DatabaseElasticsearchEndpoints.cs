@@ -469,7 +469,7 @@ public static class DatabaseElasticsearchEndpoints
     private static string FailureTag(Exception ex) => ex switch
     {
         ElasticsearchApiException api => api.Status.ToString(CultureInfo.InvariantCulture),
-        ElasticsearchUnauthenticatedException => "401",
+        ElasticsearchUnauthenticatedException unauthenticated => unauthenticated.Status.ToString(CultureInfo.InvariantCulture),
         ElasticsearchUnavailableException => "unavailable",
         ElasticsearchFilterException => "filter",
         _ => "error",
@@ -580,11 +580,13 @@ public static class DatabaseElasticsearchEndpoints
 
     private static IResult CreateUnauthenticatedResult(ElasticsearchUnauthenticatedException unauthenticated, ILoggerFactory loggerFactory, string operation)
     {
-        // The exception text can name the account; the fix is the same without it.
+        // The exception text can name the account; keep it in the WARN log but
+        // never in the response. 401 needs credentials, 403 needs privileges —
+        // reporting both as 401 sends the caller after the wrong fix.
         loggerFactory.CreateLogger("DatabaseElasticsearch")
             .LogWarning(unauthenticated, "Elasticsearch authentication failed for {Operation}", operation);
         return Results.Problem(statusCode: 502, title: "authentication failed",
-            detail: "authentication failed (401): the cluster requires credentials");
+            detail: unauthenticated.CallerSafeDetail);
     }
 
     private static IResult CreateUnavailableResult(ElasticsearchUnavailableException unavailable, ILoggerFactory loggerFactory, string operation)
