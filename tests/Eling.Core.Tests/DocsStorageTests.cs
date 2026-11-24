@@ -415,6 +415,22 @@ public class SqliteDocsIndexTests : IDisposable
     }
 
     [Fact]
+    public async Task UpsertRelationAsync_TargetMissing_DoesNotThrowAndDoesNotInsert()
+    {
+        var doc1 = CreateTestDoc(relPath: "spec.md");
+        await _index.IndexAsync(doc1, [CreateSection()], []);
+
+        // Target was never indexed (e.g. an external doc, or a link to a file
+        // that does not exist). Inserting it would violate the FK on
+        // doc_relations.target_id and abort the whole scan.
+        var relation = CreateRelation(sourcePath: "spec.md", targetPath: "missing.md");
+        await _index.UpsertRelationAsync(relation);
+
+        var relations = await _index.GetRelationsAsync(doc1.Id.Value, asSource: true);
+        Assert.Empty(relations);
+    }
+
+    [Fact]
     public async Task UpsertRelationAsync_UpdatesExisting()
     {
         var doc1 = CreateTestDoc(relPath: "spec.md");

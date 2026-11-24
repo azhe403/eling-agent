@@ -328,6 +328,22 @@ public sealed class SqliteDocsIndex : IDocsIndex
         ArgumentNullException.ThrowIfNull(relation);
 
         await using var connection = await OpenConnectionAsync();
+
+        // doc_relations has FKs to docs(id) on both endpoints. Relations are
+        // extracted from Markdown links while scanning, and a link can point at
+        // a document that is not (yet) indexed, is on the other ownership side,
+        // or simply does not exist. Inserting such a row throws SQLITE_CONSTRAINT
+        // and aborts the whole per-file scan. Skip it instead — a relation to a
+        // missing doc is not a usable relation.
+        await using (var exists = connection.CreateCommand())
+        {
+            exists.CommandText = "SELECT COUNT(*) FROM docs WHERE id IN ($source, $target);";
+            AddParameter(exists, "$source", relation.SourceId.Value);
+            AddParameter(exists, "$target", relation.TargetId.Value);
+            var present = Convert.ToInt32(await exists.ExecuteScalarAsync() ?? 0);
+            if (present != 2) return;
+        }
+
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT OR REPLACE INTO doc_relations (source_id, target_id, kind)
