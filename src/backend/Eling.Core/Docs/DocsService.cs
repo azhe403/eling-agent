@@ -379,7 +379,7 @@ public sealed class DocsService
 
         if (resolution.Ownership != DocOwnership.Managed)
         {
-            throw new InvalidOperationException($"Cannot create document at {relPath}: path is not in managed scope");
+            throw new DocReadOnlyException($"Cannot create document at {relPath}: path is not in managed scope");
         }
 
         var fileHash = ComputeHash(content);
@@ -418,7 +418,7 @@ public sealed class DocsService
 
         if (existing.IsExternal)
         {
-            throw new InvalidOperationException("Cannot update external document");
+            throw new DocReadOnlyException("Cannot update external document");
         }
 
         var beforeJson = SerializeDoc(existing);
@@ -477,7 +477,7 @@ public sealed class DocsService
 
         if (existing.IsExternal)
         {
-            throw new InvalidOperationException("Cannot archive external document");
+            throw new DocReadOnlyException("Cannot archive external document");
         }
 
         var beforeJson = SerializeDoc(existing);
@@ -499,7 +499,7 @@ public sealed class DocsService
 
         if (existing.IsExternal)
         {
-            throw new InvalidOperationException("Document is already external");
+            throw new DocReadOnlyException("Document is already external");
         }
 
         // Read current content
@@ -572,7 +572,7 @@ public sealed class DocsService
 
         if (existing.IsExternal)
         {
-            throw new InvalidOperationException("Cannot annotate external document");
+            throw new DocReadOnlyException("Cannot annotate external document");
         }
 
         var section = await index.GetSectionAsync(docId, anchor);
@@ -630,7 +630,7 @@ public sealed class DocsService
 
         if (source.IsExternal || target.IsExternal)
         {
-            throw new InvalidOperationException("Cannot create relation involving external document");
+            throw new DocReadOnlyException("Cannot create relation involving external document");
         }
 
         // Validate relation based on document kinds

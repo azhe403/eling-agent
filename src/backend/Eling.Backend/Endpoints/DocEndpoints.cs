@@ -1,3 +1,4 @@
+using Eling.Backend.Bootstrap;
 using Eling.Backend.Dtos;
 using Eling.Core;
 using Eling.Core.Docs;
@@ -188,9 +189,10 @@ public static class DocEndpoints
 
     // ---- Create ----
 
-    private static async Task<Results<Created<DocSaveResponse>, BadRequest<string>>> CreateDocAsync(
+    private static async Task<Results<Created<DocSaveResponse>, BadRequest<string>, Conflict<string>>> CreateDocAsync(
         DocsService service,
         MemoryChangeBroadcaster broadcaster,
+        HttpContext httpContext,
         DocSaveRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.RelPath))
@@ -205,23 +207,31 @@ public static class DocEndpoints
             kind = DocKind.Doc; // Default
         }
 
-        var doc = await service.CreateDocumentAsync(
-            request.RelPath,
-            request.Content,
-            kind,
-            request.Topic,
-            request.Status is not null ? new DocStatusValue(kind, int.Parse(request.Status)) : null,
-            request.Order ?? 0);
+        try
+        {
+            var doc = await service.CreateDocumentAsync(
+                request.RelPath,
+                request.Content,
+                kind,
+                request.Topic,
+                request.Status is not null ? new DocStatusValue(kind, int.Parse(request.Status)) : null,
+                request.Order ?? 0);
 
-        broadcaster.Notify(DocsChangeTopics.Docs);
-        return TypedResults.Created($"/api/docs/{doc.Id.Value}", DocSaveResponse.From(doc, "created"));
+            broadcaster.Notify(DocsChangeTopics.Docs);
+            return TypedResults.Created($"/api/docs/{doc.Id.Value}", DocSaveResponse.From(doc, "created"));
+        }
+        catch (DocReadOnlyException ex)
+        {
+            return DocReadOnly(httpContext, ex);
+        }
     }
 
     // ---- Update ----
 
-    private static async Task<Results<Ok<DocSaveResponse>, NotFound, BadRequest<string>>> UpdateDocAsync(
+    private static async Task<Results<Ok<DocSaveResponse>, NotFound, BadRequest<string>, Conflict<string>>> UpdateDocAsync(
         DocsService service,
         MemoryChangeBroadcaster broadcaster,
+        HttpContext httpContext,
         string id,
         DocUpdateRequest request)
     {
@@ -231,37 +241,53 @@ public static class DocEndpoints
         if (string.IsNullOrWhiteSpace(request.Content))
             return TypedResults.BadRequest("Content is required.");
 
-        var doc = await service.UpdateDocumentAsync(docId.Value, request.Content);
-        if (doc is null) return TypedResults.NotFound();
+        try
+        {
+            var doc = await service.UpdateDocumentAsync(docId.Value, request.Content);
+            if (doc is null) return TypedResults.NotFound();
 
-        broadcaster.Notify(DocsChangeTopics.Docs);
-        return TypedResults.Ok(DocSaveResponse.From(doc, "updated"));
+            broadcaster.Notify(DocsChangeTopics.Docs);
+            return TypedResults.Ok(DocSaveResponse.From(doc, "updated"));
+        }
+        catch (DocReadOnlyException ex)
+        {
+            return DocReadOnly(httpContext, ex);
+        }
     }
 
     // ---- Delete (Archive) ----
 
-    private static async Task<Results<NoContent, NotFound, BadRequest<string>>> DeleteDocAsync(
+    private static async Task<Results<NoContent, NotFound, BadRequest<string>, Conflict<string>>> DeleteDocAsync(
         DocsService service,
         MemoryChangeBroadcaster broadcaster,
+        HttpContext httpContext,
         string id)
     {
         if (!TryParseDocId(id, out var docId))
             return TypedResults.BadRequest("Invalid document ID format.");
 
-        var deleted = await service.ArchiveDocumentAsync(docId.Value);
-        if (deleted)
+        try
         {
-            broadcaster.Notify(DocsChangeTopics.Docs);
-            return TypedResults.NoContent();
+            var deleted = await service.ArchiveDocumentAsync(docId.Value);
+            if (deleted)
+            {
+                broadcaster.Notify(DocsChangeTopics.Docs);
+                return TypedResults.NoContent();
+            }
+            return TypedResults.NotFound();
         }
-        return TypedResults.NotFound();
+        catch (DocReadOnlyException ex)
+        {
+            return DocReadOnly(httpContext, ex);
+        }
     }
 
     // ---- Annotate Section ----
 
-    private static async Task<Results<Ok<DocAnnotateResponse>, NotFound, BadRequest<string>>> AnnotateSectionAsync(
+    private static async Task<Results<Ok<DocAnnotateResponse>, NotFound, BadRequest<string>, Conflict<string>>> AnnotateSectionAsync(
         DocsService service,
         MemoryChangeBroadcaster broadcaster,
+        HttpContext httpContext,
         string id,
         DocAnnotateRequest request)
     {
@@ -271,40 +297,56 @@ public static class DocEndpoints
         if (string.IsNullOrWhiteSpace(request.Anchor))
             return TypedResults.BadRequest("Anchor is required.");
 
-        var success = await service.AnnotateSectionAsync(
-            docId.Value,
-            request.Anchor,
-            request.Status,
-            request.Annotation);
+        try
+        {
+            var success = await service.AnnotateSectionAsync(
+                docId.Value,
+                request.Anchor,
+                request.Status,
+                request.Annotation);
 
-        if (!success) return TypedResults.NotFound();
+            if (!success) return TypedResults.NotFound();
 
-        broadcaster.Notify(DocsChangeTopics.Docs);
-        return TypedResults.Ok(new DocAnnotateResponse(true));
+            broadcaster.Notify(DocsChangeTopics.Docs);
+            return TypedResults.Ok(new DocAnnotateResponse(true));
+        }
+        catch (DocReadOnlyException ex)
+        {
+            return DocReadOnly(httpContext, ex);
+        }
     }
 
     // ---- Promote ----
 
-    private static async Task<Results<Ok<DocPromoteResponse>, NotFound, BadRequest<string>>> PromoteDocAsync(
+    private static async Task<Results<Ok<DocPromoteResponse>, NotFound, BadRequest<string>, Conflict<string>>> PromoteDocAsync(
         DocsService service,
         MemoryChangeBroadcaster broadcaster,
+        HttpContext httpContext,
         string id)
     {
         if (!TryParseDocId(id, out var docId))
             return TypedResults.BadRequest("Invalid document ID format.");
 
-        var doc = await service.PromoteDocumentAsync(docId.Value);
-        if (doc is null) return TypedResults.NotFound();
+        try
+        {
+            var doc = await service.PromoteDocumentAsync(docId.Value);
+            if (doc is null) return TypedResults.NotFound();
 
-        broadcaster.Notify(DocsChangeTopics.Docs);
-        return TypedResults.Ok(DocPromoteResponse.From(doc));
+            broadcaster.Notify(DocsChangeTopics.Docs);
+            return TypedResults.Ok(DocPromoteResponse.From(doc));
+        }
+        catch (DocReadOnlyException ex)
+        {
+            return DocReadOnly(httpContext, ex);
+        }
     }
 
     // ---- Add Relation ----
 
-    private static async Task<Results<Ok<DocRelationResponse>, NotFound, BadRequest<string>>> AddRelationAsync(
+    private static async Task<Results<Ok<DocRelationResponse>, NotFound, BadRequest<string>, Conflict<string>>> AddRelationAsync(
         DocsService service,
         MemoryChangeBroadcaster broadcaster,
+        HttpContext httpContext,
         string id,
         DocRelationRequest request)
     {
@@ -323,6 +365,10 @@ public static class DocEndpoints
             await service.AddRelationAsync(sourceId.Value, targetId.Value, kind);
             broadcaster.Notify(DocsChangeTopics.Docs);
             return TypedResults.Ok(new DocRelationResponse(true));
+        }
+        catch (DocReadOnlyException ex)
+        {
+            return DocReadOnly(httpContext, ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -419,6 +465,12 @@ public static class DocEndpoints
             policy.Include.ToArray(),
             policy.Exclude.ToArray());
         return TypedResults.Ok(new ScopePolicyResponse(coverageDto, decision?.ToString().ToLowerInvariant() ?? "ask"));
+    }
+
+    private static Conflict<string> DocReadOnly(HttpContext httpContext, DocReadOnlyException ex)
+    {
+        httpContext.Items[ApiEnvelopeMiddleware.ErrorCodeItem] = "doc_read_only";
+        return TypedResults.Conflict(ex.Message);
     }
 
     private static bool TryParseDocId(string id, out DocId docId)

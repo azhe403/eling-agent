@@ -155,7 +155,9 @@ public sealed class DocsWriteTool
         }
     }
 
-    [McpServerTool(Name = "doc_relation"), Description("Create a relation between two managed documents (Implements, Supersedes, References). Write only between managed docs. Read with doc_relation tool.")]
+    // Not an MCP tool: the spec defines ONE doc_relation tool that reads and writes.
+    // Its write half lives in DocsReadTool.GetRelationsAsync; registering this method
+    // as well would give two tools the same name and shadow one of the two halves.
     public async Task<DocRelationResponse> AddRelationAsync(
         [Description("Source document ID.")] string sourceId,
         [Description("Target document ID.")] string targetId,

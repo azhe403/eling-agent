@@ -205,10 +205,14 @@ public sealed class DocsReadTool
         }
     }
 
-    [McpServerTool(Name = "doc_relation"), Description("Read spec↔plan relations. Returns both directions: Implements (plan→spec), Supersedes, References.")]
+    [McpServerTool(Name = "doc_relation"), Description("Read spec↔plan relations in both directions (Implements, Supersedes, References). When sourceId, targetId and kind are all supplied, writes the edge between managed documents first.")]
     public async Task<IReadOnlyList<DocRelationDto>> GetRelationsAsync(
         [Description("Document ID to get relations for.")] string docId,
-        [Description("Direction: both (default), incoming, outgoing.")] string direction = "both")
+        [Description("Direction: both (default), incoming, outgoing.")] string direction = "both",
+        [Description("Source document ID for a write; requires targetId and kind.")] string? sourceId = null,
+        [Description("Target document ID for a write; requires sourceId and kind.")] string? targetId = null,
+        [Description("Relation kind to write: implements, supersedes, references.")] string? kind = null,
+        [Description("Actor for the audit trail on a write. Default 'mcp:doc_relation'.")] string actor = "mcp:doc_relation")
     {
         try
         {
@@ -218,6 +222,31 @@ public sealed class DocsReadTool
             }
 
             var id = DocId.Parse(docId);
+
+            var wantsWrite = !string.IsNullOrWhiteSpace(sourceId)
+                || !string.IsNullOrWhiteSpace(targetId)
+                || !string.IsNullOrWhiteSpace(kind);
+            if (wantsWrite)
+            {
+                if (string.IsNullOrWhiteSpace(sourceId)
+                    || string.IsNullOrWhiteSpace(targetId)
+                    || string.IsNullOrWhiteSpace(kind))
+                {
+                    throw new ArgumentException("sourceId, targetId and kind must all be supplied to write a relation.");
+                }
+
+                if (_docsService is null)
+                {
+                    throw new InvalidOperationException("Writing relations requires DocsService; this tool was constructed with an index only.");
+                }
+
+                await _docsService.AddRelationAsync(
+                    DocId.Parse(sourceId).Value,
+                    DocId.Parse(targetId).Value,
+                    ParseRelationKind(kind),
+                    actor);
+            }
+
             var asSource = direction != "incoming";
             var relations = await _docsIndex.GetRelationsAsync(id.Value, asSource);
 
@@ -238,6 +267,15 @@ public sealed class DocsReadTool
             throw;
         }
     }
+
+    private static RelationKind ParseRelationKind(string kind)
+        => kind.Trim().ToLowerInvariant() switch
+        {
+            "implements" => RelationKind.Implements,
+            "supersedes" => RelationKind.Supersedes,
+            "references" => RelationKind.References,
+            _ => throw new ArgumentException($"Invalid relation kind '{kind}'. Use 'implements', 'supersedes', or 'references'.")
+        };
 
     private static DocOwnership? ParseOwnership(string? ownership)
     {
