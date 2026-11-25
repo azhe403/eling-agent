@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Plus, RefreshCw, Search, ChevronLeft, ChevronRight, ScanSearch, Loader2 } from "lucide-react"
 
 import {
@@ -32,6 +32,10 @@ import {
 } from "@/components/ui/select"
 import { LoadingBar } from "@/components/ui/loading-bar"
 import { useDocsSse } from "@/hooks/use-docs-sse"
+import { useWorkspaceRows } from "@/components/workspaces/use-workspace-rows"
+import { WorkspaceScopePanel } from "@/components/workspaces/workspace-scope-panel"
+import { WorkspaceSelect } from "@/components/workspaces/workspace-select"
+import { selectAll, selectOnly, toggleRoots, type WorkspaceSelection } from "@/components/workspaces/selection"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { usePersistedState } from "@/lib/persisted-state"
 import { XL_BREAKPOINT } from "@/lib/constants"
@@ -41,8 +45,6 @@ import type {
   DocListResponse,
   DocTopicGroup,
   DocKindDto,
-  DocOwnershipDto,
-  DocOriginDto,
   DocReadResult,
   RelationKindDto,
 } from "@/lib/types"
@@ -51,24 +53,62 @@ import { DocCard } from "./DocCard"
 import { DocDetailPanel, type DocFormData } from "./DocDetailPanel"
 import {
   docKinds,
-  docOrigins,
-  docOwnerships,
   docKindLabel,
-  docOwnershipLabel,
-  docOriginLabel,
   extractTopics,
+  applySelection,
+  selectionFromParams,
+  sortFromParams,
+  SORT_KEYS,
+  DEFAULT_SORT,
+  DEFAULT_ORDER,
+  type DocSortKey,
+  type DocSortOrder,
 } from "./docs-scope"
 
-const ORIGINS = ["all", "current", "ancestor", "shard", "global"] as const
-const OWNERSHIPS = ["all", "managed", "external"] as const
 const KINDS = ["all", "spec", "plan", "doc", "scratch"] as const
+const ORDERS = ["asc", "desc"] as const
 
-type OriginFilter = (typeof ORIGINS)[number]
-type OwnershipFilter = (typeof OWNERSHIPS)[number]
 type KindFilter = (typeof KINDS)[number]
+type OrderFilter = (typeof ORDERS)[number]
+
+/** Segmented scope selector — same convention as Skills/Memories filter groups. */
+function FilterGroup<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string
+  options: readonly T[]
+  value: T
+  onChange: (next: T) => void
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 p-1" role="group" aria-label={label}>
+      {options.map((option) => (
+        <button
+          key={option}
+          type="button"
+          aria-pressed={value === option}
+          onClick={() => onChange(option)}
+          className={
+            (value === option
+              ? "rounded-md bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm"
+              : "rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground") +
+            " whitespace-nowrap capitalize"
+          }
+        >
+          {option === "all" ? "All" : option.charAt(0).toUpperCase() + option.slice(1)}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 export function DocsList() {
   const searchParams = useSearchParams()
+  const router = useRouter()
+  const { rows: workspaceRows } = useWorkspaceRows()
 
   const [topics, setTopics] = useState<DocTopicGroup[]>([])
   const [total, setTotal] = useState(0)
@@ -81,9 +121,11 @@ export function DocsList() {
   // Canonical per-page persistence: URL is the source of truth, localStorage
   // remembers the last position on a bare revisit. Matches Skills/Memories.
   const [kind, setKind] = usePersistedState<KindFilter>({ page: "docs", param: "kind", defaultValue: "all", allowed: KINDS })
-  const [ownership, setOwnership] = usePersistedState<OwnershipFilter>({ page: "docs", param: "ownership", defaultValue: "all", allowed: OWNERSHIPS })
-  const [origin, setOrigin] = usePersistedState<OriginFilter>({ page: "docs", param: "origin", defaultValue: "all", allowed: ORIGINS })
   const [topic, setTopic] = usePersistedState<string>({ page: "docs", param: "topic", defaultValue: "" })
+  const initialSort = sortFromParams(searchParams)
+  const [sort, setSort] = usePersistedState<DocSortKey>({ page: "docs", param: "sort", defaultValue: initialSort.sort, allowed: SORT_KEYS })
+  const [order, setOrder] = usePersistedState<OrderFilter>({ page: "docs", param: "order", defaultValue: initialSort.order, allowed: ORDERS })
+  const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection>(() => selectionFromParams(searchParams))
   const [limit] = useState(50)
   const [offset, setOffset] = useState(() => parseInt(searchParams.get("offset") ?? "0", 10))
 
@@ -95,6 +137,13 @@ export function DocsList() {
 
   // Available topics from the loaded list
   const availableTopics = useMemo(() => extractTopics(topics), [topics])
+  const allRoots = useMemo(() => workspaceRows.map((row) => row.root), [workspaceRows])
+
+  const applyWorkspaceSelection = useCallback((next: WorkspaceSelection) => {
+    setWorkspaceSelection(next)
+    const params = applySelection(new URLSearchParams(searchParams.toString()), next)
+    router.replace(`/dashboard/docs?${params.toString()}`)
+  }, [router, searchParams])
 
   // Error banner auto-dismiss
   useEffect(() => {
@@ -119,9 +168,12 @@ export function DocsList() {
       params.set("limit", String(limit))
       params.set("offset", String(offset))
       if (kind !== "all") params.set("kind", kind)
-      if (ownership !== "all") params.set("ownership", ownership)
-      if (origin !== "all") params.set("origin", origin)
+      if (workspaceSelection.kind === "workspaces") {
+        for (const root of workspaceSelection.roots) params.append("workspace", root)
+      }
       if (topic) params.set("topic", topic)
+      params.set("sort", sort)
+      params.set("order", order)
 
       const data = await apiFetch<DocListResponse>(`/api/docs?${params}`, {
         cache: "no-store",
@@ -147,7 +199,7 @@ export function DocsList() {
       setLoading(false)
       setHasLoadedOnce(true)
     }
-  }, [kind, ownership, origin, topic, limit, offset])
+  }, [kind, workspaceSelection, topic, sort, order, limit, offset])
 
   const handleDocsChanged = useCallback(() => {
     void load()
@@ -361,7 +413,23 @@ export function DocsList() {
       </DashboardHeader>
 
       <div className="flex min-h-0 w-full flex-1 overflow-hidden">
+        <WorkspaceScopePanel
+          rows={workspaceRows}
+          selection={workspaceSelection}
+          onSelectAll={() => applyWorkspaceSelection(selectAll())}
+          onSelectOnly={(root) => applyWorkspaceSelection(selectOnly(root))}
+          onToggleRoots={(roots) => applyWorkspaceSelection(toggleRoots(workspaceSelection, roots, allRoots))}
+        />
         <div className={mainColClass}>
+          <div className="px-4 pt-2 lg:hidden">
+            <WorkspaceSelect
+              rows={workspaceRows}
+              selection={workspaceSelection}
+              onSelectAll={() => applyWorkspaceSelection(selectAll())}
+              onSelectOnly={(root) => applyWorkspaceSelection(selectOnly(root))}
+              onToggleRoots={(roots) => applyWorkspaceSelection(toggleRoots(workspaceSelection, roots, allRoots))}
+            />
+          </div>
           {error && (
             <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
               {error}
@@ -369,7 +437,7 @@ export function DocsList() {
           )}
 
           {/* Toolbar: filters */}
-          <div className="sticky top-0 z-10 flex flex-col gap-2 bg-background pb-2 pt-4">
+          <div className="sticky top-0 z-10 -mb-4 flex flex-col gap-2 bg-background pb-4 pt-4">
             <div className="flex flex-wrap items-center gap-2">
               <div className={`relative min-w-[200px] flex-1 ${panelOpen ? "basis-full" : ""}`}>
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -382,44 +450,26 @@ export function DocsList() {
                 />
               </div>
 
-              <Select value={kind} onValueChange={(v) => { setOffset(0); setKind(v as KindFilter) }}>
-                <SelectTrigger className="w-[130px]">
-                  <SelectValue placeholder="Kind">
-                    {(v) => docKindLabel((v as KindFilter) ?? "all")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {docKinds().map((k) => (
-                    <SelectItem key={k} value={k}>{docKindLabel(k)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select value={ownership} onValueChange={(v) => { setOffset(0); setOwnership(v as OwnershipFilter) }}>
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue placeholder="Ownership">
-                    {(v) => docOwnershipLabel((v as OwnershipFilter) ?? "all")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {docOwnerships().map((o) => (
-                    <SelectItem key={o} value={o}>{docOwnershipLabel(o)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select value={origin} onValueChange={(v) => { setOffset(0); setOrigin(v as OriginFilter) }}>
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue placeholder="Origin">
-                    {(v) => docOriginLabel((v as OriginFilter) ?? "all")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {docOrigins().map((o) => (
-                    <SelectItem key={o} value={o}>{docOriginLabel(o)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <FilterGroup
+                label="Kind"
+                options={KINDS}
+                value={kind}
+                onChange={(v) => { setOffset(0); setKind(v) }}
+              />
+              <FilterGroup
+                label="Sort"
+                options={SORT_KEYS}
+                value={sort}
+                onChange={(v) => { setOffset(0); setSort(v) }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label={`Sort direction ${order}`}
+                onClick={() => { setOffset(0); setOrder(order === "asc" ? "desc" : "asc") }}
+              >
+                {order === "asc" ? "↑" : "↓"}
+              </Button>
 
               {availableTopics.length > 0 && (
                 <Select value={topic} onValueChange={(v) => { setOffset(0); setTopic(v ?? "") }}>
@@ -532,7 +582,7 @@ export function DocsList() {
             <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-muted-foreground">
               <span className="font-medium text-foreground">{deleteTarget.title}</span>
               <span className="mx-2">·</span>
-              <span className="font-mono">{deleteTarget.relPath}</span>
+              <span className="font-mono">{deleteTarget.path}</span>
             </div>
           )}
           <AlertDialogFooter>

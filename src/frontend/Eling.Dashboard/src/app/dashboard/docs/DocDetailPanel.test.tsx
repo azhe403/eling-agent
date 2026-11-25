@@ -4,11 +4,17 @@ import { render, fireEvent } from "@testing-library/react"
 import { DocDetailPanel } from "./DocDetailPanel"
 import type { DocListItem, DocReadResult } from "@/lib/types"
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/dashboard/docs",
+  useSearchParams: () => new URLSearchParams(),
+}))
+
 const doc: DocListItem = {
-  id: "managed:current:abc123",
-  relPath: ".eling/docs/specs/example.md",
-  ownership: 0,
-  origin: 0,
+  id: "01j00000000000000000000000",
+  workspaceId: "ws-a",
+  path: "docs/specs/example.md",
+  archived: false,
   kind: 0,
   title: "Example Spec",
   status: 0,
@@ -145,19 +151,22 @@ describe("DocDetailPanel hook order", () => {
     fireEvent.click(getByRole("button", { name: "Copy document path" }))
     fireEvent.click(getByRole("button", { name: "Copy document topic" }))
 
-    expect(writeText).toHaveBeenCalledWith("managed:current:abc123")
-    expect(writeText).toHaveBeenCalledWith(".eling/docs/specs/example.md")
+    expect(writeText).toHaveBeenCalledWith("01j00000000000000000000000")
+    expect(writeText).toHaveBeenCalledWith("docs/specs/example.md")
     expect(writeText).toHaveBeenCalledWith("specs")
   })
 
   it("hides YAML front-matter in Preview but shows it in Source", () => {
-    const md = '---\nid: managed:current:abc123\nkind: plan\ntitle: "Plan"\nstatus: 1\n---\n\n# Real Title\n\nBody text.'
+    const md = '---\nid: 01j00000000000000000000000\nkind: plan\ntitle: "Plan"\nstatus: 1\n---\n\n# Real Title\n\nBody text.'
     const { container, queryByText, getByText, getByRole } = render(
       <DocDetailPanel {...baseProps} detailLoading={false} detail={{ ...detail, content: md }} />,
     )
 
+    // The persisted view choice can leak between tests; force Preview here.
+    fireEvent.click(getByRole("button", { name: "Preview" }))
+
     // Preview must not render the YAML keys as a prose paragraph.
-    expect(queryByText(/id: managed:current/)).toBeNull()
+    expect(queryByText(/id: 01j00000000000000000000000/)).toBeNull()
     expect(getByText("Real Title")).toBeDefined()
 
     // Source stays honest: the full raw document including front-matter.

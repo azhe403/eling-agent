@@ -42,8 +42,6 @@ import type {
   DocRef,
   DocRelation,
   DocKindDto,
-  DocOwnershipDto,
-  DocOriginDto,
   ReferenceKindDto,
   RelationKindDto,
 } from "@/lib/types"
@@ -103,7 +101,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 }
 
 export type DocFormData = {
-  relPath: string
+  path: string
   content: string
   kind: DocKindDto
   topic: string
@@ -123,18 +121,6 @@ const KIND_COLORS: Record<DocKindDto, string> = {
   1: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20",
   2: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
   3: "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20",
-}
-
-const OWNERSHIP_LABELS: Record<DocOwnershipDto, string> = {
-  0: "Managed",
-  1: "External",
-}
-
-const ORIGIN_LABELS: Record<DocOriginDto, string> = {
-  0: "Current",
-  1: "Ancestor",
-  2: "Shard",
-  3: "Global",
 }
 
 const REF_KIND_LABELS: Record<ReferenceKindDto, string> = {
@@ -306,8 +292,6 @@ export function DocDetailPanel({
   const currentDoc = doc as DocListItem
   const kindLabel = KIND_LABELS[currentDoc?.kind as DocKindDto] ?? `Kind ${currentDoc?.kind}`
   const kindColor = KIND_COLORS[currentDoc?.kind as DocKindDto] ?? "bg-gray-500/10 text-gray-600"
-  const ownershipLabel = OWNERSHIP_LABELS[currentDoc?.ownership as DocOwnershipDto] ?? `Ownership ${currentDoc?.ownership}`
-  const originLabel = ORIGIN_LABELS[currentDoc?.origin as DocOriginDto] ?? `Origin ${currentDoc?.origin}`
 
   let timeAgo = ""
   if (currentDoc?.mTime) {
@@ -333,7 +317,7 @@ export function DocDetailPanel({
       <DocEditor
         variant={variant}
         initialData={{
-          relPath: "",
+          path: "",
           content: "",
           kind: 2,
           topic: "",
@@ -443,12 +427,9 @@ export function DocDetailPanel({
             <Badge variant="outline" className={`text-xs ${kindColor}`}>
               {kindLabel}
             </Badge>
-            <Badge variant="outline" className="text-xs bg-muted/50">
-              {ownershipLabel}
-            </Badge>
-            <Badge variant="outline" className="text-xs bg-muted/50">
-              {originLabel}
-            </Badge>
+            {currentDoc.archived && (
+              <Badge variant="outline" className="text-xs bg-muted/50">Archived</Badge>
+            )}
             <Badge variant="outline" className={`text-xs ${SpecStatusColor(currentDoc.status)}`}>
               {SpecStatusLabel(currentDoc.kind as DocKindDto, currentDoc.status)}
             </Badge>
@@ -461,10 +442,10 @@ export function DocDetailPanel({
         <dl className="flex flex-col gap-1.5 rounded-lg border border-border/40 bg-muted/20 p-2.5 text-xs">
           <div className="flex items-center gap-2">
             <dt className="w-14 shrink-0 text-muted-foreground">path</dt>
-            <dd className="min-w-0 flex-1 truncate font-mono text-[11px]" title={currentDoc.relPath}>
-              {currentDoc.relPath}
+            <dd className="min-w-0 flex-1 truncate font-mono text-[11px]" title={currentDoc.path}>
+              {currentDoc.path}
             </dd>
-            <CopyButton value={currentDoc.relPath} label="Copy document path" />
+            <CopyButton value={currentDoc.path} label="Copy document path" />
           </div>
           {currentDoc.topic && (
             <div className="flex items-center gap-2">
@@ -499,11 +480,6 @@ export function DocDetailPanel({
           <Button variant="outline" size="sm" onClick={() => onDelete(currentDoc.id)}>
             Delete
           </Button>
-          {currentDoc.ownership === 0 && currentDoc.origin === 0 && (
-            <Button variant="outline" size="sm" onClick={() => onPromote(currentDoc.id)}>
-              Promote to docs/
-            </Button>
-          )}
           <Button variant="outline" size="sm" onClick={() => {
             setRelationSourceId(currentDoc.id)
             setShowRelationDialog(true)
@@ -876,8 +852,8 @@ function DocEditor({
       <div className="space-y-2">
         <label className="text-sm font-medium">Relative Path <span className="text-destructive">*</span></label>
         <input
-          value={formData.relPath}
-          onChange={(e) => setFormData({ ...formData, relPath: e.target.value })}
+          value={formData.path}
+          onChange={(e) => setFormData({ ...formData, path: e.target.value })}
           className="w-full rounded border bg-background px-3 py-2 text-sm font-mono"
           placeholder=".eling/docs/specs/my-spec.md"
           required
@@ -940,7 +916,7 @@ function DocEditor({
         <Button type="button" variant="outline" onClick={onCancel} disabled={isLoading}>
           Cancel
         </Button>
-        <Button type="submit" disabled={isLoading || !formData.relPath.trim() || !formData.content.trim()}>
+        <Button type="submit" disabled={isLoading || !formData.path.trim() || !formData.content.trim()}>
           {isLoading ? "Saving..." : "Save"}
         </Button>
       </div>
@@ -954,7 +930,7 @@ function DocEditor({
     return (
       <>
         <DialogTitle className="sr-only">
-          {initialData.relPath ? "Edit Document" : "New Document"}
+          {initialData.path ? "Edit Document" : "New Document"}
         </DialogTitle>
         {editor}
       </>

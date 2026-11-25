@@ -5,6 +5,7 @@ All notable changes to Eling are documented here. Follows [Keep a Changelog](htt
 ## [Unreleased] - 2026-11-25
 
 ### Changed
+- **Docs page shows every workspace with server-side sort (dashboard)**: the docs list now uses the same `WorkspaceScopePanel`/`WorkspaceSelect` sidebar as Memory, sends repeated `workspace` params, keeps sort in `?sort=`/`?order=` with URL → localStorage → `name`/`asc`, and drops ownership/origin badges and the promote action. Design: `docs/superpowers/specs/2026-11-24-docs-unified-design.md`.
 - **Docs backend and dashboard contract unified (backend)**: MCP tools and `/api/docs` dropped ownership/origin, promote, and the managed-docs offer; list endpoints accept server-side `sort`/`order`, and every doc carries `workspaceId` and `archived`. A single dashboard-owner `DocsDirWatcher` watches Markdown and metadata files per workspace and reindexes only the changed workspace. Design: `docs/superpowers/specs/2026-11-24-docs-unified-design.md`; standards: `docs/watcher-standard.md`.
 - **Docs core unified (core)**: `DocId` is now an opaque ULID like `MemoryId`, and `Doc` carries `WorkspaceId` + `Path` + `Archived` instead of ownership/origin. Metadata lives in a committed per-workspace `docs-metadata.json`, audit in a separate persistent store, and one global SQLite index serves every workspace with a `workspace_id` tag. Scan, sort, archive, annotate, and relation paths were rewritten around those contracts; the legacy FK failure in `doc_save` is designed out. Design: `docs/superpowers/specs/2026-11-24-docs-unified-design.md`.
 

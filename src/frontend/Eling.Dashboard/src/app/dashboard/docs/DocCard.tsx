@@ -5,7 +5,7 @@ import { formatDistanceToNowStrict } from "date-fns"
 
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
-import type { DocListItem, DocKindDto, DocOwnershipDto, DocOriginDto } from "@/lib/types"
+import type { DocListItem, DocKindDto } from "@/lib/types"
 
 interface DocCardProps {
   doc: DocListItem
@@ -27,18 +27,6 @@ const KIND_COLORS: Record<DocKindDto, string> = {
   3: "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20",
 }
 
-const OWNERSHIP_LABELS: Record<DocOwnershipDto, string> = {
-  0: "Managed",
-  1: "External",
-}
-
-const ORIGIN_LABELS: Record<DocOriginDto, string> = {
-  0: "Current",
-  1: "Ancestor",
-  2: "Shard",
-  3: "Global",
-}
-
 const STATUS_LABELS: Record<number, { label: string; icon: React.ReactNode; color: string }> = {
   // Spec statuses: 0=Proposed, 1=Approved, 2=Rejected, 3=Superseded
   // Plan statuses: 0=Draft, 1=Active, 2=Completed, 3=Superseded
@@ -52,8 +40,6 @@ const STATUS_LABELS: Record<number, { label: string; icon: React.ReactNode; colo
 export function DocCard({ doc, selected, onSelect }: DocCardProps) {
   const kindLabel = KIND_LABELS[doc.kind as DocKindDto] ?? `Kind ${doc.kind}`
   const kindColor = KIND_COLORS[doc.kind as DocKindDto] ?? "bg-gray-500/10 text-gray-600"
-  const ownershipLabel = OWNERSHIP_LABELS[doc.ownership as DocOwnershipDto] ?? `Ownership ${doc.ownership}`
-  const originLabel = ORIGIN_LABELS[doc.origin as DocOriginDto] ?? `Origin ${doc.origin}`
   const statusInfo = STATUS_LABELS[doc.status] ?? { label: `Status ${doc.status}`, icon: <FileText className="size-3" />, color: "bg-gray-500/10 text-gray-600" }
 
   // The list endpoint sends no mTime, so most cards have nothing to format.
@@ -98,12 +84,9 @@ export function DocCard({ doc, selected, onSelect }: DocCardProps) {
               >
                 {kindLabel}
               </Badge>
-              <Badge variant="outline" className="text-xs bg-muted/50">
-                {ownershipLabel}
-              </Badge>
-              <Badge variant="outline" className="text-xs bg-muted/50">
-                {originLabel}
-              </Badge>
+              {doc.archived && (
+                <Badge variant="outline" className="text-xs bg-muted/50">Archived</Badge>
+              )}
             </div>
 
             <h3 className="font-medium text-sm truncate text-foreground group-hover:text-primary transition-colors">
@@ -111,7 +94,7 @@ export function DocCard({ doc, selected, onSelect }: DocCardProps) {
             </h3>
 
             <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground">
-              <span className="max-w-[240px] truncate font-mono">{doc.relPath}</span>
+              <span className="max-w-[240px] truncate font-mono">{doc.path}</span>
               {timeAgo && (
                 <>
                   <span aria-hidden>·</span>

@@ -127,8 +127,6 @@ export type ReferenceKind = "symbol" | "path" | "anchor_link"
 export type RelationKind = "implements" | "supersedes" | "references"
 
 export type DocKindDto = 0 | 1 | 2 | 3 // Spec, Plan, Doc, Scratch
-export type DocOwnershipDto = 0 | 1 // Managed, External
-export type DocOriginDto = 0 | 1 | 2 | 3 // Current, Ancestor, Shard, Global
 export type ReferenceKindDto = 0 | 1 | 2 // Symbol, Path, AnchorLink
 export type RelationKindDto = 0 | 1 | 2 // Implements, Supersedes, References
 
@@ -136,22 +134,23 @@ export type DocListItem = {
   /** The wire field from the list endpoint is `docId`; the read endpoint sends `id`. */
   docId?: string
   id: string
-  ownership: DocOwnershipDto
-  origin: DocOriginDto
-  relPath: string
+  workspaceId: string
+  path: string
+  archived: boolean
   kind: DocKindDto
   title: string
   status: number
   topic: string
   order: number
-  supersededBy: string | null
   stepsTotal: number
   stepsDone: number
-  fileHash: string
-  mTime: string
-  indexedAt: string
-  frontMatterError: boolean
-  frontMatterErrorMessage: string | null
+  /** Detail-only fields; absent on list rows. */
+  supersededBy?: string | null
+  fileHash?: string
+  mTime?: string
+  indexedAt?: string
+  frontMatterError?: boolean
+  frontMatterErrorMessage?: string | null
 }
 
 export type DocTopicGroup = {
@@ -204,9 +203,8 @@ export type DocReadResult = {
 
 export type DocSearchResult = {
   docId: string
-  ownership: DocOwnershipDto
-  origin: DocOriginDto
-  relPath: string
+  workspaceId: string
+  path: string
   kind: DocKindDto
   title: string
   status: number
