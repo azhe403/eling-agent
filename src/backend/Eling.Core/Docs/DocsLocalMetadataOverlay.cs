@@ -31,8 +31,9 @@ public sealed class DocsLocalMetadataOverlay
             return JsonSerializer.Deserialize<Dictionary<string, DocsMetadataEntry>>(json, JsonOptions)
                    ?? new Dictionary<string, DocsMetadataEntry>(StringComparer.Ordinal);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            System.Diagnostics.Debug.WriteLine(ex.Message);
             return new Dictionary<string, DocsMetadataEntry>(StringComparer.Ordinal);
         }
     }

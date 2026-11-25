@@ -44,5 +44,11 @@ public class DocsMigrationTests : IDisposable
         Assert.True(document.Docs.ContainsKey("docs/specs/legacy.md"));
         Assert.Equal(2, document.Docs["docs/specs/legacy.md"].Status);
         Assert.Single(await audit.GetAsync());
+
+        // Opening the disposable index must archive, not silently destroy,
+        // the legacy database that held that audit row.
+        var index = new Eling.Core.Docs.Storage.SqliteDocsIndex(_legacyDb);
+        await index.ListAsync();
+        Assert.NotEmpty(Directory.GetFiles(_root, "legacy.db.legacy-*"));
     }
 }

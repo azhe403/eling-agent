@@ -40,6 +40,15 @@ public sealed class DocsService
         _workspaceRoots.AddRange(roots);
     }
 
+    /// <summary>
+    /// REST/MCP callers pass a workspace root or the literal "all". The index
+    /// stores a SHA1 of the canonical root, so normalize at this boundary.
+    /// </summary>
+    public static string? NormalizeWorkspace(string? workspace)
+        => string.IsNullOrWhiteSpace(workspace) || workspace.Equals("all", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : DocsMetadataStore.ResolveWorkspaceId(workspace);
+
     public static string ComputeHash(string content)
     {
         using var sha = System.Security.Cryptography.SHA256.Create();
@@ -76,12 +85,14 @@ public sealed class DocsService
                     var entry = _docsMetadata.GetOrCreate(document, path, workspaceId);
                     var existing = await _index.GetAsync(entry.Id);
                     if (!full && existing is not null && existing.FileHash == hash
-                        && existing.Status.Value == entry.Status && existing.Archived == entry.Archived)
+                        && existing.Status.Value == entry.Status && existing.Archived == entry.Archived
+                        && existing.Kind == entry.Kind && existing.Topic == entry.Topic
+                        && existing.Order == entry.Order && existing.SupersededBy == entry.SupersededBy)
                     { skipped++; knownPaths.Remove(path); continue; }
 
                     try
                     {
-                        var parse = await ParseDocumentAsync(file, path, hash, entry, ct);
+                        var parse = await ParseDocumentAsync(file, path, hash, entry, document, ct);
                         await _index.IndexAsync(parse.Doc!, parse.Sections, parse.Refs, parse.Body);
                         foreach (var relation in parse.Relations) await _index.UpsertRelationAsync(relation);
                         indexed++;
@@ -115,12 +126,16 @@ public sealed class DocsService
     private static IEnumerable<string> EnumerateMarkdown(string root, CoveragePolicy coverage)
     {
         if (!Directory.Exists(root)) yield break;
-        var excluded = new[] { ".git", "node_modules", "bin", "obj", ".next", ".superpowers", ".eling" };
+        var excluded = new[] { ".git", "node_modules", "bin", "obj", ".next", ".eling" };
         foreach (var file in Directory.EnumerateFiles(root, "*.md", SearchOption.AllDirectories))
         {
             var relative = GetRelativePath(file, root);
             if (excluded.Any(part => relative.Split('/').Contains(part, StringComparer.OrdinalIgnoreCase))) continue;
-            if (coverage.Exclude?.Any(pattern => MatchPattern(relative, pattern)) == true) continue;
+            if (relative.StartsWith(".superpowers/sdd/", StringComparison.OrdinalIgnoreCase)) continue;
+            var excludes = coverage.Exclude ?? Array.Empty<string>();
+            var includes = coverage.Include ?? Array.Empty<string>();
+            if (excludes.Any(pattern => MatchPattern(relative, pattern))) continue;
+            if (includes.Length > 0 && !includes.Any(pattern => MatchPattern(relative, pattern))) continue;
             yield return file;
         }
     }
@@ -138,7 +153,8 @@ public sealed class DocsService
         => Path.GetRelativePath(root, file).Replace('\\', '/');
 
     private async Task<DocParseResult> ParseDocumentAsync(
-        string absolutePath, string relativePath, string hash, DocsMetadataEntry entry, CancellationToken ct)
+        string absolutePath, string relativePath, string hash,
+        DocsMetadataEntry entry, DocsMetadataDocument document, CancellationToken ct)
     {
         var content = await File.ReadAllTextAsync(absolutePath, ct);
         var frontMatter = DocFrontMatterParser.Parse(content, _logger);
@@ -189,8 +205,8 @@ public sealed class DocsService
         var refs = ExtractRefs(docId, body, sections);
         var relations = entry.Relations
             .Where(r => !string.IsNullOrWhiteSpace(r.TargetPath))
-            .Select(r => new DocRelation(docId, DocId.Parse(r.TargetPath), r.Kind))
-            .Concat(ExtractRelations(docId, body, workspaceId))
+            .Select(r => new DocRelation(docId, ResolveTarget(r.TargetPath, document), r.Kind))
+            .Concat(ExtractRelations(docId, body, document))
             .Distinct()
             .ToList();
 
@@ -211,13 +227,28 @@ public sealed class DocsService
         return refs;
     }
 
-    private static IReadOnlyList<DocRelation> ExtractRelations(DocId docId, string body, string workspaceId)
+    private static DocId ResolveTarget(string value, DocsMetadataDocument document)
+    {
+        var raw = value.Trim();
+        if (DocId.TryParse(raw, out var id)) return id;
+        var normalized = raw.Replace('\\', '/');
+        foreach (var pair in document.Docs)
+        {
+            if (string.Equals(pair.Key, normalized, StringComparison.OrdinalIgnoreCase)
+                || pair.Key.EndsWith("/" + normalized, StringComparison.OrdinalIgnoreCase))
+                return DocId.Parse(pair.Value.Id);
+        }
+        // An unresolved target is retained so UpsertRelationAsync can skip it.
+        return DocId.Parse(raw);
+    }
+
+    private static IReadOnlyList<DocRelation> ExtractRelations(DocId docId, string body, DocsMetadataDocument document)
     {
         var relations = new List<DocRelation>();
         foreach (Match match in Regex.Matches(body, @"\*\*Spec:\*\*\s*`?([^`\s]+)`?"))
-            relations.Add(new DocRelation(docId, DocId.Parse(match.Groups[1].Value.Trim()), RelationKind.Implements));
+            relations.Add(new DocRelation(docId, ResolveTarget(match.Groups[1].Value, document), RelationKind.Implements));
         foreach (Match match in Regex.Matches(body, @"\[[^\]]+\]\(([^)#]+\.md)[^)]*\)"))
-            relations.Add(new DocRelation(docId, DocId.Parse(match.Groups[1].Value.Trim()), RelationKind.References));
+            relations.Add(new DocRelation(docId, ResolveTarget(match.Groups[1].Value, document), RelationKind.References));
         return relations.Distinct().ToList();
     }
 
@@ -259,7 +290,7 @@ public sealed class DocsService
         var absolute = Path.Combine(workspaceRoot, path);
         Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
         await File.WriteAllTextAsync(absolute, content, ct);
-        var parse = await ParseDocumentAsync(absolute, entry.Path, ComputeHash(content), entry, ct);
+        var parse = await ParseDocumentAsync(absolute, entry.Path, ComputeHash(content), entry, document, ct);
         await _index.IndexAsync(parse.Doc!, parse.Sections, parse.Refs, parse.Body);
         await _docsMetadata.SaveAsync(workspaceRoot, document, ct);
         await WriteAuditAsync(parse.Doc!.Id.Value, "create", null, null, "docs_service", ct);
@@ -275,7 +306,7 @@ public sealed class DocsService
         if (!document.Docs.TryGetValue(existing.Path, out var entry) || entry is null) return null;
         var absolute = Path.Combine(root, existing.Path);
         await File.WriteAllTextAsync(absolute, content, ct);
-        var parse = await ParseDocumentAsync(absolute, existing.Path, ComputeHash(content), entry, ct);
+        var parse = await ParseDocumentAsync(absolute, existing.Path, ComputeHash(content), entry, document, ct);
         await _index.IndexAsync(parse.Doc!, parse.Sections, parse.Refs, parse.Body);
         await _docsMetadata.SaveAsync(root, document, ct);
         await WriteAuditAsync(id.Value, "update", null, null, "docs_service", ct);
@@ -336,7 +367,7 @@ public sealed class DocsService
         var document = (await _docsMetadata.LoadWithFindingsAsync(root, ct)).Document;
         if (document.Docs.TryGetValue(source.Path, out var entry) && entry is not null)
         {
-            entry.Relations.Add(new DocRelationMeta { TargetPath = target.Path, Kind = kind });
+            entry.Relations.Add(new DocRelationMeta { TargetPath = targetId.Value, Kind = kind });
             await _docsMetadata.SaveAsync(root, document, ct);
         }
         await WriteAuditAsync(sourceId.Value, "relate", null, $"relation:{kind}:{targetId.Value}", actor, ct);
@@ -345,12 +376,58 @@ public sealed class DocsService
     public Task<IReadOnlyList<DocListItem>> ListAsync(
         string? workspace = null, DocKind? kind = null, string? topic = null,
         string sort = "name", string order = "asc", CancellationToken ct = default)
-        => _index.ListAsync(workspace, kind, topic, sort, order);
+        => _index.ListAsync(NormalizeWorkspace(workspace), kind, topic, sort, order);
+
+    /// <summary>
+    /// Lists one page for a set of workspace roots. Each root is normalized to
+    /// its index id; sorting happens server-side before paging.
+    /// </summary>
+    public async Task<DocPageResult> ListPageAsync(
+        IReadOnlyList<string>? workspaces = null,
+        DocKind? kind = null,
+        string? topic = null,
+        string sort = "name",
+        string order = "asc",
+        int limit = 50,
+        int offset = 0,
+        CancellationToken ct = default)
+    {
+        var ids = workspaces?.Select(NormalizeWorkspace).Where(id => id is not null).Distinct().ToList() ?? [];
+        IReadOnlyList<DocListItem> items;
+        if (ids.Count == 0)
+        {
+            items = await _index.ListAsync(null, kind, topic, sort, order);
+        }
+        else
+        {
+            var merged = new List<DocListItem>();
+            foreach (var id in ids) merged.AddRange(await _index.ListAsync(id, kind, topic, sort, order));
+            items = merged;
+        }
+
+        var key = sort?.ToLowerInvariant() switch
+        {
+            "path" => (Func<DocListItem, object>)(item => item.Path),
+            "kind" => item => item.Kind,
+            "status" => item => item.Status,
+            "order" => item => item.Order,
+            "updated" => item => item.Path,
+            _ => item => item.Title
+        };
+        var descending = string.Equals(order, "desc", StringComparison.OrdinalIgnoreCase);
+        items = (descending ? items.OrderByDescending(key) : items.OrderBy(key))
+            .ThenBy(item => item.Title, StringComparer.Ordinal)
+            .ToList();
+
+        var total = items.Count;
+        var page = items.Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 500)).ToList().AsReadOnly();
+        return new DocPageResult(page, total);
+    }
 
     public Task<IReadOnlyList<DocSearchResult>> SearchAsync(
         string query, string? workspace = null, DocKind? kind = null, string? topic = null,
         int limit = 50, CancellationToken ct = default)
-        => _index.SearchAsync(query, workspace, kind, topic, null, limit);
+        => _index.SearchAsync(query, NormalizeWorkspace(workspace), kind, topic, null, limit);
 
     public async Task<DocReadResult?> ReadAsync(
         DocId id, bool includeSections = false, bool includeRefs = false, bool includeContent = false, CancellationToken ct = default)

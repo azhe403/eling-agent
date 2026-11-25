@@ -108,7 +108,14 @@ public sealed class SqliteDocsIndex : IDocsIndex
         var current = Convert.ToInt32(await check.ExecuteScalarAsync() ?? 0L);
         if (current == 0)
         {
-            // Legacy ownership/origin schema: this database is a disposable cache.
+            // Preserve the legacy database before rebuilding the disposable
+            // index — it holds the only copy of pre-unification audit history.
+            var legacyPath = connection.DataSource;
+            if (File.Exists(legacyPath))
+            {
+                var backup = $"{legacyPath}.legacy-{Ulid.NewUlid().ToString().ToLowerInvariant()}";
+                File.Copy(legacyPath, backup, overwrite: false);
+            }
             foreach (var sql in new[]
                      {
                          "DROP TABLE IF EXISTS doc_relations;", "DROP TABLE IF EXISTS doc_refs;",

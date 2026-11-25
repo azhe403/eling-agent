@@ -120,6 +120,31 @@ public class DocsServiceUnifiedTests : IDisposable
     }
 
     [Fact]
+    public async Task List_SpecificWorkspaceRootAndLiteralAll_ResolveToCorrectRows()
+    {
+        Write(_rootA, "docs/specs/same.md", "# Alpha\n\nBody");
+        Write(_rootB, "docs/specs/same.md", "# Beta\n\nBody");
+        await _service.ScanAsync();
+
+        Assert.Single(await _service.ListAsync(_rootA));
+        Assert.Single(await _service.ListAsync(_rootB));
+        Assert.Equal(2, (await _service.ListAsync("all")).Count);
+        Assert.Equal(2, (await _service.ListAsync()).Count);
+    }
+
+    [Fact]
+    public async Task Relation_SurvivesRescan_AsUlidEdge()
+    {
+        var source = await _service.CreateDocumentAsync(_rootA, "docs/plans/p.md", "# Plan\n\nBody", DocKind.Plan);
+        var target = await _service.CreateDocumentAsync(_rootA, "docs/specs/s.md", "# Spec\n\nBody", DocKind.Spec);
+        await _service.AddRelationAsync(source.Id, target.Id, RelationKind.Implements);
+        Assert.Single(await _index.GetRelationsAsync(source.Id.Value, true));
+
+        await _service.ScanAsync(full: true);
+        Assert.Single(await _index.GetRelationsAsync(source.Id.Value, true));
+    }
+
+    [Fact]
     public async Task Annotate_WritesIntoJson_NotIntoTheMarkdownFile()
     {
         var doc = await _service.CreateDocumentAsync(_rootA, "docs/specs/new.md", "# New\n\n## Section\n\nBody", DocKind.Spec);
