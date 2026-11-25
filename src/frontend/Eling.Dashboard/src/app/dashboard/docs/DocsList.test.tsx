@@ -10,7 +10,31 @@ vi.mock("next/navigation", () => ({
 }))
 
 vi.mock("@/lib/api", () => ({
-  apiFetch: vi.fn().mockResolvedValue({ topics: [] }),
+  apiFetch: vi.fn().mockImplementation((url: string) => {
+    if (url.startsWith("/api/docs?")) {
+      return Promise.resolve({
+        total: 1,
+        topics: [{
+          topic: "specs",
+          documents: [{
+            docId: "01j00000000000000000000000",
+            id: "01j00000000000000000000000",
+            workspaceId: "ws-a",
+            path: "docs/specs/example.md",
+            archived: false,
+            kind: 0,
+            title: "Example Spec",
+            status: 0,
+            topic: "specs",
+            order: 0,
+            stepsTotal: 0,
+            stepsDone: 0,
+          }],
+        }],
+      })
+    }
+    return Promise.resolve({})
+  }),
   ApiError: class ApiError extends Error {},
 }))
 
@@ -55,5 +79,7 @@ describe("DocsList unified surface", () => {
     expect(screen.getByRole("group", { name: "Sort" })).toBeDefined()
     expect(screen.queryByText("Managed")).toBeNull()
     expect(screen.queryByText("External")).toBeNull()
+    expect(await screen.findByText("Example Spec")).toBeDefined()
+    expect(screen.getByText(/ws:/)).toBeDefined()
   })
 })
