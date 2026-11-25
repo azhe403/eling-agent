@@ -1,12 +1,15 @@
-import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { beforeEach, describe, it, expect, vi } from "vitest"
+import { render, screen, waitFor } from "@testing-library/react"
 
+import { apiFetch } from "@/lib/api"
 import { DocsList } from "./DocsList"
+
+const nav = vi.hoisted(() => ({ searchParams: new URLSearchParams() }))
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/dashboard/docs",
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => nav.searchParams,
 }))
 
 vi.mock("@/lib/api", () => ({
@@ -29,6 +32,7 @@ vi.mock("@/lib/api", () => ({
             order: 0,
             stepsTotal: 0,
             stepsDone: 0,
+            mTime: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
           }],
         }],
       })
@@ -59,7 +63,10 @@ vi.mock("@/components/workspaces/workspace-select", () => ({
 }))
 
 describe("DocsList unified surface", () => {
-  it("shows the workspace sidebar and a server-side sort control, with no ownership badges", async () => {
+  beforeEach(() => {
+    nav.searchParams = new URLSearchParams()
+    localStorage.clear()
+    vi.mocked(apiFetch).mockClear()
     Object.defineProperty(window, "matchMedia", {
       writable: true,
       value: vi.fn().mockImplementation((query: string) => ({
@@ -73,6 +80,9 @@ describe("DocsList unified surface", () => {
         dispatchEvent: vi.fn(),
       })),
     })
+  })
+
+  it("shows the workspace sidebar, a server-side sort control and a relative-time badge", async () => {
     render(<DocsList />)
 
     expect(screen.getByRole("navigation", { name: "Workspace scope" })).toBeDefined()
@@ -80,6 +90,21 @@ describe("DocsList unified surface", () => {
     expect(screen.queryByText("Managed")).toBeNull()
     expect(screen.queryByText("External")).toBeNull()
     expect(await screen.findByText("Example Spec")).toBeDefined()
-    expect(screen.getByText(/ws:/)).toBeDefined()
+    expect(screen.queryByText(/ws:/)).toBeNull()
+    expect(screen.getByText(/hours ago/)).toBeDefined()
+  })
+
+  it("restores an open detail from the persisted doc param", async () => {
+    nav.searchParams = new URLSearchParams("doc=01j00000000000000000000000")
+
+    render(<DocsList />)
+
+    await waitFor(() => {
+      expect(vi.mocked(apiFetch)).toHaveBeenCalledWith(
+        "/api/docs/01j00000000000000000000000",
+        expect.objectContaining({ cache: "no-store" }),
+      )
+    })
+    expect(screen.getByRole("dialog")).toBeDefined()
   })
 })

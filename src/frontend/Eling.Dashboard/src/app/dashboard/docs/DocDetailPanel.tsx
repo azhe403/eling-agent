@@ -14,10 +14,10 @@ import {
   SearchX,
   X,
 } from "lucide-react"
-import { formatDistanceToNowStrict } from "date-fns"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
+import { RelativeTime } from "@/components/relative-time"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/dialog"
 import { apiFetch } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
+import { docStatusLabel } from "./docs-scope"
 import { usePersistedState } from "@/lib/persisted-state"
 import type {
   DocListItem,
@@ -141,16 +142,6 @@ const REL_KIND_COLORS: Record<RelationKindDto, string> = {
   0: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   1: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   2: "bg-green-500/10 text-green-600 dark:text-green-400",
-}
-
-function SpecStatusLabel(kind: DocKindDto, status: number): string {
-  if (kind === 0) {
-    return ["Proposed", "Approved", "Rejected", "Superseded"][status] ?? `Status ${status}`
-  }
-  if (kind === 1) {
-    return ["Draft", "Active", "Completed", "Superseded"][status] ?? `Status ${status}`
-  }
-  return ["Active", "Archived", "Superseded"][status] ?? `Status ${status}`
 }
 
 function SpecStatusColor(status: number): string {
@@ -296,17 +287,7 @@ export function DocDetailPanel({
   const kindLabel = KIND_LABELS[currentDoc?.kind as DocKindDto] ?? `Kind ${currentDoc?.kind}`
   const kindColor = KIND_COLORS[currentDoc?.kind as DocKindDto] ?? "bg-gray-500/10 text-gray-600"
 
-  let timeAgo = ""
-  if (currentDoc?.mTime) {
-    const parsed = new Date(currentDoc.mTime)
-    if (!Number.isNaN(parsed.getTime())) {
-      try {
-        timeAgo = formatDistanceToNowStrict(parsed, { addSuffix: true })
-      } catch {
-        timeAgo = ""
-      }
-    }
-  }
+  const docTime = currentDoc?.mTime && !Number.isNaN(Date.parse(currentDoc.mTime)) ? currentDoc.mTime : null
 
   const sections = detail?.sections ?? []
   const refs = detail?.references ?? []
@@ -452,7 +433,7 @@ export function DocDetailPanel({
               <Badge variant="outline" className="text-xs bg-muted/50">Archived</Badge>
             )}
             <Badge variant="outline" className={`text-xs ${SpecStatusColor(currentDoc.status)}`}>
-              {SpecStatusLabel(currentDoc.kind as DocKindDto, currentDoc.status)}
+              {docStatusLabel(currentDoc.kind as DocKindDto, currentDoc.status)}
             </Badge>
           </div>
           <h2 className="text-base font-semibold leading-snug break-words">{currentDoc.title}</h2>
@@ -461,9 +442,9 @@ export function DocDetailPanel({
         {/* Metadata below the title, one field per row so nothing truncates into
             an unreadable run, each with its own copy button. */}
         <dl className="flex flex-col gap-1.5 rounded-lg border border-border/40 bg-muted/20 p-2.5 text-xs">
-          <div className="flex items-center gap-2">
-            <dt className="w-14 shrink-0 text-muted-foreground">path</dt>
-            <dd className="min-w-0 flex-1 truncate font-mono text-[11px]" title={currentDoc.path}>
+          <div className="flex items-start gap-2">
+            <dt className="w-14 shrink-0 pt-px text-muted-foreground">path</dt>
+            <dd className="min-w-0 flex-1 break-all font-mono text-[11px] leading-relaxed">
               {currentDoc.path}
             </dd>
             <CopyButton value={currentDoc.path} label="Copy document path" />
@@ -482,10 +463,10 @@ export function DocDetailPanel({
               <CopyButton value={currentDoc.topic} label="Copy document topic" />
             </div>
           )}
-          {timeAgo && (
+          {docTime && (
             <div className="flex items-center gap-2">
               <dt className="w-14 shrink-0 text-muted-foreground">updated</dt>
-              <dd className="min-w-0 flex-1 truncate text-[11px]">{timeAgo}</dd>
+              <dd className="min-w-0 flex-1 truncate text-[11px]"><RelativeTime value={docTime} /></dd>
             </div>
           )}
           {currentDoc.supersededBy && (
@@ -605,7 +586,7 @@ export function DocDetailPanel({
                 <CollapsibleTrigger className="w-full text-left p-2 hover:bg-accent rounded transition-colors">
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className={`text-[10px] ${SpecStatusColor(section.status)}`}>
-                      {SpecStatusLabel(currentDoc.kind as DocKindDto, section.status)}
+                      {docStatusLabel(currentDoc.kind as DocKindDto, section.status)}
                     </Badge>
                     <span className="font-medium flex-1 truncate">
                       {"  ".repeat(Math.max(0, section.level - 1))}{section.heading}

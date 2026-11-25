@@ -1,11 +1,12 @@
 "use client"
 
 import { ChevronRight, FileText, AlertCircle, CheckCircle2, Clock } from "lucide-react"
-import { formatDistanceToNowStrict } from "date-fns"
 
+import { RelativeTime } from "@/components/relative-time"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import type { DocListItem, DocKindDto } from "@/lib/types"
+import { docStatusLabel } from "./docs-scope"
 
 interface DocCardProps {
   doc: DocListItem
@@ -27,35 +28,22 @@ const KIND_COLORS: Record<DocKindDto, string> = {
   3: "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20",
 }
 
-const STATUS_LABELS: Record<number, { label: string; icon: React.ReactNode; color: string }> = {
-  // Spec statuses: 0=Proposed, 1=Approved, 2=Rejected, 3=Superseded
-  // Plan statuses: 0=Draft, 1=Active, 2=Completed, 3=Superseded
-  // Doc/Scratch: 0=Active, 1=Archived, 2=Superseded
-  0: { label: "Proposed/Draft/Active", icon: <Clock className="size-3" />, color: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
-  1: { label: "Approved/Active/Archived", icon: <CheckCircle2 className="size-3" />, color: "bg-green-500/10 text-green-600 dark:text-green-400" },
-  2: { label: "Rejected/Completed/Superseded", icon: <AlertCircle className="size-3" />, color: "bg-destructive/10 text-destructive" },
-  3: { label: "Superseded", icon: <ChevronRight className="size-3" />, color: "bg-gray-500/10 text-gray-600 dark:text-gray-400" },
+const STATUS_STYLE: Record<number, { icon: React.ReactNode; color: string }> = {
+  0: { icon: <Clock className="size-3" />, color: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
+  1: { icon: <CheckCircle2 className="size-3" />, color: "bg-green-500/10 text-green-600 dark:text-green-400" },
+  2: { icon: <AlertCircle className="size-3" />, color: "bg-destructive/10 text-destructive" },
+  3: { icon: <ChevronRight className="size-3" />, color: "bg-gray-500/10 text-gray-600 dark:text-gray-400" },
 }
 
 export function DocCard({ doc, selected, onSelect }: DocCardProps) {
   const kindLabel = KIND_LABELS[doc.kind as DocKindDto] ?? `Kind ${doc.kind}`
   const kindColor = KIND_COLORS[doc.kind as DocKindDto] ?? "bg-gray-500/10 text-gray-600"
-  const statusInfo = STATUS_LABELS[doc.status] ?? { label: `Status ${doc.status}`, icon: <FileText className="size-3" />, color: "bg-gray-500/10 text-gray-600" }
+  const statusStyle = STATUS_STYLE[doc.status] ?? { icon: <FileText className="size-3" />, color: "bg-gray-500/10 text-gray-600" }
+  const statusLabel = docStatusLabel(doc.kind as DocKindDto, doc.status)
 
-  // The list endpoint sends no mTime, so most cards have nothing to format.
-  // Returning "" (instead of "unknown") lets the meta row drop the separator
-  // and the word entirely rather than printing "· unknown" on every card.
-  let timeAgo = ""
-  if (doc.mTime) {
-    const parsed = new Date(doc.mTime)
-    if (!Number.isNaN(parsed.getTime())) {
-      try {
-        timeAgo = formatDistanceToNowStrict(parsed, { addSuffix: true })
-      } catch {
-        timeAgo = ""
-      }
-    }
-  }
+  // Rows with no usable mTime drop the badge entirely instead of showing
+  // "unknown"; the label itself refreshes on a shared clock.
+  const docTime = doc.mTime && !Number.isNaN(Date.parse(doc.mTime)) ? doc.mTime : null
 
   const hasSteps = doc.stepsTotal > 0
   const progressPct = hasSteps ? Math.round((doc.stepsDone / doc.stepsTotal) * 100) : 0
@@ -74,78 +62,72 @@ export function DocCard({ doc, selected, onSelect }: DocCardProps) {
           : "border-border",
       )}
     >
-      <div className="p-0">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap mb-2">
-              <Badge
-                variant="outline"
-                className={`text-xs ${kindColor}`}
-              >
-                {kindLabel}
-              </Badge>
-              <Badge variant="outline" className="text-xs bg-muted/50" title={doc.workspaceId}>
-                ws:{doc.workspaceId.slice(-8)}
-              </Badge>
-              {doc.archived && (
-                <Badge variant="outline" className="text-xs bg-muted/50">Archived</Badge>
-              )}
-            </div>
-
-            <h3 className="font-medium text-sm truncate text-foreground group-hover:text-primary transition-colors">
-              {doc.title}
-            </h3>
-
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground">
-              <span className="max-w-[240px] truncate font-mono">{doc.path}</span>
-              {timeAgo && (
-                <>
-                  <span aria-hidden>·</span>
-                  <span>{timeAgo}</span>
-                </>
-              )}
-              {hasSteps && (
-                <>
-                  <span aria-hidden>·</span>
-                  <span>{doc.stepsDone}/{doc.stepsTotal} steps</span>
-                </>
-              )}
-            </div>
-
-            {hasSteps && (
-              <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary transition-all duration-300"
-                  style={{ width: `${progressPct}%` }}
-                />
-              </div>
-            )}
-
-            {doc.frontMatterError && (
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-destructive">
-                <AlertCircle className="size-3" />
-                <span>Front-matter error: {doc.frontMatterErrorMessage}</span>
-              </div>
-            )}
-
-            {doc.supersededBy && (
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-                <ChevronRight className="size-3" />
-                <span>Superseded by: {doc.supersededBy}</span>
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-col items-end gap-1 shrink-0">
-            <Badge variant="outline" className={`text-[10px] ${statusInfo.color}`}>
-              {statusInfo.icon}
-              <span className="hidden sm:inline">{statusInfo.label}</span>
+      <div className="min-w-0">
+        {/* Status sits in the badge row so it no longer reserves width for the
+            whole card; the title and meta row get the full card width. */}
+        <div className="flex items-center gap-2 flex-wrap mb-2">
+          <Badge
+            variant="outline"
+            className={`text-xs ${kindColor}`}
+          >
+            {kindLabel}
+          </Badge>
+          {docTime && (
+            <Badge variant="outline" className="text-xs bg-muted/50" title={`workspace: ${doc.workspaceId}`}>
+              <Clock className="size-3" />
+              <RelativeTime value={docTime} />
+            </Badge>
+          )}
+          {doc.archived && (
+            <Badge variant="outline" className="text-xs bg-muted/50">Archived</Badge>
+          )}
+          <div className="ml-auto flex items-center gap-1.5">
+            <Badge variant="outline" className={`text-[10px] ${statusStyle.color}`}>
+              {statusStyle.icon}
+              <span className="hidden sm:inline">{statusLabel}</span>
             </Badge>
             {doc.order > 0 && (
               <span className="text-[10px] text-muted-foreground font-mono">order: {doc.order}</span>
             )}
           </div>
         </div>
+
+        <h3 className="font-medium text-sm truncate text-foreground group-hover:text-primary transition-colors">
+          {doc.title}
+        </h3>
+
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground">
+          <span className="max-w-[240px] truncate font-mono">{doc.path}</span>
+          {hasSteps && (
+            <>
+              <span aria-hidden>·</span>
+              <span>{doc.stepsDone}/{doc.stepsTotal} steps</span>
+            </>
+          )}
+        </div>
+
+        {hasSteps && (
+          <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary transition-all duration-300"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        )}
+
+        {doc.frontMatterError && (
+          <div className="mt-2 flex items-center gap-1.5 text-xs text-destructive">
+            <AlertCircle className="size-3" />
+            <span>Front-matter error: {doc.frontMatterErrorMessage}</span>
+          </div>
+        )}
+
+        {doc.supersededBy && (
+          <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+            <ChevronRight className="size-3" />
+            <span>Superseded by: {doc.supersededBy}</span>
+          </div>
+        )}
       </div>
     </button>
   )

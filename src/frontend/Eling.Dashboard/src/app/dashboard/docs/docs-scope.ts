@@ -1,6 +1,7 @@
 "use client"
 
 import type { WorkspaceSelection } from "@/components/workspaces/selection"
+import type { DocKindDto } from "@/lib/types"
 import { selectAll } from "@/components/workspaces/selection"
 
 export type DocKindFilter = "all" | "spec" | "plan" | "doc" | "scratch"
@@ -18,6 +19,13 @@ export function docKinds(): DocKindFilter[] { return KINDS }
 export function docKindLabel(k: DocKindFilter): string {
   if (k === "all") return "All"
   return k.charAt(0).toUpperCase() + k.slice(1)
+}
+
+/** Status codes are shared across kinds, so the same number means a different thing per kind. */
+export function docStatusLabel(kind: DocKindDto, status: number): string {
+  if (kind === 0) return ["Proposed", "Approved", "Rejected", "Superseded"][status] ?? `Status ${status}`
+  if (kind === 1) return ["Draft", "Active", "Completed", "Superseded"][status] ?? `Status ${status}`
+  return ["Active", "Archived", "Superseded"][status] ?? `Status ${status}`
 }
 
 /** Repeated `workspace` params are an explicit root list; none means all. */

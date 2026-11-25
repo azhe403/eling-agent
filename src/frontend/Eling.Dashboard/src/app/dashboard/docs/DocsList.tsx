@@ -37,7 +37,7 @@ import { WorkspaceScopePanel } from "@/components/workspaces/workspace-scope-pan
 import { WorkspaceSelect } from "@/components/workspaces/workspace-select"
 import { selectAll, selectOnly, toggleRoots, type WorkspaceSelection } from "@/components/workspaces/selection"
 import { useMediaQuery } from "@/hooks/use-media-query"
-import { usePersistedState } from "@/lib/persisted-state"
+import { usePersistedState, useResumePageParams } from "@/lib/persisted-state"
 import { XL_BREAKPOINT } from "@/lib/constants"
 import { apiFetch, ApiError } from "@/lib/api"
 import type {
@@ -77,11 +77,13 @@ function FilterGroup<T extends string>({
   options,
   value,
   onChange,
+  trailing,
 }: {
   label: string
   options: readonly T[]
   value: T
   onChange: (next: T) => void
+  trailing?: React.ReactNode
 }) {
   return (
     <div className="flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 p-1" role="group" aria-label={label}>
@@ -101,6 +103,12 @@ function FilterGroup<T extends string>({
           {option === "all" ? "All" : option.charAt(0).toUpperCase() + option.slice(1)}
         </button>
       ))}
+      {trailing && (
+        <>
+          <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
+          {trailing}
+        </>
+      )}
     </div>
   )
 }
@@ -125,11 +133,24 @@ export function DocsList() {
   const initialSort = sortFromParams(searchParams)
   const [sort, setSort] = usePersistedState<DocSortKey>({ page: "docs", param: "sort", defaultValue: initialSort.sort, allowed: SORT_KEYS })
   const [order, setOrder] = usePersistedState<OrderFilter>({ page: "docs", param: "order", defaultValue: initialSort.order, allowed: ORDERS })
+  useResumePageParams("docs", [
+    { param: "kind", defaultValue: "all" },
+    { param: "topic", defaultValue: "" },
+    { param: "sort", defaultValue: DEFAULT_SORT },
+    { param: "order", defaultValue: DEFAULT_ORDER },
+    { param: "doc", defaultValue: "" },
+  ])
   const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection>(() => selectionFromParams(searchParams))
   const [limit] = useState(50)
   const [offset, setOffset] = useState(() => parseInt(searchParams.get("offset") ?? "0", 10))
 
-  const [selectedDoc, setSelectedDoc] = useState<DocListItem | null>(null)
+  // Detail selection follows the dashboard master-detail standard: the id is
+  // persisted (URL + localStorage) and the item is derived from the loaded list.
+  const [selectedDocId, setSelectedDocId] = usePersistedState<string>({
+    page: "docs",
+    param: "doc",
+    defaultValue: "",
+  })
   const [detailState, setDetailState] = useState<{ id: string; doc: DocReadResult | null; error: string | null; loading: boolean } | null>(null)
   const [detailNonce, setDetailNonce] = useState(0)
   const [createMode, setCreateMode] = useState(false)
@@ -138,6 +159,11 @@ export function DocsList() {
   // Available topics from the loaded list
   const availableTopics = useMemo(() => extractTopics(topics), [topics])
   const allRoots = useMemo(() => workspaceRows.map((row) => row.root), [workspaceRows])
+  const allDocs = useMemo(() => topics.flatMap((t) => t.documents), [topics])
+  const selectedListItem = useMemo(
+    () => (selectedDocId === "" ? null : (allDocs.find((d) => d.id === selectedDocId) ?? null)),
+    [allDocs, selectedDocId],
+  )
 
   const applyWorkspaceSelection = useCallback((next: WorkspaceSelection) => {
     setWorkspaceSelection(next)
@@ -160,7 +186,7 @@ export function DocsList() {
   const dialogContainerRef = useRef<HTMLDivElement>(null)
 
   // Detail fetch
-  const selectedId = selectedDoc?.id ?? null
+  const selectedId = selectedListItem?.id ?? null
 
   const load = useCallback(async () => {
     try {
@@ -279,21 +305,17 @@ export function DocsList() {
     return () => { isMounted = false }
   }, [load])
 
-  // Flat list for selection
-  const allDocs = useMemo(() => topics.flatMap((t) => t.documents), [topics])
-  const selectedListItem = selectedDoc
-
   const handleSelect = (doc: DocListItem) => {
     setCreateMode(false)
     // Selecting is a one-way action: clicking the already-open card keeps its
     // detail in place. Closing is the panel's explicit X button (or the narrow
     // dialog's dismiss), never a second click on the card — otherwise a stray
     // click on the row you're reading makes the detail vanish.
-    setSelectedDoc(doc)
+    setSelectedDocId(doc.id)
   }
 
   const handleNewDoc = () => {
-    setSelectedDoc(null)
+    setSelectedDocId("")
     setCreateMode(true)
   }
 
@@ -323,7 +345,7 @@ export function DocsList() {
     setDeleteTarget(null)
     try {
       await apiFetch(`/api/docs/${encodeURIComponent(target.id)}`, { method: "DELETE" })
-      setSelectedDoc(selectedDoc?.id === target.id ? null : selectedDoc)
+      if (selectedDocId === target.id) setSelectedDocId("")
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed")
@@ -350,7 +372,7 @@ export function DocsList() {
       detailError={detailError}
       createMode={createMode}
       trashMode={false}
-      onClose={() => { setSelectedDoc(null); setCreateMode(false) }}
+      onClose={() => { setSelectedDocId(""); setCreateMode(false) }}
       onSaveEdit={handleSaveEdit}
       onCreate={handleCreate}
       onDelete={handleDelete}
@@ -462,15 +484,18 @@ export function DocsList() {
                 options={SORT_KEYS}
                 value={sort}
                 onChange={(v) => { setOffset(0); setSort(v) }}
+                trailing={
+                  <button
+                    type="button"
+                    aria-label={`Sort direction ${order}`}
+                    title={order === "asc" ? "Ascending" : "Descending"}
+                    onClick={() => { setOffset(0); setOrder(order === "asc" ? "desc" : "asc") }}
+                    className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    {order === "asc" ? "↑" : "↓"}
+                  </button>
+                }
               />
-              <Button
-                variant="outline"
-                size="sm"
-                aria-label={`Sort direction ${order}`}
-                onClick={() => { setOffset(0); setOrder(order === "asc" ? "desc" : "asc") }}
-              >
-                {order === "asc" ? "↑" : "↓"}
-              </Button>
 
               {availableTopics.length > 0 && (
                 <Select value={topic} onValueChange={(v) => { setOffset(0); setTopic(v ?? "") }}>
@@ -500,7 +525,7 @@ export function DocsList() {
                   <DocCard
                     key={doc.id}
                     doc={doc}
-                    selected={selectedDoc?.id === doc.id}
+                    selected={selectedDocId === doc.id}
                     onSelect={handleSelect}
                   />
                 ))}
@@ -541,7 +566,7 @@ export function DocsList() {
               open
               onOpenChange={(open) => {
                 if (!open) {
-                  setSelectedDoc(null)
+                  setSelectedDocId("")
                   setCreateMode(false)
                 }
               }}

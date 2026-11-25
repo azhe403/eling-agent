@@ -1,11 +1,12 @@
 # Page-State Persistence Standard (Eling Dashboard)
 
-Status: Adopted 2026-11-16. First application: `/dashboard/skills`.
+Status: Adopted 2026-11-16; extended 2026-11-26 to cover master-detail panel
+selection on every dashboard page. First application: `/dashboard/skills`.
 
 ## Rule
 
-Any filter, scope, search, sort, or mode state on a dashboard page MUST
-persist to **both** of:
+Any filter, scope, search, sort, mode, or master-detail panel selection state
+on a dashboard page MUST persist to **both** of:
 
 1. **The URL query string** — the source of truth. Reload, back/forward and a
    shared link all land on the same state. The page reads initial state from
@@ -44,16 +45,24 @@ Use `src/lib/persisted-state.ts` — do not re-implement per page.
 - `useSearchParams` requires a `<Suspense>` boundary around the client
   component (all skill/memory pages already do; new pages must too).
 
-## What must be persisted (this page: `/dashboard/skills`)
+## What must be persisted
 
-| State | Param | Default |
-|---|---|---|
-| Search query | `q` | `""` |
-| Origin filter | `origin` | `all` |
-| Sort | `sort` (`name` \| `updated`) | `name` |
-| Trash view | `trash` (`0` \| `1`) | `0` |
-| Tag filter | `tag` | `""` |
-| Detail panel selection | `skill` (skill name) | `""` |
+Every page with a detail sidebar MUST persist **which detail is open**, not
+just an open/closed boolean. Store the selection key through the canonical
+hook; derive the selected item from the loaded list with `useMemo` (never a
+mount effect) and clear the key when the panel closes. A key that no longer
+matches a loaded item simply leaves the panel closed.
+
+| Page | State | Param | Default |
+|---|---|---|---|
+| `/dashboard/skills` | Search query | `q` | `""` |
+| `/dashboard/skills` | Origin filter | `origin` | `all` |
+| `/dashboard/skills` | Sort | `sort` (`name` \| `updated`) | `name` |
+| `/dashboard/skills` | Trash view | `trash` (`0` \| `1`) | `0` |
+| `/dashboard/skills` | Tag filter | `tag` | `""` |
+| `/dashboard/skills` | Detail panel selection | `skill` (skill name) | `""` |
+| `/dashboard/docs` | Detail panel selection | `doc` (document id) | `""` |
+| `/dashboard/codebase` | Open file | `file` + `fileRoot` | absent |
 
 Any new per-page state joins this table or gets reviewed against it.
 
@@ -66,6 +75,8 @@ Any new per-page state joins this table or gets reviewed against it.
   `use-codebase-search.test.ts` pattern.
 - Bare visit must restore the saved position (`/dashboard/skills` with an
   empty query string resumes `q`/`origin`/`sort`/`trash`/`tag`).
+- Master-detail pages must reopen the same detail on a bare revisit; closing
+  it must clear the selection key from both the URL and localStorage.
 - Invalid or stale storage values must degrade to the default, never crash.
 
 ## Anti-patterns
@@ -76,3 +87,5 @@ Any new per-page state joins this table or gets reviewed against it.
 - Page-local URL writers that race with the hook's `router.replace`.
 - Persisting unbounded values (multi-KB lists) — persist the selection key,
   not the payload.
+- Holding the selected detail in component state so it disappears on reload;
+  keeping the panel's open flag without the item key is the same anti-pattern.
