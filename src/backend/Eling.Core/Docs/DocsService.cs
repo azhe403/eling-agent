@@ -116,6 +116,24 @@ public sealed class DocsService
                         deleted++;
                     }
                 }
+
+                // A metadata entry can be replaced (its ULID changes) without the
+                // file disappearing. Prune index rows that no longer correspond to
+                // a live entry, otherwise the list keeps stale ids that 404 on read.
+                if (paths is null)
+                {
+                    var desiredIds = document.Docs.Values
+                        .Where(entry => !entry.Archived)
+                        .Select(entry => entry.Id)
+                        .ToHashSet(StringComparer.Ordinal);
+                    foreach (var row in await _index.ListAsync(workspaceId))
+                    {
+                        if (desiredIds.Contains(row.DocId)) continue;
+                        await _index.DeleteAsync(row.DocId);
+                        deleted++;
+                    }
+                }
+
                 await _docsMetadata.SaveAsync(root, document, ct);
             }
             return new ScanResult(indexed, skipped, deleted, errors, roots.Length, false, messages);

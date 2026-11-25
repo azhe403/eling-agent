@@ -133,6 +133,20 @@ public class DocsServiceUnifiedTests : IDisposable
     }
 
     [Fact]
+    public async Task Scan_PrunesIndexRowsWhoseMetadataEntryWasReplaced()
+    {
+        var doc = await _service.CreateDocumentAsync(_rootA, "docs/specs/stale.md", "# Stale\n\nBody", DocKind.Spec);
+        var document = await _metadata.LoadAsync(_rootA);
+        document.Docs.Remove("docs/specs/stale.md");
+        await _metadata.SaveAsync(_rootA, document);
+
+        await _service.ScanAsync(full: true);
+
+        Assert.Null(await _index.GetAsync(doc.Id.Value));
+        Assert.Single((await _service.ListAsync(_rootA)).Where(item => item.Path == "docs/specs/stale.md"));
+    }
+
+    [Fact]
     public async Task Relation_SurvivesRescan_AsUlidEdge()
     {
         var source = await _service.CreateDocumentAsync(_rootA, "docs/plans/p.md", "# Plan\n\nBody", DocKind.Plan);
