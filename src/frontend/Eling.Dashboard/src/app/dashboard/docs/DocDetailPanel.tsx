@@ -395,25 +395,25 @@ export function DocDetailPanel({
   // "Loading..." box with three random bars.
   if (detailLoading || !detail) {
     return (
-      <div className="flex h-full min-h-0 flex-col">
+      <div className="sticky top-16 flex h-[calc(100dvh-4rem)] max-h-[calc(100dvh-4rem)] min-h-0 min-w-[380px] flex-1 shrink-0 flex-col overflow-hidden border-l bg-background">
         <div className="flex shrink-0 flex-col gap-3 border-b border-border/40 p-4">
           {renderHeader()}
         </div>
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex shrink-0 items-center gap-4 border-b border-border/40 px-4 py-2.5">
-            <Skeleton className="h-4 w-16" />
-            <Skeleton className="h-4 w-20" />
-            <Skeleton className="h-4 w-20" />
-            <Skeleton className="h-4 w-20" />
+            <Skeleton className="h-4 flex-1" />
+            <Skeleton className="h-4 flex-1" />
+            <Skeleton className="h-4 flex-1" />
+            <Skeleton className="h-4 flex-1" />
           </div>
           <div className="flex flex-1 flex-col gap-3 p-4">
-            <Skeleton className="h-6 w-2/3" />
+            <Skeleton className="h-6 w-full" />
             <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-5/6" />
+            <Skeleton className="h-4 w-full" />
             <div className="mt-2 space-y-2 rounded-lg border border-border/40 bg-muted/20 p-4">
-              <Skeleton className="h-4 w-1/2" />
-              <Skeleton className="h-4 w-2/3" />
-              <Skeleton className="h-4 w-3/5" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-full" />
             </div>
           </div>
         </div>
