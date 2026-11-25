@@ -24,7 +24,6 @@ public class DocsDirWatcherTests : IDisposable
         _service = new DocsService(
             new SqliteDocsIndex(_dbPath),
             new SqliteDocsAuditStore(_dbPath + ".audit"),
-            new DocsMetadataStore(),
             [_rootA]);
     }
 
@@ -56,21 +55,6 @@ public class DocsDirWatcherTests : IDisposable
         Assert.Equal(DocsChangeTopics.Docs, notified);
         var item = Assert.Single(await _service.ListAsync());
         Assert.Equal("Alpha Updated", item.Title);
-    }
-
-    [Fact]
-    public async Task MetadataJsonChange_RebuildsTaggedRowsForThatWorkspace()
-    {
-        Write(_rootA, "docs/specs/a.md", "# Alpha\n\nBody");
-        using var watcher = new DocsDirWatcher(_service, _broadcaster);
-        watcher.Start();
-        Assert.True(await WaitFor(() => _service.ListAsync().ContinueWith(t => t.Result.Count == 1)));
-
-        var path = Path.Combine(_rootA, DocsMetadataStore.FileName);
-        var json = await File.ReadAllTextAsync(path);
-        await File.WriteAllTextAsync(path, json.Replace("\"status\": 0", "\"status\": 2"));
-        Assert.True(await WaitForReason(DocsChangeTopics.Docs) is not null);
-        Assert.Equal(2, Assert.Single(await _service.ListAsync()).Status);
     }
 
     [Fact]

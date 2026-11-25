@@ -291,22 +291,19 @@ public static class McpServiceExtensions
         var dataDir = ElingPaths.ResolveDataDir();
         var auditPath = Path.Combine(dataDir, "docs-audit.db");
 
-        // One-time cutover: lift legacy metadata and audit out of the old
-        // per-workspace index BEFORE any new index can rebuild (and archive) it.
+        // One-time cutover: lift audit rows out of the old per-workspace index
+        // BEFORE the new index can rebuild (and archive) it.
         var legacyIndexPath = Path.Combine(canonicalRoot, ElingPaths.DotElingDirName, "docs-index.db");
         if (File.Exists(legacyIndexPath))
         {
             DocsMigration.ExportLegacyStateAsync(
                 legacyIndexPath,
-                new DocsMetadataStore(),
-                new SqliteDocsAuditStore(auditPath),
-                currentRoot).GetAwaiter().GetResult();
+                new SqliteDocsAuditStore(auditPath)).GetAwaiter().GetResult();
         }
 
-        // One derived global index and one persistent audit store for every workspace.
+        // The global SQLite database is the docs store; audit has its own file.
         services.TryAddSingleton<IDocsIndex>(_ => new SqliteDocsIndex(Path.Combine(dataDir, "docs.db")));
         services.TryAddSingleton<IDocsAuditStore>(_ => new SqliteDocsAuditStore(auditPath));
-        services.TryAddSingleton<DocsMetadataStore>();
 
         services.AddSingleton<DocsService>(sp =>
         {
@@ -319,7 +316,6 @@ public static class McpServiceExtensions
             return new DocsService(
                 sp.GetRequiredService<IDocsIndex>(),
                 sp.GetRequiredService<IDocsAuditStore>(),
-                sp.GetRequiredService<DocsMetadataStore>(),
                 roots,
                 sp.GetService<ILogger<DocsService>>());
         });

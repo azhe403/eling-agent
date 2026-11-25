@@ -28,7 +28,6 @@ public sealed class DocsDirWatcher : IDisposable
     private readonly ILogger<DocsDirWatcher> _logger;
     private readonly Dictionary<string, FileSystemWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _dirty = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, int> _metadataDirty = new(StringComparer.OrdinalIgnoreCase);
     private readonly IWorkspacesRegistry? _workspacesRegistry;
 
     private CancellationTokenSource? _cts;
@@ -98,7 +97,6 @@ public sealed class DocsDirWatcher : IDisposable
                 watcher.EnableRaisingEvents = true;
                 _watchers[root] = watcher;
                 _dirty[root] = 1; // scan a newly registered workspace on the next tick
-                _metadataDirty[root] = 1;
             }
             catch (Exception ex)
             {
@@ -109,16 +107,10 @@ public sealed class DocsDirWatcher : IDisposable
 
     private void OnFileEvent(string root, string path)
     {
-        if (!path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
-            && !path.EndsWith("docs-metadata.json", StringComparison.OrdinalIgnoreCase)
-            && !path.EndsWith("docs-local-metadata.json", StringComparison.OrdinalIgnoreCase))
-            return;
+        if (!path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) return;
         lock (_sync)
         {
             if (_dirty.ContainsKey(root)) _dirty[root] = 1;
-            if (path.EndsWith("docs-metadata.json", StringComparison.OrdinalIgnoreCase)
-                || path.EndsWith("docs-local-metadata.json", StringComparison.OrdinalIgnoreCase))
-                _metadataDirty[root] = 1;
         }
     }
 
@@ -144,17 +136,10 @@ public sealed class DocsDirWatcher : IDisposable
                 int wasDirty;
                 lock (_sync) wasDirty = _dirty.GetValueOrDefault(root);
                 if (wasDirty == 0) continue;
-                int metadataDirty;
-                lock (_sync)
-                {
-                    _dirty[root] = 0;
-                    metadataDirty = _metadataDirty.GetValueOrDefault(root);
-                    _metadataDirty[root] = 0;
-                }
-                var full = metadataDirty == 0;
+                lock (_sync) _dirty[root] = 0;
                 try
                 {
-                    await _docsService.ScanAsync(full: full, workspaceRoot: root, ct: cancellationToken);
+                    await _docsService.ScanAsync(workspaceRoot: root, ct: cancellationToken);
                     _memoryBroadcaster.Notify(DocsChangeTopics.Docs);
                 }
                 catch (Exception ex)

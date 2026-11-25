@@ -136,7 +136,9 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
                            "SSE stream ended before the expected event arrived.");
 
             if (line == expected) return line;
-            if (line.Length == 0 || line == "data: runtimes") continue;
+            // Docs and runtimes are separate subsystems on the same SSE bus;
+            // their frames are unrelated to the memory mutation sequence.
+            if (line.Length == 0 || line == "data: runtimes" || line == "data: docs") continue;
 
             throw new InvalidOperationException(
                 $"Unexpected SSE event '{line}' while waiting for '{expected}'.");

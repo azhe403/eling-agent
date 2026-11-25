@@ -37,9 +37,8 @@ public class DocReadOnlyEndpointTests
         var dto = await tool.SaveAsync("docs/specs/new.md", "# New\n\nBody", "spec", "specs");
 
         Assert.True(File.Exists(Path.Combine(fixture.Root, "docs/specs/new.md")));
-        var metadata = await fixture.Metadata.LoadAsync(fixture.Root);
-        Assert.True(metadata.Docs.ContainsKey("docs/specs/new.md"));
-        Assert.Equal(DocsMetadataStore.ResolveWorkspaceId(fixture.Root), dto.WorkspaceId);
+        Assert.Contains(await fixture.Service.ListAsync(fixture.Root), item => item.Path == "docs/specs/new.md");
+        Assert.Equal(DocsService.ResolveWorkspaceId(fixture.Root), dto.WorkspaceId);
     }
 
     [Fact]
@@ -104,7 +103,6 @@ public class DocReadOnlyEndpointTests
     {
         private readonly string _dbPath;
         public string Root { get; }
-        public DocsMetadataStore Metadata { get; } = new();
         public DocsService Service { get; }
 
         public DocsFixture()
@@ -116,7 +114,6 @@ public class DocReadOnlyEndpointTests
             Service = new DocsService(
                 new SqliteDocsIndex(_dbPath),
                 new SqliteDocsAuditStore(_dbPath + ".audit"),
-                Metadata,
                 [Root]);
         }
 

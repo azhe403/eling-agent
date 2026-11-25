@@ -106,8 +106,9 @@ public static class DocEndpoints
     private static async Task<IResult> AnnotateAsync(DocsService service, string id, DocAnnotateRequest request)
         => Results.Ok(await service.AnnotateSectionAsync(DocId.Parse(id), request.Anchor, request.Status, request.Annotation));
 
-    private static async Task<IResult> ReindexAsync(DocsService service, DocScanRequest request, string? workspace = null)
-        => Results.Ok(DocIndexResponse.From(await service.ScanAsync(request.Full, request.Paths, workspace)));
+    private static async Task<IResult> ReindexAsync(DocsService service, DocScanRequest? request = null, string? workspace = null)
+        => Results.Ok(DocIndexResponse.From(
+            await service.ScanAsync(request?.Full ?? false, request?.Paths, workspace)));
 
     private static DocKind? ParseKind(string? value)
         => string.IsNullOrWhiteSpace(value) ? null
