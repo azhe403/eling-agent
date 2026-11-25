@@ -144,10 +144,10 @@ export type DocListItem = {
   order: number
   stepsTotal: number
   stepsDone: number
+  mTime?: string
   /** Detail-only fields; absent on list rows. */
   supersededBy?: string | null
   fileHash?: string
-  mTime?: string
   indexedAt?: string
   frontMatterError?: boolean
   frontMatterErrorMessage?: string | null
