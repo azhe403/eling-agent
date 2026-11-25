@@ -5,6 +5,7 @@ All notable changes to Eling are documented here. Follows [Keep a Changelog](htt
 ## [Unreleased] - 2026-11-25
 
 ### Fixed
+- **Docs detail route restored (backend)**: `GET /api/docs/{id}` is registered again, matching the dashboard's detail request; the earlier rewrite left only `GET /api/docs/doc?id=...`, so every detail fetch returned 404 even though the document was in the list.
 - **Post-review docs fixes**: legacy audit export is idempotent across restarts, archived docs no longer appear in search, front-matter `spec:` paths resolve to ULID relations, and `sort=updated` really uses the update timestamp.
 
 ### Changed

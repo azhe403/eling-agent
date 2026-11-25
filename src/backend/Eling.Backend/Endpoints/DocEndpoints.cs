@@ -20,6 +20,7 @@ public static class DocEndpoints
         group.MapGet("/", ListAsync);
         group.MapGet("/search", SearchAsync);
         group.MapGet("/doc", ReadAsync);
+        group.MapGet("/{id}", ReadByIdAsync);
         group.MapGet("/staleness", StalenessAsync);
         group.MapGet("/audit", AuditAsync);
         group.MapGet("/policy", PolicyAsync);
@@ -69,6 +70,18 @@ public static class DocEndpoints
         bool includeContent = true)
     {
         var result = await service.ReadAsync(DocId.Parse(id), includeSections, includeRefs, includeContent);
+        return result is null ? Results.NotFound() : Results.Ok(DocReadResultDto.From(result));
+    }
+
+    private static async Task<IResult> ReadByIdAsync(
+        DocsService service,
+        string id,
+        bool includeSections = true,
+        bool includeRefs = true,
+        bool includeContent = true)
+    {
+        if (!DocId.TryParse(id, out var parsed)) return Results.BadRequest();
+        var result = await service.ReadAsync(parsed, includeSections, includeRefs, includeContent);
         return result is null ? Results.NotFound() : Results.Ok(DocReadResultDto.From(result));
     }
 
