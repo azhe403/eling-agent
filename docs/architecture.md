@@ -24,7 +24,8 @@ Single-binary ownership: first launcher wins, peers skip Kestrel.
 - Using Eling day to day: [using-eling.md](using-eling.md)
 - Nested/project-local memory scopes: [nested-memory.md](nested-memory.md)
 - Desktop ↔ dashboard parity: [desktop-dashboard-parity.md](desktop-dashboard-parity.md)
-- Cross-client sorting standard: [sorting-standard.md](superpowers/standards/sorting-standard.md)
+- Cross-client sorting standard: [sorting-standard.md](sorting-standard.md)
+- Change-watcher ownership standard: [watcher-standard.md](watcher-standard.md)
 - Release process & asset matrix: [release.md](release.md), local release dry runs: [local-release-simulation.md](local-release-simulation.md)
 - Philosophy behind the storage model: [philosophy.md](philosophy.md)
 
