@@ -1,37 +1,21 @@
 using System.IO;
 using Eling.Core.Docs;
-using Eling.Core.Docs.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Eling.Backend;
 
 /// <summary>
-/// Watches the docs directories (docs/ and .eling/docs/) and turns
-/// on-disk changes — writes from any process, not just eling-mediated ones —
-/// into SSE "docs" broadcasts after a full catalog rescan.
+/// Watches Markdown and metadata files for every active workspace. Only the
+/// dashboard-owner process starts this watcher: it owns the SSE subscribers and
+/// is long-lived, unlike ephemeral MCP stdio processes.
 ///
-/// Rationale: the docs directories are shared folders; an external tool can
-/// drop a document into them at any time, and no eling API call runs in that
-/// process, so the mutation-side notifier never fires. The dashboard owner is
-/// the only process with SSE subscribers, so this watcher rides it the same
-/// way the audit watcher rides the store files: a dirty flag per event (O(1),
-/// no I/O, exceptions impossible) and a fixed-interval drain that clears the
-/// flag BEFORE reconciling, so a write landing mid-scan re-sets the flag and
-/// the next tick rescans — nothing is lost, and a burst of writes coalesces
-/// into at most one scan per tick.
-///
-/// A rescan is the reconcile: the REST list reads the SQLite index, not the
-/// disk, so a new external document only becomes visible after
-/// <see cref="DocsService.ScanAsync"/> runs; the broadcast fires after the
-/// scan on purpose. A scan failure is logged and the dirty flag is re-armed,
-/// so the drain retries on the next tick even without a file event.
+/// Each workspace has an O(1) dirty flag. The drain clears the flag BEFORE
+/// reconciling, so a write landing mid-scan re-arms it and a burst of events
+/// coalesces into one scan per tick. A failed scan re-arms the flag.
 /// </summary>
 public sealed class DocsDirWatcher : IDisposable
 {
-    /// <summary>
-    /// The topic this watcher broadcasts on.
-    /// </summary>
     public const string Topic = DocsChangeTopics.Docs;
 
     private static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(1);
@@ -39,15 +23,11 @@ public sealed class DocsDirWatcher : IDisposable
     private readonly object _sync = new();
     private readonly DocsService _docsService;
     private readonly MemoryChangeBroadcaster _memoryBroadcaster;
-    private readonly string _workspaceRoot;
     private readonly TimeSpan _interval;
     private readonly ILogger<DocsDirWatcher> _logger;
+    private readonly Dictionary<string, FileSystemWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _dirty = new(StringComparer.OrdinalIgnoreCase);
 
-    // All accesses go through Interlocked so the drain's clear-before-work is
-    // atomic with respect to the event handlers' set. (Interlocked is used
-    // instead of volatile+plain so the drain can atomically exchange.)
-    private int _dirty;
-    private FileSystemWatcher? _watcher;
     private CancellationTokenSource? _cts;
     private bool _started;
     private bool _disposed;
@@ -55,170 +35,110 @@ public sealed class DocsDirWatcher : IDisposable
     public DocsDirWatcher(
         DocsService docsService,
         MemoryChangeBroadcaster broadcaster,
-        string workspaceRoot,
-        TimeSpan? interval = null,
         ILogger<DocsDirWatcher>? logger = null)
     {
         _docsService = docsService ?? throw new ArgumentNullException(nameof(docsService));
         _memoryBroadcaster = broadcaster ?? throw new ArgumentNullException(nameof(broadcaster));
-        if (string.IsNullOrWhiteSpace(workspaceRoot))
-        {
-            throw new ArgumentException("A workspace root is required.", nameof(workspaceRoot));
-        }
-        if (interval is { } value && value <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(interval), "The drain interval must be positive.");
-        }
-        _workspaceRoot = workspaceRoot;
-        _interval = interval ?? DefaultInterval;
         _logger = logger ?? NullLogger<DocsDirWatcher>.Instance;
+        _interval = DefaultInterval;
     }
 
-    /// <summary>
-    /// Starts watching the docs directories and draining the dirty flag.
-    /// Idempotent; a disposed watcher cannot be restarted.
-    /// Started by the dashboard owner only — peers own no SSE subscribers,
-    /// so watching there would burn handles for nobody.
-    /// </summary>
     public void Start()
     {
         lock (_sync)
         {
             if (_disposed || _started) return;
-
-            var directoriesToWatch = new[]
-            {
-                Path.Combine(_workspaceRoot, "docs"),
-                Path.Combine(_workspaceRoot, ".eling", "docs")
-            };
-
-            try
-            {
-                foreach (var dir in directoriesToWatch)
-                {
-                    Directory.CreateDirectory(dir);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex,
-                    "Could not create one or more docs directories; the docs watcher is not running.");
-                return;
-            }
-
-            try
-            {
-                // Watch the docs/ directory
-                var docsWatcher = new FileSystemWatcher(Path.Combine(_workspaceRoot, "docs"))
-                {
-                    IncludeSubdirectories = true,
-                    NotifyFilter = NotifyFilters.LastWrite
-                        | NotifyFilters.FileName
-                        | NotifyFilters.DirectoryName
-                };
-                docsWatcher.Created += OnFileEvent;
-                docsWatcher.Changed += OnFileEvent;
-                docsWatcher.Deleted += OnFileEvent;
-                docsWatcher.Renamed += OnFileEvent;
-                docsWatcher.Error += OnWatcherError;
-                docsWatcher.EnableRaisingEvents = true;
-
-                // Watch the .eling/docs/ directory
-                var elingDocsWatcher = new FileSystemWatcher(Path.Combine(_workspaceRoot, ".eling", "docs"))
-                {
-                    IncludeSubdirectories = true,
-                    NotifyFilter = NotifyFilters.LastWrite
-                        | NotifyFilters.FileName
-                        | NotifyFilters.DirectoryName
-                };
-                elingDocsWatcher.Created += OnFileEvent;
-                elingDocsWatcher.Changed += OnFileEvent;
-                elingDocsWatcher.Deleted += OnFileEvent;
-                elingDocsWatcher.Renamed += OnFileEvent;
-                elingDocsWatcher.Error += OnWatcherError;
-                elingDocsWatcher.EnableRaisingEvents = true;
-
-                _watcher = docsWatcher; // Keep reference for disposal
-                // Note: we need to track both watchers for disposal
-                // For simplicity, we'll store them in a list, but since we only have two,
-                // we can track the second one separately or use a collection.
-                // Let's use a collection approach by creating a wrapper.
-                _elingDocsWatcher = elingDocsWatcher;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex,
-                    "Could not arm the docs watchers; the docs watcher is not running.");
-                _watcher?.Dispose();
-                _elingDocsWatcher?.Dispose();
-                _watcher = null;
-                _elingDocsWatcher = null;
-                return;
-            }
-
+            ReconcileRoots();
+            _ = Task.Run(() => CatchUpAsync());
             var cts = new CancellationTokenSource();
             _cts = cts;
-            _ = Task.Run(() => DrainAsync(cts));
+            _ = Task.Run(() => DrainAsync(cts.Token));
             _started = true;
-
-            _logger.LogInformation(
-                "Watching docs directories for changes: {WorkspaceRoot}",
-                _workspaceRoot);
+            _logger.LogInformation("Watching docs files across {Count} workspace(s)", _watchers.Count);
         }
     }
 
-    private FileSystemWatcher? _elingDocsWatcher;
-
-    private void OnFileEvent(object sender, FileSystemEventArgs e) =>
-        Interlocked.Exchange(ref _dirty, 1);
-
-    private void OnWatcherError(object sender, ErrorEventArgs e)
+    private void ReconcileRoots()
     {
-        _logger.LogError(e.GetException(), "Docs watcher error; re-arming dirty flag.");
-        Interlocked.Exchange(ref _dirty, 1);
-    }
-
-    private async Task DrainAsync(CancellationTokenSource cts)
-    {
-        while (!cts.Token.IsCancellationRequested)
+        var roots = _docsService.WorkspaceRoots.Where(Directory.Exists).ToList();
+        foreach (var removed in _watchers.Keys.Except(roots, StringComparer.OrdinalIgnoreCase).ToList())
         {
+            _watchers[removed].Dispose();
+            _watchers.Remove(removed);
+            _dirty.Remove(removed);
+        }
+        foreach (var root in roots)
+        {
+            if (_watchers.ContainsKey(root)) continue;
             try
             {
-                await Task.Delay(_interval, cts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-
-            // Clear the dirty flag BEFORE doing the work so a write landing
-            // mid-scan re-sets the flag and the next tick rescans.
-            var wasDirty = Interlocked.Exchange(ref _dirty, 0);
-            if (wasDirty == 0)
-            {
-                continue;
-            }
-
-            try
-            {
-                await _docsService.ScanAsync(full: false, paths: null, ct: cts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
+                var watcher = new FileSystemWatcher(root)
+                {
+                    IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName
+                };
+                watcher.Created += (_, args) => OnFileEvent(root, args.FullPath);
+                watcher.Changed += (_, args) => OnFileEvent(root, args.FullPath);
+                watcher.Deleted += (_, args) => OnFileEvent(root, args.FullPath);
+                watcher.Renamed += (_, args) => OnFileEvent(root, args.FullPath);
+                watcher.Error += (_, args) => _logger.LogWarning(args.GetException(), "Docs watcher error in {Root}", root);
+                watcher.EnableRaisingEvents = true;
+                _watchers[root] = watcher;
+                _dirty[root] = 1; // scan a newly registered workspace on the next tick
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Docs rescan failed; re-arming dirty flag for retry.");
-                // Re-arm the dirty flag so the drain retries on the next tick
-                // even without a file event.
-                Interlocked.Exchange(ref _dirty, 1);
-                continue;
+                _logger.LogError(ex, "Could not arm docs watcher for {Root}", root);
             }
+        }
+    }
 
-            // Broadcast after the scan on purpose — the index is the source of
-            // truth for the dashboard, so the event should fire after it is fresh.
-            _memoryBroadcaster.Notify(Topic);
+    private void OnFileEvent(string root, string path)
+    {
+        if (!path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+            && !path.EndsWith("docs-metadata.json", StringComparison.OrdinalIgnoreCase)
+            && !path.EndsWith("docs-local-metadata.json", StringComparison.OrdinalIgnoreCase))
+            return;
+        lock (_sync)
+        {
+            if (_dirty.ContainsKey(root)) _dirty[root] = 1;
+        }
+    }
+
+    private async Task CatchUpAsync()
+    {
+        foreach (var root in _watchers.Keys.ToList())
+        {
+            try { await _docsService.ScanAsync(workspaceRoot: root); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Startup docs scan failed for {Root}", root); }
+        }
+    }
+
+    private async Task DrainAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try { await Task.Delay(_interval, cancellationToken); }
+            catch (OperationCanceledException) { break; }
+
+            lock (_sync) ReconcileRoots();
+            foreach (var root in _watchers.Keys.ToList())
+            {
+                int wasDirty;
+                lock (_sync) wasDirty = _dirty.GetValueOrDefault(root);
+                if (wasDirty == 0) continue;
+                lock (_sync) _dirty[root] = 0;
+                try
+                {
+                    await _docsService.ScanAsync(workspaceRoot: root, ct: cancellationToken);
+                    _memoryBroadcaster.Notify(DocsChangeTopics.Docs);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Docs rescan failed for {Root}; re-arming", root);
+                    lock (_sync) _dirty[root] = 1;
+                }
+            }
         }
     }
 
@@ -227,15 +147,12 @@ public sealed class DocsDirWatcher : IDisposable
         lock (_sync)
         {
             if (_disposed) return;
-
-            _cts?.Cancel();
-            _watcher?.Dispose();
-            _elingDocsWatcher?.Dispose();
-            _watcher = null;
-            _elingDocsWatcher = null;
-            _cts?.Dispose();
-            _cts = null;
             _disposed = true;
+            _cts?.Cancel();
+            _cts?.Dispose();
+            foreach (var watcher in _watchers.Values) watcher.Dispose();
+            _watchers.Clear();
+            _dirty.Clear();
         }
     }
 }

@@ -1,13 +1,10 @@
 namespace Eling.Backend.Dtos;
 
-/// <summary>
-/// Search result DTO with rank.
-/// </summary>
+/// <summary>Search result DTO with rank from the global index.</summary>
 public sealed record DocSearchResultDto(
     string DocId,
-    DocOwnershipDto Ownership,
-    DocOriginDto Origin,
-    string RelPath,
+    string WorkspaceId,
+    string Path,
     DocKindDto Kind,
     string Title,
     int Status,
@@ -18,9 +15,8 @@ public sealed record DocSearchResultDto(
 {
     public static DocSearchResultDto From(Eling.Core.Docs.DocSearchResult result) => new(
         result.DocId,
-        result.Ownership.ToDto(),
-        result.Origin.ToDto(),
-        result.RelPath,
+        result.WorkspaceId,
+        result.Path,
         result.Kind.ToDto(),
         result.Title,
         result.Status,

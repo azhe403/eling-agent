@@ -81,12 +81,10 @@ public static class ToolCatalog
         new("doc_staleness", DocsGroup, "Generate staleness report for unresolved refs, superseded docs, stale drafts, untouched docs."),
         new("doc_audit", DocsGroup, "Get audit entries for a document or scope."),
         new("doc_relation", DocsGroup, "Read spec↔plan relations (Implements, Supersedes, References)."),
-        new("doc_save", DocsGroup, "Create or update a managed document; promote to external with promote: true."),
-        new("doc_annotate", DocsGroup, "Annotate a section of a managed document with status and annotation."),
-        new("doc_promote", DocsGroup, "Promote a managed document to external (writes to docs/)."),
-        new("doc_index", DocsGroup, "Trigger incremental rescan within allowed scope."),
-        new("doc_scope_policy", DocsGroup, "Inspect or change coverage policy and decision (ask/disabled/clear)."),
-        new("doc_offer_managed", DocsGroup, "Read or answer the managed docs offer policy (unasked/accepted/declined/never)."),
+        new("doc_save", DocsGroup, "Create or update a doc: writes Markdown content and committed JSON metadata."),
+        new("doc_annotate", DocsGroup, "Annotate a section of a doc; stored in JSON metadata."),
+        new("doc_index", DocsGroup, "Incremental rescan of one workspace or all registered workspaces."),
+        new("doc_scope_policy", DocsGroup, "Inspect or change the workspace's docs coverage policy."),
     }.AsReadOnly();
 
     public static bool Exists(string toolName)

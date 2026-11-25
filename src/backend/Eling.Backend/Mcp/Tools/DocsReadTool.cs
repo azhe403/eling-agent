@@ -6,311 +6,113 @@ using ModelContextProtocol.Server;
 
 namespace Eling.Backend.Mcp.Tools;
 
-/// <summary>
-/// MCP tools for the read side of the docs catalog: search, read, list, staleness, audit, relations.
-/// </summary>
+/// <summary>Read-side MCP tools for the unified docs catalog.</summary>
 [McpServerToolType]
 public sealed class DocsReadTool
 {
-    private readonly IDocsIndex _docsIndex;
-    private readonly DocsService? _docsService;
+    private readonly DocsService _docsService;
     private readonly ILogger<DocsReadTool>? _logger;
-
-    public DocsReadTool(IDocsIndex index, ILogger<DocsReadTool>? logger = null)
-    {
-        _docsIndex = index ?? throw new ArgumentNullException(nameof(index));
-        _logger = logger;
-    }
 
     public DocsReadTool(DocsService service, ILogger<DocsReadTool>? logger = null)
     {
-        _docsIndex = null!;
         _docsService = service ?? throw new ArgumentNullException(nameof(service));
         _logger = logger;
     }
 
-    public DocsReadTool(IDocsIndex index, DocsService service, ILogger<DocsReadTool>? logger = null)
-    {
-        _docsIndex = index ?? throw new ArgumentNullException(nameof(index));
-        _docsService = service ?? throw new ArgumentNullException(nameof(service));
-        _logger = logger;
-    }
-
-    [McpServerTool(Name = "doc_search"), Description("Search documents using FTS5. Supports filters: ownership (managed/external), origin (current/ancestor/shard/global), kind (spec/plan/doc/scratch), topic, pathPrefix. Returns section-level results with rank.")]
+    [McpServerTool(Name = "doc_search"), Description("Search documents using FTS5. Filters: workspace, kind, topic, pathPrefix. Returns section-level results with rank.")]
     public async Task<IReadOnlyList<DocSearchResultDto>> SearchAsync(
         [Description("Search query — keywords to match against title, topic, heading, content.")] string query,
-        [Description("Filter by ownership: managed or external.")] string? ownership = null,
-        [Description("Filter by origin: current, ancestor, shard, global.")] string? origin = null,
+        [Description("Filter by workspace root; omit for all workspaces.")] string? workspace = null,
         [Description("Filter by kind: spec, plan, doc, scratch.")] string? kind = null,
         [Description("Filter by topic (folder name).")] string? topic = null,
         [Description("Filter by path prefix (e.g. 'docs/specs/').")] string? pathPrefix = null,
         [Description("Maximum number of results. Default 10.")] int limit = 10)
     {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(query))
-            {
-                throw new ArgumentException("Query cannot be empty.", nameof(query));
-            }
-
-            var trimmedQuery = query.Trim();
-            var trimmedOwnership = ParseOwnership(ownership);
-            var trimmedOrigin = ParseOrigin(origin);
-            var trimmedKind = ParseKind(kind);
-
-            var results = await _docsIndex.SearchAsync(trimmedQuery, trimmedOwnership, trimmedOrigin, trimmedKind, topic?.Trim(), pathPrefix?.Trim(), limit);
-            var dtos = results.Select(DocSearchResultDto.From).ToList().AsReadOnly();
-
-            _logger?.LogInformation("doc_search '{Query}' returned {Count} results", trimmedQuery, dtos.Count);
-            return dtos;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "doc_search threw (query={Query})", query);
-            throw;
-        }
+        if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Query cannot be empty.", nameof(query));
+        var results = await _docsService.SearchAsync(query.Trim(), workspace?.Trim(), ParseKind(kind), topic?.Trim(), limit);
+        if (!string.IsNullOrWhiteSpace(pathPrefix))
+            results = results.Where(r => r.Path.StartsWith(pathPrefix.Trim(), StringComparison.OrdinalIgnoreCase)).Take(limit).ToList();
+        return results.Select(DocSearchResultDto.From).ToList().AsReadOnly();
     }
 
-    [McpServerTool(Name = "doc_read"), Description("Read a document by ID. Supports modes: 'full' (entire doc with all sections), 'section' (single section by anchor), 'map' (heading tree only).")]
-    public async Task<DocReadResultDto?> ReadAsync(
-        [Description("Document ID (format: ownership:origin:sha1).")] string id,
-        [Description("Read mode: full, section, map. Default full.")] string mode = "full",
-        [Description("Section anchor (required when mode=section).")] string? anchor = null)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(id))
-            {
-                throw new ArgumentException("ID cannot be empty.", nameof(id));
-            }
-
-            var docId = DocId.Parse(id);
-            var doc = await _docsIndex.GetAsync(docId.Value);
-            if (doc == null)
-            {
-                return null;
-            }
-
-            var sections = await _docsIndex.GetSectionsAsync(docId.Value);
-            var refs = await _docsIndex.GetRefsAsync(docId.Value);
-
-            var trimmedMode = mode.Trim().ToLowerInvariant();
-
-            if (trimmedMode == "section")
-            {
-                if (string.IsNullOrWhiteSpace(anchor))
-                {
-                    throw new ArgumentException("Anchor is required when mode=section.", nameof(anchor));
-                }
-                var section = sections.FirstOrDefault(s => s.Anchor == anchor);
-                if (section == null)
-                {
-                    return null;
-                }
-                return new DocReadResultDto(DocDto.From(doc), [DocSectionDto.From(section)], []);
-            }
-
-            if (trimmedMode == "map")
-            {
-                var headingTree = sections
-                    .Where(s => s.Level > 0)
-                    .Select(s => new HeadingTreeDto(s.Anchor, s.Heading, s.Level))
-                    .ToList();
-                return new DocReadResultDto(DocDto.From(doc), [], [], headingTree);
-            }
-
-            // Full mode
-            return new DocReadResultDto(
-                DocDto.From(doc),
-                sections.Select(DocSectionDto.From).ToList(),
-                refs.Select(DocRefDto.From).ToList());
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "doc_read threw (id={Id})", id);
-            throw;
-        }
-    }
-
-    [McpServerTool(Name = "doc_list"), Description("List documents grouped by topic, ordered by read_order. Filters: ownership, origin, kind, topic.")]
-    public async Task<DocListDto> ListAsync(
-        [Description("Filter by ownership: managed, external.")] string? ownership = null,
-        [Description("Filter by origin: current, ancestor, shard, global.")] string? origin = null,
+    [McpServerTool(Name = "doc_list"), Description("List documents grouped by topic, ordered by server-side sort. Workspace filter: omit for all.")]
+    public async Task<IReadOnlyList<DocListItemDto>> ListAsync(
+        [Description("Filter by workspace root; omit for all workspaces.")] string? workspace = null,
         [Description("Filter by kind: spec, plan, doc, scratch.")] string? kind = null,
-        [Description("Filter by topic (folder name).")] string? topic = null,
-        [Description("Sort: topic (default), order, title, mtime.")] string sort = "topic")
+        [Description("Filter by topic.")] string? topic = null,
+        [Description("Sort key: name (default), path, kind, status, order, updated.")] string? sort = null,
+        [Description("Direction: asc (default) or desc.")] string? order = null)
     {
-        try
-        {
-            var trimmedOwnership = ParseOwnership(ownership);
-            var trimmedOrigin = ParseOrigin(origin);
-            var trimmedKind = ParseKind(kind);
-
-            var items = await _docsIndex.ListAsync(trimmedOwnership, trimmedOrigin, trimmedKind, topic?.Trim(), sort);
-            var dtos = items.Select(DocListItemDto.From).ToList().AsReadOnly();
-
-            // Group by topic
-            var grouped = dtos
-                .GroupBy(d => d.Topic)
-                .Select(g => new DocTopicGroupDto(g.Key, g.ToList()))
-                .OrderBy(g => g.Topic)
-                .ToList();
-
-            _logger?.LogInformation("doc_list returned {Count} docs in {Topics} topics", dtos.Count, grouped.Count);
-            return new DocListDto(grouped);
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "doc_list threw");
-            throw;
-        }
+        var items = await _docsService.ListAsync(workspace?.Trim(), ParseKind(kind), topic?.Trim(), sort ?? "name", order ?? "asc");
+        return items.Select(DocListItemDto.From).ToList().AsReadOnly();
     }
 
-    [McpServerTool(Name = "doc_staleness"), Description("Generate staleness report: unresolved references, superseded without replacement, draft specs > 30 days, untouched > 180 days. Covers all documents including external.")]
-    public async Task<StalenessReportDto> GetStalenessReportAsync()
+    [McpServerTool(Name = "doc_read"), Description("Read a document: full, section, or map (heading tree).")]
+    public async Task<DocReadResultDto?> ReadAsync(
+        [Description("Document id (ULID).")] string id,
+        [Description("Mode: full, section, or map.")] string mode = "full",
+        [Description("Section anchor when mode=section.")] string? anchor = null)
     {
-        try
+        var result = await _docsService.ReadAsync(DocId.Parse(id), includeSections: true, includeRefs: true, includeContent: true);
+        if (result is null) return null;
+        var sectionDtos = (result.Sections ?? Array.Empty<DocSection>()).Select(DocSectionDto.From).ToList().AsReadOnly();
+        var refDtos = (result.References ?? Array.Empty<DocRef>()).Select(DocRefDto.From).ToList().AsReadOnly();
+        if (mode.Equals("map", StringComparison.OrdinalIgnoreCase))
+            return new DocReadResultDto(DocDto.From(result.Document), sectionDtos, refDtos, null, null);
+        if (mode.Equals("section", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(anchor))
         {
-            var report = await _docsService!.GetStalenessReportAsync();
-            var findings = report.Findings.Select(f => new StalenessFindingDto(
-                f.DocId, f.Title, f.RelPath, f.Kind.ToDto(), f.Message, f.Anchor)).ToList();
-
-            _logger?.LogInformation("doc_staleness returned {Count} findings", findings.Count);
-            return new StalenessReportDto(findings, report.GeneratedAt);
+            var section = sectionDtos.Where(s => s.Anchor == anchor).ToList().AsReadOnly();
+            return new DocReadResultDto(DocDto.From(result.Document), section, Array.Empty<DocRefDto>().ToList().AsReadOnly(), null, null);
         }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "doc_staleness threw");
-            throw;
-        }
+        return DocReadResultDto.From(result);
     }
 
-    [McpServerTool(Name = "doc_audit"), Description("Get audit entries for a document or scope. Returns empty for external documents.")]
-    public async Task<IReadOnlyList<DocAuditEntryDto>> GetAuditAsync(
-        [Description("Optional document ID to filter. Omit for all managed docs.")] string? docId = null,
+    [McpServerTool(Name = "doc_staleness"), Description("Staleness findings across docs.")]
+    public async Task<StalenessReport> StalenessAsync()
+        => await _docsService.GetStalenessReportAsync();
+
+    [McpServerTool(Name = "doc_audit"), Description("Audit entries for a document or scope.")]
+    public async Task<IReadOnlyList<DocAuditEntryDto>> AuditAsync(
+        [Description("Document id; omit for all.")] string? docId = null,
         [Description("Maximum entries. Default 100.")] int limit = 100)
-    {
-        try
-        {
-            var entries = await _docsIndex.GetAuditAsync(docId?.Trim(), limit);
-            var dtos = entries.Select(DocAuditEntryDto.From).ToList().AsReadOnly();
+        => (await _docsService.GetAuditAsync(docId?.Trim(), limit)).Select(DocAuditEntryDto.From).ToList().AsReadOnly();
 
-            _logger?.LogInformation("doc_audit returned {Count} entries (docId={DocId})", dtos.Count, docId ?? "all");
-            return dtos;
+    [McpServerTool(Name = "doc_relation"), Description("Read relations for a document, or write one when sourceId, targetId and kind are supplied.")]
+    public async Task<IReadOnlyList<DocRelationDto>> RelationAsync(
+        [Description("Document id for a read.")] string? docId = null,
+        [Description("Source id for a write.")] string? sourceId = null,
+        [Description("Target id for a write.")] string? targetId = null,
+        [Description("Relation kind: implements, supersedes, references.")] string? kind = null,
+        [Description("Actor for the audit row.")] string actor = "mcp:doc_relation")
+    {
+        if (sourceId is not null && targetId is not null && kind is not null)
+        {
+            if (!Enum.TryParse<RelationKind>(kind, true, out var parsed))
+                throw new ArgumentException($"Invalid relation kind '{kind}'.", nameof(kind));
+            await _docsService.AddRelationAsync(DocId.Parse(sourceId), DocId.Parse(targetId), parsed, actor);
         }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "doc_audit threw (docId={DocId})", docId);
-            throw;
-        }
+        var id = docId ?? sourceId;
+        if (string.IsNullOrWhiteSpace(id)) return Array.Empty<DocRelationDto>().ToList().AsReadOnly();
+        var asSource = docId is null;
+        var relations = await _docsService.GetRelationsAsync(DocId.Parse(id), asSource);
+        return relations.Select(DocRelationDto.From).ToList().AsReadOnly();
     }
 
-    [McpServerTool(Name = "doc_relation"), Description("Read spec↔plan relations in both directions (Implements, Supersedes, References). When sourceId, targetId and kind are all supplied, writes the edge between managed documents first.")]
-    public async Task<IReadOnlyList<DocRelationDto>> GetRelationsAsync(
-        [Description("Document ID to get relations for.")] string docId,
-        [Description("Direction: both (default), incoming, outgoing.")] string direction = "both",
-        [Description("Source document ID for a write; requires targetId and kind.")] string? sourceId = null,
-        [Description("Target document ID for a write; requires sourceId and kind.")] string? targetId = null,
-        [Description("Relation kind to write: implements, supersedes, references.")] string? kind = null,
-        [Description("Actor for the audit trail on a write. Default 'mcp:doc_relation'.")] string actor = "mcp:doc_relation")
+    [McpServerTool(Name = "doc_scope_policy"), Description("Inspect or change the workspace's docs coverage policy.")]
+    public async Task<CoveragePolicy> ScopePolicyAsync(
+        [Description("Workspace root; omit for the current workspace.")] string? workspace = null,
+        [Description("Optional JSON include globs to set.")] string? include = null,
+        [Description("Optional JSON exclude globs to set.")] string? exclude = null)
     {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(docId))
-            {
-                throw new ArgumentException("docId cannot be empty.", nameof(docId));
-            }
-
-            var id = DocId.Parse(docId);
-
-            var wantsWrite = !string.IsNullOrWhiteSpace(sourceId)
-                || !string.IsNullOrWhiteSpace(targetId)
-                || !string.IsNullOrWhiteSpace(kind);
-            if (wantsWrite)
-            {
-                if (string.IsNullOrWhiteSpace(sourceId)
-                    || string.IsNullOrWhiteSpace(targetId)
-                    || string.IsNullOrWhiteSpace(kind))
-                {
-                    throw new ArgumentException("sourceId, targetId and kind must all be supplied to write a relation.");
-                }
-
-                if (_docsService is null)
-                {
-                    throw new InvalidOperationException("Writing relations requires DocsService; this tool was constructed with an index only.");
-                }
-
-                await _docsService.AddRelationAsync(
-                    DocId.Parse(sourceId).Value,
-                    DocId.Parse(targetId).Value,
-                    ParseRelationKind(kind),
-                    actor);
-            }
-
-            var asSource = direction != "incoming";
-            var relations = await _docsIndex.GetRelationsAsync(id.Value, asSource);
-
-            // If direction is both, also get incoming
-            if (direction == "both")
-            {
-                var incoming = await _docsIndex.GetRelationsAsync(id.Value, false);
-                relations = relations.Concat(incoming).DistinctBy(r => (r.SourceId, r.TargetId, r.Kind)).ToList();
-            }
-
-            var dtos = relations.Select(DocRelationDto.From).ToList().AsReadOnly();
-            _logger?.LogInformation("doc_relation returned {Count} relations (docId={DocId}, direction={Direction})", dtos.Count, docId, direction);
-            return dtos;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "doc_relation threw (docId={DocId})", docId);
-            throw;
-        }
+        var current = await _docsService.GetCoveragePolicyAsync(workspace?.Trim());
+        if (include is not null) current.Include = System.Text.Json.JsonSerializer.Deserialize<string[]>(include) ?? [];
+        if (exclude is not null) current.Exclude = System.Text.Json.JsonSerializer.Deserialize<string[]>(exclude) ?? [];
+        if (include is not null || exclude is not null)
+            await _docsService.SetCoveragePolicyAsync(current, workspace?.Trim());
+        return current;
     }
 
-    private static RelationKind ParseRelationKind(string kind)
-        => kind.Trim().ToLowerInvariant() switch
-        {
-            "implements" => RelationKind.Implements,
-            "supersedes" => RelationKind.Supersedes,
-            "references" => RelationKind.References,
-            _ => throw new ArgumentException($"Invalid relation kind '{kind}'. Use 'implements', 'supersedes', or 'references'.")
-        };
-
-    private static DocOwnership? ParseOwnership(string? ownership)
-    {
-        if (string.IsNullOrWhiteSpace(ownership)) return null;
-        return ownership.Trim().ToLowerInvariant() switch
-        {
-            "managed" => DocOwnership.Managed,
-            "external" => DocOwnership.External,
-            _ => throw new ArgumentException($"Invalid ownership '{ownership}'. Use 'managed' or 'external'.")
-        };
-    }
-
-    private static DocOrigin? ParseOrigin(string? origin)
-    {
-        if (string.IsNullOrWhiteSpace(origin)) return null;
-        return origin.Trim().ToLowerInvariant() switch
-        {
-            "current" => DocOrigin.Current,
-            "ancestor" => DocOrigin.Ancestor,
-            "shard" => DocOrigin.Shard,
-            "global" => DocOrigin.Global,
-            _ => throw new ArgumentException($"Invalid origin '{origin}'. Use 'current', 'ancestor', 'shard', or 'global'.")
-        };
-    }
-
-    private static DocKind? ParseKind(string? kind)
-    {
-        if (string.IsNullOrWhiteSpace(kind)) return null;
-        return kind.Trim().ToLowerInvariant() switch
-        {
-            "spec" => DocKind.Spec,
-            "plan" => DocKind.Plan,
-            "doc" => DocKind.Doc,
-            "scratch" => DocKind.Scratch,
-            _ => throw new ArgumentException($"Invalid kind '{kind}'. Use 'spec', 'plan', 'doc', or 'scratch'.")
-        };
-    }
+    private static DocKind? ParseKind(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null
+            : Enum.TryParse<DocKind>(value, true, out var kind) ? kind : null;
 }

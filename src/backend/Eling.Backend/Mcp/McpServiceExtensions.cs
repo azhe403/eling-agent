@@ -24,6 +24,7 @@ using Eling.Core.Skill.Scanning;
 using Eling.Core.Skill.Storage;
 using Eling.Core.Docs;
 using Eling.Core.Docs.Storage;
+using Eling.Core.Projects;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -285,32 +286,35 @@ public static class McpServiceExtensions
     /// </summary>
     private static void AddDocsServices(IServiceCollection services, ScopeChain chain)
     {
-        var localCanonicalRoot = CanonicalProjectRoot.Resolve(chain.Cwd);
-        var scopeResolver = new DocScopeResolver(localCanonicalRoot);
+        var currentRoot = chain.Cwd;
+        var dataDir = ElingPaths.ResolveDataDir();
 
-        // Index paths per origin — decision affects Current origin at runtime via GetScopeDecisionAsync
-        var currentDbPath = Path.Combine(localCanonicalRoot, ElingPaths.DotElingDirName, "docs-index.db");
-        var shardDbPath = Path.Combine(ElingPaths.ResolveProjectLocalDir(localCanonicalRoot), "docs.db");
-        var globalDbPath = Path.Combine(ElingPaths.ResolveDataDir(), "docs.db");
+        // One derived global index and one persistent audit store for every workspace.
+        services.TryAddSingleton<IDocsIndex>(_ => new SqliteDocsIndex(Path.Combine(dataDir, "docs.db")));
+        services.TryAddSingleton<IDocsAuditStore>(_ => new SqliteDocsAuditStore(Path.Combine(dataDir, "docs-audit.db")));
+        services.TryAddSingleton<DocsMetadataStore>();
 
-        // Always register all three origins as keyed services for cross-origin queries
-        services.TryAddKeyedSingleton<IDocsIndex>("current", (sp, _) => new SqliteDocsIndex(currentDbPath));
-        services.TryAddKeyedSingleton<IDocsIndex>("shard", (sp, _) => new SqliteDocsIndex(shardDbPath));
-        services.TryAddKeyedSingleton<IDocsIndex>("global", (sp, _) => new SqliteDocsIndex(globalDbPath));
+        services.AddSingleton<DocsService>(sp =>
+        {
+            var roots = sp.GetService<IWorkspacesRegistry>()?.ListAsync().GetAwaiter().GetResult()
+                           .Where(w => Directory.Exists(w.WorkspaceRoot))
+                           .Select(w => w.WorkspaceRoot)
+                           .ToList() ?? [];
+            if (!roots.Any(r => string.Equals(r, currentRoot, StringComparison.OrdinalIgnoreCase)))
+                roots.Insert(0, currentRoot);
+            return new DocsService(
+                sp.GetRequiredService<IDocsIndex>(),
+                sp.GetRequiredService<IDocsAuditStore>(),
+                sp.GetRequiredService<DocsMetadataStore>(),
+                roots,
+                sp.GetService<ILogger<DocsService>>());
+        });
 
-        // Register the primary index as the shard (always available); DocsService will
-        // resolve the appropriate origin at runtime based on the scope decision.
-        services.TryAddSingleton<IDocsIndex>(sp => sp.GetRequiredKeyedService<IDocsIndex>("shard"));
-
-        services.AddSingleton(scopeResolver);
-        services.AddSingleton<DocsService>();
-
-        // Watcher for file system changes — singleton so the dashboard owner can start it
+        // Watcher for on-disk changes — started only by the dashboard owner.
         services.TryAddSingleton(sp => new DocsDirWatcher(
             sp.GetRequiredService<DocsService>(),
             sp.GetRequiredService<MemoryChangeBroadcaster>(),
-            chain.Cwd,
-            logger: sp.GetService<ILogger<DocsDirWatcher>>()));
+            sp.GetService<ILogger<DocsDirWatcher>>()));
     }
 
     private static void AddShellConfigStore(IServiceCollection services, UserScope userScope)
