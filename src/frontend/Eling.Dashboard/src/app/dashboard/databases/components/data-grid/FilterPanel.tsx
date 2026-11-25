@@ -220,10 +220,10 @@ export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onAp
                   }}
                   items={identityItems(columns)}
                 >
-                  <SelectTrigger className={`${selectClass} min-w-36 max-w-56 truncate`} aria-label="Column">
+                  <SelectTrigger className={`${selectClass} min-w-36 max-w-80 truncate`} aria-label="Column">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent align="start" alignItemWithTrigger={false} className="w-auto min-w-56 max-w-72">
+                  <SelectContent align="start" alignItemWithTrigger={false} className="w-auto min-w-56 max-w-[min(90vw,32rem)] max-h-[min(20rem,70vh)]">
                     {columns.map((c) => (
                       <SelectItem key={c} value={c}>
                         {c}
@@ -277,10 +277,10 @@ export const FilterPanel = ({ columns, columnTypes, initial, committedSort, onAp
                 {s.order === "asc" ? <ArrowUp className="size-4" /> : <ArrowDown className="size-4" />}
               </span>
               <Select value={s.column} onValueChange={(v) => v && patchSort(i, { column: v })} items={identityItems(columns)}>
-                <SelectTrigger className={`${selectClass} min-w-36 max-w-56 truncate`} aria-label="Sort column">
+                <SelectTrigger className={`${selectClass} min-w-36 max-w-80 truncate`} aria-label="Sort column">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent align="start" alignItemWithTrigger={false} className="w-auto min-w-56 max-w-72">
+                <SelectContent align="start" alignItemWithTrigger={false} className="w-auto min-w-56 max-w-[min(90vw,32rem)] max-h-[min(20rem,70vh)]">
                   {columns.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}
