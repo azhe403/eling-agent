@@ -16,7 +16,7 @@ public class DocsMetadataStoreTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, true); } catch { /* best effort */ }
+        try { Directory.Delete(_root, true); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
     }
 
     [Fact]
@@ -49,7 +49,9 @@ public class DocsMetadataStoreTests : IDisposable
             """;
         await File.WriteAllTextAsync(Path.Combine(_root, DocsMetadataStore.FileName), json);
 
-        var (document, findings) = await _store.LoadWithFindingsAsync(_root);
+        var loaded = await _store.LoadWithFindingsAsync(_root);
+        var document = loaded.Document;
+        var findings = loaded.Findings;
         Assert.NotEmpty(findings);
         Assert.True(document.Docs.ContainsKey("docs/specs/a.md"));
     }

@@ -30,10 +30,10 @@ public class DocsServiceUnifiedTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_rootA, true); } catch { }
-        try { Directory.Delete(_rootB, true); } catch { }
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + ".audit"); } catch { }
+        try { Directory.Delete(_rootA, true); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+        try { Directory.Delete(_rootB, true); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+        try { File.Delete(_dbPath); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+        try { File.Delete(_dbPath + ".audit"); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
     }
 
     private static void Write(string root, string relative, string content)

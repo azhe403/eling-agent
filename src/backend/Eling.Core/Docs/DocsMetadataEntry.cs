@@ -16,15 +16,3 @@ public sealed class DocsMetadataEntry
     public List<DocRelationMeta> Relations { get; set; } = [];
     public Dictionary<string, DocSectionAnnotation> Annotations { get; set; } = [];
 }
-
-public sealed class DocRelationMeta
-{
-    public string TargetPath { get; set; } = string.Empty;
-    public RelationKind Kind { get; set; }
-}
-
-public sealed class DocSectionAnnotation
-{
-    public int Status { get; set; }
-    public string? Text { get; set; }
-}

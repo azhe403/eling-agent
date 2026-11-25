@@ -25,15 +25,15 @@ public sealed class DocsMetadataStore
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    public Task<DocsMetadataDocument> LoadAsync(string workspaceRoot, CancellationToken ct = default)
-        => LoadWithFindingsAsync(workspaceRoot, ct).ContinueWith(t => t.Result.Document, ct);
+    public async Task<DocsMetadataDocument> LoadAsync(string workspaceRoot, CancellationToken ct = default)
+        => (await LoadWithFindingsAsync(workspaceRoot, ct)).Document;
 
-    public async Task<(DocsMetadataDocument Document, IReadOnlyList<string> Findings)> LoadWithFindingsAsync(
+    public async Task<MetadataLoadResult> LoadWithFindingsAsync(
         string workspaceRoot, CancellationToken ct = default)
     {
         var path = Path.Combine(workspaceRoot, FileName);
         var findings = new List<string>();
-        if (!File.Exists(path)) return (new DocsMetadataDocument(), findings);
+        if (!File.Exists(path)) return new MetadataLoadResult(new DocsMetadataDocument(), findings);
 
         try
         {
@@ -59,12 +59,12 @@ public sealed class DocsMetadataStore
                     }
                 }
             }
-            return (document, findings);
+            return new MetadataLoadResult(document, findings);
         }
         catch (JsonException ex)
         {
             findings.Add($"Malformed {FileName}: {ex.Message}");
-            return (new DocsMetadataDocument(), findings);
+            return new MetadataLoadResult(new DocsMetadataDocument(), findings);
         }
     }
 
@@ -90,8 +90,10 @@ public sealed class DocsMetadataStore
             Coverage = document.Coverage
         };
         var outside = new Dictionary<string, DocsMetadataEntry>(StringComparer.Ordinal);
-        foreach (var (path, entry) in document.Docs)
+        foreach (var pair in document.Docs)
         {
+            var path = pair.Key;
+            var entry = pair.Value;
             if (path.StartsWith("abs:", StringComparison.OrdinalIgnoreCase)) outside[path] = entry;
             else committed.Docs[path] = entry;
         }
@@ -103,7 +105,7 @@ public sealed class DocsMetadataStore
         {
             var overlay = new DocsLocalMetadataOverlay(workspaceRoot);
             var existing = await overlay.LoadAsync(ct);
-            foreach (var (path, entry) in outside) existing[path] = entry;
+            foreach (var pair in outside) existing[pair.Key] = pair.Value;
             await overlay.SaveAsync(existing, ct);
         }
     }

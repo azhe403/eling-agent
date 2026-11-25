@@ -12,8 +12,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 public sealed class DocsService
 {
     private readonly IDocsIndex _index;
-    private readonly IDocsAuditStore _audit;
-    private readonly DocsMetadataStore _metadata;
+    private readonly IDocsAuditStore _docsAudit;
+    private readonly DocsMetadataStore _docsMetadata;
     private readonly ILogger<DocsService> _logger;
     private readonly List<string> _workspaceRoots;
     private readonly SemaphoreSlim _scanGate = new(1, 1);
@@ -26,8 +26,8 @@ public sealed class DocsService
         ILogger<DocsService>? logger = null)
     {
         _index = index ?? throw new ArgumentNullException(nameof(index));
-        _audit = audit ?? throw new ArgumentNullException(nameof(audit));
-        _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
+        _docsAudit = audit ?? throw new ArgumentNullException(nameof(audit));
+        _docsMetadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
         _workspaceRoots = workspaceRoots?.ToList() ?? [];
         _logger = logger ?? NullLogger<DocsService>.Instance;
     }
@@ -62,8 +62,9 @@ public sealed class DocsService
             foreach (var root in roots)
             {
                 var workspaceId = DocsMetadataStore.ResolveWorkspaceId(root);
-                var (document, findings) = await _metadata.LoadWithFindingsAsync(root, ct);
-                messages.AddRange(findings);
+                var loaded = await _docsMetadata.LoadWithFindingsAsync(root, ct);
+                var document = loaded.Document;
+                messages.AddRange(loaded.Findings);
                 var knownPaths = document.Docs.Keys.ToHashSet(StringComparer.Ordinal);
 
                 var files = paths?.Where(p => p.StartsWith(root, StringComparison.OrdinalIgnoreCase) && File.Exists(p)).ToList()
@@ -72,9 +73,11 @@ public sealed class DocsService
                 {
                     var path = GetRelativePath(file, root);
                     var hash = ComputeHash(await File.ReadAllTextAsync(file, ct));
-                    var entry = _metadata.GetOrCreate(document, path, workspaceId);
+                    var entry = _docsMetadata.GetOrCreate(document, path, workspaceId);
                     var existing = await _index.GetAsync(entry.Id);
-                    if (!full && existing?.FileHash == hash) { skipped++; knownPaths.Remove(path); continue; }
+                    if (!full && existing is not null && existing.FileHash == hash
+                        && existing.Status.Value == entry.Status && existing.Archived == entry.Archived)
+                    { skipped++; knownPaths.Remove(path); continue; }
 
                     try
                     {
@@ -102,7 +105,7 @@ public sealed class DocsService
                         deleted++;
                     }
                 }
-                await _metadata.SaveAsync(root, document, ct);
+                await _docsMetadata.SaveAsync(root, document, ct);
             }
             return new ScanResult(indexed, skipped, deleted, errors, roots.Length, false, messages);
         }
@@ -247,8 +250,8 @@ public sealed class DocsService
         string? topic = null, int status = 0, int order = 0, CancellationToken ct = default)
     {
         var workspaceId = DocsMetadataStore.ResolveWorkspaceId(workspaceRoot);
-        var (document, _) = await _metadata.LoadWithFindingsAsync(workspaceRoot, ct);
-        var entry = _metadata.GetOrCreate(document, path.Replace('\\', '/'), workspaceId);
+        var document = (await _docsMetadata.LoadWithFindingsAsync(workspaceRoot, ct)).Document;
+        var entry = _docsMetadata.GetOrCreate(document, path.Replace('\\', '/'), workspaceId);
         entry.Kind = kind;
         entry.Topic = topic ?? InferTopic(path);
         entry.Status = status;
@@ -258,7 +261,7 @@ public sealed class DocsService
         await File.WriteAllTextAsync(absolute, content, ct);
         var parse = await ParseDocumentAsync(absolute, entry.Path, ComputeHash(content), entry, ct);
         await _index.IndexAsync(parse.Doc!, parse.Sections, parse.Refs, parse.Body);
-        await _metadata.SaveAsync(workspaceRoot, document, ct);
+        await _docsMetadata.SaveAsync(workspaceRoot, document, ct);
         await WriteAuditAsync(parse.Doc!.Id.Value, "create", null, null, "docs_service", ct);
         return parse.Doc;
     }
@@ -268,13 +271,13 @@ public sealed class DocsService
         var existing = await _index.GetAsync(id.Value);
         if (existing is null) return null;
         var root = ResolveRoot(existing);
-        var (document, _) = await _metadata.LoadWithFindingsAsync(root, ct);
+        var document = (await _docsMetadata.LoadWithFindingsAsync(root, ct)).Document;
         if (!document.Docs.TryGetValue(existing.Path, out var entry) || entry is null) return null;
         var absolute = Path.Combine(root, existing.Path);
         await File.WriteAllTextAsync(absolute, content, ct);
         var parse = await ParseDocumentAsync(absolute, existing.Path, ComputeHash(content), entry, ct);
         await _index.IndexAsync(parse.Doc!, parse.Sections, parse.Refs, parse.Body);
-        await _metadata.SaveAsync(root, document, ct);
+        await _docsMetadata.SaveAsync(root, document, ct);
         await WriteAuditAsync(id.Value, "update", null, null, "docs_service", ct);
         return parse.Doc;
     }
@@ -284,10 +287,10 @@ public sealed class DocsService
         var existing = await _index.GetAsync(id.Value);
         if (existing is null) return false;
         var root = ResolveRoot(existing);
-        var (document, _) = await _metadata.LoadWithFindingsAsync(root, ct);
+        var document = (await _docsMetadata.LoadWithFindingsAsync(root, ct)).Document;
         if (!document.Docs.TryGetValue(existing.Path, out var entry) || entry is null) return false;
         entry.Archived = true;
-        await _metadata.SaveAsync(root, document, ct);
+        await _docsMetadata.SaveAsync(root, document, ct);
         await _index.DeleteAsync(id.Value);
         await WriteAuditAsync(id.Value, "delete", null, null, actor, ct);
         return true;
@@ -299,10 +302,10 @@ public sealed class DocsService
         var existing = await _index.GetAsync(id.Value);
         if (existing is null) return false;
         var root = ResolveRoot(existing);
-        var (document, _) = await _metadata.LoadWithFindingsAsync(root, ct);
+        var document = (await _docsMetadata.LoadWithFindingsAsync(root, ct)).Document;
         if (!document.Docs.TryGetValue(existing.Path, out var entry) || entry is null) return false;
         entry.Annotations[anchor] = new DocSectionAnnotation { Status = status, Text = annotation };
-        await _metadata.SaveAsync(root, document, ct);
+        await _docsMetadata.SaveAsync(root, document, ct);
         var sections = await _index.GetSectionsAsync(id.Value);
         var refs = await _index.GetRefsAsync(id.Value);
         var updated = sections.Select(s => s.Anchor == anchor
@@ -330,11 +333,11 @@ public sealed class DocsService
         ValidateRelation(source.Kind, target.Kind, kind);
         await _index.UpsertRelationAsync(new DocRelation(sourceId, targetId, kind));
         var root = ResolveRoot(source);
-        var (document, _) = await _metadata.LoadWithFindingsAsync(root, ct);
+        var document = (await _docsMetadata.LoadWithFindingsAsync(root, ct)).Document;
         if (document.Docs.TryGetValue(source.Path, out var entry) && entry is not null)
         {
             entry.Relations.Add(new DocRelationMeta { TargetPath = target.Path, Kind = kind });
-            await _metadata.SaveAsync(root, document, ct);
+            await _docsMetadata.SaveAsync(root, document, ct);
         }
         await WriteAuditAsync(sourceId.Value, "relate", null, $"relation:{kind}:{targetId.Value}", actor, ct);
     }
@@ -365,13 +368,51 @@ public sealed class DocsService
         return new DocReadResult(doc, sections, refs, content);
     }
 
+    public Task<IReadOnlyList<DocSection>> GetSectionsAsync(DocId id, CancellationToken ct = default)
+        => _index.GetSectionsAsync(id.Value);
+
+    public Task<IReadOnlyList<DocRef>> GetRefsAsync(DocId id, CancellationToken ct = default)
+        => _index.GetRefsAsync(id.Value);
+
+    public Task<IReadOnlyList<DocRelation>> GetRelationsAsync(DocId id, bool asSource, CancellationToken ct = default)
+        => _index.GetRelationsAsync(id.Value, asSource);
+
+    public async Task<StalenessReport> GetStalenessReportAsync(CancellationToken ct = default)
+    {
+        var findings = new List<StalenessFinding>();
+        foreach (var item in await _index.ListAsync())
+        {
+            var doc = await _index.GetAsync(item.DocId);
+            if (doc is null || string.IsNullOrWhiteSpace(doc.SupersededBy)) continue;
+            if (await _index.GetAsync(DocId.Parse(doc.SupersededBy).Value) is null)
+                findings.Add(new StalenessFinding(item.DocId, item.Title, item.Path,
+                    StalenessKind.SupersededWithoutReplacement, "Superseded by a document that does not exist", null));
+        }
+        return new StalenessReport(findings, DateTimeOffset.UtcNow);
+    }
+
+    public async Task<CoveragePolicy> GetCoveragePolicyAsync(string? workspaceRoot = null, CancellationToken ct = default)
+    {
+        var root = workspaceRoot ?? _workspaceRoots.FirstOrDefault() ?? Directory.GetCurrentDirectory();
+        var document = (await _docsMetadata.LoadWithFindingsAsync(root, ct)).Document;
+        return document.Coverage;
+    }
+
+    public async Task SetCoveragePolicyAsync(CoveragePolicy coverage, string? workspaceRoot = null, CancellationToken ct = default)
+    {
+        var root = workspaceRoot ?? _workspaceRoots.FirstOrDefault() ?? Directory.GetCurrentDirectory();
+        var document = (await _docsMetadata.LoadWithFindingsAsync(root, ct)).Document;
+        document.Coverage = coverage;
+        await _docsMetadata.SaveAsync(root, document, ct);
+    }
+
     public Task<IReadOnlyList<DocAuditEntry>> GetAuditAsync(string? docId = null, int limit = 100, CancellationToken ct = default)
-        => _audit.GetAsync(docId, limit, ct);
+        => _docsAudit.GetAsync(docId, limit, ct);
 
     public async Task WriteAuditAsync(
         string docId, string action, string? beforeJson, string? afterJson, string actor, CancellationToken ct = default)
     {
-        await _audit.WriteAsync(new DocAuditEntry(
+        await _docsAudit.WriteAsync(new DocAuditEntry(
             Ulid.NewUlid().ToString(), docId, actor, action, beforeJson, afterJson, DateTimeOffset.UtcNow), ct);
     }
 }

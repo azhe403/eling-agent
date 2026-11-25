@@ -19,7 +19,7 @@ public static class DocsMigration
         if (!File.Exists(legacyIndexPath)) return;
 
         var workspaceId = DocsMetadataStore.ResolveWorkspaceId(workspaceRoot);
-        var (document, _) = await metadata.LoadWithFindingsAsync(workspaceRoot, ct);
+        var document = (await metadata.LoadWithFindingsAsync(workspaceRoot, ct)).Document;
         var connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = legacyIndexPath,

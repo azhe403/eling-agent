@@ -17,7 +17,7 @@ public class DocsAuditStoreTests : IDisposable
 
     public void Dispose()
     {
-        try { File.Delete(_dbPath); } catch { /* best effort */ }
+        try { File.Delete(_dbPath); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
     }
 
     [Fact]

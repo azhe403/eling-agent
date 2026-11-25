@@ -31,7 +31,7 @@ public class DocsMigrationTests : IDisposable
         cmd.ExecuteNonQuery();
     }
 
-    public void Dispose() { try { Directory.Delete(_root, true); } catch { } }
+    public void Dispose() { try { Directory.Delete(_root, true); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } }
 
     [Fact]
     public async Task ExportLegacyState_PreservesAnnotationsRelationsAndAuditOnce()
