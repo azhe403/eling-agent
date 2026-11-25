@@ -447,6 +447,13 @@ export function DocDetailPanel({
             </dd>
             <CopyButton value={currentDoc.path} label="Copy document path" />
           </div>
+          <div className="flex items-center gap-2">
+            <dt className="w-14 shrink-0 text-muted-foreground">workspace</dt>
+            <dd className="min-w-0 flex-1 truncate font-mono text-[11px]" title={currentDoc.workspaceId}>
+              {currentDoc.workspaceId}
+            </dd>
+            <CopyButton value={currentDoc.workspaceId} label="Copy document workspace" />
+          </div>
           {currentDoc.topic && (
             <div className="flex items-center gap-2">
               <dt className="w-14 shrink-0 text-muted-foreground">topic</dt>

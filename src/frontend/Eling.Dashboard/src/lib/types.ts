@@ -160,6 +160,7 @@ export type DocTopicGroup = {
 
 export type DocListResponse = {
   topics: DocTopicGroup[]
+  total: number
 }
 
 export type DocSection = {

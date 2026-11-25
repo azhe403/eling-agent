@@ -190,7 +190,7 @@ export function DocsList() {
       const normalizedGroups = topicGroups.map((t) => ({ ...t, documents: t.documents.map(normalize) }))
 
       setTopics(normalizedGroups)
-      setTotal(allItems.length)
+      setTotal(data?.total ?? allItems.length)
       setMatching(allItems.length)
       setError(null)
     } catch (e) {
@@ -212,7 +212,7 @@ export function DocsList() {
     setRescanning(true)
     setError(null)
     try {
-      await apiFetch("/api/docs/scan", { method: "POST" })
+      await apiFetch("/api/docs/reindex", { method: "POST" })
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Rescan failed")

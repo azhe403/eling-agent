@@ -84,6 +84,9 @@ export function DocCard({ doc, selected, onSelect }: DocCardProps) {
               >
                 {kindLabel}
               </Badge>
+              <Badge variant="outline" className="text-xs bg-muted/50" title={doc.workspaceId}>
+                ws:{doc.workspaceId.slice(-8)}
+              </Badge>
               {doc.archived && (
                 <Badge variant="outline" className="text-xs bg-muted/50">Archived</Badge>
               )}
