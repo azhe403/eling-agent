@@ -1,5 +1,6 @@
 using System.IO;
 using Eling.Core.Docs;
+using Eling.Core.Projects;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -27,6 +28,8 @@ public sealed class DocsDirWatcher : IDisposable
     private readonly ILogger<DocsDirWatcher> _logger;
     private readonly Dictionary<string, FileSystemWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _dirty = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _metadataDirty = new(StringComparer.OrdinalIgnoreCase);
+    private readonly IWorkspacesRegistry? _workspacesRegistry;
 
     private CancellationTokenSource? _cts;
     private bool _started;
@@ -35,10 +38,12 @@ public sealed class DocsDirWatcher : IDisposable
     public DocsDirWatcher(
         DocsService docsService,
         MemoryChangeBroadcaster broadcaster,
+        IWorkspacesRegistry? registry = null,
         ILogger<DocsDirWatcher>? logger = null)
     {
         _docsService = docsService ?? throw new ArgumentNullException(nameof(docsService));
         _memoryBroadcaster = broadcaster ?? throw new ArgumentNullException(nameof(broadcaster));
+        _workspacesRegistry = registry;
         _logger = logger ?? NullLogger<DocsDirWatcher>.Instance;
         _interval = DefaultInterval;
     }
@@ -60,6 +65,14 @@ public sealed class DocsDirWatcher : IDisposable
 
     private void ReconcileRoots()
     {
+        if (_workspacesRegistry is not null)
+        {
+            var registered = _workspacesRegistry.ListAsync().GetAwaiter().GetResult()
+                .Where(row => Directory.Exists(row.WorkspaceRoot))
+                .Select(row => row.WorkspaceRoot)
+                .ToList();
+            _docsService.SetWorkspaceRoots(registered);
+        }
         var roots = _docsService.WorkspaceRoots.Where(Directory.Exists).ToList();
         foreach (var removed in _watchers.Keys.Except(roots, StringComparer.OrdinalIgnoreCase).ToList())
         {
@@ -85,6 +98,7 @@ public sealed class DocsDirWatcher : IDisposable
                 watcher.EnableRaisingEvents = true;
                 _watchers[root] = watcher;
                 _dirty[root] = 1; // scan a newly registered workspace on the next tick
+                _metadataDirty[root] = 1;
             }
             catch (Exception ex)
             {
@@ -102,6 +116,9 @@ public sealed class DocsDirWatcher : IDisposable
         lock (_sync)
         {
             if (_dirty.ContainsKey(root)) _dirty[root] = 1;
+            if (path.EndsWith("docs-metadata.json", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith("docs-local-metadata.json", StringComparison.OrdinalIgnoreCase))
+                _metadataDirty[root] = 1;
         }
     }
 
@@ -127,10 +144,17 @@ public sealed class DocsDirWatcher : IDisposable
                 int wasDirty;
                 lock (_sync) wasDirty = _dirty.GetValueOrDefault(root);
                 if (wasDirty == 0) continue;
-                lock (_sync) _dirty[root] = 0;
+                int metadataDirty;
+                lock (_sync)
+                {
+                    _dirty[root] = 0;
+                    metadataDirty = _metadataDirty.GetValueOrDefault(root);
+                    _metadataDirty[root] = 0;
+                }
+                var full = metadataDirty == 0;
                 try
                 {
-                    await _docsService.ScanAsync(workspaceRoot: root, ct: cancellationToken);
+                    await _docsService.ScanAsync(full: full, workspaceRoot: root, ct: cancellationToken);
                     _memoryBroadcaster.Notify(DocsChangeTopics.Docs);
                 }
                 catch (Exception ex)

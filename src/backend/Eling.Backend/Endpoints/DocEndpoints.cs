@@ -33,18 +33,20 @@ public static class DocEndpoints
 
     private static async Task<IResult> ListAsync(
         DocsService service,
-        string? workspace = null,
+        string[]? workspace = null,
         string? kind = null,
         string? topic = null,
         string? sort = null,
-        string? order = null)
+        string? order = null,
+        int limit = 50,
+        int offset = 0)
     {
-        var items = await service.ListAsync(workspace, ParseKind(kind), topic, sort ?? "name", order ?? "asc");
-        var groups = items.Select(DocListItemDto.From)
+        var page = await service.ListPageAsync(workspace, ParseKind(kind), topic, sort ?? "name", order ?? "asc", limit, offset);
+        var groups = page.Items.Select(DocListItemDto.From)
             .GroupBy(item => item.Topic)
             .Select(group => new DocTopicGroupDto(group.Key, group.ToList().AsReadOnly()))
             .ToList().AsReadOnly();
-        return Results.Ok(new DocListDto(groups));
+        return Results.Ok(new DocListDto(groups, page.Total));
     }
 
     private static async Task<IResult> SearchAsync(

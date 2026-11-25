@@ -75,7 +75,7 @@ public static class ToolCatalog
         new("skill_delete", SkillsGroup, "Move a skill to the catalog trash (works for external skills too; restorable)."),
         new("skill_restore", SkillsGroup, "Restore a trashed skill back into the active catalog."),
         new("skill_adopt", SkillsGroup, "Adopt an externally-supplied skill in place, making it Eling-managed (explicit, permanent)."),
-        new("doc_search", DocsGroup, "Search documents using FTS5 with filters for ownership, origin, kind, topic, pathPrefix."),
+        new("doc_search", DocsGroup, "Search documents using FTS5 with filters for workspace, kind, topic, pathPrefix."),
         new("doc_read", DocsGroup, "Read a document by ID with modes: full, section, map."),
         new("doc_list", DocsGroup, "List documents grouped by topic with filters."),
         new("doc_staleness", DocsGroup, "Generate staleness report for unresolved refs, superseded docs, stale drafts, untouched docs."),

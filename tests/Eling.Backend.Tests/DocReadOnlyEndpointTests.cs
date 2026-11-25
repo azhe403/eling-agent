@@ -57,6 +57,35 @@ public class DocReadOnlyEndpointTests
     }
 
     [Fact]
+    public async Task DocListTool_ResolvesWorkspaceRootAndLiteralAll()
+    {
+        using var fixture = new DocsFixture();
+        var write = new DocsWriteTool(fixture.Service);
+        await write.SaveAsync("docs/specs/a.md", "# Alpha\n\nBody", "spec", "specs");
+
+        var read = new DocsReadTool(fixture.Service);
+        Assert.Single(await read.ListAsync(workspace: fixture.Root));
+        Assert.Single(await read.ListAsync(workspace: "all"));
+        Assert.Empty(await read.ListAsync(workspace: "/some/other/root"));
+    }
+
+    [Fact]
+    public async Task DocListPage_ReturnsTotalAndRespectsPaging()
+    {
+        using var fixture = new DocsFixture();
+        var write = new DocsWriteTool(fixture.Service);
+        await write.SaveAsync("docs/specs/a.md", "# Alpha\n\nBody", "spec", "specs");
+        await write.SaveAsync("docs/specs/b.md", "# Beta\n\nBody", "spec", "specs");
+
+        var first = await fixture.Service.ListPageAsync([fixture.Root], limit: 1, offset: 0);
+        var second = await fixture.Service.ListPageAsync([fixture.Root], limit: 1, offset: 1);
+        Assert.Equal(2, first.Total);
+        Assert.Single(first.Items);
+        Assert.Single(second.Items);
+        Assert.NotEqual(first.Items[0].DocId, second.Items[0].DocId);
+    }
+
+    [Fact]
     public async Task DocListTool_UsesServerSortAndNeverReSorts()
     {
         using var fixture = new DocsFixture();

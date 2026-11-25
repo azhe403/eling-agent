@@ -68,7 +68,7 @@ public class DocsDirWatcherTests : IDisposable
 
         var path = Path.Combine(_rootA, DocsMetadataStore.FileName);
         var json = await File.ReadAllTextAsync(path);
-        await File.WriteAllTextAsync(path, json.Replace("\"Status\": 0", "\"Status\": 2"));
+        await File.WriteAllTextAsync(path, json.Replace("\"status\": 0", "\"status\": 2"));
         Assert.True(await WaitForReason(DocsChangeTopics.Docs) is not null);
         Assert.Equal(2, Assert.Single(await _service.ListAsync()).Status);
     }

@@ -4,4 +4,5 @@ namespace Eling.Backend.Dtos;
 /// Document list grouped by topic.
 /// </summary>
 public sealed record DocListDto(
-    IReadOnlyList<DocTopicGroupDto> Topics);
+    IReadOnlyList<DocTopicGroupDto> Topics,
+    int Total);
