@@ -12,7 +12,8 @@ public sealed record DocListItemDto(
     int Order,
     bool Archived,
     int StepsTotal,
-    int StepsDone)
+    int StepsDone,
+    string MTime)
 {
     public static DocListItemDto From(Eling.Core.Docs.DocListItem item) => new(
         item.DocId,
@@ -25,5 +26,6 @@ public sealed record DocListItemDto(
         item.Order,
         item.Archived,
         item.StepsTotal,
-        item.StepsDone);
+        item.StepsDone,
+        item.MTime);
 }
