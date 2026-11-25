@@ -183,7 +183,7 @@ public sealed class DocsService
         var refs = ExtractRefs(id, body, sections);
         var relations = new List<DocRelation>();
         if (isNew && !string.IsNullOrWhiteSpace(frontMatter.FrontMatter?.Spec))
-            relations.Add(new DocRelation(id, DocId.Parse(frontMatter.FrontMatter!.Spec!), RelationKind.Implements));
+            relations.Add(new DocRelation(id, await ResolveTargetAsync(frontMatter.FrontMatter!.Spec!, workspaceId, ct), RelationKind.Implements));
         foreach (Match match in Regex.Matches(body, @"\*\*Spec:\*\*\s*`?([^`\s]+)`?"))
             relations.Add(new DocRelation(id, await ResolveTargetAsync(match.Groups[1].Value, workspaceId, ct), RelationKind.Implements));
         foreach (Match match in Regex.Matches(body, @"\[[^\]]+\]\(([^)#]+\.md)[^)]*\)"))
@@ -206,8 +206,15 @@ public sealed class DocsService
     {
         var raw = value.Trim();
         if (DocId.TryParse(raw, out var parsed)) return parsed;
-        var target = await _docsIndex.GetByPathAsync(workspaceId, raw.Replace('\\', '/'), ct);
-        return target?.Id ?? DocId.Parse(raw);
+        var normalized = raw.Replace('\\', '/');
+        var target = await _docsIndex.GetByPathAsync(workspaceId, normalized, ct);
+        if (target is not null) return target.Id;
+        foreach (var row in await _docsIndex.ListAsync(workspaceId, includeArchived: true))
+        {
+            if (row.Path.EndsWith("/" + normalized, StringComparison.OrdinalIgnoreCase))
+                return DocId.Parse(row.DocId);
+        }
+        return DocId.Parse(raw);
     }
 
     private static IReadOnlyList<DocRef> ExtractRefs(DocId docId, string body, IReadOnlyList<DocSection> sections)
@@ -353,7 +360,7 @@ public sealed class DocsService
             "kind" => item => item.Kind,
             "status" => item => item.Status,
             "order" => item => item.Order,
-            "updated" => item => item.Path,
+            "updated" => item => item.MTime,
             _ => item => item.Title
         };
         var descending = string.Equals(order, "desc", StringComparison.OrdinalIgnoreCase);

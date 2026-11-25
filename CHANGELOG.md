@@ -4,6 +4,9 @@ All notable changes to Eling are documented here. Follows [Keep a Changelog](htt
 
 ## [Unreleased] - 2026-11-25
 
+### Fixed
+- **Post-review docs fixes**: legacy audit export is idempotent across restarts, archived docs no longer appear in search, front-matter `spec:` paths resolve to ULID relations, and `sort=updated` really uses the update timestamp.
+
 ### Changed
 - **Docs watcher follows Markdown only (backend)**: with the JSON metadata layer gone, the dashboard-owner watcher reacts only to `.md` changes; the empty-body `/api/docs/reindex` fix and the memory-SSE tolerance for `docs` frames ship with it.
 - **Docs metadata now lives only in SQLite (core)**: the JSON metadata layer is removed; identity, status, annotations, relations, archived flags, and coverage are stored in the global docs database. Rescans reuse ULIDs by `(workspace, path)` and prune rows whose Markdown disappeared.

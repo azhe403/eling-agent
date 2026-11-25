@@ -12,4 +12,5 @@ public sealed record DocListItem(
     int Order,
     bool Archived,
     int StepsTotal,
-    int StepsDone);
+    int StepsDone,
+    string MTime);

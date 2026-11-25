@@ -436,7 +436,7 @@ public sealed class SqliteDocsIndex : IDocsIndex
         string? pathPrefix = null, int limit = 10)
     {
         var fts = "docs_fts_porter";
-        var where = new List<string> { $"{fts} MATCH $query" };
+        var where = new List<string> { $"{fts} MATCH $query", "d.archived = 0" };
         if (workspaceId is not null) where.Add("d.workspace_id = $ws");
         if (kind.HasValue) where.Add("d.kind = $kind");
         if (!string.IsNullOrWhiteSpace(topic)) where.Add("d.topic = $topic");
@@ -491,7 +491,7 @@ public sealed class SqliteDocsIndex : IDocsIndex
         await using var connection = await OpenConnectionAsync();
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = $"""
-            SELECT id, workspace_id, path, kind, title, status, topic, read_order, archived, steps_total, steps_done
+            SELECT id, workspace_id, path, kind, title, status, topic, read_order, archived, steps_total, steps_done, mtime
             FROM docs{clause}
             ORDER BY CASE WHEN {key} IS NULL THEN 1 ELSE 0 END, {key} {direction}, title ASC;
             """;
@@ -506,7 +506,7 @@ public sealed class SqliteDocsIndex : IDocsIndex
                 reader.GetString(0), reader.GetString(1), reader.GetString(2),
                 Enum.Parse<DocKind>(reader.GetString(3), true), reader.GetString(4), reader.GetInt32(5),
                 reader.GetString(6), reader.GetInt32(7), reader.GetInt32(8) == 1,
-                reader.GetInt32(9), reader.GetInt32(10)));
+                reader.GetInt32(9), reader.GetInt32(10), reader.GetString(11)));
         return results;
     }
 

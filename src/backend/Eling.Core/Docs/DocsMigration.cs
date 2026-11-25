@@ -29,10 +29,8 @@ public static class DocsMigration
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            var id = reader.GetString(0);
-            if (await audit.GetAsync(id, 1, ct) is { Count: > 0 }) continue;
             await audit.WriteAsync(new DocAuditEntry(
-                id, reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
                 reader.IsDBNull(4) ? null : reader.GetString(4),
                 reader.IsDBNull(5) ? null : reader.GetString(5),
                 DateTimeOffset.Parse(reader.GetString(6))), ct);

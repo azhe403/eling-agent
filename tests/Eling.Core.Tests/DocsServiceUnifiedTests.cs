@@ -114,6 +114,20 @@ public class DocsServiceUnifiedTests : IDisposable
     }
 
     [Fact]
+    public async Task Scan_ResolvesFrontMatterSpecPathToUlidRelation()
+    {
+        Write(_rootA, "docs/specs/target.md", "# Target\n\nBody");
+        await _service.ScanAsync();
+        var target = Assert.Single((await _service.ListAsync(_rootA)).Where(item => item.Path == "docs/specs/target.md"));
+
+        Write(_rootA, "docs/plans/linked.md", "---\nspec: docs/specs/target.md\n---\n# Plan\n\nBody");
+        await _service.ScanAsync();
+        var plan = Assert.Single((await _service.ListAsync(_rootA)).Where(item => item.Path == "docs/plans/linked.md"));
+        var relation = Assert.Single(await _index.GetRelationsAsync(plan.DocId, true));
+        Assert.Equal(target.DocId, DocId.Parse(relation.TargetId.Value).Value);
+    }
+
+    [Fact]
     public async Task Create_WritesMarkdownAndIndexRow()
     {
         var doc = await _service.CreateDocumentAsync(_rootA, "docs/specs/new.md", "# New\n\nBody", DocKind.Spec);
@@ -135,6 +149,15 @@ public class DocsServiceUnifiedTests : IDisposable
         Assert.True(row!.Archived);
         Assert.Empty(await _service.ListAsync(_rootA));
         Assert.Equal(2, (await _service.GetAuditAsync(doc.Id.Value)).Count);
+    }
+
+    [Fact]
+    public async Task Archive_ExcludesFromSearch()
+    {
+        var doc = await _service.CreateDocumentAsync(_rootA, "docs/specs/searchable.md", "# Searchable\n\nuniqueword", DocKind.Spec);
+        Assert.Single(await _service.SearchAsync("uniqueword"));
+        await _service.ArchiveDocumentAsync(doc.Id);
+        Assert.Empty(await _service.SearchAsync("uniqueword"));
     }
 
     [Fact]

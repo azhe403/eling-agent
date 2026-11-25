@@ -64,7 +64,8 @@ public sealed class SqliteDocsAuditStore : IDocsAuditStore
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             INSERT INTO doc_audit (id, doc_id, actor, action, before_json, after_json, at)
-            VALUES ($id, $docId, $actor, $action, $before, $after, $at);
+            VALUES ($id, $docId, $actor, $action, $before, $after, $at)
+            ON CONFLICT(id) DO NOTHING;
             """;
         cmd.Parameters.AddWithValue("$id", entry.Id);
         cmd.Parameters.AddWithValue("$docId", entry.DocId);
