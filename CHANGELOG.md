@@ -5,6 +5,7 @@ All notable changes to Eling are documented here. Follows [Keep a Changelog](htt
 ## [Unreleased] - 2026-11-25
 
 ### Fixed
+- **Docs detail not-found state is tidy (dashboard)**: a missing document now keeps the full panel header and shows a centered empty state with an explanation plus Retry/Close, instead of collapsing into a small red badge. Retry re-fetches the detail.
 - **Final review fixes for unified docs (core + backend + dashboard)**: workspace roots and the literal `all` now normalize to index workspace ids, explicit/inferred relations resolve to ULIDs and survive rescans, metadata-only JSON edits trigger a full per-workspace rebuild, legacy audit history is archived before an index rebuild and exported once at startup, listing supports repeated workspace params with server-side paging and a total count, and the Rescan button calls `/api/docs/reindex`. Workspace labels are visible on cards and detail.
 
 ### Changed

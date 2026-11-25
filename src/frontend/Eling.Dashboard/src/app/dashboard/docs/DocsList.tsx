@@ -354,6 +354,7 @@ export function DocsList() {
       onSaveEdit={handleSaveEdit}
       onCreate={handleCreate}
       onDelete={handleDelete}
+      onRetry={() => setDetailNonce((n) => n + 1)}
       onPromote={handlePromote}
       onAddRelation={handleAddRelation}
     />

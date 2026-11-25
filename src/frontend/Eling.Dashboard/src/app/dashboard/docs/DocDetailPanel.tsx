@@ -11,6 +11,7 @@ import {
   Link2,
   Copy,
   Check,
+  SearchX,
   X,
 } from "lucide-react"
 import { formatDistanceToNowStrict } from "date-fns"
@@ -58,6 +59,7 @@ interface DocDetailPanelProps {
   onSaveEdit: (id: string, data: DocFormData) => Promise<void>
   onCreate: (data: DocFormData) => Promise<void>
   onDelete: (id: string) => void
+  onRetry?: () => void
   onPromote: (id: string) => void
   onAddRelation: (sourceId: string, targetId: string, kind: RelationKindDto) => Promise<void>
 }
@@ -231,6 +233,7 @@ export function DocDetailPanel({
   onSaveEdit,
   onCreate,
   onDelete,
+  onRetry,
   onPromote,
   onAddRelation,
 }: DocDetailPanelProps) {
@@ -351,18 +354,36 @@ export function DocDetailPanel({
     )
   }
 
-  // Error view
+  // Error view. Keep the same panel shell as loading/ready: a real header and
+  // a centered empty state, so a missing document does not collapse the panel
+  // into a small red badge.
   if (detailError) {
     return (
-      <div className="flex flex-col gap-4 h-full">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-medium">{doc?.title ?? "Document"}</h2>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <X className="size-4" />
-          </Button>
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex shrink-0 flex-col gap-3 border-b border-border/40 p-4">
+          {renderHeader()}
         </div>
-        <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
-          {detailError}
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+          <div className="flex max-w-md flex-col items-center gap-3 rounded-xl border border-dashed border-border/60 bg-muted/10 p-8 text-center">
+            <SearchX className="size-7 text-muted-foreground" aria-hidden />
+            <div className="flex flex-col gap-1">
+              <h3 className="text-sm font-medium text-foreground">Document not found</h3>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                It may have been deleted, moved, or the index is still catching up. Pick
+                another document from the list or retry the load.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {onRetry && (
+                <Button variant="outline" size="sm" onClick={onRetry}>
+                  Retry
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={onClose}>
+                Close
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     )

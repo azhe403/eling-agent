@@ -156,6 +156,25 @@ describe("DocDetailPanel hook order", () => {
     expect(writeText).toHaveBeenCalledWith("specs")
   })
 
+  it("shows a full-panel not-found state with a retry action", () => {
+    const onRetry = vi.fn()
+    const { getByRole, getByText } = render(
+      <DocDetailPanel
+        {...baseProps}
+        detailLoading={false}
+        detail={null}
+        detailError="Document not found"
+        onRetry={onRetry}
+      />,
+    )
+
+    expect(getByRole("button", { name: "Close document detail" })).toBeDefined()
+    expect(getByRole("heading", { name: "Document not found" })).toBeDefined()
+    expect(getByText(/It may have been deleted, moved, or the index is still catching up/)).toBeDefined()
+    fireEvent.click(getByRole("button", { name: "Retry" }))
+    expect(onRetry).toHaveBeenCalledOnce()
+  })
+
   it("hides YAML front-matter in Preview but shows it in Source", () => {
     const md = '---\nid: 01j00000000000000000000000\nkind: plan\ntitle: "Plan"\nstatus: 1\n---\n\n# Real Title\n\nBody text.'
     const { container, queryByText, getByText, getByRole } = render(
