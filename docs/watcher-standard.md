@@ -39,7 +39,7 @@ The existing cross-process notifiers (`HttpCoordinatorMemoryChangeNotifier` and 
 
 | Surface | Status |
 |---|---|
-| Unified docs watcher (`docs/**/*.md` + `docs-metadata.json` + local overlay, one per workspace) | **Planned** — spec `docs/superpowers/specs/2026-11-24-docs-unified-design.md` §7, plan `docs/superpowers/plans/2026-11-24-docs-unified.md` Task 7 |
+| Unified docs watcher (`.md` files only, one per workspace) | **Shipped** — spec `docs/superpowers/specs/2026-11-24-docs-unified-design.md` §5, plan `docs/superpowers/plans/2026-11-24-docs-unified.md` Task R4 |
 | Legacy `DocsDirWatcher` (one process, `docs/` + `.eling/docs/`) | Superseded by the unified docs watcher; retired with the managed/external split |
 | Codebase, memory, and skill directory watchers | Legacy — not yet migrated; the watcher-sprawl follow-up is tracked separately |
 
