@@ -11,7 +11,6 @@ public class DocsServiceUnifiedTests : IDisposable
     private readonly string _dbPath;
     private readonly SqliteDocsIndex _index;
     private readonly SqliteDocsAuditStore _audit;
-    private readonly DocsMetadataStore _metadata;
     private readonly DocsService _service;
 
     public DocsServiceUnifiedTests()
@@ -24,8 +23,7 @@ public class DocsServiceUnifiedTests : IDisposable
         _dbPath = Path.Combine(Path.GetTempPath(), $"eling-docs-u-{key}.db");
         _index = new SqliteDocsIndex(_dbPath);
         _audit = new SqliteDocsAuditStore(_dbPath + ".audit");
-        _metadata = new DocsMetadataStore();
-        _service = new DocsService(_index, _audit, _metadata, [_rootA, _rootB]);
+        _service = new DocsService(_index, _audit, [_rootA, _rootB]);
     }
 
     public void Dispose()
@@ -44,10 +42,17 @@ public class DocsServiceUnifiedTests : IDisposable
     }
 
     [Fact]
+    public void Constructor_UsesIndexAndAuditOnly()
+    {
+        var service = new DocsService(_index, _audit, [_rootA]);
+        Assert.Contains(_rootA, service.WorkspaceRoots);
+    }
+
+    [Fact]
     public async Task Scan_IndexesMarkdownFromAllRegisteredWorkspaces()
     {
-        Write(_rootA, "docs/specs/a.md", "# Alpha\n\nBody A");
-        Write(_rootB, "docs/specs/b.md", "# Beta\n\nBody B");
+        Write(_rootA, "docs/specs/a.md", "# Alpha\n\nBody");
+        Write(_rootB, "docs/specs/b.md", "# Beta\n\nBody");
         await _service.ScanAsync();
         Assert.Equal(2, (await _service.ListAsync()).Count);
     }
@@ -55,12 +60,12 @@ public class DocsServiceUnifiedTests : IDisposable
     [Fact]
     public async Task Scan_UsesExistingUlidForSamePathAndAssignsNewForUnseenPath()
     {
-        Write(_rootA, "docs/specs/a.md", "# Alpha\n\nBody A");
+        Write(_rootA, "docs/specs/a.md", "# Alpha\n\nBody");
         await _service.ScanAsync();
-        var first = (await _service.ListAsync()).Single().DocId;
+        var first = Assert.Single(await _service.ListAsync()).DocId;
         await _service.ScanAsync();
-        Assert.Equal(first, (await _service.ListAsync()).Single().DocId);
-        Write(_rootA, "docs/specs/b.md", "# Beta\n\nBody B");
+        Assert.Equal(first, Assert.Single(await _service.ListAsync()).DocId);
+        Write(_rootA, "docs/specs/b.md", "# Beta\n\nBody");
         await _service.ScanAsync();
         Assert.Equal(2, (await _service.ListAsync()).Count);
     }
@@ -71,8 +76,7 @@ public class DocsServiceUnifiedTests : IDisposable
         var original = "---\nstatus: 2\n---\n# Approved spec\n\nBody";
         Write(_rootA, "docs/specs/approved.md", original);
         await _service.ScanAsync();
-        var doc = (await _service.ListAsync()).Single();
-        Assert.Equal(2, doc.Status);
+        Assert.Equal(2, Assert.Single(await _service.ListAsync()).Status);
         Assert.Equal(original, await File.ReadAllTextAsync(Path.Combine(_rootA, "docs/specs/approved.md")));
     }
 
@@ -88,62 +92,14 @@ public class DocsServiceUnifiedTests : IDisposable
     }
 
     [Fact]
-    public async Task Scan_WithMalformedMetadataEntry_StillIndexesOtherDocs()
-    {
-        Write(_rootA, "docs/specs/a.md", "# Alpha\n\nBody");
-        await File.WriteAllTextAsync(Path.Combine(_rootA, DocsMetadataStore.FileName), "{bad json");
-        await _service.ScanAsync();
-        Assert.Single(await _service.ListAsync());
-    }
-
-    [Fact]
-    public async Task Create_WritesMarkdownAndJsonEntryAndIndexesOneTaggedRow()
-    {
-        var doc = await _service.CreateDocumentAsync(_rootA, "docs/specs/new.md", "# New\n\nBody", DocKind.Spec);
-        Assert.True(File.Exists(Path.Combine(_rootA, "docs/specs/new.md")));
-        var document = await _metadata.LoadAsync(_rootA);
-        Assert.True(document.Docs.ContainsKey("docs/specs/new.md"));
-        Assert.Equal(DocsMetadataStore.ResolveWorkspaceId(_rootA), (await _index.GetAsync(doc.Id.Value))!.WorkspaceId);
-    }
-
-    [Fact]
-    public async Task Archive_SetsArchivedInJson_RemovesIndexRow_LeavesMarkdownFileUntouched()
-    {
-        var doc = await _service.CreateDocumentAsync(_rootA, "docs/specs/new.md", "# New\n\nBody", DocKind.Spec);
-        var before = await File.ReadAllTextAsync(Path.Combine(_rootA, "docs/specs/new.md"));
-        Assert.True(await _service.ArchiveDocumentAsync(doc.Id));
-        Assert.Equal(before, await File.ReadAllTextAsync(Path.Combine(_rootA, "docs/specs/new.md")));
-        Assert.Null(await _index.GetAsync(doc.Id.Value));
-        var document = await _metadata.LoadAsync(_rootA);
-        Assert.True(document.Docs["docs/specs/new.md"].Archived);
-        Assert.Equal(2, (await _service.GetAuditAsync(doc.Id.Value)).Count);
-    }
-
-    [Fact]
     public async Task List_SpecificWorkspaceRootAndLiteralAll_ResolveToCorrectRows()
     {
         Write(_rootA, "docs/specs/same.md", "# Alpha\n\nBody");
         Write(_rootB, "docs/specs/same.md", "# Beta\n\nBody");
         await _service.ScanAsync();
-
         Assert.Single(await _service.ListAsync(_rootA));
         Assert.Single(await _service.ListAsync(_rootB));
         Assert.Equal(2, (await _service.ListAsync("all")).Count);
-        Assert.Equal(2, (await _service.ListAsync()).Count);
-    }
-
-    [Fact]
-    public async Task Scan_PrunesIndexRowsWhoseMetadataEntryWasReplaced()
-    {
-        var doc = await _service.CreateDocumentAsync(_rootA, "docs/specs/stale.md", "# Stale\n\nBody", DocKind.Spec);
-        var document = await _metadata.LoadAsync(_rootA);
-        document.Docs.Remove("docs/specs/stale.md");
-        await _metadata.SaveAsync(_rootA, document);
-
-        await _service.ScanAsync(full: true);
-
-        Assert.Null(await _index.GetAsync(doc.Id.Value));
-        Assert.Single((await _service.ListAsync(_rootA)).Where(item => item.Path == "docs/specs/stale.md"));
     }
 
     [Fact]
@@ -153,19 +109,52 @@ public class DocsServiceUnifiedTests : IDisposable
         var target = await _service.CreateDocumentAsync(_rootA, "docs/specs/s.md", "# Spec\n\nBody", DocKind.Spec);
         await _service.AddRelationAsync(source.Id, target.Id, RelationKind.Implements);
         Assert.Single(await _index.GetRelationsAsync(source.Id.Value, true));
-
         await _service.ScanAsync(full: true);
         Assert.Single(await _index.GetRelationsAsync(source.Id.Value, true));
     }
 
     [Fact]
-    public async Task Annotate_WritesIntoJson_NotIntoTheMarkdownFile()
+    public async Task Create_WritesMarkdownAndIndexRow()
+    {
+        var doc = await _service.CreateDocumentAsync(_rootA, "docs/specs/new.md", "# New\n\nBody", DocKind.Spec);
+        Assert.True(File.Exists(Path.Combine(_rootA, "docs/specs/new.md")));
+        var row = await _index.GetAsync(doc.Id.Value);
+        Assert.NotNull(row);
+        Assert.Equal(DocsService.ResolveWorkspaceId(_rootA), row!.WorkspaceId);
+    }
+
+    [Fact]
+    public async Task Archive_KeepsRowWithArchivedFlag_AndLeavesMarkdownFile()
+    {
+        var doc = await _service.CreateDocumentAsync(_rootA, "docs/specs/new.md", "# New\n\nBody", DocKind.Spec);
+        var before = await File.ReadAllTextAsync(Path.Combine(_rootA, "docs/specs/new.md"));
+        Assert.True(await _service.ArchiveDocumentAsync(doc.Id));
+        Assert.Equal(before, await File.ReadAllTextAsync(Path.Combine(_rootA, "docs/specs/new.md")));
+        var row = await _index.GetAsync(doc.Id.Value);
+        Assert.NotNull(row);
+        Assert.True(row!.Archived);
+        Assert.Empty(await _service.ListAsync(_rootA));
+        Assert.Equal(2, (await _service.GetAuditAsync(doc.Id.Value)).Count);
+    }
+
+    [Fact]
+    public async Task Annotate_WritesSectionRow_NotIntoTheMarkdownFile()
     {
         var doc = await _service.CreateDocumentAsync(_rootA, "docs/specs/new.md", "# New\n\n## Section\n\nBody", DocKind.Spec);
         var before = await File.ReadAllTextAsync(Path.Combine(_rootA, "docs/specs/new.md"));
         Assert.True(await _service.AnnotateSectionAsync(doc.Id, "section", 1, "note"));
         Assert.Equal(before, await File.ReadAllTextAsync(Path.Combine(_rootA, "docs/specs/new.md")));
-        var document = await _metadata.LoadAsync(_rootA);
-        Assert.Equal("note", document.Docs["docs/specs/new.md"].Annotations["section"].Text);
+        var section = await _index.GetSectionAsync(doc.Id.Value, "section");
+        Assert.NotNull(section);
+        Assert.Equal("note", section!.Annotation);
+    }
+
+    [Fact]
+    public async Task Scan_PrunesRowsForDeletedMarkdown()
+    {
+        var doc = await _service.CreateDocumentAsync(_rootA, "docs/specs/gone.md", "# Gone\n\nBody", DocKind.Spec);
+        File.Delete(Path.Combine(_rootA, "docs/specs/gone.md"));
+        await _service.ScanAsync();
+        Assert.Null(await _index.GetAsync(doc.Id.Value));
     }
 }

@@ -65,6 +65,12 @@ public sealed class SqliteDocsIndex : IDocsIndex
             PRIMARY KEY (source_id, target_id, kind));
         """;
 
+    private const string CreatePolicySql = """
+        CREATE TABLE IF NOT EXISTS doc_policy (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL);
+        """;
+
     private readonly string _connectionString;
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private bool _schemaReady;
@@ -132,7 +138,7 @@ public sealed class SqliteDocsIndex : IDocsIndex
 
         foreach (var sql in new[]
                  {
-                     CreateDocsSql, CreateSectionsSql, CreateRefsSql, CreateRelationsSql,
+                     CreateDocsSql, CreateSectionsSql, CreateRefsSql, CreateRelationsSql, CreatePolicySql,
                      "CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts_porter USING fts5(title, heading, body, tokenize='porter unicode61 remove_diacritics 1');",
                      "CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts_trigram USING fts5(title, heading, body, tokenize='trigram');"
                  })
@@ -304,6 +310,39 @@ public sealed class SqliteDocsIndex : IDocsIndex
         return await reader.ReadAsync() ? ReadDoc(reader) : null;
     }
 
+    public async Task<Doc?> GetByPathAsync(string workspaceId, string path, CancellationToken ct = default)
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT * FROM docs WHERE workspace_id = $ws AND path = $path LIMIT 1;";
+        Add(cmd, "$ws", workspaceId);
+        Add(cmd, "$path", path);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? ReadDoc(reader) : null;
+    }
+
+    public async Task<CoveragePolicy> GetPolicyAsync(CancellationToken ct = default)
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT value FROM doc_policy WHERE key = 'coverage';";
+        var value = await cmd.ExecuteScalarAsync(ct) as string;
+        if (string.IsNullOrWhiteSpace(value)) return new CoveragePolicy();
+        return System.Text.Json.JsonSerializer.Deserialize<CoveragePolicy>(value) ?? new CoveragePolicy();
+    }
+
+    public async Task SetPolicyAsync(CoveragePolicy policy, CancellationToken ct = default)
+    {
+        await using var connection = await OpenConnectionAsync();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO doc_policy(key, value) VALUES ('coverage', $value)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            """;
+        Add(cmd, "$value", System.Text.Json.JsonSerializer.Serialize(policy));
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<DocSection?> GetSectionAsync(string docId, string anchor)
     {
         await using var connection = await OpenConnectionAsync();
@@ -434,7 +473,7 @@ public sealed class SqliteDocsIndex : IDocsIndex
 
     public async Task<IReadOnlyList<DocListItem>> ListAsync(
         string? workspaceId = null, DocKind? kind = null, string? topic = null,
-        string sort = "name", string order = "asc")
+        string sort = "name", string order = "asc", bool includeArchived = false)
     {
         var key = sort?.ToLowerInvariant() switch
         {
@@ -446,7 +485,8 @@ public sealed class SqliteDocsIndex : IDocsIndex
         if (workspaceId is not null) where.Add("workspace_id = $ws");
         if (kind.HasValue) where.Add("kind = $kind");
         if (!string.IsNullOrWhiteSpace(topic)) where.Add("topic = $topic");
-        var clause = where.Count > 0 ? " WHERE " + string.Join(" AND ", where) : "";
+        if (!includeArchived) where.Add("archived = 0");
+        var clause = " WHERE " + string.Join(" AND ", where);
 
         await using var connection = await OpenConnectionAsync();
         await using var cmd = connection.CreateCommand();

@@ -4,7 +4,11 @@ All notable changes to Eling are documented here. Follows [Keep a Changelog](htt
 
 ## [Unreleased] - 2026-11-25
 
+### Changed
+- **Docs metadata now lives only in SQLite (core)**: the JSON metadata layer is removed; identity, status, annotations, relations, archived flags, and coverage are stored in the global docs database. Rescans reuse ULIDs by `(workspace, path)` and prune rows whose Markdown disappeared.
+
 ### Fixed
+- **Rescan endpoint accepts the dashboard's empty POST (backend)**: `POST /api/docs/reindex` no longer treats the missing body as a required `DocScanRequest`, so the Rescan button stops returning 500/400.
 - **Stale docs ids are pruned on scan (core)**: when a metadata entry is replaced or re-IDed, its old global-index row is now deleted, so the list no longer serves document ids that return 404 on read. Score: duplicate rows for the same path in one workspace.
 - **Docs detail not-found state is tidy (dashboard)**: a missing document now keeps the full panel header and shows a centered empty state with an explanation plus Retry/Close, instead of collapsing into a small red badge. Retry re-fetches the detail.
 - **Final review fixes for unified docs (core + backend + dashboard)**: workspace roots and the literal `all` now normalize to index workspace ids, explicit/inferred relations resolve to ULIDs and survive rescans, metadata-only JSON edits trigger a full per-workspace rebuild, legacy audit history is archived before an index rebuild and exported once at startup, listing supports repeated workspace params with server-side paging and a total count, and the Rescan button calls `/api/docs/reindex`. Workspace labels are visible on cards and detail.
