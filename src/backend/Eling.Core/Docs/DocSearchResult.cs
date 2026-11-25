@@ -1,13 +1,10 @@
 namespace Eling.Core.Docs;
 
-/// <summary>
-/// Search result.
-/// </summary>
+/// <summary>Search result with workspace and rank from the single global index.</summary>
 public sealed record DocSearchResult(
     string DocId,
-    DocOwnership Ownership,
-    DocOrigin Origin,
-    string RelPath,
+    string WorkspaceId,
+    string Path,
     DocKind Kind,
     string Title,
     int Status,

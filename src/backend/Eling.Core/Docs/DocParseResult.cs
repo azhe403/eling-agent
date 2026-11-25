@@ -7,7 +7,8 @@ public sealed record DocParseResult(
     Doc? Doc,
     IReadOnlyList<DocSection> Sections,
     IReadOnlyList<DocRef> Refs,
-    IReadOnlyList<DocRelation> Relations);
+    IReadOnlyList<DocRelation> Relations,
+    string? Body = null);
 
 /// <summary>
 /// Result of heading chunking.

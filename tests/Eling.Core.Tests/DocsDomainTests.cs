@@ -1,31 +1,33 @@
 namespace Eling.Core.Tests;
 
 using Eling.Core.Docs;
-using Eling.Core.Scope;
 using Xunit;
 
 public class DocsDomainTests
 {
+    private static Doc NewDoc(string workspaceId = "ws-a", string path = "docs/specs/a.md", bool archived = false)
+        => new(
+            DocId.NewId(), workspaceId, path,
+            DocKind.Spec, "Test", DocStatusValue.DefaultFor(DocKind.Spec),
+            "specs", 0, archived, null, 0, 0, "hash", DateTimeOffset.UtcNow);
+
     [Fact]
-    public void DocId_EncodesOwnershipOriginAndPathHash()
+    public void DocId_NewId_IsUniqueAndOpaque()
     {
-        var id = DocId.Create(DocOwnership.Managed, DocOrigin.Current, "docs/specs/my-spec.md");
-        
-        Assert.Equal(DocOwnership.Managed, id.Ownership);
-        Assert.Equal(DocOrigin.Current, id.Origin);
-        Assert.NotEmpty(id.PathHash);
-        Assert.StartsWith("managed:current:", id.Value);
+        var a = DocId.NewId();
+        var b = DocId.NewId();
+        Assert.NotEqual(a.Value, b.Value);
+        Assert.DoesNotContain(":", a.Value);
+        Assert.Equal(a.Value, DocId.Parse(a.Value).Value);
     }
 
     [Fact]
-    public void DocId_Parse_RoundTrips()
+    public void Doc_CarriesWorkspacePathAndArchivedFlag()
     {
-        var original = DocId.Create(DocOwnership.External, DocOrigin.Ancestor, "docs/plans/plan-1.md");
-        var parsed = DocId.Parse(original.Value);
-        
-        Assert.Equal(original.Ownership, parsed.Ownership);
-        Assert.Equal(original.Origin, parsed.Origin);
-        Assert.Equal(original.PathHash, parsed.PathHash);
+        var doc = NewDoc(workspaceId: "ws-a", path: "docs/specs/a.md", archived: true);
+        Assert.Equal("ws-a", doc.WorkspaceId);
+        Assert.Equal("docs/specs/a.md", doc.Path);
+        Assert.True(doc.Archived);
     }
 
     [Fact]
@@ -34,7 +36,6 @@ public class DocsDomainTests
         Assert.False(DocId.TryParse(null, out _));
         Assert.False(DocId.TryParse("", out _));
         Assert.False(DocId.TryParse("invalid", out _));
-        Assert.False(DocId.TryParse("managed:invalid:hash", out _));
     }
 
     [Fact]
@@ -58,25 +59,11 @@ public class DocsDomainTests
     [Fact]
     public void Doc_Progress_CalculatesCorrectly()
     {
-        var id = DocId.Create(DocOwnership.Managed, DocOrigin.Current, "test.md");
         var doc = new Doc(
-            id, DocOwnership.Managed, DocOrigin.Current, "test.md",
+            DocId.NewId(), "ws-a", "test.md",
             DocKind.Plan, "Test", DocStatusValue.DefaultFor(DocKind.Plan),
-            "topic", 0, null, 10, 3, "hash", DateTimeOffset.UtcNow);
-        
-        Assert.Equal(0.3, doc.Progress, 2);
-    }
+            "topic", 0, false, null, 10, 3, "hash", DateTimeOffset.UtcNow);
 
-    [Fact]
-    public void Doc_External_Managed_Properties()
-    {
-        var id = DocId.Create(DocOwnership.External, DocOrigin.Current, "docs/spec.md");
-        var doc = new Doc(
-            id, DocOwnership.External, DocOrigin.Current, "docs/spec.md",
-            DocKind.Spec, "Spec", DocStatusValue.DefaultFor(DocKind.Spec),
-            "specs", 0, null, 0, 0, "hash", DateTimeOffset.UtcNow);
-        
-        Assert.True(doc.IsExternal);
-        Assert.False(doc.IsManaged);
+        Assert.Equal(0.3, doc.Progress, 2);
     }
 }

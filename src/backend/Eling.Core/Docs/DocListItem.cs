@@ -1,17 +1,15 @@
 namespace Eling.Core.Docs;
 
-/// <summary>
-/// List item.
-/// </summary>
+/// <summary>List item with workspace and archive state.</summary>
 public sealed record DocListItem(
     string DocId,
-    DocOwnership Ownership,
-    DocOrigin Origin,
-    string RelPath,
+    string WorkspaceId,
+    string Path,
     DocKind Kind,
     string Title,
     int Status,
     string Topic,
     int Order,
+    bool Archived,
     int StepsTotal,
     int StepsDone);

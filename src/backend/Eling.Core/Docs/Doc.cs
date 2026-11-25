@@ -1,19 +1,20 @@
 namespace Eling.Core.Docs;
 
 /// <summary>
-/// A document entity. The canonical representation in the index.
+/// A document entity: content lives in a Markdown file, metadata in the
+/// workspace's docs-metadata.json. Ownership and origin were removed.
 /// </summary>
 public sealed class Doc
 {
     public DocId Id { get; }
-    public DocOwnership Ownership { get; }
-    public DocOrigin Origin { get; }
-    public string RelPath { get; }
+    public string WorkspaceId { get; }
+    public string Path { get; }
     public DocKind Kind { get; set; }
     public string Title { get; set; }
     public DocStatusValue Status { get; set; }
     public string Topic { get; set; }
     public int Order { get; set; }
+    public bool Archived { get; set; }
     public string? SupersededBy { get; set; }
     public int StepsTotal { get; set; }
     public int StepsDone { get; set; }
@@ -25,14 +26,14 @@ public sealed class Doc
 
     public Doc(
         DocId id,
-        DocOwnership ownership,
-        DocOrigin origin,
-        string relPath,
+        string workspaceId,
+        string path,
         DocKind kind,
         string title,
         DocStatusValue status,
         string topic,
         int order,
+        bool archived,
         string? supersededBy,
         int stepsTotal,
         int stepsDone,
@@ -42,19 +43,20 @@ public sealed class Doc
         bool frontMatterError = false,
         string? frontMatterErrorMessage = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(relPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentException.ThrowIfNullOrWhiteSpace(topic);
 
         Id = id;
-        Ownership = ownership;
-        Origin = origin;
-        RelPath = relPath;
+        WorkspaceId = workspaceId;
+        Path = path;
         Kind = kind;
         Title = title;
         Status = status;
         Topic = topic;
         Order = order;
+        Archived = archived;
         SupersededBy = supersededBy;
         StepsTotal = stepsTotal;
         StepsDone = stepsDone;
@@ -66,7 +68,4 @@ public sealed class Doc
     }
 
     public double Progress => StepsTotal > 0 ? (double)StepsDone / StepsTotal : 0.0;
-
-    public bool IsExternal => Ownership == DocOwnership.External;
-    public bool IsManaged => Ownership == DocOwnership.Managed;
 }

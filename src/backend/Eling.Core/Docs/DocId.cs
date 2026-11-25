@@ -1,69 +1,38 @@
 namespace Eling.Core.Docs;
 
 /// <summary>
-/// Document identifier encoding ownership, origin, and a SHA-1 of the relative path.
-/// Format: <c>{ownership}:{origin}:{sha1(rel_path)}</c>.
+/// Opaque document identifier. A ULID, shaped like MemoryId — never derived
+/// from a path or hash. Path is the dedupe key in workspace metadata.
 /// </summary>
 public readonly record struct DocId
 {
-    public DocOwnership Ownership { get; }
-    public DocOrigin Origin { get; }
-    public string PathHash { get; }
+    public string Value { get; }
 
-    public DocId(DocOwnership ownership, DocOrigin origin, string pathHash)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(pathHash);
-        Ownership = ownership;
-        Origin = origin;
-        PathHash = pathHash.ToLowerInvariant();
-    }
-
-    public static DocId Create(DocOwnership ownership, DocOrigin origin, string relativePath)
-    {
-        using var sha1 = System.Security.Cryptography.SHA1.Create();
-        var hash = sha1.ComputeHash(System.Text.Encoding.UTF8.GetBytes(relativePath));
-        var pathHash = Convert.ToHexString(hash).ToLowerInvariant();
-        return new DocId(ownership, origin, pathHash);
-    }
-
-    public string Value => $"{Ownership.ToString().ToLowerInvariant()}:{Origin.ToString().ToLowerInvariant()}:{PathHash}";
-
-    public override string ToString() => Value;
-
-    public static DocId Parse(string value)
+    public DocId(string value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        var parts = value.Split(':', 3);
-        if (parts.Length != 3 ||
-            !Enum.TryParse<DocOwnership>(parts[0], true, out var ownership) ||
-            !Enum.TryParse<DocOrigin>(parts[1], true, out var origin))
-        {
-            throw new ArgumentException("Invalid DocId format.", nameof(value));
-        }
-        return new DocId(ownership, origin, parts[2]);
+        Value = value.ToLowerInvariant();
     }
 
-    public static bool TryParse(string? value, out DocId result)
+    public static DocId NewId() => new(Ulid.NewUlid().ToString().ToLowerInvariant());
+
+    public static DocId Parse(string value) => new(value);
+
+    public static bool TryParse(string? value, out DocId id)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        id = default;
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        if (value.Length != 26) return false;
+        foreach (var c in value)
         {
-            result = default;
-            return false;
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
+                return false;
         }
-        try
-        {
-            result = Parse(value);
-            return true;
-        }
-        catch
-        {
-            result = default;
-            return false;
-        }
+        id = new DocId(value);
+        return true;
     }
 
-    /// <summary>
-    /// An empty DocId placeholder.
-    /// </summary>
-    public static DocId Empty => new DocId(DocOwnership.Managed, DocOrigin.Current, "0000000000000000000000000000000000000000");
+    public static DocId Empty => new("00000000000000000000000000");
+
+    public override string ToString() => Value;
 }
