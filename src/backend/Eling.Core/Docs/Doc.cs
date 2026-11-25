@@ -2,7 +2,7 @@ namespace Eling.Core.Docs;
 
 /// <summary>
 /// A document entity: content lives in a Markdown file, metadata in the
-/// workspace's docs-metadata.json. Ownership and origin were removed.
+/// global SQLite docs store. Ownership and origin were removed.
 /// </summary>
 public sealed class Doc
 {
