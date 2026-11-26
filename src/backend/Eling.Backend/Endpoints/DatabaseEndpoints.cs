@@ -666,6 +666,23 @@ public static class DatabaseEndpoints
                     cachedAt = count.CachedAt;
                 }
 
+                // The Data badge shows how old the snapshot is and how much
+                // time it has left. Both come from the same cachedAt the read
+                // service reported, so the badge cannot disagree with what was
+                // actually served. A live read (except SQLite, which is never
+                // cached) just wrote the snapshot, so its age starts now.
+                long? cacheTtlSeconds = null;
+                if (cachedAt is not null)
+                {
+                    var expiresAt = cachedAt.Value + IDatabaseReadCache.DefaultMaxAge;
+                    cacheTtlSeconds = (long)Math.Max(0, (expiresAt - DateTimeOffset.UtcNow).TotalSeconds);
+                }
+                else if (!fromCache && row.Provider != DatabaseProvider.Sqlite)
+                {
+                    cachedAt = DateTimeOffset.UtcNow;
+                    cacheTtlSeconds = (long)IDatabaseReadCache.DefaultMaxAge.TotalSeconds;
+                }
+
                 sw.Stop();
                 var truncated = (long)(page - 1) * limit + rows.Rows.Count < total;
                 await auditLogger.RecordAsync(new AuditEvent
@@ -687,7 +704,8 @@ public static class DatabaseEndpoints
                     truncated,
                     total,
                     fromCache,
-                    cachedAt));
+                    cachedAt,
+                    cacheTtlSeconds));
             }
             catch (Exception ex)
             {

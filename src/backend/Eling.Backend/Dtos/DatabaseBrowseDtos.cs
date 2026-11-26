@@ -24,11 +24,16 @@ public sealed record BrowseRequest(
     string? ManualCondition = null,
     bool Refresh = false);
 
-/// <summary>The browse payload: one page of rows plus the total matching the filter.</summary>
+/// <summary>
+/// The browse payload: one page of rows plus the total matching the filter.
+/// <c>CacheTtlSeconds</c> is the time left before the snapshot stops being
+/// served; it is absent when this answer holds no snapshot at all.
+/// </summary>
 public sealed record BrowseResponse(
     IReadOnlyList<string> Columns,
     IReadOnlyList<IReadOnlyList<object?>> Rows,
     bool Truncated,
     long Total,
     bool FromCache,
-    DateTimeOffset? CachedAt);
+    DateTimeOffset? CachedAt,
+    long? CacheTtlSeconds = null);
