@@ -102,7 +102,7 @@ export function useRedisBrowser({
   setSelectedId: React.Dispatch<React.SetStateAction<string | null>>
   setSchemaConnId: React.Dispatch<React.SetStateAction<string | null>>
   setOpenTabs: React.Dispatch<React.SetStateAction<DbTab[]>>
-  setRightTab: React.Dispatch<React.SetStateAction<"data" | "schema" | "sql">>
+  setRightTab: React.Dispatch<React.SetStateAction<"data" | "schema" | "sql" | "ddl">>
   expandedConns: Set<string>
   setExpandedConns: React.Dispatch<React.SetStateAction<Set<string>>>
   conns: DbConn[]

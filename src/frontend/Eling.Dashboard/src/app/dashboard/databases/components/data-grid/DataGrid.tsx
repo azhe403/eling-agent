@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCallback, useMemo } from "react"
 import { ListFilter, ArrowUp, ArrowDown } from "lucide-react"
 import { DbTab, QueryResult, SchemaInfo, ColumnSchema } from "@/app/dashboard/databases/types"
-import { formatCacheAge, formatCacheExpiry, isStaleCache } from "@/app/dashboard/databases/utils/format-helpers"
+import { cacheBadgeCopy, isStaleCache } from "@/app/dashboard/databases/utils/format-helpers"
 import { BROWSE_LIMIT_OPTIONS, totalPages } from "@/app/dashboard/databases/utils/browse-paging"
 import {
   activeCount,
@@ -120,6 +120,10 @@ export const DataGrid = ({
   // grid has nothing to page into.
   const nextDisabled = pages !== null ? browsePage >= pages : !browseResult || browseResult.rows.length < browseLimit
 
+  // Every read is cached, including a live one: the label stays "live", and
+  // the cache facts follow it even when the response has no timestamp yet.
+  const cache = cacheBadgeCopy(browseResult?.cachedAt, browseResult?.cacheTtlSeconds)
+
   /** The schema of the table the grid shows, or null when it is not known. */
   const activeSchema = useCallback(
     () => schemaInfo?.tables?.find((t) => t.name === activeTable?.table) ?? null,
@@ -184,12 +188,10 @@ export const DataGrid = ({
                   ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
                   : "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
               }
-              title={formatCacheExpiry(browseResult.cachedAt, browseResult.cacheTtlSeconds)}
+              title={cache.expiry}
             >
-              {browseResult.fromCache ? (isStaleCache(browseResult.cachedAt) ? "stale" : "cached") : "live"} · {formatCacheAge(browseResult.cachedAt)}
-              {formatCacheExpiry(browseResult.cachedAt, browseResult.cacheTtlSeconds) && (
-                <> · {formatCacheExpiry(browseResult.cachedAt, browseResult.cacheTtlSeconds)}</>
-              )}
+              {browseResult.fromCache ? (isStaleCache(browseResult.cachedAt) ? "stale" : "cached") : "live · cached"} · {cache.age}
+              {cache.expiry ? ` · ${cache.expiry}` : ""}
             </Badge>
           ) : null}
           {selectedIsReadOnly && (

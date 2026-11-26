@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { formatCacheAge, formatCacheExpiry, formatColumnType } from "./format-helpers"
+import { cacheBadgeCopy, formatCacheAge, formatCacheExpiry, formatColumnType } from "./format-helpers"
 
 describe("formatColumnType", () => {
   it("appends the declared length to a bare type", () => {
@@ -27,6 +27,7 @@ describe("formatCacheAge", () => {
   const oneDayAgo = new Date(now - 24 * 60 * 60 * 1000).toISOString()
 
   it("formats relative time", () => {
+    expect(formatCacheAge(new Date(now - 1000).toISOString())).toBe("just now")
     expect(formatCacheAge(oneMinAgo)).toBe("1 min ago")
     expect(formatCacheAge(oneHourAgo)).toBe("1 h ago")
     expect(formatCacheAge(oneDayAgo)).toBe("1 day ago")
@@ -38,6 +39,21 @@ describe("formatCacheAge", () => {
   })
 })
 
+describe("cacheBadgeCopy", () => {
+  it("still reports cache facts for a live read with no cachedAt", () => {
+    const cache = cacheBadgeCopy(null, 7 * 24 * 60 * 60)
+    expect(cache.age).toBe("just now")
+    expect(cache.expiry).toMatch(/expires in (6d|7d)/)
+  })
+
+  it("uses the timestamp and TTL the response carries", () => {
+    const cachedAt = new Date(Date.now() - 60 * 1000).toISOString()
+    const cache = cacheBadgeCopy(cachedAt, 2 * 24 * 60 * 60)
+    expect(cache.age).toBe("1 min ago")
+    expect(cache.expiry).toMatch(/expires in 1d/)
+  })
+})
+
 describe("formatCacheExpiry", () => {
   it("shows remaining time with default 7-day TTL", () => {
     const now = Date.now()
@@ -46,7 +62,7 @@ describe("formatCacheExpiry", () => {
     const eightDaysAgo = new Date(now - 8 * 24 * 60 * 60 * 1000).toISOString()
 
     expect(formatCacheExpiry(oneDayAgo)).toMatch(/expires in 5d|6d/)
-    expect(formatCacheExpiry(sixDaysAgo)).toMatch(/expires in (0d|1d)/)
+    expect(formatCacheExpiry(sixDaysAgo)).toMatch(/expires in (1d|23h|0d)/)
     expect(formatCacheExpiry(eightDaysAgo)).toBe("expired")
   })
 

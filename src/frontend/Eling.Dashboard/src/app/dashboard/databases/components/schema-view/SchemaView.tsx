@@ -2,7 +2,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Loader2 } from "lucide-react"
 import { DbConn, DbTab, SchemaInfo } from "@/app/dashboard/databases/types"
-import { formatCacheAge, formatCacheExpiry, formatColumnType, isStaleCache } from "@/app/dashboard/databases/utils/format-helpers"
+import { cacheBadgeCopy, formatColumnType, isStaleCache } from "@/app/dashboard/databases/utils/format-helpers"
 
 export interface SchemaViewProps {
   schemaConnId: string | null
@@ -34,6 +34,7 @@ export const SchemaView = ({
 }: SchemaViewProps) => {
   const t = activeTable ? schemaInfo?.tables?.find((x) => x.name === activeTable.table) : null
   const retry = schemaConnId ? retryLabel(schemaConnId) : null
+  const cache = cacheBadgeCopy(schemaInfo?.cachedAt, schemaInfo?.cacheTtlSeconds)
 
   return (
     // The card fills the column and scrolls inside: the schema of a wide table
@@ -54,12 +55,10 @@ export const SchemaView = ({
                   ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
                   : "border-emerald-600/30 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
               }
-              title={formatCacheExpiry(schemaInfo.cachedAt, schemaInfo.cacheTtlSeconds)}
+              title={cache.expiry}
             >
-              {schemaInfo.fromCache ? (isStaleCache(schemaInfo.cachedAt) ? "stale" : "cached") : "live"} · {formatCacheAge(schemaInfo.cachedAt)}
-              {formatCacheExpiry(schemaInfo.cachedAt, schemaInfo.cacheTtlSeconds) && (
-                <> · {formatCacheExpiry(schemaInfo.cachedAt, schemaInfo.cacheTtlSeconds)}</>
-              )}
+              {schemaInfo.fromCache ? (isStaleCache(schemaInfo.cachedAt) ? "stale" : "cached") : "live · cached"} · {cache.age}
+              {cache.expiry ? ` · ${cache.expiry}` : ""}
             </Badge>
           ) : null}
         </CardTitle>

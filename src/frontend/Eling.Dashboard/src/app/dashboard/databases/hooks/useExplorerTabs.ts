@@ -62,7 +62,7 @@ export function useExplorerTabs({
   /** The open tabs, so a click can find the one it names. */
   openTabs: DbTab[]
   activeTableRef: React.MutableRefObject<DbTab | null>
-  rightTabRef: React.MutableRefObject<"data" | "schema" | "sql">
+  rightTabRef: React.MutableRefObject<"data" | "schema" | "sql" | "ddl">
   autoScrollPendingRef: React.MutableRefObject<boolean>
 }) {
   /**

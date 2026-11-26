@@ -10,6 +10,7 @@ import { DbTab, isRedisTab, isElasticsearchIndexTab, tabKey, persistableTab, san
 import { fetchEsIndices } from "./es-client"
 import { serializeBrowseParam, parseBrowseParam } from "./filter-model"
 import { effectiveBrowseLimit, effectiveBrowsePage } from "./utils/browse-paging"
+import { ddlFromQueryResult, ddlFromSchema, ddlSqlFor } from "./utils/ddl"
 import { toggleSortColumn, type BrowseFilter, type BrowseSort } from "./filter-model"
 import { RedisDbInfo, fetchRedisDatabases, pickRedisDb, parseRedisDb } from "./redis-browser"
 import {
@@ -24,7 +25,7 @@ import { useMemoriesSse } from "@/hooks/use-memories-sse"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { XL_BREAKPOINT } from "@/lib/constants"
 
-import type { DbConn, Detected, QueryResult, ElasticsearchIndexInfo, EsInspect } from "./types"
+import type { DbConn, Detected, Provider, QueryResult, ElasticsearchIndexInfo, EsInspect } from "./types"
 import { API } from "./utils"
 import { apiFetch } from "@/lib/api"
 
@@ -110,7 +111,12 @@ export function Databases() {
   // already on its way can tell which table it was asked for.
   const [activeTable, setActiveTable] = useState<DbTab | null>(null)
   const [openTabs, setOpenTabs] = useState<DbTab[]>([])
-  const [rightTab, setRightTab] = useState<"data" | "schema" | "sql">("data")
+  const [rightTab, setRightTab] = useState<"data" | "schema" | "sql" | "ddl">("data")
+  const [ddlText, setDdlText] = useState("")
+  const [ddlLoading, setDdlLoading] = useState(false)
+  const [ddlError, setDdlError] = useState<string | null>(null)
+  const [ddlNonce, setDdlNonce] = useState(0)
+  const ddlSeqRef = useRef(0)
   const [tabCtxMenu, setTabCtxMenu] = useState<TabContextMenuState | null>(null)
   const rightTabRef = useRef(rightTab)
   const activeTableRef = useRef<DbTab | null>(null)
@@ -734,7 +740,7 @@ export function Databases() {
       const params = new URLSearchParams(window.location.search)
       const urlConn = params.get("connectionId")
       const urlTable = params.get("table")
-      const urlTab = params.get("tab") as "data" | "schema" | "sql" | null
+      const urlTab = params.get("tab") as "data" | "schema" | "sql" | "ddl" | null
 
       const raw = localStorage.getItem("db.explorer.state")
       const st = raw ? JSON.parse(raw) : null
@@ -1104,6 +1110,70 @@ export function Databases() {
     }
   }, [selectedId, sql, selectedIsReadOnly, activeTable, notifyDb, conns])
 
+  /* ------------------------------------------------------------------- DDL */
+
+  // The kind is already in the schema snapshot; the DDL panel only needs to
+  // say it, not fetch it again.
+  const ddlKind = activeTable
+    ? ((activeTable.database ? dbSchemas[`${activeTable.connId}:${activeTable.database}`] : connSchemas[activeTable.connId])
+        ?.tables?.find((t) => t.name === activeTable.table)?.kind ?? null)
+    : null
+
+  const loadDdl = useCallback(async () => {
+    const tab = activeTable
+    if (!tab) return
+    const conn = conns.find((c) => c.id === tab.connId)
+    if (!conn || conn.provider === "Redis" || conn.provider === "Elasticsearch") return
+    const provider = conn.provider as Provider
+
+    // Only the newest request may write: switching tables or tabs while a
+    // statement is being read must not replace it with the older answer.
+    const seq = ++ddlSeqRef.current
+    const schema = tab.database ? dbSchemas[`${tab.connId}:${tab.database}`] : connSchemas[tab.connId]
+    const found = schema?.tables?.find((t) => t.name === tab.table) ?? null
+    const sql = ddlSqlFor(provider, tab.table)
+
+    if (!sql) {
+      if (!found) {
+        setDdlText("")
+        setDdlError("The definition is not in the cached schema. Refresh the connection and retry.")
+        return
+      }
+      setDdlText(ddlFromSchema(provider, found))
+      setDdlError(null)
+      return
+    }
+
+    setDdlLoading(true)
+    setDdlError(null)
+    try {
+      const result = await apiFetch<QueryResult>(API + "/" + tab.connId + "/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql, maxRows: 1, database: tab.database ?? null }),
+      })
+      if (seq !== ddlSeqRef.current) return
+      const statement = ddlFromQueryResult(provider, result)
+      setDdlText(statement || "The database did not return a definition for this table.")
+    } catch (e: unknown) {
+      if (seq !== ddlSeqRef.current) return
+      setDdlText("")
+      setDdlError(e instanceof Error ? e.message : "Failed to read the table definition.")
+    } finally {
+      if (seq === ddlSeqRef.current) setDdlLoading(false)
+    }
+  }, [activeTable, conns, connSchemas, dbSchemas])
+
+  useEffect(() => {
+    if (rightTab !== "ddl" || !activeTable) return
+    let isMounted = true
+    const fetchDdl = async () => {
+      if (isMounted) await loadDdl()
+    }
+    void fetchDdl()
+    return () => { isMounted = false }
+  }, [rightTab, activeTable, loadDdl, ddlNonce])
+
   /* ---------------------------------------------------------------- import */
 
   const doImport = useCallback(async () => {
@@ -1196,6 +1266,11 @@ export function Databases() {
             setTabCtxMenu({ x: e.clientX, y: e.clientY, idx })
           }}
           rightTab={rightTab}
+          ddlText={ddlText}
+          ddlLoading={ddlLoading}
+          ddlError={ddlError}
+          ddlKind={ddlKind}
+          onDdlRetry={() => setDdlNonce((n) => n + 1)}
           connSort={connSort}
           connOrder={connOrder}
           loading={loading}

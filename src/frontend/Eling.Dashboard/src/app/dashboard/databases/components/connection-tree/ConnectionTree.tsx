@@ -1,5 +1,4 @@
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { Loader2, ArrowUp, ArrowDown } from "lucide-react"
 import { DbConn, DbTab, SchemaInfo, RedisDbInfo, ElasticsearchIndexInfo, EsInspect } from "@/app/dashboard/databases/types"
 import { isRedisTab, isElasticsearchIndexTab } from "@/app/dashboard/databases/db-tabs"
@@ -73,8 +72,8 @@ export const ConnectionTree = ({
   const isActiveEsIndex = isElasticsearchIndexTab(activeTable)
 
   return (
-    <Card>
-      <CardHeader className="space-y-2 pb-2">
+    <Card className="flex h-full min-h-0 flex-col">
+      <CardHeader className="shrink-0 space-y-2 rounded-t-xl bg-card pb-2">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="flex items-center gap-2">
             Connections
@@ -85,43 +84,55 @@ export const ConnectionTree = ({
 
         {/* The list is arranged by the server, so picking a key or a
             direction here only sets the pair the next fetch asks for. The
-            control sits under the panel header and above the rows, so it
-            stays in place while a long tree scrolls. */}
-        <div role="group" aria-label="Sort connections" className="flex flex-wrap items-center gap-1">
+            control sits under the panel header and above the rows. The card
+            fills the column and only its body scrolls, so the header stays
+            put: a sticky header cannot work here because Card clips overflow.
+            The group is the Docs filter-group shape, with a thin outline on
+            every segment. */}
+        <div
+          role="group"
+          aria-label="Sort connections"
+          className="flex shrink-0 flex-wrap items-center gap-1 rounded-lg border bg-muted/40 p-1"
+        >
           {CONN_SORT_KEYS.map((key) => (
-            <Button
+            <button
               key={key}
-              size="sm"
-              variant={connSort === key ? "default" : "outline"}
-              className="h-6 px-2 text-xs"
+              type="button"
               aria-pressed={connSort === key}
               title={CONN_SORT_COPY[key].title}
               onClick={() => onSortChange(key)}
+              className={
+                "cursor-pointer rounded-md border px-2.5 py-1 text-xs font-medium " +
+                (connSort === key
+                  ? "border-border/60 bg-background text-foreground shadow-sm"
+                  : "border-border/40 bg-background/40 text-muted-foreground hover:bg-background hover:text-foreground")
+              }
             >
               {CONN_SORT_COPY[key].label}
-            </Button>
+            </button>
           ))}
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-6 px-2 text-xs"
+          <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
+          <button
+            type="button"
             aria-pressed={connOrder === "desc"}
             aria-label={connOrder === "asc" ? "Sort descending" : "Sort ascending"}
             title={connOrder === "asc" ? "Sort descending" : "Sort ascending"}
             onClick={() => onOrderChange(connOrder === "asc" ? "desc" : "asc")}
+            className="cursor-pointer rounded-md border border-border/40 bg-background/40 px-2 py-1 text-muted-foreground hover:bg-background hover:text-foreground"
           >
             {connOrder === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
-          </Button>
+          </button>
         </div>
       </CardHeader>
 
       <CardContent
-        className={`space-y-1 p-2 transition-opacity duration-150 ease-out ${isFading ? "opacity-0" : "opacity-100"}`}
+        className={`min-h-0 flex-1 space-y-1 overflow-y-auto p-2 transition-opacity duration-150 ease-out ${isFading ? "opacity-0" : "opacity-100"}`}
       >
         {/* Tree rows stay plain <button>s on purpose: shadcn's Button bakes in
             a minimum height and text-sm, and these rows are one line at 20px
             (db rows) and 28px (connection rows) so a deep tree stays readable.
-            Every interactive control outside the tree uses Button. */}
+            The sort control above is the one exception: it is one segmented
+            group, the same shape as the filter groups on the Docs list. */}
         {conns.map((c) => (
           <div key={c.id} className="space-y-1">
             <button

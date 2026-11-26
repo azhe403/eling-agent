@@ -7,6 +7,7 @@ import { isRedisTab, isElasticsearchIndexTab, tabKey } from "@/app/dashboard/dat
 import type { RedisPage, RedisPrefixPreview } from "@/app/dashboard/databases/redis-browser"
 import { visibleIndices } from "@/app/dashboard/databases/es-browser"
 import { ConnectionTree } from "./connection-tree/ConnectionTree"
+import { DdlView } from "./ddl-view/DdlView"
 import { SchemaView } from "./schema-view/SchemaView"
 import { DataGrid } from "./data-grid/DataGrid"
 import { SqlEditor } from "./sql-editor/SqlEditor"
@@ -30,7 +31,14 @@ export interface ExplorerPanelsProps {
   onActivateTab: (idx: number) => void
   onCloseTab: (idx: number) => void
   onTabContextMenu: (e: React.MouseEvent, idx: number) => void
-  rightTab: "data" | "schema" | "sql"
+  rightTab: "data" | "schema" | "sql" | "ddl"
+  /** The DDL statement of the active table, read on entering the DDL tab. */
+  ddlText: string
+  ddlLoading: boolean
+  ddlError: string | null
+  /** The active table's own kind (table or view) from the schema. */
+  ddlKind: string | null
+  onDdlRetry: () => void
   connSort: import("@/app/dashboard/databases/conn-sorting").ConnSortKey
   connOrder: import("@/app/dashboard/databases/conn-sorting").ConnSortOrder
   loading: boolean
@@ -88,7 +96,7 @@ export interface ExplorerPanelsProps {
   onToggleEsSystem: (connId: string) => void
   onTreeContextMenu: (e: React.MouseEvent, connId: string, table?: string, database?: string) => void
   onRegisterTreeItem: (key: string, el: HTMLButtonElement | null) => void
-  onRightTabChange: (tab: "data" | "schema" | "sql") => void
+  onRightTabChange: (tab: "data" | "schema" | "sql" | "ddl") => void
   onSchemaTableSelect: (table: string) => void
   onRefreshData: () => void
   onAddRow: () => void
@@ -144,7 +152,7 @@ export interface ExplorerPanelsProps {
 export const ExplorerPanels = (props: ExplorerPanelsProps) => {
   const {
     conns, expandedConns, expandedDbs, connSchemas, dbSchemas, redisDbs, esIndices, esSystemVisible, activeTable, openTabs,
-    rightTab, connSort, connOrder, loading, isFading, schemaConnId, schemaInfo, schemaLoading,
+    rightTab, ddlText, ddlLoading, ddlError, ddlKind, connSort, connOrder, loading, isFading, schemaConnId, schemaInfo, schemaLoading,
     selectedId, selectedIsReadOnly, selectedIsRedis, browseResult, browseTotal, browseLoading, browseLimit, browsePage,
     browseFilters, browseSort, manualCondition, manualEnabled, filterOpen, onFilterOpenChange,
     mutating, editingCell, editValue, savingCell, newRow, pkNames, sql, qResult, qLoading,
@@ -273,7 +281,23 @@ export const ExplorerPanels = (props: ExplorerPanelsProps) => {
               SQL
             </Button>
           ) : null}
+          {!activeIsRedis && !activeIsEsIndex ? (
+            <Button size="sm" variant={rightTab === "ddl" ? "default" : "outline"} onClick={() => props.onRightTabChange("ddl")}>
+              DDL
+            </Button>
+          ) : null}
         </div>
+
+        {rightTab === "ddl" && activeTable && !activeIsRedis && !activeIsEsIndex ? (
+          <DdlView
+            table={activeTable.table}
+            kind={ddlKind}
+            ddl={ddlText}
+            loading={ddlLoading}
+            error={ddlError}
+            onRetry={props.onDdlRetry}
+          />
+        ) : null}
 
         {rightTab === "schema" && schemaConnId && !selectedIsRedis ? (
           <SchemaView

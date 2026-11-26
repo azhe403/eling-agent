@@ -12,6 +12,7 @@ export const formatCacheAge = (cachedAt?: string | null): string => {
   const ms = Date.now() - new Date(cachedAt).getTime()
   if (!Number.isFinite(ms) || ms < 0) return "cached"
   const sec = Math.floor(ms / 1000)
+  if (sec < 5) return "just now"
   if (sec < 60) return `${sec}s ago`
   const min = Math.floor(sec / 60)
   if (min < 60) return `${min} min ago`
@@ -26,6 +27,21 @@ export const isStaleCache = (cachedAt?: string | null): boolean => {
   if (!cachedAt) return false
   const ms = Date.now() - new Date(cachedAt).getTime()
   return Number.isFinite(ms) && ms > 24 * 60 * 60 * 1000
+}
+
+/**
+ * The two facts a cache badge shows: how old the answer is and how long the
+ * snapshot still has. A response that carries no timestamp was fetched on
+ * this render, so it is "just now" with the default TTL - never "no cache":
+ * database reads are cached, a live answer simply has not been served from
+ * the snapshot yet.
+ */
+export const cacheBadgeCopy = (cachedAt?: string | null, ttlSeconds?: number | null) => {
+  const stamp = cachedAt ?? new Date().toISOString()
+  return {
+    age: formatCacheAge(stamp),
+    expiry: formatCacheExpiry(stamp, ttlSeconds),
+  }
 }
 
 /**
