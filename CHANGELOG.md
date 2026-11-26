@@ -5,6 +5,7 @@ All notable changes to Eling are documented here. Follows [Keep a Changelog](htt
 ## [Unreleased] - 2026-11-25
 
 ### Fixed
+- **Docs instructions match the unified model (MCP)**: the handshake text now describes one Markdown catalog backed by SQLite instead of the retired managed/external split, `.eling/docs/` tool-only rule, offer policy and promote action; tool descriptions no longer promise committed JSON metadata. The unused ownership/origin/offer/read-only types and DTOs left behind by that revamp are removed, along with their obsolete test.
 - **Docs list cards and detail panel polish (dashboard)**: the detail side panel keeps its full width while loading, card titles use the whole card width, status labels follow the document kind instead of printing `Proposed/Draft/Active`, the workspace badge is replaced by a live relative age, the sort-direction control sits inside the sort group, the detail path wraps in full, and every relative age refreshes from one shared clock.
 - **Docs detail panel remembers its open card (dashboard + standard)**: the selected document id is persisted in `?doc=` and localStorage, so a reload or bare revisit reopens the same detail; closing clears the key. `docs/persisted-state.md` now makes selection persistence a rule for every master-detail page.
 - **Docs detail route restored (backend)**: `GET /api/docs/{id}` is registered again, matching the dashboard's detail request; the earlier rewrite left only `GET /api/docs/doc?id=...`, so every detail fetch returned 404 even though the document was in the list.

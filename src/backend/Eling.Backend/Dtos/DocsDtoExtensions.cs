@@ -7,22 +7,6 @@ namespace Eling.Backend.Dtos;
 /// </summary>
 public static class DocsDtoExtensions
 {
-    public static DocOwnershipDto ToDto(this Eling.Core.Docs.DocOwnership o) => o switch
-    {
-        Eling.Core.Docs.DocOwnership.Managed => DocOwnershipDto.Managed,
-        Eling.Core.Docs.DocOwnership.External => DocOwnershipDto.External,
-        _ => throw new ArgumentOutOfRangeException(nameof(o))
-    };
-
-    public static DocOriginDto ToDto(this Eling.Core.Docs.DocOrigin o) => o switch
-    {
-        Eling.Core.Docs.DocOrigin.Current => DocOriginDto.Current,
-        Eling.Core.Docs.DocOrigin.Ancestor => DocOriginDto.Ancestor,
-        Eling.Core.Docs.DocOrigin.Shard => DocOriginDto.Shard,
-        Eling.Core.Docs.DocOrigin.Global => DocOriginDto.Global,
-        _ => throw new ArgumentOutOfRangeException(nameof(o))
-    };
-
     public static DocKindDto ToDto(this Eling.Core.Docs.DocKind k) => k switch
     {
         Eling.Core.Docs.DocKind.Spec => DocKindDto.Spec,
@@ -57,12 +41,4 @@ public static class DocsDtoExtensions
         _ => throw new ArgumentOutOfRangeException(nameof(k))
     };
 
-    public static OfferStateDto ToDto(this Eling.Core.Docs.OfferState s) => s switch
-    {
-        Eling.Core.Docs.OfferState.Unasked => OfferStateDto.Unasked,
-        Eling.Core.Docs.OfferState.Accepted => OfferStateDto.Accepted,
-        Eling.Core.Docs.OfferState.Declined => OfferStateDto.Declined,
-        Eling.Core.Docs.OfferState.Never => OfferStateDto.Never,
-        _ => throw new ArgumentOutOfRangeException(nameof(s))
-    };
 }

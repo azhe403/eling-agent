@@ -81,8 +81,8 @@ public static class ToolCatalog
         new("doc_staleness", DocsGroup, "Generate staleness report for unresolved refs, superseded docs, stale drafts, untouched docs."),
         new("doc_audit", DocsGroup, "Get audit entries for a document or scope."),
         new("doc_relation", DocsGroup, "Read spec↔plan relations (Implements, Supersedes, References)."),
-        new("doc_save", DocsGroup, "Create or update a doc: writes Markdown content and committed JSON metadata."),
-        new("doc_annotate", DocsGroup, "Annotate a section of a doc; stored in JSON metadata."),
+        new("doc_save", DocsGroup, "Create or update a Markdown doc at a workspace root; metadata is stored in the global SQLite docs index."),
+        new("doc_annotate", DocsGroup, "Annotate a section of a doc; stored in the global SQLite docs index."),
         new("doc_index", DocsGroup, "Incremental rescan of one workspace or all registered workspaces."),
         new("doc_scope_policy", DocsGroup, "Inspect or change the workspace's docs coverage policy."),
     }.AsReadOnly();

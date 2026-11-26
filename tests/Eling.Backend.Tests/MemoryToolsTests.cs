@@ -567,9 +567,10 @@ public class MemoryToolsTests
         Assert.Contains("Update Eling to the latest release (Recommended)", options.ServerInstructions, StringComparison.Ordinal);
         Assert.Contains("Check the latest version", options.ServerInstructions, StringComparison.Ordinal);
         Assert.Contains("'Do nothing' (close with no changes)", options.ServerInstructions, StringComparison.Ordinal);
-        Assert.Contains("managed or external", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("ask the user", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("targeted patch", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("unified catalog", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no ownership or location tier", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("managed or external", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("targeted change", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("file_edit", options.ServerInstructions, StringComparison.OrdinalIgnoreCase);
     }
 }

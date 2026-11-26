@@ -1,7 +1,7 @@
 namespace Eling.Core.Docs;
 
 /// <summary>
-/// Front-matter structure for managed documents.
+/// Front-matter structure parsed from Markdown documents.
 /// </summary>
 public sealed class DocFrontMatter
 {

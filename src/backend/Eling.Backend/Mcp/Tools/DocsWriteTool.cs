@@ -19,7 +19,7 @@ public sealed class DocsWriteTool
         _logger = logger;
     }
 
-    [McpServerTool(Name = "doc_save"), Description("Create or update a doc: writes Markdown content and committed JSON metadata. No promote flag.")]
+    [McpServerTool(Name = "doc_save"), Description("Create or update a Markdown doc at a workspace root; metadata is stored in the global SQLite docs index.")]
     public async Task<DocDto> SaveAsync(
         [Description("Workspace-relative Markdown path.")] string relPath,
         [Description("Markdown content only — no YAML front-matter.")] string content,
@@ -38,7 +38,7 @@ public sealed class DocsWriteTool
         return DocDto.From(doc);
     }
 
-    [McpServerTool(Name = "doc_annotate"), Description("Annotate a section of a doc. Stored in JSON metadata, never in the Markdown.")]
+    [McpServerTool(Name = "doc_annotate"), Description("Annotate a section of a doc. Stored in the global SQLite docs index, never in the Markdown.")]
     public async Task<bool> AnnotateAsync(
         [Description("Document id (ULID).")] string docId,
         [Description("Section anchor.")] string anchor,

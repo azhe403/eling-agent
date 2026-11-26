@@ -6,7 +6,7 @@ using YamlDotNet.Serialization.NamingConventions;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Parses optional YAML front-matter from managed documents.
+/// Parses optional YAML front-matter from Markdown documents.
 /// Malformed front-matter is non-fatal and recorded as a finding.
 /// </summary>
 public static class DocFrontMatterParser
