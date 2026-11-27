@@ -1,13 +1,13 @@
 import { beforeEach, describe, it, expect, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import { apiFetch } from "@/lib/api"
 import { DocsList } from "./DocsList"
 
-const nav = vi.hoisted(() => ({ searchParams: new URLSearchParams() }))
+const nav = vi.hoisted(() => ({ searchParams: new URLSearchParams(), replace: vi.fn() }))
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: nav.replace }),
   usePathname: () => "/dashboard/docs",
   useSearchParams: () => nav.searchParams,
 }))
@@ -55,7 +55,18 @@ vi.mock("@/components/workspaces/use-workspace-rows", () => ({
 }))
 
 vi.mock("@/components/workspaces/workspace-scope-panel", () => ({
-  WorkspaceScopePanel: () => <nav aria-label="Workspace scope">Workspace scope</nav>,
+  WorkspaceScopePanel: ({
+    onSelectOnly,
+    onSelectAll,
+  }: {
+    onSelectOnly: (root: string) => void
+    onSelectAll: () => void
+  }) => (
+    <nav aria-label="Workspace scope">
+      <button onClick={() => onSelectOnly("/ws/a")}>Only A</button>
+      <button onClick={onSelectAll}>All workspaces</button>
+    </nav>
+  ),
 }))
 
 vi.mock("@/components/workspaces/workspace-select", () => ({
@@ -65,6 +76,7 @@ vi.mock("@/components/workspaces/workspace-select", () => ({
 describe("DocsList unified surface", () => {
   beforeEach(() => {
     nav.searchParams = new URLSearchParams()
+    nav.replace.mockClear()
     localStorage.clear()
     vi.mocked(apiFetch).mockClear()
     Object.defineProperty(window, "matchMedia", {
@@ -92,6 +104,48 @@ describe("DocsList unified surface", () => {
     expect(await screen.findByText("Example Spec")).toBeDefined()
     expect(screen.queryByText(/ws:/)).toBeNull()
     expect(screen.getByText(/hours ago/)).toBeDefined()
+  })
+
+  it("clears sort from the URL and storage when the default is chosen from a non-default link", async () => {
+    nav.searchParams = new URLSearchParams("sort=updated")
+
+    render(<DocsList />)
+    await screen.findByText("Example Spec")
+
+    fireEvent.click(within(screen.getByRole("group", { name: "Sort" })).getByRole("button", { name: "Name" }))
+
+    await waitFor(() => {
+      const target = nav.replace.mock.calls.at(-1)?.[0] as string | undefined
+      expect(target).toBeDefined()
+      expect(target).not.toMatch(/[?&]sort=/)
+    })
+    expect(localStorage.getItem("eling:docs:sort")).toBeNull()
+  })
+
+  it("restores the workspace scope from localStorage on a bare revisit", async () => {
+    localStorage.setItem("eling:docs:workspace", "/ws/a")
+
+    render(<DocsList />)
+
+    await waitFor(() => {
+      expect(vi.mocked(apiFetch)).toHaveBeenCalledWith(
+        expect.stringContaining("workspace=%2Fws%2Fa"),
+        expect.anything(),
+      )
+    })
+  })
+
+  it("persists the workspace selection to storage and the URL, and clears both on All", async () => {
+    render(<DocsList />)
+    await screen.findByText("Example Spec")
+
+    fireEvent.click(screen.getByRole("button", { name: "Only A" }))
+    await waitFor(() => expect(localStorage.getItem("eling:docs:workspace")).toBe("/ws/a"))
+    expect(nav.replace.mock.calls.at(-1)?.[0]).toContain("workspace=")
+
+    fireEvent.click(screen.getByRole("button", { name: "All workspaces" }))
+    await waitFor(() => expect(localStorage.getItem("eling:docs:workspace")).toBeNull())
+    expect(nav.replace.mock.calls.at(-1)?.[0]).not.toContain("workspace=")
   })
 
   it("restores an open detail from the persisted doc param", async () => {

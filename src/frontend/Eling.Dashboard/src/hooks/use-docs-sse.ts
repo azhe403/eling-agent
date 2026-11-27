@@ -11,17 +11,23 @@ export type DocsSseStatus = "connected" | "connecting" | "error"
  */
 export function useDocsSse(
   onMutation: () => void,
-  topics: string[] = ["docs"]
+  topics: string[] = ["docs"],
+  workspaceRoots: readonly string[] = []
 ): { status: DocsSseStatus } {
   const [status, setStatus] = useState<DocsSseStatus>("connecting")
   const wanted = useMemo(() => new Set<string>(topics), [topics])
 
   const onMutationRef = useRef(onMutation)
   const wantedRef = useRef(wanted)
+  const scopesRef = useRef(workspaceRoots)
 
   useEffect(() => {
     wantedRef.current = wanted
   }, [wanted])
+
+  useEffect(() => {
+    scopesRef.current = workspaceRoots
+  }, [workspaceRoots])
 
   useEffect(() => {
     onMutationRef.current = onMutation
@@ -53,9 +59,30 @@ export function useDocsSse(
 
         if (!event.data || event.data === "connected") return
 
+        // Scoped changes arrive as one compact JSON frame: the topic stays
+        // shared, while workspace_id/workspace identify which workspace moved.
+        // A plain topic string is still accepted for older frames.
+        let topic = event.data
+        let changedRoot: string | null = null
+        if (event.data.startsWith("{")) {
+          try {
+            const payload = JSON.parse(event.data) as { topic?: unknown; workspace?: unknown }
+            if (typeof payload.topic === "string") topic = payload.topic
+            if (typeof payload.workspace === "string") changedRoot = payload.workspace
+          } catch {
+            // Malformed frame: fall through and treat the raw text as a topic.
+          }
+        }
+
         // Not our topic: another page's business.
-        if (!wantedRef.current.has(event.data)) {
-          console.log(`[DOCS SSE IGNORED] 🚫 Topic "${event.data}" is not watched by this page`)
+        if (!wantedRef.current.has(topic)) {
+          console.log(`[DOCS SSE IGNORED] 🚫 Topic "${topic}" is not watched by this page`)
+          return
+        }
+        // All-workspaces views pass no roots; a scoped view ignores other roots.
+        const scopes = scopesRef.current
+        if (changedRoot !== null && scopes.length > 0 && !scopes.includes(changedRoot)) {
+          console.log(`[DOCS SSE IGNORED] 🚫 Change in "${changedRoot}" is outside the selected workspaces`)
           return
         }
 

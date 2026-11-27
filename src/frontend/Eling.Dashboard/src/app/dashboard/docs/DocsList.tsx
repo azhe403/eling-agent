@@ -37,7 +37,7 @@ import { WorkspaceScopePanel } from "@/components/workspaces/workspace-scope-pan
 import { WorkspaceSelect } from "@/components/workspaces/workspace-select"
 import { selectAll, selectOnly, toggleRoots, type WorkspaceSelection } from "@/components/workspaces/selection"
 import { useMediaQuery } from "@/hooks/use-media-query"
-import { usePersistedState, useResumePageParams } from "@/lib/persisted-state"
+import { loadPageParam, savePageParam, usePersistedState, useResumePageParams } from "@/lib/persisted-state"
 import { XL_BREAKPOINT } from "@/lib/constants"
 import { apiFetch, ApiError } from "@/lib/api"
 import type {
@@ -57,7 +57,6 @@ import {
   extractTopics,
   applySelection,
   selectionFromParams,
-  sortFromParams,
   SORT_KEYS,
   DEFAULT_SORT,
   DEFAULT_ORDER,
@@ -130,9 +129,8 @@ export function DocsList() {
   // remembers the last position on a bare revisit. Matches Skills/Memories.
   const [kind, setKind] = usePersistedState<KindFilter>({ page: "docs", param: "kind", defaultValue: "all", allowed: KINDS })
   const [topic, setTopic] = usePersistedState<string>({ page: "docs", param: "topic", defaultValue: "" })
-  const initialSort = sortFromParams(searchParams)
-  const [sort, setSort] = usePersistedState<DocSortKey>({ page: "docs", param: "sort", defaultValue: initialSort.sort, allowed: SORT_KEYS })
-  const [order, setOrder] = usePersistedState<OrderFilter>({ page: "docs", param: "order", defaultValue: initialSort.order, allowed: ORDERS })
+  const [sort, setSort] = usePersistedState<DocSortKey>({ page: "docs", param: "sort", defaultValue: DEFAULT_SORT, allowed: SORT_KEYS })
+  const [order, setOrder] = usePersistedState<OrderFilter>({ page: "docs", param: "order", defaultValue: DEFAULT_ORDER, allowed: ORDERS })
   useResumePageParams("docs", [
     { param: "kind", defaultValue: "all" },
     { param: "topic", defaultValue: "" },
@@ -140,7 +138,14 @@ export function DocsList() {
     { param: "order", defaultValue: DEFAULT_ORDER },
     { param: "doc", defaultValue: "" },
   ])
-  const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection>(() => selectionFromParams(searchParams))
+  const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceSelection>(() => {
+    const fromUrl = selectionFromParams(searchParams)
+    if (fromUrl.kind === "workspaces" || searchParams.toString() !== "") return fromUrl
+    // A bare address resumes the last workspace scope; any URL state wins.
+    const saved = loadPageParam("docs", "workspace")
+    const roots = (saved ?? "").split(",").map((root) => root.trim()).filter(Boolean)
+    return roots.length > 0 ? { kind: "workspaces", roots } : fromUrl
+  })
   const [limit] = useState(50)
   const [offset, setOffset] = useState(() => parseInt(searchParams.get("offset") ?? "0", 10))
 
@@ -167,8 +172,10 @@ export function DocsList() {
 
   const applyWorkspaceSelection = useCallback((next: WorkspaceSelection) => {
     setWorkspaceSelection(next)
+    savePageParam("docs", "workspace", next.kind === "workspaces" ? next.roots.join(",") : null)
     const params = applySelection(new URLSearchParams(searchParams.toString()), next)
-    router.replace(`/dashboard/docs?${params.toString()}`)
+    const qs = params.toString()
+    router.replace(qs ? `/dashboard/docs?${qs}` : "/dashboard/docs", { scroll: false })
   }, [router, searchParams])
 
   // Error banner auto-dismiss
@@ -232,7 +239,8 @@ export function DocsList() {
     setDetailNonce((n) => n + 1)
   }, [load])
 
-  const { status: sseStatus } = useDocsSse(handleDocsChanged, ["docs"])
+  const sseScopes = workspaceSelection.kind === "workspaces" ? workspaceSelection.roots : []
+  const { status: sseStatus } = useDocsSse(handleDocsChanged, ["docs"], sseScopes)
 
   const handleRescan = useCallback(async () => {
     setRescanning(true)
