@@ -28,6 +28,7 @@ public sealed class DocsDirWatcher : IDisposable
     private readonly ILogger<DocsDirWatcher> _logger;
     private readonly Dictionary<string, FileSystemWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _dirty = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, HashSet<string>> _pending = new(StringComparer.OrdinalIgnoreCase);
     private readonly IWorkspacesRegistry? _workspacesRegistry;
 
     private CancellationTokenSource? _cts;
@@ -78,6 +79,7 @@ public sealed class DocsDirWatcher : IDisposable
             _watchers[removed].Dispose();
             _watchers.Remove(removed);
             _dirty.Remove(removed);
+            _pending.Remove(removed);
         }
         foreach (var root in roots)
         {
@@ -92,7 +94,7 @@ public sealed class DocsDirWatcher : IDisposable
                 watcher.Created += (_, args) => OnFileEvent(root, args.FullPath);
                 watcher.Changed += (_, args) => OnFileEvent(root, args.FullPath);
                 watcher.Deleted += (_, args) => OnFileEvent(root, args.FullPath);
-                watcher.Renamed += (_, args) => OnFileEvent(root, args.FullPath);
+                watcher.Renamed += (_, args) => OnFileEvent(root, args.OldFullPath, args.FullPath);
                 watcher.Error += (_, args) => _logger.LogWarning(args.GetException(), "Docs watcher error in {Root}", root);
                 watcher.EnableRaisingEvents = true;
                 _watchers[root] = watcher;
@@ -105,12 +107,17 @@ public sealed class DocsDirWatcher : IDisposable
         }
     }
 
-    private void OnFileEvent(string root, string path)
+    private void OnFileEvent(string root, string path, string? renamedTo = null)
     {
-        if (!path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) return;
         lock (_sync)
         {
-            if (_dirty.ContainsKey(root)) _dirty[root] = 1;
+            if (!_pending.TryGetValue(root, out var paths))
+            {
+                paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                _pending[root] = paths;
+            }
+            if (path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) paths.Add(path);
+            if (renamedTo is not null && renamedTo.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) paths.Add(renamedTo);
         }
     }
 
@@ -133,21 +140,81 @@ public sealed class DocsDirWatcher : IDisposable
             lock (_sync) ReconcileRoots();
             foreach (var root in _watchers.Keys.ToList())
             {
-                int wasDirty;
-                lock (_sync) wasDirty = _dirty.GetValueOrDefault(root);
-                if (wasDirty == 0) continue;
-                lock (_sync) _dirty[root] = 0;
+                bool full;
+                List<string> paths;
+                lock (_sync)
+                {
+                    full = _dirty.GetValueOrDefault(root) != 0;
+                    _dirty[root] = 0;
+                    paths = _pending.TryGetValue(root, out var pending)
+                        ? pending.ToList()
+                        : [];
+                    _pending.Remove(root);
+                }
+                if (!full && paths.Count == 0) continue;
+
                 try
                 {
-                    await _docsService.ScanAsync(workspaceRoot: root, ct: cancellationToken);
-                    _memoryBroadcaster.Notify(DocsChangeTopics.Docs);
+                    var broadcast = full;
+                    ScanResult? scan = null;
+                    if (full)
+                    {
+                        scan = await _docsService.ScanAsync(workspaceRoot: root, ct: cancellationToken);
+                    }
+                    else
+                    {
+                        // Coverage is shared with the scanner: an event under
+                        // node_modules/.git/... is not a docs change at all.
+                        var coverage = await _docsService.GetCoveragePolicyAsync(root, cancellationToken);
+                        var covered = paths.Where(p => DocsService.IsCoveredPath(p, root, coverage)).ToList();
+                        foreach (var removed in covered.Where(p => !File.Exists(p)))
+                        {
+                            await _docsService.DeleteIndexedPathAsync(root, removed, cancellationToken);
+                            broadcast = true;
+                        }
+                        var changed = covered.Where(File.Exists).ToList();
+                        if (changed.Count > 0)
+                        {
+                            scan = await _docsService.ScanAsync(full: false, paths: changed, workspaceRoot: root, ct: cancellationToken);
+                            broadcast = true;
+                        }
+                    }
+                    // Another scan (startup catch-up, manual reindex) held the
+                    // gate. Nothing was indexed, so keep the flag armed instead
+                    // of dropping the event — the next tick retries.
+                    if (scan?.AlreadyRunning == true)
+                    {
+                        ReArm(root, paths);
+                        broadcast = false;
+                    }
+                    if (broadcast)
+                    {
+                        _memoryBroadcaster.Notify(
+                            DocsChangeTopics.Docs,
+                            DocsService.ResolveWorkspaceId(root),
+                            root);
+                    }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Docs rescan failed for {Root}; re-arming", root);
-                    lock (_sync) _dirty[root] = 1;
+                    ReArm(root, paths);
                 }
             }
+        }
+    }
+
+    private void ReArm(string root, IEnumerable<string> paths)
+    {
+        lock (_sync)
+        {
+            _dirty[root] = 1;
+            if (!_pending.TryGetValue(root, out var pending))
+            {
+                pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                _pending[root] = pending;
+            }
+            foreach (var path in paths) pending.Add(path);
         }
     }
 
@@ -162,6 +229,7 @@ public sealed class DocsDirWatcher : IDisposable
             foreach (var watcher in _watchers.Values) watcher.Dispose();
             _watchers.Clear();
             _dirty.Clear();
+            _pending.Clear();
         }
     }
 }

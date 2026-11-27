@@ -1,3 +1,4 @@
+using Eling.Backend.Bootstrap;
 using Eling.Backend.Dtos;
 using Eling.Core.Docs;
 using Microsoft.AspNetCore.Builder;
@@ -63,24 +64,27 @@ public static class DocEndpoints
     }
 
     private static async Task<IResult> ReadAsync(
+        HttpContext httpContext,
         DocsService service,
         string id,
         bool includeSections = true,
         bool includeRefs = true,
         bool includeContent = true)
     {
-        var result = await service.ReadAsync(DocId.Parse(id), includeSections, includeRefs, includeContent);
+        if (!DocId.TryParse(id, out var parsed)) return InvalidId(httpContext, id);
+        var result = await service.ReadAsync(parsed, includeSections, includeRefs, includeContent);
         return result is null ? Results.NotFound() : Results.Ok(DocReadResultDto.From(result));
     }
 
     private static async Task<IResult> ReadByIdAsync(
+        HttpContext httpContext,
         DocsService service,
         string id,
         bool includeSections = true,
         bool includeRefs = true,
         bool includeContent = true)
     {
-        if (!DocId.TryParse(id, out var parsed)) return Results.BadRequest();
+        if (!DocId.TryParse(id, out var parsed)) return InvalidId(httpContext, id);
         var result = await service.ReadAsync(parsed, includeSections, includeRefs, includeContent);
         return result is null ? Results.NotFound() : Results.Ok(DocReadResultDto.From(result));
     }
@@ -97,31 +101,49 @@ public static class DocEndpoints
     private static async Task<IResult> PolicyAsync(DocsService service, string? workspace = null)
         => Results.Ok(await service.GetCoveragePolicyAsync(workspace));
 
-    private static async Task<IResult> CreateAsync(DocsService service, DocSaveRequest request, string? workspace = null)
+    private static async Task<IResult> CreateAsync(HttpContext httpContext, DocsService service, DocSaveRequest request, string? workspace = null)
     {
-        var root = workspace ?? service.WorkspaceRoots.FirstOrDefault()
-                   ?? throw new InvalidOperationException("No workspace is registered.");
+        var root = workspace ?? service.WorkspaceRoots.FirstOrDefault();
+        if (root is null)
+        {
+            httpContext.Items[ApiEnvelopeMiddleware.ErrorCodeItem] = "no_workspace_registered";
+            return Results.BadRequest("No workspace is registered - add one from the dashboard workspaces page and try again.");
+        }
         var kind = ParseKind(request.Kind) ?? DocKind.Doc;
         var status = int.TryParse(request.Status, out var parsed) ? parsed : 0;
         var doc = await service.CreateDocumentAsync(root, request.RelPath, request.Content, kind, request.Topic, status, request.Order ?? 0);
         return Results.Ok(DocDto.From(doc));
     }
 
-    private static async Task<IResult> UpdateAsync(DocsService service, string id, DocUpdateRequest request)
+    private static async Task<IResult> UpdateAsync(HttpContext httpContext, DocsService service, string id, DocUpdateRequest request)
     {
-        var doc = await service.UpdateDocumentAsync(DocId.Parse(id), request.Content);
+        if (!DocId.TryParse(id, out var parsed)) return InvalidId(httpContext, id);
+        var doc = await service.UpdateDocumentAsync(parsed, request.Content);
         return doc is null ? Results.NotFound() : Results.Ok(DocDto.From(doc));
     }
 
-    private static async Task<IResult> ArchiveAsync(DocsService service, string id)
-        => Results.Ok(await service.ArchiveDocumentAsync(DocId.Parse(id)));
+    private static async Task<IResult> ArchiveAsync(HttpContext httpContext, DocsService service, string id)
+    {
+        if (!DocId.TryParse(id, out var parsed)) return InvalidId(httpContext, id);
+        return Results.Ok(await service.ArchiveDocumentAsync(parsed));
+    }
 
-    private static async Task<IResult> AnnotateAsync(DocsService service, string id, DocAnnotateRequest request)
-        => Results.Ok(await service.AnnotateSectionAsync(DocId.Parse(id), request.Anchor, request.Status, request.Annotation));
+    private static async Task<IResult> AnnotateAsync(HttpContext httpContext, DocsService service, string id, DocAnnotateRequest request)
+    {
+        if (!DocId.TryParse(id, out var parsed)) return InvalidId(httpContext, id);
+        return Results.Ok(await service.AnnotateSectionAsync(parsed, request.Anchor, request.Status, request.Annotation));
+    }
 
     private static async Task<IResult> ReindexAsync(DocsService service, DocScanRequest? request = null, string? workspace = null)
         => Results.Ok(DocIndexResponse.From(
             await service.ScanAsync(request?.Full ?? false, request?.Paths, workspace)));
+
+    private static IResult InvalidId(HttpContext httpContext, string id)
+    {
+        httpContext.Items[ApiEnvelopeMiddleware.ErrorCodeItem] = "invalid_doc_id";
+        return Results.BadRequest(
+            $"The document id '{id}' is not a valid identifier - check the link or the id and try again.");
+    }
 
     private static DocKind? ParseKind(string? value)
         => string.IsNullOrWhiteSpace(value) ? null

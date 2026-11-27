@@ -137,11 +137,30 @@ public class MemoryApiTests : IAsyncLifetime, IDisposable
 
             if (line == expected) return line;
             // Docs and runtimes are separate subsystems on the same SSE bus;
-            // their frames are unrelated to the memory mutation sequence.
+            // their frames are unrelated to the memory mutation sequence. Docs
+            // frames carry a scoped JSON payload, not just the topic name.
             if (line.Length == 0 || line == "data: runtimes" || line == "data: docs") continue;
+            if (IsUnrelatedTopicFrame(line)) continue;
 
             throw new InvalidOperationException(
                 $"Unexpected SSE event '{line}' while waiting for '{expected}'.");
+        }
+    }
+
+    private static bool IsUnrelatedTopicFrame(string line)
+    {
+        if (!line.StartsWith("data: {", StringComparison.Ordinal)) return false;
+        try
+        {
+            using var payload = JsonDocument.Parse(line["data: ".Length..]);
+            return payload.RootElement.TryGetProperty("topic", out var topic)
+                   && topic.ValueKind == JsonValueKind.String
+                   && topic.GetString() is "docs" or "runtimes";
+        }
+        catch (JsonException)
+        {
+            System.Diagnostics.Debug.WriteLine("Ignoring malformed SSE frame while waiting for a memory event.");
+            return false;
         }
     }
 

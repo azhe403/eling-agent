@@ -53,7 +53,7 @@ public sealed class DocsReadTool
         [Description("Mode: full, section, or map.")] string mode = "full",
         [Description("Section anchor when mode=section.")] string? anchor = null)
     {
-        var result = await _docsService.ReadAsync(DocId.Parse(id), includeSections: true, includeRefs: true, includeContent: true);
+        var result = await _docsService.ReadAsync(ParseId(id, nameof(id)), includeSections: true, includeRefs: true, includeContent: true);
         if (result is null) return null;
         var sectionDtos = (result.Sections ?? Array.Empty<DocSection>()).Select(DocSectionDto.From).ToList().AsReadOnly();
         var refDtos = (result.References ?? Array.Empty<DocRef>()).Select(DocRefDto.From).ToList().AsReadOnly();
@@ -89,13 +89,21 @@ public sealed class DocsReadTool
         {
             if (!Enum.TryParse<RelationKind>(kind, true, out var parsed))
                 throw new ArgumentException($"Invalid relation kind '{kind}'.", nameof(kind));
-            await _docsService.AddRelationAsync(DocId.Parse(sourceId), DocId.Parse(targetId), parsed, actor);
+            await _docsService.AddRelationAsync(ParseId(sourceId, nameof(sourceId)), ParseId(targetId, nameof(targetId)), parsed, actor);
         }
         var id = docId ?? sourceId;
         if (string.IsNullOrWhiteSpace(id)) return Array.Empty<DocRelationDto>().ToList().AsReadOnly();
         var asSource = docId is null;
-        var relations = await _docsService.GetRelationsAsync(DocId.Parse(id), asSource);
+        var relations = await _docsService.GetRelationsAsync(ParseId(id, nameof(id)), asSource);
         return relations.Select(DocRelationDto.From).ToList().AsReadOnly();
+    }
+
+    private static DocId ParseId(string value, string paramName)
+    {
+        if (!DocId.TryParse(value, out var parsed))
+            throw new ArgumentException(
+                $"The document id '{value}' is not a valid ULID - check the id and try again.", paramName);
+        return parsed;
     }
 
     [McpServerTool(Name = "doc_scope_policy"), Description("Inspect or change the workspace's docs coverage policy.")]

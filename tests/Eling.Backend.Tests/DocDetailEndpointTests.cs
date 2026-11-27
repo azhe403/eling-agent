@@ -1,4 +1,6 @@
 using System.Net;
+using System.Text;
+using System.Text.Json;
 using Eling.Backend.Bootstrap;
 using Eling.Core.Docs;
 using Microsoft.AspNetCore.Builder;
@@ -51,5 +53,46 @@ public sealed class DocDetailEndpointTests : IAsyncLifetime, IDisposable
 
         var res = await _client!.GetAsync($"/api/docs/{doc.Id.Value}");
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task ReadByQuery_WithMalformedId_ReturnsBadRequestEnvelope()
+    {
+        var res = await _client!.GetAsync("/api/docs/doc?id=not-a-ulid");
+        await AssertInvalidIdAsync(res);
+    }
+
+    [Fact]
+    public async Task Update_WithMalformedId_ReturnsBadRequestEnvelope()
+    {
+        var res = await _client!.PutAsync("/api/docs/not-a-ulid",
+            new StringContent("{\"content\":\"x\"}", Encoding.UTF8, "application/json"));
+        await AssertInvalidIdAsync(res);
+    }
+
+    [Fact]
+    public async Task Delete_WithMalformedId_ReturnsBadRequestEnvelope()
+    {
+        var res = await _client!.DeleteAsync("/api/docs/not-a-ulid");
+        await AssertInvalidIdAsync(res);
+    }
+
+    [Fact]
+    public async Task Annotate_WithMalformedId_ReturnsBadRequestEnvelope()
+    {
+        var res = await _client!.PostAsync("/api/docs/not-a-ulid/annotate",
+            new StringContent("{\"anchor\":\"a\",\"status\":1}", Encoding.UTF8, "application/json"));
+        await AssertInvalidIdAsync(res);
+    }
+
+    private static async Task AssertInvalidIdAsync(HttpResponseMessage res)
+    {
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+        using var payload = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var root = payload.RootElement;
+        Assert.Equal("invalid_doc_id", root.GetProperty("code").GetString());
+        var message = root.GetProperty("message").GetString() ?? "";
+        Assert.True(message.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length >= 6,
+            $"Failure message must carry cause and next step: '{message}'");
     }
 }

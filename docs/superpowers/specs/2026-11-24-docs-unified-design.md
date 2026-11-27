@@ -63,7 +63,7 @@ MCP tools: `doc_search`, `doc_read`, `doc_list`, `doc_save`, `doc_annotate`, `do
 
 ### 5. Watcher
 
-The dashboard owner runs one watcher per active registered workspace over `.md` files only. Each workspace has an O(1) dirty flag; the drain clears it before scanning so a mid-scan write re-arms it. The watcher re-arms from the workspace registry each tick and scans every workspace at startup. SSE broadcasts the shared `docs` topic; the dashboard refreshes its docs list. This follows `docs/watcher-standard.md`.
+The dashboard owner runs one watcher per active registered workspace over `.md` files only. Each workspace has an O(1) dirty flag; the drain clears it before scanning so a mid-scan write re-arms it. The watcher re-arms from the workspace registry each tick and scans every workspace at startup. SSE broadcasts the shared `docs` topic as a compact JSON frame carrying `workspace_id` and the workspace root; the dashboard refreshes its docs list and skips frames from workspaces outside its selection. This follows `docs/watcher-standard.md`.
 
 ### 6. Dashboard
 

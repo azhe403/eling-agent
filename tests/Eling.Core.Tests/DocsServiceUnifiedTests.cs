@@ -151,6 +151,35 @@ public class DocsServiceUnifiedTests : IDisposable
         Assert.Equal(2, (await _service.GetAuditAsync(doc.Id.Value)).Count);
     }
 
+    [Theory]
+    [InlineData("docs/a.md", true)]
+    [InlineData("docs/specs/a.md", true)]
+    [InlineData("src/a.md", false)]
+    public void IncludeGlob_DocsRecursive_MatchesOnlyThatSubtree(string relative, bool expected)
+    {
+        var coverage = new CoveragePolicy { Include = ["docs/**"] };
+
+        Assert.Equal(expected, DocsService.IsCoveredPath(Path.Combine(_rootA, relative), _rootA, coverage));
+    }
+
+    [Theory]
+    [InlineData("docs/specs/a.md", false)]
+    [InlineData("docs/a.md", true)]
+    public void ExcludeGlob_SpecsRecursive_DropsOnlyThatSubtree(string relative, bool expected)
+    {
+        var coverage = new CoveragePolicy { Exclude = ["docs/specs/**"] };
+
+        Assert.Equal(expected, DocsService.IsCoveredPath(Path.Combine(_rootA, relative), _rootA, coverage));
+    }
+
+    [Fact]
+    public void IncludeGlob_AnyMarkdown_MatchesNestedPath()
+    {
+        var coverage = new CoveragePolicy { Include = ["**/*.md"] };
+
+        Assert.True(DocsService.IsCoveredPath(Path.Combine(_rootA, "docs/specs/a.md"), _rootA, coverage));
+    }
+
     [Fact]
     public async Task Archive_ExcludesFromSearch()
     {

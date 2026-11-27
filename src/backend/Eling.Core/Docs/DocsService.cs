@@ -1,5 +1,6 @@
 namespace Eling.Core.Docs;
 
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -115,27 +116,89 @@ public sealed class DocsService
     private static IEnumerable<string> EnumerateMarkdown(string root, CoveragePolicy coverage)
     {
         if (!Directory.Exists(root)) yield break;
-        var excluded = new[] { ".git", "node_modules", "bin", "obj", ".next", ".eling" };
         foreach (var file in Directory.EnumerateFiles(root, "*.md", SearchOption.AllDirectories))
         {
-            var relative = GetRelativePath(file, root);
-            if (excluded.Any(part => relative.Split('/').Contains(part, StringComparer.OrdinalIgnoreCase))) continue;
-            if (relative.StartsWith(".superpowers/sdd/", StringComparison.OrdinalIgnoreCase)) continue;
-            var excludes = coverage.Exclude ?? Array.Empty<string>();
-            var includes = coverage.Include ?? Array.Empty<string>();
-            if (excludes.Any(pattern => MatchPattern(relative, pattern))) continue;
-            if (includes.Length > 0 && !includes.Any(pattern => MatchPattern(relative, pattern))) continue;
-            yield return file;
+            if (IsCoveredPath(file, root, coverage)) yield return file;
         }
     }
 
+    /// <summary>Same coverage rule the scanner uses, exposed so watchers can drop out-of-scope events.</summary>
+    public static bool IsCoveredPath(string file, string root, CoveragePolicy coverage)
+    {
+        var relative = GetRelativePath(file, root).Replace('\\', '/');
+        if (!relative.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) return false;
+        var excluded = new[] { ".git", "node_modules", "bin", "obj", ".next", ".eling" };
+        if (excluded.Any(part => relative.Split('/').Contains(part, StringComparer.OrdinalIgnoreCase))) return false;
+        if (relative.StartsWith(".superpowers/sdd/", StringComparison.OrdinalIgnoreCase)) return false;
+        var excludes = coverage.Exclude ?? Array.Empty<string>();
+        var includes = coverage.Include ?? Array.Empty<string>();
+        if (excludes.Any(pattern => MatchPattern(relative, pattern))) return false;
+        if (includes.Length > 0 && !includes.Any(pattern => MatchPattern(relative, pattern))) return false;
+        return true;
+    }
+
+    /// <summary>Drops an indexed row whose Markdown file was removed outside Eling.</summary>
+    public async Task<bool> DeleteIndexedPathAsync(string workspaceRoot, string path, CancellationToken ct = default)
+    {
+        var workspaceId = ResolveWorkspaceId(workspaceRoot);
+        var existing = await _docsIndex.GetByPathAsync(workspaceId, GetRelativePath(path, workspaceRoot), ct);
+        if (existing is null) return false;
+        await _docsIndex.DeleteAsync(existing.Id.Value);
+        return true;
+    }
+
+    /// <summary>
+    /// Coverage patterns are globs over the workspace-relative path: <c>**</c>
+    /// spans directories, <c>*</c> stays inside one segment, and <c>?</c> is one
+    /// character. A pattern without a wildcard keeps the older prefix/segment
+    /// meaning so existing policies do not change behaviour.
+    /// </summary>
     private static bool MatchPattern(string path, string pattern)
     {
         if (string.IsNullOrWhiteSpace(pattern)) return false;
-        var trimmed = pattern.TrimEnd('/').Replace("**/", "");
-        return path.Equals(trimmed, StringComparison.OrdinalIgnoreCase)
-               || path.EndsWith("/" + trimmed, StringComparison.OrdinalIgnoreCase)
-               || path.StartsWith(trimmed + "/", StringComparison.OrdinalIgnoreCase);
+        var normalizedPath = path.Replace('\\', '/');
+        var glob = pattern.Replace('\\', '/').Trim();
+        if (glob.StartsWith("./", StringComparison.Ordinal)) glob = glob[2..];
+        if (glob.EndsWith('/')) glob += "**";
+
+        var regex = new StringBuilder("^");
+        var hasWildcard = false;
+        for (var i = 0; i < glob.Length; i++)
+        {
+            var c = glob[i];
+            if (c == '*' && i + 1 < glob.Length && glob[i + 1] == '*')
+            {
+                hasWildcard = true;
+                if (i + 2 < glob.Length && glob[i + 2] == '/')
+                {
+                    regex.Append("(?:.*/)?");
+                    i += 2;
+                }
+                else
+                {
+                    regex.Append(".*");
+                    i++;
+                }
+            }
+            else if (c == '*')
+            {
+                hasWildcard = true;
+                regex.Append("[^/]*");
+            }
+            else if (c == '?')
+            {
+                hasWildcard = true;
+                regex.Append("[^/]");
+            }
+            else
+            {
+                regex.Append(Regex.Escape(c.ToString()));
+            }
+        }
+        if (!hasWildcard) regex.Append("(?:/.*)?");
+        regex.Append('$');
+        return Regex.IsMatch(normalizedPath, regex.ToString(),
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
     private static string GetRelativePath(string file, string root)

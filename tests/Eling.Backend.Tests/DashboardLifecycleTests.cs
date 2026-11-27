@@ -280,9 +280,11 @@ public sealed class DashboardLifecycleTests : IAsyncLifetime
         await WaitForRuntimeCountAsync(1);
 
         // Crash-style death: no graceful unregister, liveness sweeper must reap it.
+        // Capture the id before Kill: Process.Id throws once the process exits.
+        var pid = runtime.Process.Id;
         runtime.Process.Kill(entireProcessTree: true);
 
-        var remaining = await WaitUntilRuntimeGoneAsync(runtime.Process.Id);
+        var remaining = await WaitUntilRuntimeGoneAsync(pid);
         Assert.Empty(remaining);
     }
 

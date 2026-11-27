@@ -99,6 +99,25 @@ public class DocReadOnlyEndpointTests
         Assert.Equal("Beta", desc[0].Title);
     }
 
+    [Fact]
+    public async Task DocReadTool_WithMalformedId_RejectsItInsteadOfReturningNull()
+    {
+        using var fixture = new DocsFixture();
+        var read = new DocsReadTool(fixture.Service);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => read.ReadAsync("not-a-ulid"));
+    }
+
+    [Fact]
+    public async Task DocRelationTool_WithMalformedSourceId_RejectsIt()
+    {
+        using var fixture = new DocsFixture();
+        var read = new DocsReadTool(fixture.Service);
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => read.RelationAsync(sourceId: "not-a-ulid", targetId: "01j00000000000000000000000", kind: "references"));
+    }
+
     private sealed class DocsFixture : IDisposable
     {
         private readonly string _dbPath;

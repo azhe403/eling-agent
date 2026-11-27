@@ -2,6 +2,19 @@
 
 All notable changes to Eling are documented here. Follows [Keep a Changelog](https://keepachangelog.com/) and [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [Unreleased] - 2026-11-27
+
+### Fixed
+- **Docs coverage patterns are real globs (core)**: include/exclude policies now compile `**`, `*` and `?` over workspace-relative paths, so `docs/**` and `**/*.md` scope the catalog as documented in the unified-docs spec; literal patterns keep their previous prefix behaviour.
+- **Watcher keeps changes made during a concurrent scan (backend)**: when `ScanAsync` reports `AlreadyRunning`, the docs watcher re-arms its dirty flag and pending paths instead of dropping the edit, so a change made during startup catch-up or a manual reindex is indexed on the next tick.
+- **Malformed document ids are rejected by the MCP tools (backend)**: `doc_read` and `doc_relation` now validate ULIDs before use and raise a clear argument error instead of returning an empty result or a confusing "source document not found" failure.
+- **Docs workspace scope survives a bare revisit (dashboard)**: the selected workspaces persist to localStorage through the canonical persisted-state helpers and to repeated `workspace` URL params, and choosing All clears both; URL writes use `router.replace` with `scroll: false`.
+
+## [Unreleased] - 2026-11-26
+
+### Fixed
+- **Hard review findings for unified docs (core + backend + dashboard)**: the docs list now uses the canonical default for `sort`/`order`, so returning to `name`/`asc` from a shared non-default link clears both the URL params and the localStorage keys instead of writing the default back. The docs watcher drops events under uncovered paths using the scanner's own coverage rule, indexes only the changed files, deletes index rows for Markdown removed outside Eling, and no longer broadcasts when nothing changed. Its SSE frame now carries `workspace_id` and the workspace root alongside the shared `docs` topic, and the dashboard skips frames outside the selected workspaces. Every id-taking docs endpoint validates the ULID before use and answers `400 invalid_doc_id` with a cause-and-next-step message; creating a doc without a registered workspace now returns `400 no_workspace_registered` instead of throwing. Standards reconciled in `docs/watcher-standard.md` and `docs/superpowers/specs/2026-11-24-docs-unified-design.md`.
+
 ## [Unreleased] - 2026-11-25
 
 ### Fixed

@@ -12,8 +12,8 @@
 | Registry changes | When the workspace registry changes, re-arm the watcher set: add new roots, stop watching removed roots. |
 | Event handling | One O(1) dirty flag per workspace. Clear the flag **before** reconciling; a write landing mid-scan re-arms it, and a burst of events coalesces into one scan per tick. |
 | Failure | A scan failure is logged and the flag is re-armed, so the next tick retries even without a file event. |
-| Reconcile | Reindex changed files and remove rows for deleted files. Tag every written row with its workspace id. A metadata-only change rebuilds that workspace's rows; it never rebuilds the whole catalog. |
-| Broadcast | Publish on the in-process topic after the scan, carrying the workspace id. No cross-process SSE relay is introduced just to wake the dashboard. |
+| Reconcile | Reindex changed files with a targeted scan and remove rows for deleted files. Events under uncovered paths are dropped using the same coverage rule the scanner uses. Tag every written row with its workspace id. A metadata-only change rebuilds that workspace's rows; it never rebuilds the whole catalog. |
+| Broadcast | Publish on the in-process topic after the scan, carrying the workspace id. The topic name stays shared (`docs`); the id and root travel in a compact JSON payload so one stream still serves every page. No cross-process SSE relay is introduced just to wake the dashboard. |
 | Writers | The dashboard owner is the sole writer to the shared global index for watched changes. |
 
 ## 2. Why the dashboard owner and not stdio processes
@@ -32,15 +32,15 @@ The existing cross-process notifiers (`HttpCoordinatorMemoryChangeNotifier` and 
 - `Start()` is idempotent; a disposed watcher cannot be restarted. Only the dashboard owner calls it.
 - `ScanAsync(full, paths, workspaceId, ct)` is the reconcile. Watched changes call it with `full: false` and only the affected workspace.
 - Events cover file creation, change, deletion, rename, and metadata-file changes under the workspace.
-- The broadcast topic carries `workspace_id` so a dashboard filtered to one workspace refreshes only that scope.
+- The broadcast topic carries `workspace_id` and the workspace root in one compact JSON frame (`{"topic":"docs","workspace_id":"...","workspace":"..."}`). A dashboard filtered to one workspace skips frames from other roots; an all-workspaces view ignores the scope and refreshes on every frame. Plain topic strings remain valid for older/other producers.
 - Every `catch` logs; no silent catch and no rethrow that kills the drain loop.
 
 ## 4. Adoption
 
 | Surface | Status |
 |---|---|
-| Unified docs watcher (`.md` files only, one per workspace) | **Shipped** — spec `docs/superpowers/specs/2026-11-24-docs-unified-design.md` §5, plan `docs/superpowers/plans/2026-11-24-docs-unified.md` Task R4 |
-| Legacy `DocsDirWatcher` (one process, `docs/` + `.eling/docs/`) | Superseded by the unified docs watcher; retired with the managed/external split |
+| Unified docs watcher (`.md` files only, one per workspace) | **Shipped** — `src/backend/Eling.Backend/DocsDirWatcher.cs`, spec `docs/superpowers/specs/2026-11-24-docs-unified-design.md` §5, plan `docs/superpowers/plans/2026-11-24-docs-unified.md` Task R4 |
+| Legacy `DocsDirWatcher` (one process, `docs/` + `.eling/docs/`) | Retired with the managed/external split; the surviving class name is the unified per-workspace watcher, not the legacy service |
 | Codebase, memory, and skill directory watchers | Legacy — not yet migrated; the watcher-sprawl follow-up is tracked separately |
 
 ## 5. Relation to other standards
